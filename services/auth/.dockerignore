@@ -1,0 +1,9 @@
+node_modules
+dist
+.env
+*.md
+.git
+.gitignore
+*.log
+coverage
+.nyc_output

@@ -1,0 +1,195 @@
+version: "3.9"
+
+services:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # INFRASTRUCTURE
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: qsvc-postgres
+    environment:
+      POSTGRES_DB: qsvc
+      POSTGRES_USER: qsvc
+      POSTGRES_PASSWORD: qsvc_dev_2025
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./docker-data/postgres:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U qsvc" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: qsvc-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./docker-data/redis:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: qsvc-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: qsvc_minio
+      MINIO_ROOT_PASSWORD: qsvc_minio_secret
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ./docker-data/minio:/data
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: qsvc-coturn
+    command: >
+      -n --lt-cred-mech --use-auth-secret --static-auth-secret=dev-turn-secret-change-in-production --realm=qsvc.dev --listening-port=3478 --min-port=49152 --max-port=49200 --log-file=stdout
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "49152-49200:49152-49200/udp"
+    restart: unless-stopped
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # APPLICATION SERVICES
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  sfu:
+    build:
+      context: ./services/sfu
+      dockerfile: Dockerfile
+    container_name: qsvc-sfu
+    # Note: ports not needed — network_mode: host exposes all ports directly
+    environment:
+      - NODE_ENV=development
+      - SFU_PORT=4000
+      - SFU_ANNOUNCED_IP=${SFU_ANNOUNCED_IP:-127.0.0.1}
+      - SFU_MIN_PORT=40000
+      - SFU_MAX_PORT=40100
+      - SFU_NUM_WORKERS=2
+      - SFU_LOG_LEVEL=debug
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      redis:
+        condition: service_healthy
+    network_mode: host
+
+  signaling:
+    build:
+      context: ./services/signaling
+      dockerfile: Dockerfile
+    container_name: qsvc-signaling
+    ports:
+      - "4001:4001"
+    environment:
+      - NODE_ENV=development
+      - SIGNALING_PORT=4001
+      - SFU_INTERNAL_URL=http://localhost:4000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=qsvc
+      - POSTGRES_USER=qsvc
+      - POSTGRES_PASSWORD=qsvc_dev_2025
+      - JWT_SECRET=dev-jwt-secret-change-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  auth:
+    build:
+      context: ./services/auth
+      dockerfile: Dockerfile
+    container_name: qsvc-auth
+    ports:
+      - "4002:4002"
+    environment:
+      - NODE_ENV=development
+      - AUTH_PORT=4002
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=qsvc
+      - POSTGRES_USER=qsvc
+      - POSTGRES_PASSWORD=qsvc_dev_2025
+      - JWT_SECRET=dev-jwt-secret-change-in-production
+      - JWT_EXPIRY=24h
+      - TURN_SECRET=dev-turn-secret-change-in-production
+      - TURN_SERVERS=turn:coturn:3478
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  meeting:
+    build:
+      context: ./services/meeting
+      dockerfile: Dockerfile
+    container_name: qsvc-meeting
+    ports:
+      - "4003:4003"
+    environment:
+      - NODE_ENV=development
+      - MEETING_PORT=4003
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=qsvc
+      - POSTGRES_USER=qsvc
+      - POSTGRES_PASSWORD=qsvc_dev_2025
+      - JWT_SECRET=dev-jwt-secret-change-in-production
+      - WEB_URL=http://localhost:5173
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  recording:
+    build:
+      context: ./services/recording
+      dockerfile: Dockerfile
+    container_name: qsvc-recording
+    ports:
+      - "4004:4004"
+    environment:
+      - NODE_ENV=development
+      - RECORDING_PORT=4004
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=qsvc
+      - POSTGRES_USER=qsvc
+      - POSTGRES_PASSWORD=qsvc_dev_2025
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=qsvc_minio
+      - MINIO_SECRET_KEY=qsvc_minio_secret
+      - MINIO_BUCKET=qsvc-recordings
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+
+  web:
+    build:
+      context: ./frontend/web
+      dockerfile: Dockerfile
+    container_name: qsvc-web
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_SIGNALING_URL=ws://localhost:4001/ws
+      - VITE_AUTH_URL=http://localhost:4002
+      - VITE_MEETING_URL=http://localhost:4003
+      - VITE_RECORDING_URL=http://localhost:4004

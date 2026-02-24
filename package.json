@@ -1,0 +1,42 @@
+{
+  "name": "qs-vc",
+  "version": "0.1.0",
+  "private": true,
+  "description": "QS-VC: Quantum-Safe Video Conferencing Platform",
+  "workspaces": [
+    "services/sfu",
+    "services/signaling",
+    "services/auth",
+    "services/meeting",
+    "services/recording",
+    "frontend/web"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:sfu\" \"npm run dev:signaling\" \"npm run dev:auth\" \"npm run dev:meeting\" \"npm run dev:recording\" \"npm run dev:web\"",
+    "dev:sfu": "npm -w services/sfu run dev",
+    "dev:signaling": "npm -w services/signaling run dev",
+    "dev:auth": "npm -w services/auth run dev",
+    "dev:meeting": "npm -w services/meeting run dev",
+    "dev:recording": "npm -w services/recording run dev",
+    "dev:web": "npm -w frontend/web run dev",
+    "build": "npm run build:sfu && npm run build:signaling && npm run build:auth && npm run build:meeting && npm run build:recording && npm run build:web",
+    "build:sfu": "npm -w services/sfu run build",
+    "build:signaling": "npm -w services/signaling run build",
+    "build:auth": "npm -w services/auth run build",
+    "build:meeting": "npm -w services/meeting run build",
+    "build:recording": "npm -w services/recording run build",
+    "build:web": "npm -w frontend/web run build",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npx vitest run --reporter=verbose",
+    "test:watch": "npx vitest",
+    "test:coverage": "npx vitest run --coverage",
+    "db:migrate": "node db/migrate.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
