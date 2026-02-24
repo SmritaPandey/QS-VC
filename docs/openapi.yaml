@@ -1,0 +1,530 @@
+openapi: 3.0.3
+info:
+  title: QS-VC Platform API
+  description: |
+    REST API documentation for the QS-VC Video Conferencing Platform.
+    Covers Auth, Meeting, and Recording services.
+  version: 0.1.0
+  contact:
+    name: QS-VC Platform
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:4002
+    description: Auth Service
+  - url: http://localhost:4003
+    description: Meeting Service
+  - url: http://localhost:4004
+    description: Recording Service
+
+tags:
+  - name: Auth
+    description: User authentication and profile management
+  - name: Meeting
+    description: Meeting CRUD, scheduling, and participants
+  - name: Recording
+    description: Recording management and playback
+
+paths:
+  # ━━━━ AUTH SERVICE ━━━━
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, displayName]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                displayName: { type: string }
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  user:
+                    $ref: '#/components/schemas/User'
+        '409':
+          description: Email already exists
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with email and password
+      operationId: loginUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token: { type: string }
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          description: Invalid credentials
+
+  /api/auth/verify:
+    get:
+      tags: [Auth]
+      summary: Verify JWT token
+      operationId: verifyToken
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Token valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  valid: { type: boolean }
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          description: Invalid or expired token
+
+  /api/auth/profile:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      operationId: getProfile
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+    put:
+      tags: [Auth]
+      summary: Update user profile
+      operationId: updateProfile
+      security:
+        - bearerAuth: []
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                displayName: { type: string }
+                avatar: { type: string }
+      responses:
+        '200':
+          description: Profile updated
+
+  /api/auth/turn-credentials:
+    get:
+      tags: [Auth]
+      summary: Get TURN server credentials
+      operationId: getTurnCredentials
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: TURN credentials
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  urls: { type: array, items: { type: string } }
+                  username: { type: string }
+                  credential: { type: string }
+                  ttl: { type: integer }
+
+  # ━━━━ MEETING SERVICE ━━━━
+  /api/meetings:
+    post:
+      tags: [Meeting]
+      summary: Create a new meeting
+      operationId: createMeeting
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                scheduledStart: { type: string, format: date-time }
+                scheduledEnd: { type: string, format: date-time }
+                password: { type: string }
+                waitingRoom: { type: boolean }
+      responses:
+        '201':
+          description: Meeting created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meeting'
+    get:
+      tags: [Meeting]
+      summary: List user's meetings
+      operationId: listMeetings
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [scheduled, active, ended] }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 20 }
+        - name: offset
+          in: query
+          schema: { type: integer, default: 0 }
+      responses:
+        '200':
+          description: List of meetings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  meetings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Meeting'
+                  total: { type: integer }
+
+  /api/meetings/{meetingCode}:
+    get:
+      tags: [Meeting]
+      summary: Get meeting by code
+      operationId: getMeeting
+      parameters:
+        - name: meetingCode
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Meeting details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Meeting'
+        '404':
+          description: Meeting not found
+    patch:
+      tags: [Meeting]
+      summary: Update meeting
+      operationId: updateMeeting
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: meetingCode
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                status: { type: string, enum: [active, ended] }
+      responses:
+        '200':
+          description: Meeting updated
+
+  /api/meetings/{meetingCode}/join:
+    post:
+      tags: [Meeting]
+      summary: Join a meeting (record participant)
+      operationId: joinMeeting
+      parameters:
+        - name: meetingCode
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [displayName]
+              properties:
+                displayName: { type: string }
+                userId: { type: string }
+      responses:
+        '200':
+          description: Joined successfully
+
+  /api/meetings/{meetingCode}/leave:
+    post:
+      tags: [Meeting]
+      summary: Leave a meeting (record departure)
+      operationId: leaveMeeting
+      parameters:
+        - name: meetingCode
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [peerId]
+              properties:
+                peerId: { type: string }
+      responses:
+        '200':
+          description: Left successfully
+
+  /api/meetings/{meetingCode}/chat:
+    get:
+      tags: [Meeting]
+      summary: Get chat history
+      operationId: getChatHistory
+      parameters:
+        - name: meetingCode
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Chat messages
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ChatMessage'
+    post:
+      tags: [Meeting]
+      summary: Persist a chat message
+      operationId: saveChatMessage
+      parameters:
+        - name: meetingCode
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatMessage'
+      responses:
+        '201':
+          description: Message saved
+
+  # ━━━━ RECORDING SERVICE ━━━━
+  /api/recordings/upload:
+    post:
+      tags: [Recording]
+      summary: Upload a complete recording file
+      operationId: uploadRecording
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, meetingId]
+              properties:
+                file: { type: string, format: binary }
+                meetingId: { type: string }
+                meetingCode: { type: string }
+      responses:
+        '201':
+          description: Recording uploaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Recording'
+
+  /api/recordings/chunk:
+    post:
+      tags: [Recording]
+      summary: Upload a recording chunk (for server-side recording)
+      operationId: uploadChunk
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [chunk, sessionId, chunkIndex]
+              properties:
+                chunk: { type: string, format: binary }
+                sessionId: { type: string }
+                chunkIndex: { type: integer }
+                meetingId: { type: string }
+      responses:
+        '200':
+          description: Chunk uploaded
+
+  /api/recordings/meeting/{meetingId}:
+    get:
+      tags: [Recording]
+      summary: List recordings for a meeting
+      operationId: getRecordingsByMeeting
+      parameters:
+        - name: meetingId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: List of recordings
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recordings:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Recording'
+
+  /api/recordings/{recordingId}/download:
+    get:
+      tags: [Recording]
+      summary: Get pre-signed download URL
+      operationId: getDownloadUrl
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: recordingId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Download URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string, format: uri }
+                  expiresIn: { type: integer, description: Seconds until expiry }
+
+  /api/recordings/{recordingId}:
+    delete:
+      tags: [Recording]
+      summary: Delete a recording
+      operationId: deleteRecording
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: recordingId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '204':
+          description: Recording deleted
+
+  # ━━━━ HEALTH CHECKS ━━━━
+  /health:
+    get:
+      summary: Service health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+                  uptime: { type: number }
+                  timestamp: { type: string, format: date-time }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        avatar: { type: string }
+        role: { type: string, enum: [admin, user] }
+        createdAt: { type: string, format: date-time }
+
+    Meeting:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        meetingCode: { type: string, pattern: '^QS-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$' }
+        title: { type: string }
+        hostId: { type: string, format: uuid }
+        status: { type: string, enum: [scheduled, active, ended] }
+        scheduledStart: { type: string, format: date-time }
+        scheduledEnd: { type: string, format: date-time }
+        participantCount: { type: integer }
+        hasWaitingRoom: { type: boolean }
+        createdAt: { type: string, format: date-time }
+
+    ChatMessage:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        peerId: { type: string }
+        displayName: { type: string }
+        type: { type: string, enum: [text, file, system] }
+        content: { type: string }
+        timestamp: { type: string, format: date-time }
+
+    Recording:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        meetingId: { type: string, format: uuid }
+        meetingCode: { type: string }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time }
+        duration: { type: integer, description: Duration in seconds }
+        size: { type: integer, description: Size in bytes }
+        status: { type: string, enum: [uploading, processing, ready, error] }
+        downloadUrl: { type: string, format: uri }

@@ -1,0 +1,248 @@
+# QS-VC Production Docker Compose
+# Usage: docker compose -f docker-compose.prod.yml up -d
+# Requires: SSL certificates in ./certs/ (fullchain.pem, privkey.pem)
+
+version: "3.9"
+
+services:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # REVERSE PROXY (TLS Termination)
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  nginx:
+    image: nginx:alpine
+    container_name: qsvc-nginx
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      - web
+      - signaling
+      - auth
+      - meeting
+      - recording
+    restart: always
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # INFRASTRUCTURE
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: qsvc-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./db/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    container_name: qsvc-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  minio:
+    image: minio/minio:latest
+    container_name: qsvc-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: always
+
+  coturn:
+    image: coturn/coturn:latest
+    container_name: qsvc-coturn
+    command: >
+      -n --lt-cred-mech --use-auth-secret --static-auth-secret=${TURN_SECRET} --realm=${DOMAIN} --listening-port=3478 --min-port=49152 --max-port=49200 --log-file=stdout
+    ports:
+      - "3478:3478"
+      - "3478:3478/udp"
+      - "49152-49200:49152-49200/udp"
+    restart: always
+
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # APPLICATION SERVICES
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  sfu:
+    build:
+      context: ./services/sfu
+      dockerfile: Dockerfile
+    container_name: qsvc-sfu
+    ports:
+      - "40000-40100:40000-40100/udp"
+    environment:
+      - NODE_ENV=production
+      - SFU_PORT=4000
+      - SFU_ANNOUNCED_IP=${SFU_ANNOUNCED_IP}
+      - SFU_MIN_PORT=40000
+      - SFU_MAX_PORT=40100
+      - SFU_NUM_WORKERS=4
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - CORS_ORIGINS=https://${DOMAIN}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:4000/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: always
+    network_mode: host
+
+  signaling:
+    build:
+      context: ./services/signaling
+      dockerfile: Dockerfile
+    container_name: qsvc-signaling
+    environment:
+      - NODE_ENV=production
+      - SIGNALING_PORT=4001
+      - SFU_INTERNAL_URL=http://sfu:4000
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - CORS_ORIGINS=https://${DOMAIN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:4001/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: always
+
+  auth:
+    build:
+      context: ./services/auth
+      dockerfile: Dockerfile
+    container_name: qsvc-auth
+    environment:
+      - NODE_ENV=production
+      - AUTH_PORT=4002
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - JWT_EXPIRY=24h
+      - TURN_SECRET=${TURN_SECRET}
+      - TURN_SERVERS=turn:coturn:3478
+      - CORS_ORIGINS=https://${DOMAIN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:4002/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: always
+
+  meeting:
+    build:
+      context: ./services/meeting
+      dockerfile: Dockerfile
+    container_name: qsvc-meeting
+    environment:
+      - NODE_ENV=production
+      - MEETING_PORT=4003
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+      - WEB_URL=https://${DOMAIN}
+      - CORS_ORIGINS=https://${DOMAIN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:4003/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: always
+
+  recording:
+    build:
+      context: ./services/recording
+      dockerfile: Dockerfile
+    container_name: qsvc-recording
+    environment:
+      - NODE_ENV=production
+      - RECORDING_PORT=4004
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=${POSTGRES_DB}
+      - POSTGRES_USER=${POSTGRES_USER}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_BUCKET=qsvc-recordings
+      - CORS_ORIGINS=https://${DOMAIN}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:4004/health" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: always
+
+  web:
+    build:
+      context: ./frontend/web
+      dockerfile: Dockerfile
+    container_name: qsvc-web
+    environment:
+      - VITE_SIGNALING_URL=wss://${DOMAIN}/ws
+      - VITE_AUTH_URL=https://${DOMAIN}/api/auth
+      - VITE_MEETING_URL=https://${DOMAIN}/api/meetings
+      - VITE_RECORDING_URL=https://${DOMAIN}/api/recordings
+    restart: always
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
