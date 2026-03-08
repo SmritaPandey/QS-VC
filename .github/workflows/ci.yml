@@ -89,3 +89,11 @@ jobs:
           file: services/recording/Dockerfile
           push: false
           tags: qsvc-recording:latest
+
+      - name: Build Web image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: frontend/web/Dockerfile
+          push: false
+          tags: qsvc-web:latest

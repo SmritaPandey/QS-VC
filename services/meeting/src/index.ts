@@ -90,16 +90,19 @@ app.use(cors({
 app.use(express.json());
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } }));
 
-const PORT = parseInt(process.env.MEETING_PORT || '4003', 10);
+const PORT = parseInt(process.env.PORT || process.env.MEETING_PORT || '4003', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production';
 
-const pool = new Pool({
-    host: process.env.POSTGRES_HOST || 'localhost',
-    port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
-    database: process.env.POSTGRES_DB || 'qsvc',
-    user: process.env.POSTGRES_USER || 'qsvc',
-    password: process.env.POSTGRES_PASSWORD || 'qsvc_dev_2025',
-});
+// Database pool — supports DATABASE_URL (Render) or individual env vars (local)
+const pool = process.env.DATABASE_URL
+    ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
+    : new Pool({
+        host: process.env.POSTGRES_HOST || 'localhost',
+        port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
+        database: process.env.POSTGRES_DB || 'qsvc',
+        user: process.env.POSTGRES_USER || 'qsvc',
+        password: process.env.POSTGRES_PASSWORD || 'qsvc_dev_2025',
+    });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // AUTH MIDDLEWARE

@@ -170,10 +170,10 @@ const AdminDashboard: React.FC = () => {
                 </div>
                 <div className="admin-header-actions">
                     <button className="btn-back-to-app" onClick={() => navigate('/schedule')}>
-                        📅 Schedule
+                        <span className="mi mi-sm">calendar_today</span> Schedule
                     </button>
                     <button className="btn-back-to-app" onClick={() => navigate('/')}>
-                        ← Back to App
+                        <span className="mi mi-sm">arrow_back</span> Back to App
                     </button>
                 </div>
             </header>
@@ -185,12 +185,14 @@ const AdminDashboard: React.FC = () => {
                         className={`admin-nav-btn ${activeTab === tab ? 'active' : ''}`}
                         onClick={() => setActiveTab(tab)}
                     >
-                        {tab === 'overview' && '📊 '}
-                        {tab === 'meetings' && '📹 '}
-                        {tab === 'users' && '👤 '}
-                        {tab === 'recordings' && '🎙️ '}
-                        {tab === 'analytics' && '📈 '}
-                        {tab === 'system' && '⚙️ '}
+                        <span className="mi mi-sm" style={{ marginRight: '4px' }}>
+                            {tab === 'overview' && 'dashboard'}
+                            {tab === 'meetings' && 'videocam'}
+                            {tab === 'users' && 'group'}
+                            {tab === 'recordings' && 'mic'}
+                            {tab === 'analytics' && 'analytics'}
+                            {tab === 'system' && 'settings'}
+                        </span>
                         {tab.charAt(0).toUpperCase() + tab.slice(1)}
                     </button>
                 ))}
@@ -202,42 +204,42 @@ const AdminDashboard: React.FC = () => {
                     <div className="admin-overview">
                         <div className="kpi-grid">
                             <div className="kpi-card">
-                                <span className="kpi-icon">📹</span>
+                                <span className="kpi-icon"><span className="mi">videocam</span></span>
                                 <div className="kpi-data">
                                     <span className="kpi-value">{stats.activeMeetings}</span>
                                     <span className="kpi-label">Active Meetings</span>
                                 </div>
                             </div>
                             <div className="kpi-card">
-                                <span className="kpi-icon">👥</span>
+                                <span className="kpi-icon"><span className="mi">group</span></span>
                                 <div className="kpi-data">
                                     <span className="kpi-value">{stats.totalParticipants}</span>
                                     <span className="kpi-label">Participants Now</span>
                                 </div>
                             </div>
                             <div className="kpi-card">
-                                <span className="kpi-icon">👤</span>
+                                <span className="kpi-icon"><span className="mi">person</span></span>
                                 <div className="kpi-data">
                                     <span className="kpi-value">{stats.totalUsers}</span>
                                     <span className="kpi-label">Registered Users</span>
                                 </div>
                             </div>
                             <div className="kpi-card">
-                                <span className="kpi-icon">🎙️</span>
+                                <span className="kpi-icon"><span className="mi">mic</span></span>
                                 <div className="kpi-data">
                                     <span className="kpi-value">{stats.recordingsCount}</span>
                                     <span className="kpi-label">Recordings</span>
                                 </div>
                             </div>
                             <div className="kpi-card">
-                                <span className="kpi-icon">📅</span>
+                                <span className="kpi-icon"><span className="mi">calendar_today</span></span>
                                 <div className="kpi-data">
                                     <span className="kpi-value">{stats.totalMeetingsToday}</span>
                                     <span className="kpi-label">Meetings Today</span>
                                 </div>
                             </div>
                             <div className="kpi-card">
-                                <span className="kpi-icon">⏱</span>
+                                <span className="kpi-icon"><span className="mi">schedule</span></span>
                                 <div className="kpi-data">
                                     <span className="kpi-value">{stats.avgMeetingDuration}</span>
                                     <span className="kpi-label">Avg Duration</span>
@@ -266,7 +268,7 @@ const AdminDashboard: React.FC = () => {
                         </div>
                         {meetings.length === 0 ? (
                             <div className="empty-state">
-                                <div className="empty-icon">📹</div>
+                                <div className="empty-icon"><span className="mi" style={{ fontSize: '48px' }}>videocam</span></div>
                                 <p>No active meetings right now</p>
                             </div>
                         ) : (
@@ -288,7 +290,7 @@ const AdminDashboard: React.FC = () => {
                                             <td>{m.host}</td>
                                             <td>{m.participants}</td>
                                             <td>{new Date(m.startedAt).toLocaleTimeString()}</td>
-                                            <td>{m.isRecording ? '🔴 Recording' : '—'}</td>
+                                            <td>{m.isRecording ? <span style={{ color: 'var(--accent-danger)' }}><span className="mi mi-sm" style={{ verticalAlign: 'middle' }}>fiber_manual_record</span> Recording</span> : '—'}</td>
                                             <td>
                                                 <button
                                                     className="btn-sm"
@@ -335,7 +337,7 @@ const AdminDashboard: React.FC = () => {
 
                         {filteredUsers.length === 0 ? (
                             <div className="empty-state">
-                                <div className="empty-icon">👤</div>
+                                <div className="empty-icon"><span className="mi" style={{ fontSize: '48px' }}>person</span></div>
                                 <p>{userSearch ? 'No users match your search' : 'No users registered yet'}</p>
                             </div>
                         ) : (
@@ -386,7 +388,7 @@ const AdminDashboard: React.FC = () => {
 
                         {recordings.length === 0 ? (
                             <div className="empty-state">
-                                <div className="empty-icon">🎙️</div>
+                                <div className="empty-icon"><span className="mi" style={{ fontSize: '48px' }}>mic</span></div>
                                 <p>No recordings available</p>
                             </div>
                         ) : (
@@ -416,7 +418,7 @@ const AdminDashboard: React.FC = () => {
                                                     className="btn-sm"
                                                     onClick={() => navigate(`/recordings/${r.id}`)}
                                                 >
-                                                    ▶ Play
+                                                    <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '4px' }}>play_arrow</span> Play
                                                 </button>
                                             </td>
                                         </tr>
@@ -578,7 +580,8 @@ const AdminDashboard: React.FC = () => {
                                         <div key={flag.name} className="flag-item">
                                             <span>{flag.name}</span>
                                             <span className={`flag-status ${flag.enabled ? 'enabled' : 'disabled'}`}>
-                                                {flag.enabled ? '✅ Enabled' : '❌ Disabled'}
+                                                <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '4px' }}>{flag.enabled ? 'check_circle' : 'cancel'}</span>
+                                                {flag.enabled ? 'Enabled' : 'Disabled'}
                                             </span>
                                         </div>
                                     ))}

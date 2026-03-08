@@ -7,6 +7,7 @@ import VideoGrid from '../components/VideoGrid';
 import ControlBar from '../components/ControlBar';
 import ParticipantsPanel from '../components/ParticipantsPanel';
 import ReactionsOverlay from '../components/ReactionsOverlay';
+import AIChatBot from '../components/AIChatBot';
 
 interface PeerData {
     peerId: string;
@@ -43,56 +44,37 @@ export default function MeetingRoom() {
     const [connected, setConnected] = useState(false);
     const [duration, setDuration] = useState(0);
     const [handRaised, setHandRaised] = useState(false);
+    const chatInputRef = useRef<HTMLInputElement>(null);
 
     const screenStreamRef = useRef<MediaStream | null>(null);
     const originalVideoTrackRef = useRef<MediaStreamTrack | null>(null);
 
-    // Meeting timer
     useEffect(() => {
         if (!connected) return;
         const timer = setInterval(() => setDuration((d) => d + 1), 1000);
         return () => clearInterval(timer);
     }, [connected]);
 
-    // Initialize connection
     useEffect(() => {
         let mounted = true;
-
         async function init() {
             try {
-                // 1. Get local media
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: true,
-                    video: { width: 1280, height: 720 },
+                    audio: true, video: { width: 1280, height: 720 },
                 });
                 if (!mounted) { stream.getTracks().forEach(t => t.stop()); return; }
                 setLocalStream(stream);
-
-                // Apply initial mute states
                 if (state.audioMuted) stream.getAudioTracks().forEach(t => t.enabled = false);
                 if (state.videoOff) stream.getVideoTracks().forEach(t => t.enabled = false);
-
-                // 2. Connect to signaling server
                 await signaling.connect();
-
-                // 3. Join room
                 const joinResult = await signaling.request('joinRoom', {
-                    meetingCode,
-                    displayName,
-                    rtpCapabilities: null,
+                    meetingCode, displayName, rtpCapabilities: null,
                 });
-
                 if (!mounted) return;
                 setMyPeerId(joinResult.peerId);
-
-                // 4. Load mediasoup device
                 await media.loadDevice(joinResult.routerRtpCapabilities);
-
-                // 5. Create send/recv transports
                 await media.createSendTransport(joinResult.sendTransport);
                 await media.createRecvTransport(joinResult.recvTransport);
-
-                // 6. Set consumer callbacks
                 media.setConsumerCallbacks(
                     (info: ConsumerInfo) => {
                         setPeers((prev) => {
@@ -106,89 +88,41 @@ export default function MeetingRoom() {
                     },
                     (_consumerId: string) => { }
                 );
-
-                // 7. Produce audio and video
                 const audioTrack = stream.getAudioTracks()[0];
                 const videoTrack = stream.getVideoTracks()[0];
-
                 if (audioTrack) await media.produce(audioTrack, { source: 'mic' });
                 if (videoTrack) await media.produce(videoTrack, { source: 'camera' });
-
-                // 8. Consume existing peers' producers
                 for (const existingPeer of joinResult.existingPeers) {
                     setPeers((prev) => {
                         const next = new Map(prev);
-                        next.set(existingPeer.peerId, {
-                            peerId: existingPeer.peerId,
-                            displayName: existingPeer.displayName,
-                        });
+                        next.set(existingPeer.peerId, { peerId: existingPeer.peerId, displayName: existingPeer.displayName });
                         return next;
                     });
-
                     for (const producer of existingPeer.producers) {
-                        try {
-                            await media.consume(existingPeer.peerId, producer.id);
-                        } catch (err) {
-                            console.error('Failed to consume existing producer:', err);
-                        }
+                        try { await media.consume(existingPeer.peerId, producer.id); } catch (err) { console.error('Failed to consume:', err); }
                     }
                 }
-
                 setConnected(true);
-
-                // 9. Listen for signaling events
                 signaling.on('newPeer', ({ peerId, displayName: name }: any) => {
-                    setPeers((prev) => {
-                        const next = new Map(prev);
-                        next.set(peerId, { peerId, displayName: name });
-                        return next;
-                    });
+                    setPeers((prev) => { const next = new Map(prev); next.set(peerId, { peerId, displayName: name }); return next; });
                 });
-
                 signaling.on('peerLeft', ({ peerId }: any) => {
-                    setPeers((prev) => {
-                        const next = new Map(prev);
-                        next.delete(peerId);
-                        return next;
-                    });
+                    setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; });
                 });
-
                 signaling.on('newProducer', async ({ peerId, producerId }: any) => {
-                    try {
-                        await media.consume(peerId, producerId);
-                    } catch (err) {
-                        console.error('Failed to consume new producer:', err);
-                    }
+                    try { await media.consume(peerId, producerId); } catch (err) { console.error('Failed to consume:', err); }
                 });
-
-                signaling.on('chatMessage', (msg: ChatMessage) => {
-                    setChatMessages((prev) => [...prev, msg]);
-                });
-
-                signaling.on('reaction', () => {
-                    // Handled by ReactionsOverlay
-                });
-
+                signaling.on('chatMessage', (msg: ChatMessage) => { setChatMessages((prev) => [...prev, msg]); });
+                signaling.on('reaction', () => { });
             } catch (err) {
                 console.error('Failed to join meeting:', err);
                 alert('Failed to join meeting. Please check your connection.');
             }
         }
-
         init();
-
-        return () => {
-            mounted = false;
-            media.close();
-            signaling.request('leaveRoom', {}).catch(() => { });
-            signaling.disconnect();
-        };
+        return () => { mounted = false; media.close(); signaling.request('leaveRoom', {}).catch(() => { }); signaling.disconnect(); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [meetingCode]);
-
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // CONTROL HANDLERS
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
     const handleToggleAudio = useCallback(async () => {
         if (localStream) {
@@ -212,45 +146,22 @@ export default function MeetingRoom() {
 
     const handleScreenShare = useCallback(async () => {
         if (screenSharing) {
-            // Stop screen share — revert to camera
             screenStreamRef.current?.getTracks().forEach(t => t.stop());
             screenStreamRef.current = null;
-
-            if (originalVideoTrackRef.current) {
-                await media.replaceVideoTrack(originalVideoTrackRef.current);
-                originalVideoTrackRef.current = null;
-            }
-
+            if (originalVideoTrackRef.current) { await media.replaceVideoTrack(originalVideoTrackRef.current); originalVideoTrackRef.current = null; }
             signaling.request('muteStateChanged', { kind: 'screen', sharing: false }).catch(() => { });
             setScreenSharing(false);
         } else {
             try {
-                const screenStream = await navigator.mediaDevices.getDisplayMedia({
-                    video: { width: 1920, height: 1080, frameRate: 30 },
-                    audio: true,
-                });
-
+                const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: { width: 1920, height: 1080, frameRate: 30 }, audio: true });
                 screenStreamRef.current = screenStream;
-
-                // Save original camera track
-                if (localStream) {
-                    originalVideoTrackRef.current = localStream.getVideoTracks()[0] || null;
-                }
-
-                // Replace video producer with screen share track
+                if (localStream) originalVideoTrackRef.current = localStream.getVideoTracks()[0] || null;
                 const screenTrack = screenStream.getVideoTracks()[0];
                 await media.replaceVideoTrack(screenTrack);
-
-                // Auto-stop when user clicks browser "stop sharing" button
-                screenTrack.onended = () => {
-                    handleScreenShare(); // Toggle off
-                };
-
+                screenTrack.onended = () => { handleScreenShare(); };
                 signaling.request('muteStateChanged', { kind: 'screen', sharing: true }).catch(() => { });
                 setScreenSharing(true);
-            } catch (err) {
-                console.error('Screen share failed:', err);
-            }
+            } catch (err) { console.error('Screen share failed:', err); }
         }
     }, [screenSharing, localStream]);
 
@@ -260,56 +171,26 @@ export default function MeetingRoom() {
                 const result = await recordingManager.stopRecording();
                 recordingManager.downloadLocally(result.blob, `QS-VC-${meetingCode}-${Date.now()}.${result.format}`);
                 setIsRecording(false);
-            } catch (err) {
-                console.error('Failed to stop recording:', err);
-            }
+            } catch (err) { console.error('Failed to stop recording:', err); }
         } else {
             try {
-                // Combine all video tiles + audio into a single canvas/stream
-                // For client-side: record the local display
-                const displayStream = await navigator.mediaDevices.getDisplayMedia({
-                    video: { width: 1920, height: 1080 },
-                    audio: true,
-                });
-
+                const displayStream = await navigator.mediaDevices.getDisplayMedia({ video: { width: 1920, height: 1080 }, audio: true });
                 await recordingManager.startRecording(displayStream);
                 setIsRecording(true);
-
-                // Auto-stop if user stops sharing
                 displayStream.getVideoTracks()[0].onended = () => {
                     recordingManager.stopRecording().then((result) => {
                         recordingManager.downloadLocally(result.blob, `QS-VC-${meetingCode}-${Date.now()}.${result.format}`);
                         setIsRecording(false);
                     });
                 };
-            } catch (err) {
-                console.error('Failed to start recording:', err);
-            }
+            } catch (err) { console.error('Failed to start recording:', err); }
         }
     }, [isRecording, meetingCode]);
 
-    const handleRaiseHand = useCallback(() => {
-        const raised = !handRaised;
-        setHandRaised(raised);
-        signaling.request('handRaise', { raised }).catch(() => { });
-    }, [handRaised]);
-
-    const handleSendReaction = useCallback((emoji: string) => {
-        signaling.request('reaction', { emoji }).catch(() => { });
-    }, []);
-
-    const handleLeave = useCallback(() => {
-        media.close();
-        signaling.request('leaveRoom', {}).catch(() => { });
-        signaling.disconnect();
-        localStream?.getTracks().forEach(t => t.stop());
-        screenStreamRef.current?.getTracks().forEach(t => t.stop());
-        navigate('/');
-    }, [localStream, navigate]);
-
-    const handleSendChat = useCallback((content: string) => {
-        signaling.request('chatMessage', { content, type: 'text' }).catch(() => { });
-    }, []);
+    const handleRaiseHand = useCallback(() => { const raised = !handRaised; setHandRaised(raised); signaling.request('handRaise', { raised }).catch(() => { }); }, [handRaised]);
+    const handleSendReaction = useCallback((emoji: string) => { signaling.request('reaction', { emoji }).catch(() => { }); }, []);
+    const handleLeave = useCallback(() => { media.close(); signaling.request('leaveRoom', {}).catch(() => { }); signaling.disconnect(); localStream?.getTracks().forEach(t => t.stop()); screenStreamRef.current?.getTracks().forEach(t => t.stop()); navigate('/'); }, [localStream, navigate]);
+    const handleSendChat = useCallback((content: string) => { signaling.request('chatMessage', { content, type: 'text' }).catch(() => { }); }, []);
 
     const formatDuration = (s: number) => {
         const h = Math.floor(s / 3600);
@@ -320,49 +201,44 @@ export default function MeetingRoom() {
             : `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
     };
 
-    // Determine which side panel is open
     const sidePanelOpen = chatOpen || participantsOpen;
 
     return (
         <div className="meeting-room">
-            {/* Top Bar */}
             <div className="meeting-top-bar">
                 <div className="top-bar-left">
-                    <span className="e2ee-badge">🔒 E2EE</span>
+                    <span className="e2ee-badge">
+                        <span className="mi mi-sm">lock</span> E2EE
+                    </span>
                     <span className="meeting-code-display">{meetingCode}</span>
                 </div>
                 <div className="top-bar-center">
                     <span className="meeting-timer">{formatDuration(duration)}</span>
-                    {isRecording && <span className="recording-indicator">🔴 REC</span>}
-                    {screenSharing && <span className="sharing-indicator">🖥️ Sharing</span>}
+                    {isRecording && <span className="recording-indicator"><span className="mi mi-sm">fiber_manual_record</span> REC</span>}
+                    {screenSharing && <span className="sharing-indicator"><span className="mi mi-sm">screen_share</span> Sharing</span>}
                 </div>
                 <div className="top-bar-right">
-                    <span className="participant-count">👥 {peers.size + 1}</span>
+                    <span className="participant-count"><span className="mi mi-sm">group</span> {peers.size + 1}</span>
                 </div>
             </div>
 
-            {/* Main content */}
             <div className="meeting-content">
                 <div className={`video-area ${sidePanelOpen ? 'with-panel' : ''}`}>
-                    <VideoGrid
-                        localStream={localStream}
-                        peers={peers}
-                        displayName={displayName}
-                        videoOff={videoOff}
-                    />
+                    <VideoGrid localStream={localStream} peers={peers} displayName={displayName} videoOff={videoOff} />
                     <ReactionsOverlay onSendReaction={handleSendReaction} />
                 </div>
 
-                {/* Chat Panel */}
                 {chatOpen && (
                     <div className="side-panel">
                         <div className="panel-header">
                             <h3>Chat</h3>
-                            <button className="panel-close" onClick={() => setChatOpen(false)}>✕</button>
+                            <button className="panel-close" onClick={() => setChatOpen(false)}>
+                                <span className="mi mi-sm">close</span>
+                            </button>
                         </div>
                         <div className="chat-messages">
                             {chatMessages.length === 0 ? (
-                                <div className="chat-empty">No messages yet. Say hello! 👋</div>
+                                <div className="chat-empty">No messages yet. Say hello!</div>
                             ) : (
                                 chatMessages.map((msg) => (
                                     <div key={msg.id} className="chat-msg">
@@ -374,6 +250,7 @@ export default function MeetingRoom() {
                         </div>
                         <div className="chat-input-area">
                             <input
+                                ref={chatInputRef}
                                 type="text"
                                 placeholder="Type a message..."
                                 className="chat-input"
@@ -384,38 +261,35 @@ export default function MeetingRoom() {
                                     }
                                 }}
                             />
+                            <button className="chat-send-btn" onClick={() => {
+                                if (chatInputRef.current && chatInputRef.current.value.trim()) {
+                                    handleSendChat(chatInputRef.current.value);
+                                    chatInputRef.current.value = '';
+                                }
+                            }}>
+                                <span className="mi mi-sm">send</span>
+                            </button>
                         </div>
                     </div>
                 )}
 
-                {/* Participants Panel */}
                 {participantsOpen && (
-                    <ParticipantsPanel
-                        peers={peers}
-                        displayName={displayName}
-                        onClose={() => setParticipantsOpen(false)}
-                    />
+                    <ParticipantsPanel peers={peers} displayName={displayName} onClose={() => setParticipantsOpen(false)} />
                 )}
             </div>
 
-            {/* Control Bar */}
             <ControlBar
-                audioMuted={audioMuted}
-                videoOff={videoOff}
-                screenSharing={screenSharing}
-                isRecording={isRecording}
-                chatOpen={chatOpen}
-                participantsOpen={participantsOpen}
+                audioMuted={audioMuted} videoOff={videoOff} screenSharing={screenSharing}
+                isRecording={isRecording} chatOpen={chatOpen} participantsOpen={participantsOpen}
                 handRaised={handRaised}
-                onToggleAudio={handleToggleAudio}
-                onToggleVideo={handleToggleVideo}
-                onToggleScreen={handleScreenShare}
-                onToggleRecording={handleToggleRecording}
+                onToggleAudio={handleToggleAudio} onToggleVideo={handleToggleVideo}
+                onToggleScreen={handleScreenShare} onToggleRecording={handleToggleRecording}
                 onToggleChat={() => { setChatOpen(!chatOpen); setParticipantsOpen(false); }}
                 onToggleParticipants={() => { setParticipantsOpen(!participantsOpen); setChatOpen(false); }}
-                onRaiseHand={handleRaiseHand}
-                onLeave={handleLeave}
+                onRaiseHand={handleRaiseHand} onLeave={handleLeave}
             />
+
+            <AIChatBot />
         </div>
     );
 }

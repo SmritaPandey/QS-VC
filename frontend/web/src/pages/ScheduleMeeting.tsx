@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const MEETING_API = import.meta.env.VITE_MEETING_URL || 'http://localhost:4003';
+const MEETING_API = import.meta.env.VITE_API_URL || import.meta.env.VITE_MEETING_URL || '';
 
 type RecurrenceType = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
 type MeetingDuration = 15 | 30 | 45 | 60 | 90 | 120;

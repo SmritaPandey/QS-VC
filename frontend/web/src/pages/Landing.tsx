@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const SIGNALING_API = 'http://localhost:4001';
+const SIGNALING_API = import.meta.env.VITE_API_URL || '';
 
 export default function Landing() {
     const [joinCode, setJoinCode] = useState('');
@@ -32,10 +32,27 @@ export default function Landing() {
         <div className="landing-page">
             <div className="landing-bg-gradient" />
 
+            <nav className="landing-nav">
+                <div className="landing-nav-logo">
+                    <span className="mi" style={{ color: 'var(--accent-secondary)' }}>verified_user</span>
+                    <span className="landing-nav-brand">QS-VC</span>
+                </div>
+                <div className="landing-nav-links">
+                    <button className="btn-outline" onClick={() => navigate('/schedule')}>
+                        <span className="mi mi-sm">calendar_today</span>
+                        Schedule
+                    </button>
+                    <button className="btn-outline" onClick={() => navigate('/admin')}>
+                        <span className="mi mi-sm">admin_panel_settings</span>
+                        Admin
+                    </button>
+                </div>
+            </nav>
+
             <div className="landing-container">
                 <div className="landing-hero">
                     <div className="logo-badge">
-                        <span className="logo-icon">🛡️</span>
+                        <span className="mi logo-icon">shield</span>
                         <span className="logo-text">QS-VC</span>
                     </div>
                     <h1>Quantum-Safe<br />Video Conference</h1>
@@ -58,7 +75,7 @@ export default function Landing() {
                                 <span className="spinner" />
                             ) : (
                                 <>
-                                    <span className="btn-icon">📹</span>
+                                    <span className="mi mi-sm">videocam</span>
                                     Create Meeting
                                 </>
                             )}
@@ -66,9 +83,9 @@ export default function Landing() {
                         <button
                             className="btn-outline"
                             onClick={() => navigate('/schedule')}
-                            style={{ marginTop: '8px' }}
+                            style={{ marginTop: '10px', width: '100%' }}
                         >
-                            <span className="btn-icon">📅</span>
+                            <span className="mi mi-sm">calendar_today</span>
                             Schedule for Later
                         </button>
                     </div>
@@ -90,10 +107,12 @@ export default function Landing() {
                                 className="input-meeting-code"
                             />
                             <button
-                                className="btn-secondary"
+                                className="btn-primary"
                                 onClick={handleJoin}
                                 disabled={!joinCode.trim()}
+                                style={{ padding: '12px 24px' }}
                             >
+                                <span className="mi mi-sm">login</span>
                                 Join
                             </button>
                         </div>
@@ -101,10 +120,10 @@ export default function Landing() {
                 </div>
 
                 <div className="landing-features">
-                    <div className="feature-chip">🔐 Post-Quantum Encryption</div>
-                    <div className="feature-chip">🤖 AI Captions & Translation</div>
-                    <div className="feature-chip">🎙️ Noise Suppression</div>
-                    <div className="feature-chip">🌐 22 Indian Languages</div>
+                    <div className="feature-chip"><span className="mi mi-sm">lock</span> Post-Quantum Encryption</div>
+                    <div className="feature-chip"><span className="mi mi-sm">smart_toy</span> AI Captions & Translation</div>
+                    <div className="feature-chip"><span className="mi mi-sm">mic_off</span> Noise Suppression</div>
+                    <div className="feature-chip"><span className="mi mi-sm">language</span> 22 Indian Languages</div>
                 </div>
             </div>
         </div>

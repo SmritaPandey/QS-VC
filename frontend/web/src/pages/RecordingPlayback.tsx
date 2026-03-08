@@ -1,143 +1,117 @@
-/**
- * Recording Playback Page — View and download meeting recordings.
- */
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 
-interface Recording {
+const RECORDING_URL = import.meta.env.VITE_RECORDING_URL || 'http://localhost:4004';
+
+interface RecordingData {
     id: string;
-    meetingId: string;
     meetingCode: string;
-    startedAt: string;
-    endedAt: string;
+    filename: string;
     duration: string;
     size: string;
-    downloadUrl: string;
-    status: string;
+    format: string;
+    url: string;
+    createdAt: string;
 }
 
-const RECORDING_SERVICE = import.meta.env.VITE_RECORDING_URL || 'http://localhost:4004';
-
-const RecordingPlayback: React.FC = () => {
+export default function RecordingPlayback() {
     const { meetingId } = useParams<{ meetingId: string }>();
     const navigate = useNavigate();
-    const [recordings, setRecordings] = useState<Recording[]>([]);
-    const [selectedRecording, setSelectedRecording] = useState<Recording | null>(null);
+    const [recordings, setRecordings] = useState<RecordingData[]>([]);
+    const [selectedIdx, setSelectedIdx] = useState(0);
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
+    const [error, setError] = useState('');
 
     useEffect(() => {
-        const fetchRecordings = async () => {
+        async function fetchRecordings() {
             try {
-                const res = await fetch(`${RECORDING_SERVICE}/api/recordings/meeting/${meetingId}`);
+                const res = await fetch(`${RECORDING_URL}/api/recordings/${meetingId}`, {
+                    headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+                });
                 if (!res.ok) throw new Error('Failed to fetch recordings');
                 const data = await res.json();
                 setRecordings(data.recordings || []);
-                if (data.recordings?.length > 0) {
-                    setSelectedRecording(data.recordings[0]);
-                }
             } catch (err: any) {
                 setError(err.message);
             } finally {
                 setLoading(false);
             }
-        };
-
-        if (meetingId) fetchRecordings();
+        }
+        fetchRecordings();
     }, [meetingId]);
 
-    const formatDuration = (seconds: string) => {
-        const s = parseInt(seconds, 10);
-        const hrs = Math.floor(s / 3600);
-        const mins = Math.floor((s % 3600) / 60);
-        const secs = s % 60;
-        return [hrs, mins, secs].map(v => v.toString().padStart(2, '0')).join(':');
-    };
-
-    const formatSize = (bytes: string) => {
-        const b = parseInt(bytes, 10);
-        if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
-        if (b < 1024 * 1024 * 1024) return `${(b / (1024 * 1024)).toFixed(1)} MB`;
-        return `${(b / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-    };
-
-    if (loading) {
-        return (
-            <div className="recording-page">
-                <div className="recording-loading">Loading recordings...</div>
-            </div>
-        );
-    }
+    const selected = recordings[selectedIdx];
 
     return (
         <div className="recording-page">
             <div className="recording-header">
-                <button className="btn-back" onClick={() => navigate(-1)}>← Back</button>
-                <h1>Meeting Recordings</h1>
+                <button className="btn-back" onClick={() => navigate(-1)}>
+                    <span className="mi mi-sm">arrow_back</span> Back
+                </button>
+                <h1>
+                    <span className="mi" style={{ color: 'var(--accent-primary)', verticalAlign: 'middle', marginRight: '8px' }}>play_circle</span>
+                    Recordings
+                </h1>
             </div>
 
-            {error && <div className="recording-error">{error}</div>}
+            {loading && <div className="recording-loading"><span className="spinner" /> Loading recordings...</div>}
+            {error && <div className="recording-error"><span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '6px' }}>error</span>{error}</div>}
 
-            <div className="recording-layout">
-                {/* Player */}
-                <div className="recording-player">
-                    {selectedRecording ? (
-                        <>
-                            <video
-                                controls
-                                autoPlay={false}
-                                className="recording-video"
-                                src={selectedRecording.downloadUrl}
-                            />
-                            <div className="recording-info">
-                                <h3>{selectedRecording.meetingCode}</h3>
-                                <p>
-                                    {new Date(selectedRecording.startedAt).toLocaleString()} ·{' '}
-                                    {formatDuration(selectedRecording.duration)} ·{' '}
-                                    {formatSize(selectedRecording.size)}
-                                </p>
-                                <a
-                                    href={selectedRecording.downloadUrl}
-                                    download
-                                    className="btn-download"
-                                >
-                                    ⬇ Download
-                                </a>
-                            </div>
-                        </>
-                    ) : (
-                        <div className="recording-empty">No recordings available</div>
+            {!loading && recordings.length === 0 && !error && (
+                <div className="recording-empty">
+                    <span className="mi" style={{ fontSize: '48px', opacity: 0.3, display: 'block', marginBottom: '12px' }}>videocam_off</span>
+                    <p>No recordings found for this meeting.</p>
+                </div>
+            )}
+
+            {recordings.length > 0 && selected && (
+                <div className="recording-layout">
+                    <div className="recording-player">
+                        <video
+                            src={selected.url}
+                            controls
+                            className="recording-video"
+                        />
+                        <div className="recording-info">
+                            <h3>{selected.filename || `Recording ${selectedIdx + 1}`}</h3>
+                            <p>
+                                <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '4px' }}>schedule</span>
+                                {selected.duration} &nbsp;·&nbsp;
+                                <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '4px' }}>storage</span>
+                                {selected.size} &nbsp;·&nbsp;
+                                {selected.format?.toUpperCase()}
+                            </p>
+                            <a href={selected.url} download className="btn-download">
+                                <span className="mi mi-sm">download</span>
+                                Download
+                            </a>
+                        </div>
+                    </div>
+
+                    {recordings.length > 1 && (
+                        <div className="recording-list">
+                            <h3>All Recordings ({recordings.length})</h3>
+                            <ul>
+                                {recordings.map((r, i) => (
+                                    <li
+                                        key={r.id}
+                                        className={`recording-item ${i === selectedIdx ? 'active' : ''}`}
+                                        onClick={() => setSelectedIdx(i)}
+                                    >
+                                        <span className="mi mi-sm">play_circle</span>
+                                        <div>
+                                            <div style={{ fontWeight: 500, color: 'var(--text-primary)', marginBottom: '2px' }}>
+                                                {r.filename || `Recording ${i + 1}`}
+                                            </div>
+                                            <div style={{ fontSize: '11px' }}>{r.duration} · {r.size}</div>
+                                        </div>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
                     )}
                 </div>
-
-                {/* Recording list */}
-                {recordings.length > 1 && (
-                    <div className="recording-list">
-                        <h3>All Recordings ({recordings.length})</h3>
-                        <ul>
-                            {recordings.map((r) => (
-                                <li
-                                    key={r.id}
-                                    className={`recording-item ${r.id === selectedRecording?.id ? 'active' : ''}`}
-                                    onClick={() => setSelectedRecording(r)}
-                                >
-                                    <span className="recording-item-date">
-                                        {new Date(r.startedAt).toLocaleDateString()}
-                                    </span>
-                                    <span className="recording-item-duration">
-                                        {formatDuration(r.duration)}
-                                    </span>
-                                    <span className="recording-item-size">
-                                        {formatSize(r.size)}
-                                    </span>
-                                </li>
-                            ))}
-                        </ul>
-                    </div>
-                )}
-            </div>
+            )}
         </div>
     );
-};
-
-export default RecordingPlayback;
+}

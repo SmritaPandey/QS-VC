@@ -25,7 +25,7 @@ const app = express();
 // CORS: restrict origins per environment
 const allowedOrigins = process.env.CORS_ORIGINS
     ? process.env.CORS_ORIGINS.split(',')
-    : ['http://localhost:5173'];
+    : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5174', 'http://127.0.0.1:5174'];
 app.use(cors({
     origin: allowedOrigins,
     methods: ['GET', 'POST'],
@@ -50,6 +50,30 @@ app.get('/health', (_req, res) => {
 app.post('/api/meetings/create', (_req, res) => {
     const code = generateMeetingCode();
     res.json({ meetingCode: code, joinUrl: `http://localhost:5173/meeting/${code}` });
+});
+
+// Schedule or create a meeting (handles the meeting-service API contract)
+app.post('/api/meetings', express.json(), (req, res) => {
+    const code = generateMeetingCode();
+    const { title, type, scheduledStart, scheduledEnd, settings } = req.body || {};
+
+    // Store in-memory for the session (production would persist to DB)
+    const meeting = {
+        id: `mtg-${Date.now()}`,
+        meetingCode: code,
+        code,
+        title: title || 'Meeting',
+        type: type || 'instant',
+        scheduledStart: scheduledStart || null,
+        scheduledEnd: scheduledEnd || null,
+        settings: settings || {},
+        status: type === 'scheduled' ? 'waiting' : 'active',
+        createdAt: new Date().toISOString(),
+        joinUrl: `http://localhost:5173/meeting/${code}/preview`,
+    };
+
+    logger.info(`Meeting created: ${code} (${meeting.type})`);
+    res.json(meeting);
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -161,6 +185,18 @@ function generateMeetingCode(): string {
     }
     return `QS-${segments.join('-')}`;
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// GLOBAL ERROR HANDLING (prevent crashes)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+process.on('uncaughtException', (err) => {
+    logger.error({ err }, 'Uncaught exception (service kept alive)');
+});
+
+process.on('unhandledRejection', (reason) => {
+    logger.error({ reason }, 'Unhandled rejection (service kept alive)');
+});
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // START
