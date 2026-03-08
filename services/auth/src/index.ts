@@ -83,7 +83,7 @@ app.use(generalLimiter);
 app.use('/api/auth/register', authLimiter);
 app.use('/api/auth/login', authLimiter);
 
-const PORT = parseInt(process.env.AUTH_PORT || '4002', 10);
+const PORT = parseInt(process.env.PORT || process.env.AUTH_PORT || '4002', 10);
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production';
 // Convert time string to seconds for JWT (avoids StringValue branded type issue)
 function parseExpiry(val: string): number {
@@ -99,14 +99,16 @@ function parseExpiry(val: string): number {
 }
 const JWT_EXPIRY = parseExpiry(process.env.JWT_EXPIRY || '24h');
 
-// Database pool
-const pool = new Pool({
-    host: process.env.POSTGRES_HOST || 'localhost',
-    port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
-    database: process.env.POSTGRES_DB || 'qsvc',
-    user: process.env.POSTGRES_USER || 'qsvc',
-    password: process.env.POSTGRES_PASSWORD || 'qsvc_dev_2025',
-});
+// Database pool — supports DATABASE_URL (Render) or individual env vars (local)
+const pool = process.env.DATABASE_URL
+    ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
+    : new Pool({
+        host: process.env.POSTGRES_HOST || 'localhost',
+        port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
+        database: process.env.POSTGRES_DB || 'qsvc',
+        user: process.env.POSTGRES_USER || 'qsvc',
+        password: process.env.POSTGRES_PASSWORD || 'qsvc_dev_2025',
+    });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // HELPERS

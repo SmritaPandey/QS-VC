@@ -43,10 +43,8 @@ export default function VideoTile({ displayName, stream, audioTrack, videoTrack,
                 className={`tile-video ${videoOff ? 'hidden' : ''}`}
             />
 
-            {/* Audio element for remote peers */}
             {!isLocal && <audio ref={audioRef} autoPlay />}
 
-            {/* Avatar when video is off */}
             {videoOff && (
                 <div className="tile-avatar">
                     <div className="avatar-circle-tile">
@@ -55,14 +53,11 @@ export default function VideoTile({ displayName, stream, audioTrack, videoTrack,
                 </div>
             )}
 
-            {/* Name badge */}
             <div className="tile-name-badge">
+                <span className="mi mi-sm" style={{ color: audioTrack ? 'var(--accent-success)' : 'var(--accent-danger)' }}>
+                    {audioTrack ? 'mic' : 'mic_off'}
+                </span>
                 <span className="tile-name">{displayName}</span>
-            </div>
-
-            {/* Network indicator */}
-            <div className="tile-network">
-                <span className="network-bars">▁▃▅▇</span>
             </div>
         </div>
     );

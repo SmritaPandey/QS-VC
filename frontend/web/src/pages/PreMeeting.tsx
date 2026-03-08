@@ -16,7 +16,6 @@ export default function PreMeeting() {
     }>({ cameras: [], mics: [], speakers: [] });
 
     useEffect(() => {
-        // Request camera + mic access
         navigator.mediaDevices
             .getUserMedia({ audio: true, video: { width: 1280, height: 720 } })
             .then((s) => {
@@ -29,7 +28,6 @@ export default function PreMeeting() {
                 console.error('Media access denied:', err);
             });
 
-        // Enumerate devices
         navigator.mediaDevices.enumerateDevices().then((devs) => {
             setDevices({
                 cameras: devs.filter((d) => d.kind === 'videoinput'),
@@ -39,7 +37,6 @@ export default function PreMeeting() {
         });
 
         return () => {
-            // Cleanup stream on unmount
             stream?.getTracks().forEach((t) => t.stop());
         };
     }, []);
@@ -66,7 +63,6 @@ export default function PreMeeting() {
 
     const handleJoin = () => {
         const name = displayName.trim() || 'Guest';
-        // Pass stream and name to meeting room via state
         navigate(`/meeting/${meetingCode}`, {
             state: { displayName: name, audioMuted, videoOff },
         });
@@ -97,14 +93,14 @@ export default function PreMeeting() {
                                 onClick={toggleAudio}
                                 title={audioMuted ? 'Unmute' : 'Mute'}
                             >
-                                {audioMuted ? '🔇' : '🎤'}
+                                <span className="mi">{audioMuted ? 'mic_off' : 'mic'}</span>
                             </button>
                             <button
                                 className={`preview-btn ${videoOff ? 'muted' : ''}`}
                                 onClick={toggleVideo}
                                 title={videoOff ? 'Turn on camera' : 'Turn off camera'}
                             >
-                                {videoOff ? '📵' : '📹'}
+                                <span className="mi">{videoOff ? 'videocam_off' : 'videocam'}</span>
                             </button>
                         </div>
                     </div>
@@ -112,7 +108,7 @@ export default function PreMeeting() {
 
                 <div className="join-section">
                     <div className="meeting-info">
-                        <span className="lock-icon">🔒</span>
+                        <span className="mi mi-sm lock-icon">lock</span>
                         <span className="meeting-code-label">{meetingCode}</span>
                     </div>
 
@@ -130,6 +126,7 @@ export default function PreMeeting() {
 
                     <div className="device-selectors">
                         <label>
+                            <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '4px' }}>videocam</span>
                             Camera
                             <select className="device-select">
                                 {devices.cameras.map((d) => (
@@ -140,6 +137,7 @@ export default function PreMeeting() {
                             </select>
                         </label>
                         <label>
+                            <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '4px' }}>mic</span>
                             Microphone
                             <select className="device-select">
                                 {devices.mics.map((d) => (
@@ -152,6 +150,7 @@ export default function PreMeeting() {
                     </div>
 
                     <button className="btn-join-meeting" onClick={handleJoin}>
+                        <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '6px' }}>login</span>
                         Join Meeting
                     </button>
                 </div>

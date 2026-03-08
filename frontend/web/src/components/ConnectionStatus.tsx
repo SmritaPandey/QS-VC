@@ -11,28 +11,27 @@ interface Props {
 }
 
 const statusConfig: Record<ConnectionState, { message: string; className: string; icon: string }> = {
-    connecting: { message: 'Connecting...', className: 'status-connecting', icon: '⟳' },
-    connected: { message: 'Connected', className: 'status-connected', icon: '●' },
-    reconnecting: { message: 'Reconnecting...', className: 'status-reconnecting', icon: '⟳' },
-    disconnected: { message: 'Disconnected', className: 'status-disconnected', icon: '○' },
-    failed: { message: 'Connection failed', className: 'status-failed', icon: '✕' },
+    connecting: { message: 'Connecting...', className: 'status-connecting', icon: 'sync' },
+    connected: { message: 'Connected', className: 'status-connected', icon: 'check_circle' },
+    reconnecting: { message: 'Reconnecting...', className: 'status-reconnecting', icon: 'sync' },
+    disconnected: { message: 'Disconnected', className: 'status-disconnected', icon: 'cloud_off' },
+    failed: { message: 'Connection failed', className: 'status-failed', icon: 'error' },
 };
 
 const ConnectionStatus: React.FC<Props> = ({ state, attemptCount }) => {
-    // Don't show when connected
     if (state === 'connected') return null;
-
     const config = statusConfig[state];
 
     return (
         <div className={`connection-status-banner ${config.className}`}>
-            <span className="connection-icon">{config.icon}</span>
+            <span className="mi mi-sm connection-icon">{config.icon}</span>
             <span className="connection-message">
                 {config.message}
                 {state === 'reconnecting' && ` (attempt ${attemptCount})`}
             </span>
             {state === 'failed' && (
                 <button className="btn-retry" onClick={() => window.location.reload()}>
+                    <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '4px' }}>refresh</span>
                     Retry
                 </button>
             )}

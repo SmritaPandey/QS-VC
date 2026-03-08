@@ -2,7 +2,7 @@
  * WebSocket + JSON-RPC 2.0 signaling client.
  */
 
-const SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL || 'ws://localhost:4001/ws';
+const SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
 
 type RpcCallback = (result: any, error?: any) => void;
 
