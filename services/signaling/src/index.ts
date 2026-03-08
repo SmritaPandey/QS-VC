@@ -11,6 +11,7 @@ import { handleRpcMessage, handlePeerDisconnect } from './rpc/handler.js';
 import { roomManager } from './room-manager.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production';
+const WEB_URL = (process.env.WEB_URL || 'http://localhost:5173').replace(/\/$/, '');
 
 interface AuthPayload {
     sub: string;
@@ -49,7 +50,7 @@ app.get('/health', (_req, res) => {
 // Generate a simple meeting code
 app.post('/api/meetings/create', (_req, res) => {
     const code = generateMeetingCode();
-    res.json({ meetingCode: code, joinUrl: `http://localhost:5173/meeting/${code}` });
+    res.json({ meetingCode: code, joinUrl: `${WEB_URL}/meeting/${code}` });
 });
 
 // Schedule or create a meeting (handles the meeting-service API contract)
@@ -69,7 +70,7 @@ app.post('/api/meetings', express.json(), (req, res) => {
         settings: settings || {},
         status: type === 'scheduled' ? 'waiting' : 'active',
         createdAt: new Date().toISOString(),
-        joinUrl: `http://localhost:5173/meeting/${code}/preview`,
+        joinUrl: `${WEB_URL}/meeting/${code}/preview`,
     };
 
     logger.info(`Meeting created: ${code} (${meeting.type})`);
