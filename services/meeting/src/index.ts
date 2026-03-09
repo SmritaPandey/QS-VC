@@ -81,7 +81,7 @@ const app = express();
 // CORS: restrict origins per environment
 const allowedOrigins = process.env.CORS_ORIGINS
     ? process.env.CORS_ORIGINS.split(',')
-    : ['http://localhost:5173'];
+    : ['http://localhost:5173', 'https://dist-puce-one-68.vercel.app'];
 app.use(cors({
     origin: allowedOrigins,
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
@@ -147,6 +147,34 @@ function generateMeetingCode(): string {
 
 app.get('/health', (_req, res) => {
     res.json({ status: 'ok', service: 'qsvc-meeting' });
+});
+
+// Quick meeting creation (no auth required — for demo/guest access)
+app.post('/api/meetings/create', async (_req, res) => {
+    try {
+        const meetingCode = generateMeetingCode();
+        const WEB_URL = (process.env.WEB_URL || 'http://localhost:5173').replace(/\/$/, '');
+
+        // Try to persist to DB, fall back to in-memory if DB isn't ready
+        try {
+            const id = uuidv4();
+            await pool.query(
+                `INSERT INTO meetings (id, tenant_id, meeting_code, title, host_id, type, status, settings)
+                 VALUES ($1, 'demo', $2, 'Quick Meeting', NULL, 'instant', 'waiting', '{}')`,
+                [id, meetingCode]
+            );
+        } catch (dbErr: any) {
+            logger.warn('DB insert skipped (demo mode): ' + dbErr.message);
+        }
+
+        res.json({
+            meetingCode,
+            joinUrl: `${WEB_URL}/meeting/${meetingCode}/preview`,
+        });
+    } catch (err: any) {
+        logger.error(err, 'Failed to create quick meeting');
+        res.status(500).json({ error: 'Failed to create meeting' });
+    }
 });
 
 // Create instant meeting
