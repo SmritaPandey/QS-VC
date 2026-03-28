@@ -1,8 +1,8 @@
 {
     "version": 2,
-    "buildCommand": "npm ci && cd frontend/web && npx vite build",
+    "buildCommand": "cd frontend/web && npm install && npx vite build",
     "outputDirectory": "frontend/web/dist",
-    "installCommand": "npm ci",
+    "installCommand": "echo 'skip root install'",
     "framework": "vite",
     "rewrites": [
         {
