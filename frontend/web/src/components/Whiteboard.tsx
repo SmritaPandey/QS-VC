@@ -43,7 +43,7 @@ const Whiteboard: React.FC<WhiteboardProps> = ({
     isOpen,
     onClose,
     userId,
-    userName,
+    userName: _userName,
     onDrawAction,
     remoteActions = [],
 }) => {
