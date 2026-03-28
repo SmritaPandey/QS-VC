@@ -36,3 +36,4 @@ coverage/
 tmp/
 .tmp/
 .vercel
+.env*.local

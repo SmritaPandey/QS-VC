@@ -45,7 +45,6 @@ interface WebinarProps {
 const Webinar: React.FC<WebinarProps> = ({
     meetingCode,
     webinarTitle,
-    webinarDescription,
     panelists,
     attendeeCount,
     isHost,
