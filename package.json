@@ -9,6 +9,7 @@
     "services/auth",
     "services/meeting",
     "services/recording",
+    "services/mcu",
     "frontend/web"
   ],
   "scripts": {
@@ -30,14 +31,24 @@
     "test": "npx vitest run --reporter=verbose",
     "test:watch": "npx vitest",
     "test:coverage": "npx vitest run --coverage",
-    "db:migrate": "node db/migrate.js"
+    "db:migrate": "node db/migrate.js",
+    "internet": "node start-internet.js",
+    "intranet": "node start-intranet.js",
+    "local": "node start-local.js",
+    "dev:mcu": "npm -w services/mcu run dev"
   },
   "devDependencies": {
+    "cloudflared": "^0.7.1",
     "concurrently": "^9.1.0",
+    "localtunnel": "^2.0.2",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "pptxgenjs": "^4.0.1",
+    "puppeteer": "^24.40.0"
   }
 }

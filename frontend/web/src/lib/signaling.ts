@@ -83,13 +83,13 @@ export class SignalingClient {
 
             this.ws.send(JSON.stringify(message));
 
-            // Timeout after 10 seconds
+            // Timeout after 15 seconds (joinRoom needs extra time for SFU probing)
             setTimeout(() => {
                 if (this.pendingRequests.has(id)) {
                     this.pendingRequests.delete(id);
                     reject(new Error(`Request timeout: ${method}`));
                 }
-            }, 10000);
+            }, 15000);
         });
     }
 

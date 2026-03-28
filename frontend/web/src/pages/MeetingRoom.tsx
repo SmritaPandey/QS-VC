@@ -44,6 +44,7 @@ export default function MeetingRoom() {
     const [connected, setConnected] = useState(false);
     const [duration, setDuration] = useState(0);
     const [handRaised, setHandRaised] = useState(false);
+    const [linkCopied, setLinkCopied] = useState(false);
     const chatInputRef = useRef<HTMLInputElement>(null);
 
     const screenStreamRef = useRef<MediaStream | null>(null);
@@ -72,36 +73,51 @@ export default function MeetingRoom() {
                 });
                 if (!mounted) return;
                 setMyPeerId(joinResult.peerId);
-                await media.loadDevice(joinResult.routerRtpCapabilities);
-                await media.createSendTransport(joinResult.sendTransport);
-                await media.createRecvTransport(joinResult.recvTransport);
-                media.setConsumerCallbacks(
-                    (info: ConsumerInfo) => {
-                        setPeers((prev) => {
-                            const next = new Map(prev);
-                            const existing = next.get(info.peerId) || { peerId: info.peerId, displayName: info.peerId };
-                            if (info.kind === 'audio') existing.audioTrack = info.track;
-                            if (info.kind === 'video') existing.videoTrack = info.track;
-                            next.set(info.peerId, existing);
-                            return next;
-                        });
-                    },
-                    (_consumerId: string) => { }
-                );
-                const audioTrack = stream.getAudioTracks()[0];
-                const videoTrack = stream.getVideoTracks()[0];
-                if (audioTrack) await media.produce(audioTrack, { source: 'mic' });
-                if (videoTrack) await media.produce(videoTrack, { source: 'camera' });
+
+                // SFU-based media relay — only if SFU is available
+                if (joinResult.routerRtpCapabilities && joinResult.sendTransport && joinResult.recvTransport) {
+                    try {
+                        await media.loadDevice(joinResult.routerRtpCapabilities);
+                        await media.createSendTransport(joinResult.sendTransport);
+                        await media.createRecvTransport(joinResult.recvTransport);
+                        media.setConsumerCallbacks(
+                            (info: ConsumerInfo) => {
+                                setPeers((prev) => {
+                                    const next = new Map(prev);
+                                    const existing = next.get(info.peerId) || { peerId: info.peerId, displayName: info.peerId };
+                                    if (info.kind === 'audio') existing.audioTrack = info.track;
+                                    if (info.kind === 'video') existing.videoTrack = info.track;
+                                    next.set(info.peerId, existing);
+                                    return next;
+                                });
+                            },
+                            (_consumerId: string) => { }
+                        );
+                        const audioTrack = stream.getAudioTracks()[0];
+                        const videoTrack = stream.getVideoTracks()[0];
+                        if (audioTrack) await media.produce(audioTrack, { source: 'mic' });
+                        if (videoTrack) await media.produce(videoTrack, { source: 'camera' });
+                        for (const existingPeer of joinResult.existingPeers) {
+                            for (const producer of existingPeer.producers) {
+                                try { await media.consume(existingPeer.peerId, producer.id); } catch (err) { console.error('Failed to consume:', err); }
+                            }
+                        }
+                    } catch (mediaErr) {
+                        console.warn('[MeetingRoom] SFU media setup failed, continuing in signaling-only mode:', mediaErr);
+                    }
+                } else {
+                    console.info('[MeetingRoom] SFU not available — running in signaling-only mode (chat, reactions, presence work; video relay disabled)');
+                }
+
+                // Register existing peers for the participants list even without media
                 for (const existingPeer of joinResult.existingPeers) {
                     setPeers((prev) => {
                         const next = new Map(prev);
                         next.set(existingPeer.peerId, { peerId: existingPeer.peerId, displayName: existingPeer.displayName });
                         return next;
                     });
-                    for (const producer of existingPeer.producers) {
-                        try { await media.consume(existingPeer.peerId, producer.id); } catch (err) { console.error('Failed to consume:', err); }
-                    }
                 }
+
                 setConnected(true);
                 signaling.on('newPeer', ({ peerId, displayName: name }: any) => {
                     setPeers((prev) => { const next = new Map(prev); next.set(peerId, { peerId, displayName: name }); return next; });
@@ -192,6 +208,24 @@ export default function MeetingRoom() {
     const handleLeave = useCallback(() => { media.close(); signaling.request('leaveRoom', {}).catch(() => { }); signaling.disconnect(); localStream?.getTracks().forEach(t => t.stop()); screenStreamRef.current?.getTracks().forEach(t => t.stop()); navigate('/'); }, [localStream, navigate]);
     const handleSendChat = useCallback((content: string) => { signaling.request('chatMessage', { content, type: 'text' }).catch(() => { }); }, []);
 
+    const handleCopyLink = useCallback(() => {
+        const url = `${window.location.origin}/meeting/${meetingCode}/preview`;
+        navigator.clipboard.writeText(url).then(() => {
+            setLinkCopied(true);
+            setTimeout(() => setLinkCopied(false), 2000);
+        }).catch(() => {
+            // Fallback for older browsers
+            const input = document.createElement('input');
+            input.value = url;
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand('copy');
+            document.body.removeChild(input);
+            setLinkCopied(true);
+            setTimeout(() => setLinkCopied(false), 2000);
+        });
+    }, [meetingCode]);
+
     const formatDuration = (s: number) => {
         const h = Math.floor(s / 3600);
         const m = Math.floor((s % 3600) / 60);
@@ -210,7 +244,11 @@ export default function MeetingRoom() {
                     <span className="e2ee-badge">
                         <span className="mi mi-sm">lock</span> E2EE
                     </span>
-                    <span className="meeting-code-display">{meetingCode}</span>
+                    <button className="share-link-btn" onClick={handleCopyLink} title="Copy invite link">
+                        <span className="meeting-code-display">{meetingCode}</span>
+                        <span className="mi mi-sm share-copy-icon">{linkCopied ? 'check' : 'content_copy'}</span>
+                        {linkCopied && <span className="copied-tooltip">Link copied!</span>}
+                    </button>
                 </div>
                 <div className="top-bar-center">
                     <span className="meeting-timer">{formatDuration(duration)}</span>

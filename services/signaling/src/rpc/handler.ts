@@ -740,12 +740,21 @@ async function joinPeerToRoom(
     const room = roomManager.getRoom(roomId);
     if (!room) throw createError(-32000, 'Room not found');
 
-    // Get SFU router capabilities
-    const { rtpCapabilities: routerCaps } = await sfuClient.getRtpCapabilities(roomId);
+    // Try to get SFU capabilities — gracefully degrade if SFU is unavailable
+    let routerCaps: any = null;
+    let sendTransport: any = null;
+    let recvTransport: any = null;
+    let sfuAvailable = false;
 
-    // Create send + recv transports
-    const sendTransport = await sfuClient.createTransport(roomId, peerId, displayName, 'send');
-    const recvTransport = await sfuClient.createTransport(roomId, peerId, displayName, 'recv');
+    try {
+        const sfuResult = await sfuClient.getRtpCapabilities(roomId);
+        routerCaps = sfuResult.rtpCapabilities;
+        sendTransport = await sfuClient.createTransport(roomId, peerId, displayName, 'send');
+        recvTransport = await sfuClient.createTransport(roomId, peerId, displayName, 'recv');
+        sfuAvailable = true;
+    } catch (sfuErr: any) {
+        logger.warn(`SFU unavailable — joining room ${roomId} in signaling-only mode (chat, presence, reactions work; media relay disabled): ${sfuErr.message}`);
+    }
 
     // Register peer
     const peerState: PeerState = {
@@ -790,25 +799,26 @@ async function joinPeerToRoom(
         role: peerState.role,
     }, peerId);
 
-    const result = {
+    const result: any = {
         peerId,
         roomId,
         role: peerState.role,
         routerRtpCapabilities: routerCaps,
         settings: room.settings,
-        sendTransport: {
+        sendTransport: sfuAvailable ? {
             id: sendTransport.id,
             iceParameters: sendTransport.iceParameters,
             iceCandidates: sendTransport.iceCandidates,
             dtlsParameters: sendTransport.dtlsParameters,
-        },
-        recvTransport: {
+        } : null,
+        recvTransport: sfuAvailable ? {
             id: recvTransport.id,
             iceParameters: recvTransport.iceParameters,
             iceCandidates: recvTransport.iceCandidates,
             dtlsParameters: recvTransport.dtlsParameters,
-        },
+        } : null,
         existingPeers,
+        sfuAvailable,
     };
 
     if (rpcId !== null) {
