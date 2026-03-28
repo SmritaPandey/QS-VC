@@ -9,11 +9,14 @@ export default function PreMeeting() {
     const [displayName, setDisplayName] = useState('');
     const [audioMuted, setAudioMuted] = useState(false);
     const [videoOff, setVideoOff] = useState(false);
+    const [copied, setCopied] = useState(false);
     const [devices, setDevices] = useState<{
         cameras: MediaDeviceInfo[];
         mics: MediaDeviceInfo[];
         speakers: MediaDeviceInfo[];
     }>({ cameras: [], mics: [], speakers: [] });
+
+    const inviteLink = `${window.location.origin}/meeting/${meetingCode}/preview`;
 
     useEffect(() => {
         navigator.mediaDevices
@@ -58,6 +61,23 @@ export default function PreMeeting() {
         if (stream) {
             stream.getVideoTracks().forEach((t) => (t.enabled = videoOff));
             setVideoOff(!videoOff);
+        }
+    };
+
+    const handleCopyLink = async () => {
+        try {
+            await navigator.clipboard.writeText(inviteLink);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            const ta = document.createElement('textarea');
+            ta.value = inviteLink;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
         }
     };
 
@@ -114,6 +134,16 @@ export default function PreMeeting() {
 
                     <h2>Ready to join?</h2>
 
+                    {/* Copy Invite Link */}
+                    <button
+                        className="btn-copy-invite"
+                        onClick={handleCopyLink}
+                        title="Copy meeting link to share with others"
+                    >
+                        <span className="mi mi-sm">{copied ? 'done' : 'link'}</span>
+                        {copied ? 'Link Copied!' : 'Copy Invite Link'}
+                    </button>
+
                     <input
                         type="text"
                         placeholder="Enter your name"
@@ -158,3 +188,4 @@ export default function PreMeeting() {
         </div>
     );
 }
+

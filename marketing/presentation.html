@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QS-VC — Quantum-Safe Video Conferencing Presentation</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
+  :root { --primary:#0a1628; --accent:#00bcd4; --accent2:#1565c0; --accent3:#7c4dff; --text:#e0e7ef; --text-muted:#8fa4c0; --border:rgba(0,188,212,0.2); --card-bg:rgba(15,31,58,0.9); }
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:'Inter',-apple-system,sans-serif;background:#000;color:var(--text);overflow:hidden}
+  .slides-wrapper{width:100vw;height:100vh;overflow:hidden;position:relative}
+  .slide{width:100vw;height:100vh;display:none;position:absolute;top:0;left:0;padding:60px 80px;flex-direction:column;justify-content:center;overflow:hidden}
+  .slide.active{display:flex}
+  .slide::before{content:'';position:absolute;top:-200px;right:-200px;width:600px;height:600px;background:radial-gradient(circle,rgba(0,188,212,0.1) 0%,transparent 70%);border-radius:50%}
+  .slide > *{position:relative;z-index:1}
+  .bg-dark{background:linear-gradient(160deg,#0a1628 0%,#0d2137 40%,#1a237e 100%)}
+  .bg-gradient{background:linear-gradient(160deg,#0a1628 0%,#1a237e 50%,#0d47a1 100%)}
+  .bg-deep{background:linear-gradient(160deg,#050d1a 0%,#0d1f35 50%,#1a237e 100%)}
+  .bg-accent{background:linear-gradient(160deg,#0a1628 0%,#004d40 50%,#006064 100%)}
+  .slide-number{position:absolute;bottom:30px;right:60px;font-size:12px;color:var(--text-muted);font-weight:600;z-index:2}
+  .slide-logo{position:absolute;top:30px;left:60px;z-index:2;display:flex;align-items:center;gap:10px}
+  .slide-logo img{width:36px;border-radius:6px}
+  .slide-logo span{font-size:15px;font-weight:800;color:var(--accent)}
+  h1{font-size:56px;font-weight:900;letter-spacing:-2px;line-height:1.05;background:linear-gradient(90deg,#fff 30%,#00bcd4 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-bottom:16px}
+  h2{font-size:38px;font-weight:800;color:#fff;letter-spacing:-1px;margin-bottom:12px}
+  .subtitle{font-size:18px;color:var(--text-muted);line-height:1.6;max-width:700px}
+  .subtitle-lg{font-size:20px;color:var(--text-muted);line-height:1.6;max-width:800px}
+  .grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:30px}
+  .grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin-top:30px}
+  .grid-4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;margin-top:30px}
+  .card{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:28px}
+  .card h4{font-size:16px;font-weight:700;color:#fff;margin-bottom:8px}
+  .card p{font-size:13px;color:var(--text-muted);line-height:1.55}
+  .card ul{list-style:none}
+  .card ul li{font-size:13px;color:var(--text-muted);padding:4px 0 4px 18px;position:relative}
+  .card ul li::before{content:'›';position:absolute;left:0;color:var(--accent);font-weight:700}
+  .card-sm{padding:20px}
+  .card-sm h4{font-size:14px;margin-bottom:6px}
+  .card-sm p{font-size:12px}
+  .card-highlight{border-color:var(--accent);background:linear-gradient(180deg,rgba(0,188,212,0.08),var(--card-bg))}
+  .stats-row{display:flex;gap:30px;margin-top:30px}
+  .stat{text-align:center}
+  .stat .value{font-size:42px;font-weight:900;background:linear-gradient(90deg,#00bcd4,#7c4dff);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+  .stat .label{font-size:12px;color:var(--text-muted);text-transform:uppercase;letter-spacing:1.5px;margin-top:4px}
+  .flow{display:flex;gap:10px;align-items:stretch;margin-top:24px}
+  .flow-step{flex:1;background:var(--card-bg);border:1px solid var(--border);border-radius:12px;padding:18px;text-align:center;position:relative}
+  .flow-step::after{content:'→';position:absolute;right:-14px;top:50%;transform:translateY(-50%);color:var(--accent);font-weight:700;font-size:18px;z-index:3}
+  .flow-step:last-child::after{display:none}
+  .flow-step h5{font-size:13px;font-weight:700;color:#fff;margin-bottom:4px}
+  .flow-step p{font-size:10.5px;color:var(--text-muted)}
+  .layer{display:flex;align-items:center;gap:16px;padding:14px 20px;background:var(--card-bg);border:1px solid var(--border);border-radius:10px;margin-bottom:8px}
+  .layer .num{width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#00bcd4,#1565c0);display:flex;align-items:center;justify-content:center;font-size:15px;font-weight:800;color:#fff;flex-shrink:0}
+  .layer h4{font-size:15px;font-weight:700;color:#fff;margin-bottom:2px}
+  .layer p{font-size:12px;color:var(--text-muted)}
+  .badge-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+  .badge{background:rgba(0,188,212,0.1);border:1px solid var(--border);border-radius:8px;padding:6px 14px;font-size:11px;font-weight:600;color:var(--accent)}
+  .pricing-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:24px}
+  .price-card{background:var(--card-bg);border:1px solid var(--border);border-radius:16px;padding:28px;text-align:center}
+  .price-card.featured{border-color:var(--accent);background:linear-gradient(180deg,rgba(0,188,212,0.1),var(--card-bg))}
+  .price-card h4{font-size:20px;font-weight:800;color:#fff;margin-bottom:6px}
+  .price-card .price-sub{font-size:12px;color:var(--accent);font-weight:600;margin-bottom:14px}
+  .price-card ul{list-style:none;text-align:left}
+  .price-card ul li{font-size:12.5px;color:var(--text-muted);padding:4px 0 4px 18px;position:relative}
+  .price-card ul li::before{content:'✓';position:absolute;left:0;color:#00e676;font-weight:700;font-size:11px}
+  .divider{width:60px;height:3px;background:linear-gradient(90deg,#00bcd4,#7c4dff);border-radius:2px;margin-bottom:20px}
+  .cta-box{background:linear-gradient(135deg,rgba(0,188,212,0.12),rgba(124,77,255,0.08));border:1px solid var(--border);border-radius:20px;padding:40px 50px;text-align:center;margin-top:30px}
+  .nav{position:fixed;bottom:25px;left:50%;transform:translateX(-50%);z-index:100;display:flex;gap:10px}
+  .nav button{background:rgba(0,188,212,0.15);border:1px solid rgba(0,188,212,0.3);color:#00bcd4;padding:10px 20px;border-radius:8px;font-family:'Inter',sans-serif;font-weight:600;font-size:13px;cursor:pointer;transition:all 0.2s}
+  .nav button:hover{background:rgba(0,188,212,0.3)}
+  .nav .counter{color:var(--text-muted);font-size:13px;display:flex;align-items:center;padding:0 10px}
+  @media print{.nav{display:none}.slides-wrapper{overflow:visible}.slide{display:flex!important;position:relative;page-break-after:always;width:100%;height:100vh}}
+</style>
+</head>
+<body>
+<div class="slides-wrapper">
+
+  <!-- SLIDE 1: Title -->
+  <div class="slide bg-dark active" id="slide-1">
+    <div style="display:flex;flex-direction:column;align-items:center;text-align:center;justify-content:center;height:100%">
+      <img src="qsvc_logo.png" alt="QS-VC" style="width:100px;border-radius:16px;margin-bottom:30px">
+      <h1>Quantum-Safe<br>Video Conferencing</h1>
+      <p class="subtitle-lg" style="text-align:center;margin:0 auto 30px">Secure HD/4K video calls with NIST-approved post-quantum cryptography, real-time AI captions &amp; translation, and flexible deployment for the quantum era.</p>
+      <div class="stats-row">
+        <div class="stat"><div class="value">PQC L5</div><div class="label">NIST Security Level</div></div>
+        <div class="stat"><div class="value">10K+</div><div class="label">Participants/Call</div></div>
+        <div class="stat"><div class="value">99+</div><div class="label">Languages STT</div></div>
+        <div class="stat"><div class="value">99.995%</div><div class="label">Uptime SLA</div></div>
+      </div>
+      <div class="badge-row" style="justify-content:center;margin-top:24px">
+        <span class="badge">End-to-End Encrypted</span>
+        <span class="badge">Zero-Knowledge SFU</span>
+        <span class="badge">AI-Powered Captions</span>
+        <span class="badge">Air-Gap Ready</span>
+        <span class="badge">HSM Key Mgmt</span>
+      </div>
+    </div>
+    <div class="slide-number">1 / 8</div>
+  </div>
+
+  <!-- SLIDE 2: The Problem -->
+  <div class="slide bg-gradient" id="slide-2">
+    <div class="slide-logo"><img src="qsvc_logo.png" alt=""><span>QS-VC</span></div>
+    <div class="divider"></div>
+    <h2>The Quantum Threat to Video Calls</h2>
+    <p class="subtitle" style="margin-bottom:24px">Today's encrypted video calls use RSA/ECC algorithms that quantum computers will break. Adversaries are already harvesting encrypted traffic — the "Harvest Now, Decrypt Later" attack.</p>
+    <div class="grid-2">
+      <div class="card" style="border-left:3px solid #ef5350">
+        <h4>⚠️ The Risk</h4>
+        <ul>
+          <li>RSA-2048 &amp; ECC vulnerable to Shor's algorithm</li>
+          <li>Quantum computers expected to break them by 2030</li>
+          <li>Nation-state actors harvesting encrypted call traffic</li>
+          <li>Video calls contain the most sensitive discussions</li>
+          <li>Once broken, all recorded calls are exposed forever</li>
+        </ul>
+      </div>
+      <div class="card" style="border-left:3px solid #00bcd4">
+        <h4>🛡️ QS-VC Solution</h4>
+        <ul>
+          <li>Hybrid Kyber-1024 + X25519 key exchange for every call</li>
+          <li>Dilithium-5 + Ed25519 signatures for all signaling</li>
+          <li>E2EE media frames — SFU never sees plaintext</li>
+          <li>Crypto-agility: dual-layer, if one breaks other protects</li>
+          <li>60-second media key rotation for minimal exposure</li>
+        </ul>
+      </div>
+    </div>
+    <div class="slide-number">2 / 8</div>
+  </div>
+
+  <!-- SLIDE 3: VC Features -->
+  <div class="slide bg-deep" id="slide-3">
+    <div class="slide-logo"><img src="qsvc_logo.png" alt=""><span>QS-VC</span></div>
+    <div class="divider"></div>
+    <h2>Video Conferencing Features</h2>
+    <p class="subtitle">Everything you need for world-class video meetings, built quantum-safe from the ground up.</p>
+    <div class="grid-3">
+      <div class="card card-sm"><h4>📹 HD/4K Video</h4><p>VP9/AV1 codecs, Simulcast + SVC, adaptive bitrate, up to 4K@30fps.</p></div>
+      <div class="card card-sm"><h4>🎙️ Crystal Audio</h4><p>Opus 48kHz stereo, AI noise suppression (RNNoise + U-Net), echo cancel.</p></div>
+      <div class="card card-sm"><h4>🖥️ Screen Sharing</h4><p>Full-screen &amp; app sharing, real-time annotation, remote desktop control.</p></div>
+      <div class="card card-sm"><h4>📝 Whiteboard</h4><p>CRDT collaborative canvas with drawing, text, shapes — real-time sync.</p></div>
+      <div class="card card-sm"><h4>🎥 Recording</h4><p>Cloud &amp; on-prem, composite MP4, per-participant tracks, encrypted at rest.</p></div>
+      <div class="card card-sm"><h4>📡 Live Streaming</h4><p>RTMP → HLS/DASH, CDN distribution, broadcast to 100K+ audience.</p></div>
+    </div>
+    <div class="grid-4" style="margin-top:14px">
+      <div class="card card-sm"><h4>🎯 Smart Camera</h4><p>Auto-framing, person tracking, whiteboard detection.</p></div>
+      <div class="card card-sm"><h4>💬 Meeting Tools</h4><p>Breakout rooms, lobby, polls, reactions, raise hand.</p></div>
+      <div class="card card-sm"><h4>📞 Interop</h4><p>SIP/H.323 gateway, PSTN dial-in, legacy room systems.</p></div>
+      <div class="card card-sm"><h4>🌐 Multi-Platform</h4><p>Web, Desktop (Electron), iOS &amp; Android (React Native).</p></div>
+    </div>
+    <div class="slide-number">3 / 8</div>
+  </div>
+
+  <!-- SLIDE 4: AI Pipeline -->
+  <div class="slide bg-accent" id="slide-4">
+    <div class="slide-logo"><img src="qsvc_logo.png" alt=""><span>QS-VC</span></div>
+    <div class="divider"></div>
+    <h2>AI-Powered Meeting Intelligence</h2>
+    <p class="subtitle" style="margin-bottom:8px">Turn every video call into actionable, searchable, translated content — in real-time.</p>
+    <h3 style="font-size:16px;margin-top:16px;color:var(--accent)">Real-Time Pipeline (&lt;300ms)</h3>
+    <div class="flow">
+      <div class="flow-step"><h5>🎤 Capture</h5><p>Opus 48kHz stream</p></div>
+      <div class="flow-step"><h5>🔇 Denoise</h5><p>RNNoise + U-Net</p></div>
+      <div class="flow-step"><h5>📝 Transcribe</h5><p>Whisper (99+ langs)</p></div>
+      <div class="flow-step"><h5>🌍 Translate</h5><p>NLLB-200 subtitles</p></div>
+      <div class="flow-step"><h5>📊 Display</h5><p>Live captions overlay</p></div>
+    </div>
+    <h3 style="font-size:16px;margin-top:20px;color:var(--accent)">Post-Meeting AI</h3>
+    <div class="flow">
+      <div class="flow-step"><h5>🧹 Clean</h5><p>Speaker diarization</p></div>
+      <div class="flow-step"><h5>📋 Segment</h5><p>Topic identification</p></div>
+      <div class="flow-step"><h5>📄 Summarize</h5><p>LLaMA 3 / Mistral</p></div>
+      <div class="flow-step"><h5>✅ Actions</h5><p>Tasks &amp; deadlines</p></div>
+      <div class="flow-step"><h5>📈 Report</h5><p>Engagement scores</p></div>
+    </div>
+    <div class="grid-3" style="margin-top:18px">
+      <div class="card card-sm"><h4>🗣️ Voice Cloning</h4><p>Voice-preserving translation — hear the speaker in your language with their voice.</p></div>
+      <div class="card card-sm"><h4>🇮🇳 22 Indian Languages</h4><p>All scheduled Indian languages for STT &amp; translation with &lt;200ms latency.</p></div>
+      <div class="card card-sm"><h4>🔍 Smart Search</h4><p>Search across all meeting transcripts — find any moment by keyword or topic.</p></div>
+    </div>
+    <div class="slide-number">4 / 8</div>
+  </div>
+
+  <!-- SLIDE 5: Security Architecture -->
+  <div class="slide bg-deep" id="slide-5">
+    <div class="slide-logo"><img src="qsvc_logo.png" alt=""><span>QS-VC</span></div>
+    <div class="divider"></div>
+    <h2>Quantum-Safe Security Architecture</h2>
+    <p class="subtitle" style="margin-bottom:20px">Every layer of the media pipeline is protected with post-quantum cryptography.</p>
+    <div class="layer"><div class="num">1</div><div><h4>Signaling Security (Quantum-TLS)</h4><p>Hybrid Kyber-1024 + X25519 key exchange, Dilithium-5 + Ed25519 signatures, TLS 1.3 with PQC extensions</p></div></div>
+    <div class="layer"><div class="num">2</div><div><h4>Media End-to-End Encryption (E2EE)</h4><p>SFrame via Insertable Streams, per-participant Kyber keypairs, frame-level AES-256-GCM, zero-knowledge SFU</p></div></div>
+    <div class="layer"><div class="num">3</div><div><h4>Key Management</h4><p>HSM-backed key hierarchy (Shamir 5-of-8), 60-second media key rotation, hourly TURN credential rotation</p></div></div>
+    <div class="layer"><div class="num">4</div><div><h4>Recording Encryption</h4><p>Kyber-wrapped Data Encryption Keys for recordings, encrypted object storage (MinIO/S3), tamper-proof metadata</p></div></div>
+    <div class="layer"><div class="num">5</div><div><h4>Audit Trail</h4><p>Merkle-tree verified hash chains, Dilithium-signed audit entries, configurable retention, SIEM integration</p></div></div>
+    <div class="badge-row" style="margin-top:14px">
+      <span class="badge">NIST PQC Level 5</span>
+      <span class="badge">HSM-Backed (Shamir 5-of-8)</span>
+      <span class="badge">60s Key Rotation</span>
+      <span class="badge">Zero-Knowledge Architecture</span>
+    </div>
+    <div class="slide-number">5 / 8</div>
+  </div>
+
+  <!-- SLIDE 6: Deployment + Scalability -->
+  <div class="slide bg-gradient" id="slide-6">
+    <div class="slide-logo"><img src="qsvc_logo.png" alt=""><span>QS-VC</span></div>
+    <div class="divider"></div>
+    <h2>Deployment & Scalability</h2>
+    <p class="subtitle">Deploy however your organization needs — and scale to any meeting size.</p>
+    <div class="grid-3">
+      <div class="card"><h4>☁️ SaaS Cloud</h4><ul><li>Multi-tenant Kubernetes</li><li>Auto-scaling SFU pools</li><li>Region-selectable residency</li><li>Zero-downtime updates</li></ul></div>
+      <div class="card card-highlight"><h4>🏢 On-Premise (Air-Gapped)</h4><ul><li>100% on-site — zero internet</li><li>HSM key management</li><li>Local AI inference (NVIDIA A10)</li><li>4–8 hour automated install</li></ul></div>
+      <div class="card"><h4>🔗 Hybrid</h4><ul><li>Edge media + cloud control</li><li>Media stays local</li><li>72-hour offline grace</li><li>Auto state sync on reconnect</li></ul></div>
+    </div>
+    <div class="stats-row" style="margin-top:20px;justify-content:center">
+      <div class="stat"><div class="value">99.995%</div><div class="label">Platform SLA</div></div>
+      <div class="stat"><div class="value">&lt;3s</div><div class="label">Join Time (P95)</div></div>
+      <div class="stat"><div class="value">&lt;150ms</div><div class="label">Audio Latency</div></div>
+      <div class="stat"><div class="value">&lt;2s</div><div class="label">Failover Time</div></div>
+    </div>
+    <div class="badge-row" style="justify-content:center;margin-top:16px">
+      <span class="badge">1–49: Single SFU</span>
+      <span class="badge">50–500: SFU Cascade</span>
+      <span class="badge">500–10K: Webinar (MCU+CDN)</span>
+      <span class="badge">10K–100K: Broadcast (HLS/DASH)</span>
+    </div>
+    <div class="slide-number">6 / 8</div>
+  </div>
+
+  <!-- SLIDE 7: Pricing -->
+  <div class="slide bg-deep" id="slide-7">
+    <div class="slide-logo"><img src="qsvc_logo.png" alt=""><span>QS-VC</span></div>
+    <div class="divider"></div>
+    <h2>Choose Your Plan</h2>
+    <p class="subtitle">Flexible pricing for every organization size.</p>
+    <div class="pricing-grid">
+      <div class="price-card">
+        <h4>Business</h4>
+        <div class="price-sub">SaaS | Per-user/month</div>
+        <ul>
+          <li>Up to 300 participants per call</li>
+          <li>HD 1080p video &amp; audio</li>
+          <li>Screen sharing &amp; recording</li>
+          <li>AI captions (English)</li>
+          <li>Basic noise suppression</li>
+          <li>SSO (SAML 2.0 / OIDC)</li>
+          <li>Email support</li>
+        </ul>
+      </div>
+      <div class="price-card featured">
+        <h4>Enterprise</h4>
+        <div class="price-sub">SaaS/Hybrid | Custom Pricing</div>
+        <ul>
+          <li>Up to 10,000 participants</li>
+          <li>4K video + live streaming</li>
+          <li>AI: 99+ language STT &amp; translation</li>
+          <li>Quantum-safe E2EE (PQC)</li>
+          <li>Meeting summarization &amp; actions</li>
+          <li>SIP/H.323 room system gateway</li>
+          <li>Whiteboard &amp; breakout rooms</li>
+          <li>Dedicated CSM + 24/7 support</li>
+        </ul>
+      </div>
+      <div class="price-card">
+        <h4>Sovereign</h4>
+        <div class="price-sub">On-Premise | Perpetual + AMC</div>
+        <ul>
+          <li>Air-gapped deployment</li>
+          <li>HSM key management</li>
+          <li>All AI features (local GPU)</li>
+          <li>Full data sovereignty</li>
+          <li>Custom branding / white-label</li>
+          <li>LDAP / Active Directory</li>
+          <li>On-site deployment team</li>
+          <li>Offline operation (72hr grace)</li>
+        </ul>
+      </div>
+    </div>
+    <div class="slide-number">7 / 8</div>
+  </div>
+
+  <!-- SLIDE 8: CTA -->
+  <div class="slide bg-dark" id="slide-8">
+    <div class="slide-logo"><img src="qsvc_logo.png" alt=""><span>QS-VC</span></div>
+    <div style="display:flex;flex-direction:column;align-items:center;text-align:center;justify-content:center;height:100%">
+      <img src="qsvc_logo.png" alt="" style="width:80px;border-radius:14px;margin-bottom:24px">
+      <h1 style="font-size:44px">Secure Calls Today.<br>Quantum-Safe Tomorrow.</h1>
+      <p class="subtitle-lg" style="text-align:center;margin:0 auto 30px;max-width:600px">Schedule a demo and experience quantum-safe video conferencing — crystal-clear HD/4K with post-quantum encryption protecting every frame.</p>
+      <div class="cta-box" style="max-width:600px">
+        <h3 style="font-size:22px;margin-bottom:12px">Get Started</h3>
+        <div style="display:flex;flex-direction:column;gap:10px;font-size:15px;font-weight:600;color:var(--accent)">
+          <span>🌐 www.qsvc.io</span>
+          <span>📧 sales@qsvc.io</span>
+          <span>📞 +91-XXXX-XXXXXX</span>
+          <span>🏢 Bengaluru, India</span>
+        </div>
+      </div>
+      <p style="font-size:11px;color:var(--text-muted);margin-top:20px">© 2025 QS-VC Technologies Pvt. Ltd. — All Rights Reserved | Proprietary & Confidential</p>
+    </div>
+    <div class="slide-number">8 / 8</div>
+  </div>
+
+</div>
+<div class="nav">
+  <button onclick="prevSlide()">← Prev</button>
+  <span class="counter" id="counter">1 / 8</span>
+  <button onclick="nextSlide()">Next →</button>
+</div>
+<script>
+  let current=1; const total=8;
+  function showSlide(n){document.querySelectorAll('.slide').forEach(s=>s.classList.remove('active'));document.getElementById('slide-'+n).classList.add('active');document.getElementById('counter').textContent=n+' / '+total}
+  function nextSlide(){if(current<total){current++;showSlide(current)}}
+  function prevSlide(){if(current>1){current--;showSlide(current)}}
+  document.addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key===' '){e.preventDefault();nextSlide()}if(e.key==='ArrowLeft'){e.preventDefault();prevSlide()}});
+</script>
+</body>
+</html>

@@ -6,6 +6,7 @@ export default defineConfig({
     server: {
         port: 5173,
         host: '0.0.0.0',
+        allowedHosts: true,
         proxy: {
             '/api': {
                 target: 'http://localhost:4001',
@@ -14,6 +15,14 @@ export default defineConfig({
             '/ws': {
                 target: 'ws://localhost:4001',
                 ws: true,
+            },
+            '/api/mcu': {
+                target: 'http://localhost:4002',
+                changeOrigin: true,
+            },
+            '/api/gateway': {
+                target: 'http://localhost:4002',
+                changeOrigin: true,
             },
         },
     },

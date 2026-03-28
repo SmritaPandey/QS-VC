@@ -6,6 +6,9 @@ const SIGNALING_API = import.meta.env.VITE_API_URL || '';
 export default function Landing() {
     const [joinCode, setJoinCode] = useState('');
     const [creating, setCreating] = useState(false);
+    const [shareLink, setShareLink] = useState('');
+    const [shareMeetingCode, setShareMeetingCode] = useState('');
+    const [copied, setCopied] = useState(false);
     const navigate = useNavigate();
 
     const handleCreate = async () => {
@@ -13,13 +16,37 @@ export default function Landing() {
         try {
             const res = await fetch(`${SIGNALING_API}/api/meetings/create`, { method: 'POST' });
             const data = await res.json();
-            navigate(`/meeting/${data.meetingCode}/preview`);
+            const fullLink = `${window.location.origin}/meeting/${data.meetingCode}/preview`;
+            setShareMeetingCode(data.meetingCode);
+            setShareLink(fullLink);
         } catch (err) {
             console.error('Failed to create meeting:', err);
             alert('Failed to create meeting. Is the signaling server running?');
         } finally {
             setCreating(false);
         }
+    };
+
+    const handleCopy = async () => {
+        try {
+            await navigator.clipboard.writeText(shareLink);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        } catch {
+            // Fallback for non-HTTPS contexts
+            const ta = document.createElement('textarea');
+            ta.value = shareLink;
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+        }
+    };
+
+    const handleGoToMeeting = () => {
+        navigate(`/meeting/${shareMeetingCode}/preview`);
     };
 
     const handleJoin = () => {
@@ -55,10 +82,10 @@ export default function Landing() {
                         <span className="mi logo-icon">shield</span>
                         <span className="logo-text">QS-VC</span>
                     </div>
-                    <h1>Quantum-Safe<br />Video Conference</h1>
+                    <h1>Quantum Safe<br />Video Conferencing</h1>
                     <p className="landing-subtitle">
-                        Next-generation secure meetings with AI-powered captions,
-                        noise suppression, and post-quantum encryption.
+                        India's quantum-safe video conferencing — unbreakable meetings with
+                        AI captions, noise suppression, and post-quantum encryption.
                     </p>
                 </div>
 
@@ -123,9 +150,50 @@ export default function Landing() {
                     <div className="feature-chip"><span className="mi mi-sm">lock</span> Post-Quantum Encryption</div>
                     <div className="feature-chip"><span className="mi mi-sm">smart_toy</span> AI Captions & Translation</div>
                     <div className="feature-chip"><span className="mi mi-sm">mic_off</span> Noise Suppression</div>
-                    <div className="feature-chip"><span className="mi mi-sm">language</span> 22 Indian Languages</div>
+                    <div className="feature-chip"><span className="mi mi-sm">flag</span> Made in India 🇮🇳</div>
                 </div>
             </div>
+
+            {/* ── Share Link Modal ── */}
+            {shareLink && (
+                <div className="share-modal-overlay" onClick={() => setShareLink('')}>
+                    <div className="share-modal" onClick={(e) => e.stopPropagation()}>
+                        <div className="share-modal-icon">
+                            <span className="mi" style={{ fontSize: 48, color: 'var(--accent-success)' }}>check_circle</span>
+                        </div>
+                        <h2>Meeting Created!</h2>
+                        <p className="share-modal-code">
+                            <span className="mi mi-sm">lock</span> {shareMeetingCode}
+                        </p>
+                        <p style={{ color: 'var(--text-secondary)', margin: '8px 0 16px' }}>
+                            Share this link with participants:
+                        </p>
+                        <div className="share-link-box">
+                            <input
+                                type="text"
+                                value={shareLink}
+                                readOnly
+                                className="share-link-input"
+                                onClick={(e) => (e.target as HTMLInputElement).select()}
+                            />
+                            <button className="btn-copy" onClick={handleCopy}>
+                                <span className="mi mi-sm">{copied ? 'done' : 'content_copy'}</span>
+                                {copied ? 'Copied!' : 'Copy'}
+                            </button>
+                        </div>
+                        <div className="share-modal-actions">
+                            <button className="btn-primary btn-lg" onClick={handleGoToMeeting}>
+                                <span className="mi mi-sm">videocam</span>
+                                Join Meeting Now
+                            </button>
+                            <button className="btn-outline" onClick={() => setShareLink('')}>
+                                Close
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
+

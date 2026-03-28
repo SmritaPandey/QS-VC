@@ -22,11 +22,15 @@ interface AuthPayload {
 }
 
 const app = express();
+app.set('trust proxy', 1);  // Trust first proxy (Cloudflare tunnel)
 
 // CORS: restrict origins per environment
-const allowedOrigins = process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',')
-    : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5174', 'http://127.0.0.1:5174', 'https://dist-puce-one-68.vercel.app'];
+const corsOriginsEnv = process.env.CORS_ORIGINS;
+const allowedOrigins = corsOriginsEnv === '*'
+    ? true  // Allow all origins (tunnel/dev mode)
+    : corsOriginsEnv
+        ? corsOriginsEnv.split(',')
+        : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5174', 'http://127.0.0.1:5174', 'https://dist-puce-one-68.vercel.app'];
 app.use(cors({
     origin: allowedOrigins,
     methods: ['GET', 'POST'],
@@ -110,9 +114,9 @@ wss.on('connection', (ws: WebSocket, req) => {
         authUser?: AuthPayload | null;
     } = { authUser };
 
-    // Heartbeat
-    let isAlive = true;
-    ws.on('pong', () => { isAlive = true; });
+    // Heartbeat — attach to ws object so the interval can access it
+    (ws as any).isAlive = true;
+    ws.on('pong', () => { (ws as any).isAlive = true; });
 
     ws.on('message', async (data) => {
         try {
