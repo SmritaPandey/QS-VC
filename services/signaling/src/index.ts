@@ -11,7 +11,7 @@ import { handleRpcMessage, handlePeerDisconnect } from './rpc/handler.js';
 import { roomManager } from './room-manager.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production';
-const WEB_URL = (process.env.WEB_URL || 'http://localhost:5173').replace(/\/$/, '');
+const WEB_URL = (process.env.WEB_URL || 'https://qs-vc.vercel.app').replace(/\/$/, '');
 
 interface AuthPayload {
     sub: string;
@@ -24,13 +24,22 @@ interface AuthPayload {
 const app = express();
 app.set('trust proxy', 1);  // Trust first proxy (Cloudflare tunnel)
 
-// CORS: restrict origins per environment
+// CORS: merge env with production defaults so stale Render env can't lock out Vercel
+const DEFAULT_CORS_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'http://localhost:5174',
+    'http://127.0.0.1:5174',
+    'https://qs-vc.vercel.app',
+    'https://dist-puce-one-68.vercel.app',
+];
 const corsOriginsEnv = process.env.CORS_ORIGINS;
 const allowedOrigins = corsOriginsEnv === '*'
     ? true  // Allow all origins (tunnel/dev mode)
-    : corsOriginsEnv
-        ? corsOriginsEnv.split(',')
-        : ['http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:5174', 'http://127.0.0.1:5174', 'https://dist-puce-one-68.vercel.app'];
+    : [...new Set([
+        ...(corsOriginsEnv ? corsOriginsEnv.split(',').map((o) => o.trim()).filter(Boolean) : []),
+        ...DEFAULT_CORS_ORIGINS,
+    ])];
 app.use(cors({
     origin: allowedOrigins,
     methods: ['GET', 'POST'],
@@ -55,6 +64,11 @@ app.get('/health', (_req, res) => {
 app.post('/api/meetings/create', (_req, res) => {
     const code = generateMeetingCode();
     res.json({ meetingCode: code, joinUrl: `${WEB_URL}/meeting/${code}` });
+});
+
+// Return ICE servers (STUN + TURN) for WebRTC NAT traversal
+app.get('/api/ice-servers', (_req, res) => {
+    res.json({ iceServers: config.iceServers });
 });
 
 // Schedule or create a meeting (handles the meeting-service API contract)
@@ -211,6 +225,12 @@ server.listen(config.port, () => {
     logger.info(`🚀 QS-VC Signaling running on port ${config.port}`);
     logger.info(`   WebSocket: ws://localhost:${config.port}/ws`);
     logger.info(`   SFU backend: ${config.sfuUrl}`);
+    if (config.mcuEnabled) {
+        logger.info(`   MCU backend: ${config.mcuUrl}`);
+    }
+    if (config.hybridMode) {
+        logger.info(`   🔀 HYBRID MODE: MCU (Intranet) + SFU (Internet) active`);
+    }
 });
 
 process.on('SIGTERM', () => {

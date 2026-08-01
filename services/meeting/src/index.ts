@@ -78,10 +78,20 @@ function validateBody<T>(schema: z.ZodSchema<T>) {
 
 const app = express();
 
-// CORS: restrict origins per environment
-const allowedOrigins = process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',')
-    : ['http://localhost:5173', 'https://dist-puce-one-68.vercel.app'];
+// CORS: merge env with production defaults so stale Render env can't lock out Vercel
+const DEFAULT_CORS_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://qs-vc.vercel.app',
+    'https://dist-puce-one-68.vercel.app',
+];
+const corsOriginsEnv = process.env.CORS_ORIGINS;
+const allowedOrigins = corsOriginsEnv === '*'
+    ? true
+    : [...new Set([
+        ...(corsOriginsEnv ? corsOriginsEnv.split(',').map((o) => o.trim()).filter(Boolean) : []),
+        ...DEFAULT_CORS_ORIGINS,
+    ])];
 app.use(cors({
     origin: allowedOrigins,
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
@@ -153,7 +163,7 @@ app.get('/health', (_req, res) => {
 app.post('/api/meetings/create', async (_req, res) => {
     try {
         const meetingCode = generateMeetingCode();
-        const WEB_URL = (process.env.WEB_URL || 'http://localhost:5173').replace(/\/$/, '');
+        const WEB_URL = (process.env.WEB_URL || 'https://qs-vc.vercel.app').replace(/\/$/, '');
 
         // Try to persist to DB, fall back to in-memory if DB isn't ready
         try {
@@ -196,7 +206,7 @@ app.post('/api/meetings', authMiddleware, validateBody(createMeetingBody), async
             id,
             meetingCode,
             title: title || 'Instant Meeting',
-            joinUrl: `${process.env.WEB_URL || 'http://localhost:5173'}/meeting/${meetingCode}`,
+            joinUrl: `${process.env.WEB_URL || 'https://qs-vc.vercel.app'}/meeting/${meetingCode}`,
             hostId: user.sub,
         });
     } catch (err: any) {
@@ -228,7 +238,7 @@ app.post('/api/meetings/schedule', authMiddleware, validateBody(createMeetingBod
             title: title || 'Scheduled Meeting',
             scheduledStart,
             scheduledEnd,
-            joinUrl: `${process.env.WEB_URL || 'http://localhost:5173'}/meeting/${meetingCode}`,
+            joinUrl: `${process.env.WEB_URL || 'https://qs-vc.vercel.app'}/meeting/${meetingCode}`,
         });
     } catch (err: any) {
         logger.error(err, 'Failed to schedule meeting');
