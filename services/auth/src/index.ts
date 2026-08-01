@@ -65,10 +65,20 @@ function validateBody<T>(schema: z.ZodSchema<T>) {
 
 const app = express();
 
-// CORS: restrict origins per environment
-const allowedOrigins = process.env.CORS_ORIGINS
-    ? process.env.CORS_ORIGINS.split(',')
-    : ['http://localhost:5173', 'https://dist-puce-one-68.vercel.app'];
+// CORS: merge env with production defaults so stale Render env can't lock out Vercel
+const DEFAULT_CORS_ORIGINS = [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+    'https://qs-vc.vercel.app',
+    'https://dist-puce-one-68.vercel.app',
+];
+const corsOriginsEnv = process.env.CORS_ORIGINS;
+const allowedOrigins = corsOriginsEnv === '*'
+    ? true
+    : [...new Set([
+        ...(corsOriginsEnv ? corsOriginsEnv.split(',').map((o) => o.trim()).filter(Boolean) : []),
+        ...DEFAULT_CORS_ORIGINS,
+    ])];
 app.use(cors({
     origin: allowedOrigins,
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],

@@ -1,7 +1,45 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const SIGNALING_API = import.meta.env.VITE_API_URL || '';
+const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
+const SIGNALING_HTTP = (import.meta.env.VITE_SIGNALING_URL || '')
+    .replace(/^wss:/i, 'https:')
+    .replace(/^ws:/i, 'http:')
+    .replace(/\/ws\/?$/i, '');
+
+function generateMeetingCode(): string {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const segments = [];
+    for (let s = 0; s < 3; s++) {
+        let seg = '';
+        for (let i = 0; i < 4; i++) {
+            seg += chars[Math.floor(Math.random() * chars.length)];
+        }
+        segments.push(seg);
+    }
+    return `QS-${segments.join('-')}`;
+}
+
+async function createMeetingCode(): Promise<string> {
+    const endpoints = [
+        `${MEETING_API}/api/meetings/create`,
+        `${SIGNALING_HTTP}/api/meetings/create`,
+    ].filter((url) => url.startsWith('http'));
+
+    for (const url of endpoints) {
+        try {
+            const res = await fetch(url, { method: 'POST' });
+            if (!res.ok) continue;
+            const data = await res.json();
+            if (data?.meetingCode) return data.meetingCode as string;
+        } catch (err) {
+            console.warn('Create meeting attempt failed:', url, err);
+        }
+    }
+
+    // Room is created on first WebSocket joinRoom — local code unblocks the share UI
+    return generateMeetingCode();
+}
 
 export default function Landing() {
     const [joinCode, setJoinCode] = useState('');
@@ -14,14 +52,13 @@ export default function Landing() {
     const handleCreate = async () => {
         setCreating(true);
         try {
-            const res = await fetch(`${SIGNALING_API}/api/meetings/create`, { method: 'POST' });
-            const data = await res.json();
-            const fullLink = `${window.location.origin}/meeting/${data.meetingCode}/preview`;
-            setShareMeetingCode(data.meetingCode);
+            const meetingCode = await createMeetingCode();
+            const fullLink = `${window.location.origin}/meeting/${meetingCode}/preview`;
+            setShareMeetingCode(meetingCode);
             setShareLink(fullLink);
         } catch (err) {
             console.error('Failed to create meeting:', err);
-            alert('Failed to create meeting. Is the signaling server running?');
+            alert('Failed to create meeting. Please try again in a moment.');
         } finally {
             setCreating(false);
         }

@@ -36,7 +36,7 @@ services:
       - key: TURN_SERVERS
         value: "stun:stun.l.google.com:19302"
       - key: CORS_ORIGINS
-        sync: false  # Set manually after Vercel deploy
+        value: "https://qs-vc.vercel.app,https://dist-puce-one-68.vercel.app,http://localhost:5173"
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # SIGNALING SERVICE
@@ -53,8 +53,10 @@ services:
         value: production
       - key: JWT_SECRET
         sync: false  # Must match auth service
+      - key: WEB_URL
+        value: "https://qs-vc.vercel.app"
       - key: CORS_ORIGINS
-        sync: false  # Set manually after Vercel deploy
+        value: "https://qs-vc.vercel.app,https://dist-puce-one-68.vercel.app,http://localhost:5173"
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # MEETING SERVICE
@@ -76,6 +78,6 @@ services:
       - key: JWT_SECRET
         sync: false  # Must match auth service
       - key: WEB_URL
-        sync: false  # Set to Vercel URL
+        value: "https://qs-vc.vercel.app"
       - key: CORS_ORIGINS
-        sync: false  # Set manually after Vercel deploy
+        value: "https://qs-vc.vercel.app,https://dist-puce-one-68.vercel.app,http://localhost:5173"
