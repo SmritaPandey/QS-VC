@@ -21,10 +21,12 @@ function generateMeetingCode(): string {
 }
 
 async function createMeetingCode(): Promise<string> {
+    // Prefer same-origin Vercel serverless (always available in prod), then backends
     const endpoints = [
+        '/api/meetings/create',
         `${MEETING_API}/api/meetings/create`,
         `${SIGNALING_HTTP}/api/meetings/create`,
-    ].filter((url) => url.startsWith('http'));
+    ].filter((url) => url.startsWith('/') || url.startsWith('http'));
 
     for (const url of endpoints) {
         try {
