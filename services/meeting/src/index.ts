@@ -444,8 +444,9 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 // START
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-app.listen(PORT, () => {
-    logger.info(`📋 QS-VC Meeting Service running on port ${PORT}`);
+const HOST = process.env.HOST || '0.0.0.0';
+app.listen(PORT, HOST, () => {
+    logger.info(`📋 QS-VC Meeting Service running on ${HOST}:${PORT}`);
 });
 
 process.on('SIGTERM', () => { pool.end(); process.exit(0); });
