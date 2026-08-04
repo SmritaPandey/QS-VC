@@ -13,5 +13,6 @@ COPY package.json ./
 RUN npm install --omit=dev
 COPY --from=0 /app/dist ./dist
 
+ENV HOST=0.0.0.0
 EXPOSE 4001
 CMD ["node", "dist/index.js"]

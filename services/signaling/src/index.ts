@@ -221,9 +221,10 @@ process.on('unhandledRejection', (reason) => {
 // START
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-server.listen(config.port, () => {
-    logger.info(`🚀 QS-VC Signaling running on port ${config.port}`);
-    logger.info(`   WebSocket: ws://localhost:${config.port}/ws`);
+const HOST = process.env.HOST || '0.0.0.0';
+server.listen(config.port, HOST, () => {
+    logger.info(`🚀 QS-VC Signaling running on ${HOST}:${config.port}`);
+    logger.info(`   WebSocket: ws://${HOST}:${config.port}/ws`);
     logger.info(`   SFU backend: ${config.sfuUrl}`);
     if (config.mcuEnabled) {
         logger.info(`   MCU backend: ${config.mcuUrl}`);

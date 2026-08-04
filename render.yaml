@@ -17,6 +17,7 @@ services:
     name: qsvc-auth
     runtime: docker
     plan: free
+    autoDeploy: true
     dockerfilePath: ./services/auth/Dockerfile
     dockerContext: ./services/auth
     healthCheckPath: /health
@@ -45,6 +46,7 @@ services:
     name: qsvc-signaling
     runtime: docker
     plan: free
+    autoDeploy: true
     dockerfilePath: ./services/signaling/Dockerfile
     dockerContext: ./services/signaling
     healthCheckPath: /health
@@ -65,6 +67,7 @@ services:
     name: qsvc-meeting
     runtime: docker
     plan: free
+    autoDeploy: true
     dockerfilePath: ./services/meeting/Dockerfile
     dockerContext: ./services/meeting
     healthCheckPath: /health
