@@ -69,7 +69,7 @@ services:
     plan: free
     autoDeploy: true
     dockerfilePath: ./services/meeting/Dockerfile
-    dockerContext: ./services/meeting
+    dockerContext: .
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
