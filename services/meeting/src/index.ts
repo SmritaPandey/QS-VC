@@ -3,10 +3,12 @@ import cors from 'cors';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
+import http from 'http';
 import { Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
 import pino from 'pino';
+import { attachSignalingIfAvailable } from './signaling-bridge.js';
 
 dotenv.config({ path: '../../.env' });
 
@@ -445,8 +447,17 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const HOST = process.env.HOST || '0.0.0.0';
-app.listen(PORT, HOST, () => {
-    logger.info(`📋 QS-VC Meeting Service running on ${HOST}:${PORT}`);
+const server = http.createServer(app);
+
+attachSignalingIfAvailable(server).then((attached) => {
+    server.listen(PORT, HOST, () => {
+        logger.info(`📋 QS-VC Meeting Service running on ${HOST}:${PORT}${attached ? ' (+ signaling /ws)' : ''}`);
+    });
+}).catch((err) => {
+    logger.error(err, 'Failed to attach signaling WebSocket');
+    server.listen(PORT, HOST, () => {
+        logger.info(`📋 QS-VC Meeting Service running on ${HOST}:${PORT} (meeting-only)`);
+    });
 });
 
 process.on('SIGTERM', () => { pool.end(); process.exit(0); });
