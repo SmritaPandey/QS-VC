@@ -1,0 +1,7 @@
+{
+  "frontend/web/public/theme.js": "5f6040f244117ecfdb907c21a0e5b4cf4dc3b0c95cf8201a8739e3127c258863",
+  "frontend/web/index.html": "92c549e57f4269107f2ad31aa81c469a480a7221c3d05f93dc2e80fc88bbc27b",
+  "frontend/web/src/components/ThemeSelect.tsx": "7352e70c46ae6c6585729294d807dbad70ef88656862c2efbd4e670d9e3813e6",
+  "frontend/web/src/styles/theme.css": "a57d9d4bdb16a804ba46e69834fd2afcf567ea597ad2d45fd85e50303f1d5ad5",
+  "frontend/web/src/lib/theme.test.ts": "cfaf41cec5f3d4b56821495a310fba8c48260b6af6453b1295c37f3641aabeb8"
+}

@@ -1,3 +1,4 @@
+import ThemeSelect from './ThemeSelect';
 import ActionContents from './ActionContents';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
@@ -72,6 +73,7 @@ export default function SiteNav({ accountAction }: { accountAction?: ReactNode }
                     <Link className="public-mobile-app" to="/app" onClick={() => setOpen(false)}>Open meeting app <span className="mi" aria-hidden="true">arrow_forward</span></Link>
                     {accountAction || <Link to="/login" aria-current={pathname === '/login' ? 'page' : undefined} onClick={() => setOpen(false)}>Sign in</Link>}
                 </div>
+                <ThemeSelect />
                 <Link className="public-primary public-nav-cta qsvc-action" to="/app"><ActionContents>Open meeting app</ActionContents></Link>
             </nav>
         </header>

@@ -1,3 +1,4 @@
+import ThemeSelect from '../components/ThemeSelect';
 import ActionContents from '../components/ActionContents';
 import { getToken } from '../lib/session';
 import LoadingMark from '../components/LoadingMark';
@@ -152,7 +153,7 @@ const ScheduleMeeting: React.FC = () => {
         return (
             <div className="schedule-page">
                 <div className="schedule-container">
-                    <div className="schedule-success">
+                    <div className="schedule-success"><ThemeSelect />
                         <div className="success-icon"><span className="mi" aria-hidden="true">check_circle</span></div>
                         <h1>Meeting scheduled.</h1>
                         <div className="success-details">
@@ -200,7 +201,7 @@ const ScheduleMeeting: React.FC = () => {
     return (
         <div className="schedule-page">
             <div className="schedule-container">
-                <header className="schedule-header">
+                <header className="schedule-header"><ThemeSelect />
                     <button className="btn-back qsvc-action qsvc-action--secondary" onClick={() =>navigate('/')}><ActionContents><span className="mi" aria-hidden="true">arrow_back</span> Back</ActionContents></button>
                     <h1>Schedule a meeting.</h1>
                     <p>Plan a future meeting and invite participants</p>

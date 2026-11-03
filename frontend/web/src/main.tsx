@@ -6,6 +6,7 @@ import './styles/actions.css';
 import './styles/headings.css';
 import './styles/focus.css';
 import './styles/responsive-finish.css';
+import './styles/theme.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
     <React.StrictMode>

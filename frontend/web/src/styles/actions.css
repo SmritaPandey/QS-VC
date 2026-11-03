@@ -29,7 +29,7 @@
 }
 .qsvc-action.qsvc-action.qsvc-action--secondary {
   --action-fill: transparent;
-  --action-ink: #102a43;
+  --action-ink: var(--text-primary);
 }
 .qsvc-action__inner {
   position: relative;
@@ -41,7 +41,7 @@
   width: 100%;
   min-height: 48px;
   padding: 10px 12px;
-  border: 1px solid #006d77;
+  border: 1px solid var(--accent-primary);
   background: var(--action-fill);
   white-space: normal;
   transition: width 500ms cubic-bezier(.165, .84, .44, 1);

@@ -1,3 +1,4 @@
+import ThemeSelect from '../components/ThemeSelect';
 import ActionContents from '../components/ActionContents';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 
@@ -27,7 +28,7 @@ export default function MeetingEnd() {
 
     return (
         <div className="meeting-end-page">
-            <div className="meeting-end-card">
+            <div className="meeting-end-card"><ThemeSelect />
                 <div className="meeting-end-icon">
                     <span className="mi" style={{ fontSize: '32px' }}>check</span>
                 </div>

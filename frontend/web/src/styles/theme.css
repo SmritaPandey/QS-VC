@@ -1,0 +1,215 @@
+/* Appearance changes semantic surfaces; video and meeting canvases keep their identity. */
+:root { --header-surface:#fffffffa; }
+:root[data-theme=dark] {
+  --bg-primary:#0b1420; --bg-secondary:#162331; --bg-tertiary:#203242; --bg-elevated:#2b4051;
+  --bg-glass:#162331; --bg-glass-hover:#203242; --bg-glass-strong:#162331;
+  --text-primary:#edf5fa; --text-secondary:#b6c8d5; --text-muted:#a2b6c5; --text-inverse:#102a43;
+  --accent-primary:#73e0d0; --accent-primary-hover:#a0eee3; --accent-secondary:#73e0d0;
+  --accent-info:#8dcde9; --accent-success:#83dbac; --accent-warning:#f0ce79;
+  --accent-danger:#ff91a3; --accent-danger-hover:#ffb0bc;
+  --border-subtle:#587083; --border-glass:#385063; --border-focus:#73e0d0;
+  --surface-tint:#203242; --border-tone:#587083; --header-surface:#162331fa;
+  --qsvc-focus-glow:#73e0d0;
+  --shadow-sm:0 2px 6px #0002; --shadow-md:0 12px 32px #0002; --shadow-lg:0 24px 72px #0003;
+  --qsvc-brand-gradient:linear-gradient(110deg,#b4c8ff 0%,#c9b8ff 25%,#73e0d0 50%,#c9b8ff 75%,#b4c8ff 100%);
+}
+html,body { background:var(--bg-primary); }
+:root[data-theme=dark] .public-skip { background:var(--bg-secondary); }
+/* Dark hero: the globe video is drawn light-on-white, so invert it (keeping hue) and screen it onto the dark page:
+   the white backdrop drops out and the dotted globe + meeting links glow in the brand teal. */
+:root[data-theme=dark] .home-hero-ambient { mix-blend-mode:screen; opacity:1; }
+:root[data-theme=dark] .public-home .home-overview .home-hero-ambient { mix-blend-mode:screen; opacity:.95; }
+:root[data-theme=dark] .home-hero-ambient-media { filter:invert(1) hue-rotate(180deg) saturate(1.6) brightness(1.15) contrast(1.1); }
+:root[data-theme=dark] :is(.legal-draft,.public-auth-note) { background:#3b321e; color:#f0ce79; }
+:root[data-theme=dark] :is(.public-form-error,.workspace-alert,#workspace-error) { color:#ff91a3; }
+:root[data-theme=dark] .public-help-message--user p { color:#edf5fa; }
+@media(max-width:1240px) and (min-width:768px) { .public-nav { gap:16px; padding-inline:24px; }.public-nav-links { gap:16px; } }
+@media(max-width:767px) {
+  .public-nav>.theme-select { margin-left:auto; order:1; }
+  .public-nav>.public-menu-toggle { order:2; margin-left:0; }
+  .pre-meeting-page { padding-top:140px; }
+}
+@media(max-width:360px) { .public-nav { gap:8px; }.public-brand { font-size:23px; }.public-nav .qsvc-logo-symbol { width:34px; height:34px; } }
+:root[data-theme=dark] .public-auth-visual { background:var(--bg-tertiary); }
+:root[data-theme=dark] .public-contact-details { background:var(--bg-secondary); }
+:root[data-theme=dark] .public-contact .public-contact-details { background:none; }
+:root[data-theme=dark] .public-help-message--user { background:#233c65; }
+:root[data-theme=dark] .public-site .public-help-heading p { color:var(--text-secondary); }
+:root[data-theme=dark] .public-site .public-help-suggestions button { color:var(--text-primary); }
+:root[data-theme=dark] .public-site .public-help-close { color:var(--text-primary); }
+@media(max-width:1240px) { .public-site .public-nav>.theme-select { order:1; margin-left:0; }.public-site .public-nav>.public-brand { margin-right:auto; } }
+
+:root[data-theme=dark] .footer-wordmark-static { color:#b6c8d5; background-image:linear-gradient(180deg,#b6c8d5 0%,#b6c8d5 78%,#91a8b8 92%,#587083 100%); }
+
+/* ── Appearance switch ──────────────────────────────────────────────
+   Icon-only trigger shows the current choice; the two other choices pop
+   out as separate soft circles (springy, staggered). Every surface, ink
+   and shadow comes from the tokens below, so light and dark stay matched. */
+:root {
+  --ts-size:44px; --ts-option:40px;
+  --ts-surface:#ffffff; --ts-surface-hover:#f3f7fa; --ts-ink:#3b5266; --ts-ink-hover:var(--accent-primary);
+  --ts-edge:#102a430f;
+  --ts-shadow:0 1px 2px #102a4314, 0 6px 16px #102a431c, inset 0 1px 0 #ffffff;
+  --ts-shadow-pressed:inset 0 2px 5px #102a431f, inset 0 -1px 0 #ffffff;
+  --ts-tip-bg:#102a43; --ts-tip-ink:#ffffff;
+}
+:root[data-theme=dark] {
+  --ts-surface:#1b2b3a; --ts-surface-hover:#243749; --ts-ink:#c3d3df; --ts-ink-hover:var(--accent-primary);
+  --ts-edge:#ffffff12;
+  --ts-shadow:inset 0 1px 0 #ffffff14, 0 1px 2px #0006, 0 8px 22px #00000059;
+  --ts-shadow-pressed:inset 0 2px 6px #0008, inset 0 -1px 0 #ffffff0d;
+  --ts-tip-bg:#edf5fa; --ts-tip-ink:#0b1420;
+}
+.theme-select { position:relative; display:inline-flex; flex:0 0 var(--ts-size); width:var(--ts-size); height:var(--ts-size); align-self:center; vertical-align:middle; }
+.theme-select :is(.theme-select-trigger,.theme-select-option) {
+  display:grid; place-items:center; min-width:0; min-height:0; padding:0; margin:0; border:1px solid var(--ts-edge); border-radius:50%;
+  background:var(--ts-surface); color:var(--ts-ink); box-shadow:var(--ts-shadow); cursor:pointer; font:inherit;
+  -webkit-tap-highlight-color:transparent;
+  transition:background-color 160ms ease, color 160ms ease, box-shadow 200ms ease, transform 220ms cubic-bezier(.34,1.56,.64,1);
+}
+.theme-select .theme-select-trigger { width:var(--ts-size); height:var(--ts-size); }
+.theme-select .theme-select-option { position:relative; width:var(--ts-option); height:var(--ts-option); }
+.theme-select .mi { font-size:22px; line-height:1; }
+.theme-select .theme-select-option .mi { font-size:20px; }
+.theme-select :is(.theme-select-trigger,.theme-select-option):hover { background:var(--ts-surface-hover); color:var(--ts-ink-hover); transform:translateY(-1px); }
+.theme-select :is(.theme-select-trigger,.theme-select-option):active { transform:scale(.92); }
+.theme-select[data-open=true] .theme-select-trigger { box-shadow:var(--ts-shadow-pressed); color:var(--ts-ink-hover); transform:none; }
+.theme-select :is(.theme-select-trigger,.theme-select-option):focus-visible { outline:3px solid var(--accent-primary); outline-offset:3px; }
+.theme-select-icon { pointer-events:none; animation:theme-icon-arrive 360ms cubic-bezier(.34,1.56,.64,1) both; }
+.theme-select-menu { position:absolute; z-index:60; inset:0; pointer-events:none; }
+.theme-select-menu[hidden] { display:none; }
+/* Disperse: each spare option bursts out of the trigger's centre to its spot on the arc, then settles with a spring. */
+.theme-select .theme-select-option { position:absolute; left:50%; top:50%; margin:calc(var(--ts-option) / -2) 0 0 calc(var(--ts-option) / -2); pointer-events:auto;
+  transform:translate(var(--x),var(--y)); animation:theme-option-disperse 520ms cubic-bezier(.34,1.56,.64,1) both; animation-delay:calc(var(--i, 0) * 60ms); }
+.theme-select .theme-select-option:hover { transform:translate(var(--x),calc(var(--y) - 2px)); }
+.theme-select .theme-select-option:active { transform:translate(var(--x),var(--y)) scale(.92); }
+.theme-select[data-closing] .theme-select-option { pointer-events:none; animation:theme-option-gather 240ms cubic-bezier(.55,0,.75,.4) both; animation-delay:calc((1 - var(--i, 0)) * 30ms); }
+/* A soft ring pulses out of the trigger as it disperses. */
+.theme-select::before { content:''; position:absolute; inset:0; border-radius:50%; pointer-events:none; border:2px solid var(--accent-primary); opacity:0; }
+.theme-select[data-open=true]::before { animation:theme-burst 520ms ease-out both; }
+.theme-select-option::after {
+  content:attr(data-tip); position:absolute; left:50%; top:calc(100% + 8px); padding:4px 10px; border-radius:8px;
+  background:var(--ts-tip-bg); color:var(--ts-tip-ink); font-size:13px; font-weight:500; line-height:1.4; white-space:nowrap;
+  opacity:0; transform:translate(-50%,-4px); transition:opacity 140ms ease, transform 140ms ease; pointer-events:none;
+}
+.theme-select-option:is(:hover,:focus-visible)::after { opacity:1; transform:translate(-50%,0); }
+@keyframes theme-option-disperse {
+  0% { opacity:0; transform:translate(0,0) scale(.3); filter:blur(4px); }
+  45% { opacity:1; filter:blur(0); }
+  100% { opacity:1; transform:translate(var(--x),var(--y)) scale(1); filter:blur(0); }
+}
+@keyframes theme-option-gather { from { opacity:1; transform:translate(var(--x),var(--y)) scale(1); } to { opacity:0; transform:translate(0,0) scale(.3); } }
+@keyframes theme-burst { from { opacity:.55; transform:scale(1); } to { opacity:0; transform:scale(1.9); } }
+@keyframes theme-icon-arrive { from { opacity:0; transform:rotate(-90deg) scale(.5); } to { opacity:1; transform:rotate(0) scale(1); } }
+@media(prefers-reduced-motion:reduce) {
+  .theme-select-icon,.theme-select .theme-select-option,.theme-select[data-closing] .theme-select-option,.theme-select[data-open=true]::before { animation:none; }
+  .theme-select[data-closing] .theme-select-menu { display:none; }
+  .theme-select :is(.theme-select-trigger,.theme-select-option) { transition:background-color 160ms ease, color 160ms ease; }
+  .theme-select .theme-select-trigger:is(:hover,:active) { transform:none; }
+  .theme-select .theme-select-option:is(:hover,:active) { transform:translate(var(--x),var(--y)); }
+}
+@media(forced-colors:active) { .theme-select :is(.theme-select-trigger,.theme-select-option) { border-color:ButtonText; } }
+
+/* Inside the account dropdown the options disperse sideways, in the same row. */
+.workspace-dropdown .theme-select { margin:8px 12px; }
+.workspace-dropdown .theme-select-option:nth-child(1) { --x:54px !important; --y:0px !important; }
+.workspace-dropdown .theme-select-option:nth-child(2) { --x:102px !important; --y:0px !important; }
+
+/* Placement: the switch always sits in the top-right corner of its screen or card, on the first row. */
+.preview-appearance { position:absolute; top:20px; right:24px; display:flex; }
+.meeting-end-card { position:relative; }
+.meeting-end-card>.theme-select { position:absolute; top:24px; right:24px; }
+.schedule-container { position:relative; }
+.schedule-header>.theme-select,.schedule-success>.theme-select { position:absolute; top:2px; right:0; }
+.schedule-success { position:relative; }
+.admin-header-actions { align-items:center; }
+@media(max-width:760px) {
+  .preview-appearance { top:16px; right:16px; }
+  .meeting-end-card>.theme-select { top:16px; right:16px; }
+}
+
+/* Dark theme: homepage feature stories, scene captions and pricing — text and panels follow theme tokens. */
+:root[data-theme=dark] .meeting-feature-copy>p,
+:root[data-theme=dark] .meeting-feature-copy ul { color:var(--text-secondary); }
+:root[data-theme=dark] :is(.feature-schedule-link,.feature-hand) { color:var(--accent-primary); }
+:root[data-theme=dark] .feature-schedule-link:focus-visible { outline-color:var(--accent-primary); }
+:root[data-theme=dark] .feature-visual { background:var(--bg-secondary); color:var(--text-primary); }
+:root[data-theme=dark] .feature-person { background:var(--bg-tertiary); }
+:root[data-theme=dark] :is(.feature-device-list,.feature-paper,.feature-participants>div:not(:first-child)) { background:var(--bg-tertiary); color:var(--text-primary); }
+:root[data-theme=dark] :is(.feature-device-list dt,.feature-paper>span,.feature-paper p,.feature-language-note,.feature-participants>p) { color:var(--text-secondary); }
+
+/* Captions: frosted teal glass with a soft glowing edge. */
+:root[data-theme=dark] :is(.feature-written-caption,.meeting-scene-caption,.feature-chat-note) {
+  background:linear-gradient(160deg,#73e0d02e 0%,#73e0d00f 55%,#8dcde914 100%);
+  -webkit-backdrop-filter:blur(14px) saturate(140%); backdrop-filter:blur(14px) saturate(140%);
+  border:1px solid #73e0d059; color:var(--text-primary);
+  box-shadow:inset 0 1px 0 #ffffff1f, inset 0 0 18px #73e0d014, 0 0 0 1px #73e0d014, 0 0 22px #73e0d026, 0 10px 28px #0006;
+}
+:root[data-theme=dark] :is(.feature-written-caption,.meeting-scene-caption)>span { color:#9fdccf; }
+:root[data-theme=dark] :is(.feature-written-caption,.meeting-scene-caption) p { color:var(--text-primary); }
+:root[data-theme=dark] .pricing-current-plan:disabled { background:var(--bg-tertiary); color:var(--text-secondary); }
+
+/* Caption-language pills (homepage): glass chips with glowing edges; the sliding selection is a lit glass pill. */
+:root[data-theme=dark] .home-upright-example .public-sample-switch button {
+  background:linear-gradient(180deg,#ffffff0d,#ffffff05); border-color:#73e0d040; color:var(--text-primary);
+  -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px);
+  box-shadow:inset 0 1px 0 #ffffff14, 0 0 0 0 #73e0d000;
+  transition:color 300ms ease,border-color 300ms ease,box-shadow 300ms ease,background-color 300ms ease;
+}
+:root[data-theme=dark] .home-upright-example .public-sample-switch button:hover { border-color:#73e0d099; box-shadow:inset 0 1px 0 #ffffff1f, 0 0 14px #73e0d033; }
+:root[data-theme=dark] .home-upright-example .public-sample-switch button[aria-pressed=true] { background:transparent; border-color:#a0eee3cc; color:#ffffff; }
+:root[data-theme=dark] .home-upright-example .public-sample-switch::before {
+  background:linear-gradient(160deg,#1fa597cc 0%,#0b6f68e6 60%,#0b5b6de6 100%);
+  box-shadow:inset 0 1px 0 #ffffff40, inset 0 -6px 14px #0003, 0 0 0 1px #73e0d066, 0 0 20px #73e0d059, 0 0 42px #73e0d026;
+}
+@media(prefers-reduced-transparency:reduce) {
+  :root[data-theme=dark] :is(.feature-written-caption,.meeting-scene-caption,.home-upright-example .public-sample-switch button) { -webkit-backdrop-filter:none; backdrop-filter:none; background:#133a35; }
+}
+
+/* Dark: the meeting preview card was the same navy as the page and vanished. Give it a lifted glass card with a glowing edge. */
+:root[data-theme=dark] .meeting-scene {
+  background:linear-gradient(165deg,#1a2b3b 0%,#132232 55%,#0f1d2b 100%);
+  border:1px solid #73e0d040;
+  box-shadow:inset 0 1px 0 #ffffff1a, 0 0 0 1px #73e0d012, 0 0 28px #73e0d01f, 0 24px 60px #00000080;
+}
+:root[data-theme=dark] :is(.meeting-scene-side,.meeting-scene-dock) { background:#0e1a27; box-shadow:inset 0 1px 0 #ffffff0f, 0 0 0 1px #73e0d01f; }
+:root[data-theme=dark] .meeting-scene-control:not(.meeting-scene-leave,.meeting-scene-language) { background:#22374a; }
+
+/* Dark: homepage feature cards get the same glass card + glowing teal edge as the meeting preview. */
+:root[data-theme=dark] .feature-visual {
+  background:linear-gradient(165deg,#1a2b3b 0%,#132232 55%,#0f1d2b 100%);
+  border:1px solid #73e0d040;
+  box-shadow:inset 0 1px 0 #ffffff1a, 0 0 0 1px #73e0d012, 0 0 28px #73e0d01f, 0 24px 60px #00000080;
+}
+:root[data-theme=dark] :is(.feature-device-list,.feature-paper,.feature-participants>div:not(:first-child)) {
+  background:#ffffff0a; border:1px solid #73e0d026; box-shadow:inset 0 1px 0 #ffffff0f;
+}
+
+/* Dark: "More ways to meet" visuals were the page navy and vanished — same glass card + glowing edge. */
+:root[data-theme=dark] .home-option-visual {
+  background:linear-gradient(165deg,#1a2b3b 0%,#132232 55%,#0f1d2b 100%);
+  border:1px solid #73e0d040;
+  box-shadow:inset 0 1px 0 #ffffff1a, 0 0 0 1px #73e0d012, 0 0 28px #73e0d01f, 0 24px 60px #00000080;
+}
+:root[data-theme=dark] .home-option-caption {
+  background:linear-gradient(160deg,#73e0d02e 0%,#73e0d00f 55%,#8dcde914 100%);
+  border:1px solid #73e0d059; box-shadow:inset 0 1px 0 #ffffff1f, 0 0 18px #73e0d021;
+}
+:root[data-theme=dark] .home-option-record>.mi { background:#22374a; box-shadow:inset 0 1px 0 #ffffff14, 0 0 0 1px #73e0d033, 0 0 18px #73e0d026; }
+:root[data-theme=dark] .home-option-network-map>span { background:#22374a; box-shadow:inset 0 1px 0 #ffffff14, 0 0 0 1px #73e0d026; }
+:root[data-theme=dark] .home-option-network-map>.home-option-network-hub { background:linear-gradient(160deg,#1f6f63,#14473f); box-shadow:inset 0 1px 0 #ffffff26, 0 0 0 1px #73e0d066, 0 0 24px #73e0d040; }
+:root[data-theme=dark] .home-option-badge { background:#73e0d014; border:1px solid #73e0d033; color:var(--text-primary); }
+
+/* "See QS-VC in action": a rounded card inset from the page edges, with room before the FAQ (both themes). */
+.public-home .home-demo {
+  box-sizing:border-box; width:calc(100% - 2 * clamp(24px,5vw,72px)); max-width:1296px;
+  margin:24px auto 72px; padding:clamp(28px,4vw,48px) clamp(24px,4vw,56px); border-radius:24px;
+  border:1px solid var(--border-tone, #dce5e9);
+}
+@media(max-width:767px) { .public-home .home-demo { margin:16px auto 48px; padding:28px 24px; } }
+@media(max-width:380px) { .public-home .home-demo { width:calc(100% - 40px); } }
+:root[data-theme=dark] .public-home .home-demo {
+  background:radial-gradient(120% 140% at 0% 0%,#73e0d01f 0%,transparent 55%), linear-gradient(165deg,#1a2b3b 0%,#132232 55%,#0f1d2b 100%);
+  border-color:#73e0d040;
+  box-shadow:inset 0 1px 0 #ffffff1a, 0 0 0 1px #73e0d012, 0 0 32px #73e0d01f, 0 24px 60px #00000080;
+}

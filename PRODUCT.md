@@ -67,7 +67,7 @@ Participant name badges use user-requested frosted navy glass and a soft teal ed
 
 ## Public website decisions
 
-The homepage, plans, launcher, sign-in and contact pages share the light navy/teal/Plex identity. Retain the existing moving hero background and its reduced-motion/data-saving fallback. Keep the original four rate cards and their existing proposed rates/inclusions; do not silently replace the cards with status panels. Proposed rates and features are not confirmed purchase entitlements.
+The homepage, plans, launcher, sign-in and contact pages share the navy/teal/Plex identity in light and dark appearances. Follow the device appearance by default, using light when no dark preference is available. Users can choose System, Light or Dark. Retain the existing moving hero background and its reduced-motion/data-saving fallback. Keep the original four rate cards and their existing proposed rates/inclusions; do not silently replace the cards with status panels. Proposed rates and features are not confirmed purchase entitlements.
 
 The public header has Meetings, Plans, Contact and account access, without a Languages item. After the header scrolls away, an animated side navigation offers page shortcuts; phones use a compact expandable control. Language content remains in the page and meeting controls. Public contact/sales actions use an enquiry form rather than mail-app links. Calendar email addresses inside iCalendar files remain protocol data.
 

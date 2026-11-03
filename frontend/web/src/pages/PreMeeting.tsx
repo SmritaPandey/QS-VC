@@ -1,3 +1,4 @@
+import ThemeSelect from '../components/ThemeSelect';
 import ActionContents from '../components/ActionContents';
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -193,6 +194,7 @@ export default function PreMeeting() {
 
     return (
         <div className="pre-meeting-page">
+            <div className="preview-appearance"><ThemeSelect /></div>
             <button type="button" className="preview-back" onClick={() => navigate('/app', { replace: true })}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 5-7 7 7 7M5 12h14" /></svg>
                 Back to meetings

@@ -45,7 +45,7 @@ Scope: public homepage and the shared labelled-action component. These are descr
 
 ## Colors
 
-Navy anchors text and the illustrative meeting. Teal identifies actions and selected caption samples. White and pale neutral surfaces keep the public page light. The existing animated logo retains its approved gradient.
+Navy anchors text and the illustrative meeting. Teal identifies actions and selected caption samples. White and pale neutral surfaces define the light appearance; a navy dark appearance supports the device's dark preference. The default is System, with light as the fallback. Explicit Light and Dark choices override the device preference. The operational meeting canvas stays dark. The existing animated logo retains its approved gradient.
 
 ## Typography
 
@@ -73,6 +73,6 @@ The hero caption sample is interactive and announced politely. Story scene text 
 
 - Do keep illustrative labels and language-availability qualifications attached to demonstrations.
 - Do preserve ordinary links and readable chapter text outside camera transforms.
-- Do keep public pages light and retain the static footer wordmark.
+- Do support system-aware light and dark appearances and retain the static footer wordmark.
 - Don’t promote unverified security, scale, translation quality or deployment claims from visual examples. Describe the application directly without demo framing.
 - Don’t treat this incomplete finish review as accessibility certification.
