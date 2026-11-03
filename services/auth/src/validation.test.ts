@@ -5,14 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
-// Re-define schemas locally for testing (matching auth/src/index.ts)
-const registerBody = z.object({
-    email: z.string().email('Invalid email').max(255),
-    password: z.string().min(8, 'Password must be at least 8 characters').max(128),
-    displayName: z.string().min(1, 'Display name is required').max(100)
-        .transform((s) => s.trim().replace(/<[^>]*>/g, '')),
-    tenantSlug: z.string().max(100).optional(),
-});
+import { registerBody } from './registration';
 
 const loginBody = z.object({
     email: z.string().email('Invalid email').max(255),
@@ -44,17 +37,14 @@ describe('Auth: registerBody schema', () => {
         }
     });
 
-    it('should accept registration with optional tenantSlug', () => {
+    it('should reject public registration into an organisation', () => {
         const result = registerBody.safeParse({
             email: 'user@corp.com',
             password: 'strongPassword!',
             displayName: 'Corp User',
             tenantSlug: 'acme-corp',
         });
-        expect(result.success).toBe(true);
-        if (result.success) {
-            expect(result.data.tenantSlug).toBe('acme-corp');
-        }
+        expect(result.success).toBe(false);
     });
 
     it('should reject invalid email', () => {

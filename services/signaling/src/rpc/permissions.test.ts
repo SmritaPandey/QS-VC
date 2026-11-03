@@ -1,3 +1,4 @@
+vi.mock('../meeting-policy.js', () => ({ loadMeetingPolicy: vi.fn().mockResolvedValue(null) }));
 import { describe, it, expect, vi } from 'vitest';
 vi.mock('../sfu-client.js', () => ({ sfuClient: {
     getRtpCapabilities: vi.fn().mockResolvedValue({ rtpCapabilities: {} }),
@@ -123,4 +124,19 @@ describe('production meeting permissions', () => {
         await handlePeerDisconnect(guest);
         await handlePeerDisconnect(host);
     });
+});
+
+it('rejects guests before a saved organiser and restores the saved owner role', async () => {
+    const { loadMeetingPolicy } = await import('../meeting-policy.js');
+    vi.mocked(loadMeetingPolicy).mockResolvedValue({hostId:'owner',status:'waiting',settings:{waitingRoomEnabled:true,allowChat:false,allowScreenShare:true,allowRecording:false}});
+    const code=`owner-${crypto.randomUUID().slice(0,10)}`;
+    const guest=socket(), guestState:any={};
+    expect((await rpc(guest,guestState,'joinRoom',{meetingCode:code,displayName:'Guest'}))?.error?.message).toContain('organiser');
+    const host=socket(), hostState:any={authUser:{sub:'owner'}};
+    const result=await rpc(host,hostState,'joinRoom',{meetingCode:code,displayName:'Owner'});
+    expect(result?.result.role).toBe('host');
+    expect(roomManager.getRoom(hostState.roomId)?.settings.allowChat).toBe(false);
+    expect((await rpc(guest,guestState,'joinRoom',{meetingCode:code,displayName:'Guest'}))?.result.status).toBe('waiting');
+    await handlePeerDisconnect(guestState); await handlePeerDisconnect(hostState);
+    vi.mocked(loadMeetingPolicy).mockResolvedValue(null);
 });

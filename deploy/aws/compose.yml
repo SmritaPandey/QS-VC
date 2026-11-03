@@ -17,6 +17,7 @@ x-runtime: &runtime
   POSTGRES_CA_FILE: /opt/qsvc/certs/rds-ca.pem
   JWT_SECRET: ${JWT_SECRET:?Set a private JWT secret}
   AUTH_INTERNAL_URL: http://127.0.0.1:4002
+  MEETING_INTERNAL_URL: http://127.0.0.1:4003
   SFU_INTERNAL_URL: http://127.0.0.1:4000
   SFU_ANNOUNCED_IP: ${SFU_ANNOUNCED_IP:?Set the public media IP}
   SFU_NUM_WORKERS: '1'
@@ -35,6 +36,10 @@ services:
     environment:
       <<: *runtime
       DATABASE_URL: ${AUTH_DATABASE_URL:?Set the restricted auth database URL}
+      ENTERPRISE_ACCESS_JSON: '${ENTERPRISE_ACCESS_JSON:-[]}'
+      ENTERPRISE_WINDOWS_INSTALLER: /opt/qsvc/installers/QS-VC-Windows-Setup.exe
+    volumes:
+      - ./installers:/opt/qsvc/installers:ro
     command: [node, services/auth/dist/index.js]
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:4002/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]

@@ -221,8 +221,49 @@ html { scroll-behavior:smooth; }
 /* The decorative OR column is hidden, so the two real actions need two tracks. */
 .public-launcher .landing-actions { grid-template-columns:repeat(2,minmax(0,1fr)); }
 @media(max-width:760px) { .public-launcher .landing-actions { grid-template-columns:minmax(0,1fr); } }
-.identity-options { display:grid; gap:10px; padding-top:16px; }
-.identity-options button { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; min-height:48px; padding:12px 16px; border:0; border-radius:14px; background:#edf3f5; color:#102a43; }
-.public-site .identity-options button:disabled { opacity:1; cursor:not-allowed; }
-.identity-options small { font-size:12px; color:#526676; }
-.identity-options p { font-size:13px; }
+ .identity-options { display:grid; gap:12px; padding-top:16px; min-width:0; }
+.identity-options-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.identity-options-grid>.qsvc-action.qsvc-action { width:100%; font-size:14px; }
+.identity-options-grid>button:last-child { grid-column:1 / -1; }
+.public-site .identity-options button:disabled { opacity:.7; cursor:not-allowed; }
+.identity-options p { font-size:13px; line-height:1.6; margin:0; }
+
+.public-contact-details { display:grid; gap:24px; margin:32px 0 0; padding:24px; border-radius:20px; background:rgba(255,255,255,.8); box-shadow:0 8px 32px rgba(16,42,67,.05); }
+.public-contact-details > div { display:flex; align-items:flex-start; gap:16px; min-width:0; }
+.public-contact-details .mi { color:#006d77; font-size:24px; flex-shrink:0; margin-top:2px; }
+.public-contact-details dt { color:#102a43; font-size:17px; font-weight:500; line-height:1.5; }
+.public-contact-details dd { margin:4px 0 0; color:#526b7b; font-size:15px; line-height:1.6; overflow-wrap:anywhere; }
+.public-contact-details a { color:inherit; text-decoration:none; }
+.public-contact-details a:hover { color:#006d77; text-decoration:underline; }
+.public-contact .public-demo-link { margin-top:12px; }
+
+/* Give contact copy and controls room without forcing lines on small screens. */
+.public-contact .public-auth-layout { grid-template-columns:minmax(0,1fr) minmax(0,1.15fr); gap:48px; }
+.public-contact .public-auth-copy,.public-contact .public-auth-form { min-width:0; }
+.public-contact .public-auth-form { gap:10px; }
+.public-contact .public-auth-form label:not(:first-child) { margin-top:8px; }
+.public-contact .public-contact-details { padding:0; background:none; box-shadow:none; border-radius:0; }
+.public-contact .qsvc-action__inner { white-space:nowrap; }
+@media(max-width:767px) {
+ .public-contact .public-auth-layout { grid-template-columns:minmax(0,1fr); gap:32px; }
+ .public-contact .public-auth-form label { text-wrap:pretty; }
+}
+.public-contact .public-auth-copy h1 {
+ font-size:clamp(32px,3.5vw,44px);
+ line-height:1.15;
+ text-wrap:wrap;
+ margin-bottom:20px;
+}
+.public-contact .public-contact-success h2 {
+ font-size:clamp(26px,3vw,36px);
+ line-height:1.2;
+ text-wrap:wrap;
+}
+
+.home-demo { display:flex; align-items:center; justify-content:space-between; gap:32px; padding-block:48px; background:linear-gradient(110deg,rgba(67,217,194,.08),transparent); }
+.home-demo > div { min-width:0; max-width:640px; }
+.public-home .home-demo h2 { font-size:clamp(28px,3vw,40px); line-height:1.2; text-wrap:wrap; margin:0 0 12px; }
+.public-home .home-demo p { max-width:56ch; margin:0; }
+.home-demo > .qsvc-action { flex-shrink:0; }
+.home-demo .qsvc-action__inner { white-space:nowrap; }
+@media(max-width:767px) { .home-demo { flex-direction:column; align-items:flex-start; gap:24px; padding-block:32px; } }

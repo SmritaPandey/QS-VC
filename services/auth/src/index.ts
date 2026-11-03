@@ -1,3 +1,4 @@
+import { registerBody } from './registration';
 import { enterpriseRouter } from './enterprise-access.js';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -11,7 +12,7 @@ import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import pino from 'pino';
-import { createSession, validateSession, endSession } from './sessions.js';
+import { createSession, validateSession, endSession, sessionErrorStatus } from './sessions.js';
 import { contactRouter, contactRequestError } from './contact.js';
 
 dotenv.config({ path: '../../.env' });
@@ -28,13 +29,6 @@ const logger = pino({
 // VALIDATION SCHEMAS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-const registerBody = z.object({
-    email: z.string().email('Invalid email').max(255),
-    password: z.string().min(8, 'Password must be at least 8 characters').max(128),
-    displayName: z.string().min(1, 'Display name is required').max(100)
-        .transform((s) => s.trim().replace(/<[^>]*>/g, '')),
-    tenantSlug: z.string().max(100).optional(),
-});
 
 const loginBody = z.object({
     email: z.string().email('Invalid email').max(255),
@@ -95,7 +89,7 @@ app.use(express.json());
 const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } });
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many auth attempts, please try again later' } });
 // Signaling verifies each authenticated RPC, so do not apply the low browser API quota here.
-app.use('/api/auth/verify', rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, standardHeaders: true, legacyHeaders: false }));
+app.use('/api/auth/verify', rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, skip: req => { try { const value = jwt.verify(String(req.headers['x-qsvc-service-token'] || ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production') as jwt.JwtPayload; return value.aud === 'qsvc-auth-verify' && value.iss === 'qsvc-internal'; } catch { return false; } }, keyGenerator: req => crypto.createHash('sha256').update(req.headers.authorization || req.ip || 'unknown').digest('hex'), standardHeaders: true, legacyHeaders: false }));
 app.use((req, res, next) => req.path === '/api/auth/verify' ? next() : generalLimiter(req, res, next));
 app.use('/api/auth/register', authLimiter);
 app.use('/api/auth/login', authLimiter);
@@ -173,18 +167,17 @@ app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
     try {
         const { email, password, displayName, tenantSlug } = req.body;
 
-        // Find or create tenant
-        let tenantId: string;
+        // Public signup cannot enrol users into an organisation or a paid tenant.
         if (tenantSlug) {
-            const tenantResult = await pool.query('SELECT id FROM tenants WHERE slug = $1', [tenantSlug]);
-            if (tenantResult.rows.length === 0) {
-                return res.status(404).json({ error: 'Tenant not found' });
-            }
-            tenantId = tenantResult.rows[0].id;
-        } else {
-            // Default dev tenant
-            tenantId = '00000000-0000-0000-0000-000000000001';
+            return res.status(403).json({ error: 'Enterprise access requires organisation SSO / SAML.' });
         }
+        const tenantResult = await pool.query(
+            "SELECT id FROM tenants WHERE slug = 'personal-free' AND plan = 'free' AND is_active = true"
+        );
+        if (tenantResult.rows.length !== 1) {
+            return res.status(503).json({ error: 'Account creation is temporarily unavailable. Please try again later.' });
+        }
+        const tenantId = tenantResult.rows[0].id;
 
         // Check if email exists
         const existing = await pool.query(
@@ -283,7 +276,8 @@ app.get('/api/auth/verify', async (req, res) => {
         const payload = await verifyToken(token);
         res.json({ valid: true, payload });
     } catch (err) {
-        res.status(401).json({ valid: false, error: 'Invalid token' });
+        const status = sessionErrorStatus(err);
+        res.status(status).json({ valid: false, error: status === 401 ? 'Invalid token' : 'Authentication temporarily unavailable' });
     }
 });
 
@@ -295,8 +289,9 @@ app.post('/api/auth/logout', async (req, res) => {
         const payload = await verifyToken(header.slice(7));
         await endSession(pool, payload);
         res.json({ loggedOut: true });
-    } catch {
-        res.status(401).json({ error: 'Invalid token' });
+    } catch (error) {
+        const status = sessionErrorStatus(error);
+        res.status(status).json({ error: status === 401 ? 'Invalid token' : 'Sign out could not finish. Please retry.' });
     }
 });
 

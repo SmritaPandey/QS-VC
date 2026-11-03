@@ -1,3 +1,4 @@
+import jwt from 'jsonwebtoken';
 import http from 'http';
 import url from 'url';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -6,15 +7,18 @@ import { logger } from './logger.js';
 
 const AUTH_URL = (process.env.AUTH_INTERNAL_URL || 'http://localhost:4002').replace(/\/$/, '');
 
+export class InvalidAuthentication extends Error {}
+
 export async function verifySession(token: string): Promise<AuthPayload> {
     const response = await fetch(`${AUTH_URL}/api/auth/verify`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: { Authorization: `Bearer ${token}`, 'x-qsvc-service-token': jwt.sign({}, process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-auth-verify', issuer: 'qsvc-internal', expiresIn: 30 }) },
         signal: AbortSignal.timeout(3000),
     });
-    if (!response.ok) throw new Error('Invalid authentication');
+    if (response.status === 401 || response.status === 403) throw new InvalidAuthentication('Invalid authentication');
+    if (!response.ok) throw new Error('Authentication temporarily unavailable');
     const body = await response.json() as { valid?: boolean; payload?: AuthPayload };
     const payload = body.payload;
-    if (!body.valid || !payload?.sub) throw new Error('Invalid authentication');
+    if (!body.valid || !payload?.sub) throw new InvalidAuthentication('Invalid authentication');
     return payload;
 }
 
@@ -66,8 +70,12 @@ export function attachSignalingWebSocket(server: http.Server): WebSocketServer {
                     try {
                         authUser = await verifySession(token);
                         connectionState.authUser = authUser;
-                    } catch {
-                        ws.close(4003, 'Session expired or invalid');
+                    } catch (error) {
+                        if (error instanceof InvalidAuthentication) ws.close(4003, 'Session expired or invalid');
+                        else {
+                            const request = JSON.parse(data.toString());
+                            ws.send(JSON.stringify({ jsonrpc: '2.0', id: request.id ?? null, error: { code: -32050, message: 'Authentication temporarily unavailable. Please retry.' } }));
+                        }
                         return;
                     }
                 }

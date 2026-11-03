@@ -17,3 +17,11 @@ it('blocks preference writes before consent and after denial, clears saved prefe
     expect(data.has('qsvc:reaction-preferences')).toBe(false);
     expect(data.get('token')).toBe('untouched');
 });
+
+it('honours denial even if an old allow is readable but writes fail', () => {
+    const removeItem = vi.fn();
+    vi.stubGlobal('localStorage', {getItem:()=> 'allow',setItem:()=>{throw Error('quota');},removeItem});
+    saveStorageConsent(false);
+    expect(preferencesAllowed()).toBe(false);
+    expect(removeItem).toHaveBeenCalledWith('qsvc:reaction-preferences');
+});

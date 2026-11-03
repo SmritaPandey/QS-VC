@@ -1,3 +1,4 @@
+import jwt from 'jsonwebtoken';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { z } from 'zod';
@@ -103,7 +104,7 @@ app.use(cors({
     credentials: true,
 }));
 app.use(express.json());
-app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } }));
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, skip: req => { if (!req.path.startsWith('/api/internal/meetings/')) return false; try { jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal' }); return true; } catch { return false; } }, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } }));
 
 const PORT = parseInt(process.env.PORT || process.env.MEETING_PORT || '4003', 10);
 const AUTH_URL = process.env.AUTH_INTERNAL_URL || 'http://localhost:4002';
@@ -126,7 +127,7 @@ async function authMiddleware(req: express.Request, res: express.Response, next:
     }
     try {
         const response = await fetch(`${AUTH_URL}/api/auth/verify`, {
-            headers: { Authorization: authHeader }, signal: AbortSignal.timeout(5000),
+            headers: { Authorization: authHeader, 'x-qsvc-service-token': jwt.sign({}, process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-auth-verify', issuer: 'qsvc-internal', expiresIn: 30 }) }, signal: AbortSignal.timeout(5000),
         });
         if (!response.ok) throw new Error('Invalid session');
         const verified = await response.json() as { valid: boolean; payload: AuthPayload };
@@ -261,6 +262,19 @@ app.post('/api/meetings/schedule', authMiddleware, validateBody(createMeetingBod
 });
 
 // Get meeting by code
+app.get('/api/internal/meetings/:code', async (req, res) => {
+    try {
+        jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal' });
+    } catch { return res.status(401).json({ error: 'Invalid service authentication' }); }
+    try {
+        const result = await pool.query('SELECT * FROM public.qsvc_meeting_by_code($1)', [String(req.params.code).toUpperCase()]);
+        if (!result.rows.length) return res.status(404).json({ error: 'Meeting not found' });
+        const row = result.rows[0];
+        res.setHeader('Cache-Control', 'no-store');
+        res.json({ hostId: row.host_id, status: row.status, settings: row.settings || {} });
+    } catch { res.status(503).json({ error: 'Meeting storage unavailable' }); }
+});
+
 app.get('/api/meetings/code/:code', async (req, res) => {
     try {
         const result = await pool.query(
@@ -283,7 +297,7 @@ app.get('/api/meetings/code/:code', async (req, res) => {
             status: m.status,
             scheduledStart: m.scheduled_start,
             scheduledEnd: m.scheduled_end,
-            settings: m.settings,
+            settings: Object.fromEntries(Object.entries(m.settings || {}).filter(([key]) => key !== 'password')),
             createdAt: m.created_at,
         });
     } catch (err: any) {
