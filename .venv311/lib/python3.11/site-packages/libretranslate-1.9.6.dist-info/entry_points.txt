@@ -1,0 +1,3 @@
+[console_scripts]
+libretranslate = libretranslate.main:main
+ltmanage = libretranslate.manage:manage
