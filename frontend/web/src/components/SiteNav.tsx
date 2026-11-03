@@ -16,6 +16,7 @@ const quickLinks = [
 ];
 
 export default function SiteNav({ accountAction }: { accountAction?: ReactNode }) {
+    const [formVisible, setFormVisible] = useState(false);
     const [open, setOpen] = useState(false);
     const [scrolled, setScrolled] = useState(false);
     const [dockOpen, setDockOpen] = useState(false);
@@ -24,6 +25,17 @@ export default function SiteNav({ accountAction }: { accountAction?: ReactNode }
     const dockButton = useRef<HTMLButtonElement>(null);
     const { pathname } = useLocation();
     useScrollReveal(headerRef, pathname);
+    useEffect(() => {
+        const forms = document.querySelectorAll('.public-auth-form');
+        const visible = new Set<Element>();
+        const observer = new IntersectionObserver(entries => {
+            entries.forEach(entry => entry.isIntersecting ? visible.add(entry.target) : visible.delete(entry.target));
+            setFormVisible(visible.size > 0 && window.matchMedia('(max-width:767px)').matches);
+        });
+        forms.forEach(form => observer.observe(form));
+        return () => { observer.disconnect(); setFormVisible(false); };
+    }, [pathname]);
+
     useEffect(() => {
         const header = headerRef.current;
         if (!header || typeof IntersectionObserver === 'undefined') return;
@@ -57,13 +69,14 @@ export default function SiteNav({ accountAction }: { accountAction?: ReactNode }
                     <Link to="/pricing" aria-current={pathname === '/pricing' ? 'page' : undefined} onClick={() => setOpen(false)}>Plans</Link>
                     <Link to="/intranet" aria-current={pathname === '/intranet' ? 'page' : undefined} onClick={() => setOpen(false)}>Intranet</Link>
                     <Link to="/contact" aria-current={pathname === '/contact' ? 'page' : undefined} onClick={() => setOpen(false)}>Contact us</Link>
+                    <Link className="public-mobile-app" to="/app" onClick={() => setOpen(false)}>Open meeting app <span className="mi" aria-hidden="true">arrow_forward</span></Link>
                     {accountAction || <Link to="/login" aria-current={pathname === '/login' ? 'page' : undefined} onClick={() => setOpen(false)}>Sign in</Link>}
                 </div>
                 <Link className="public-primary public-nav-cta qsvc-action" to="/app"><ActionContents>Open meeting app</ActionContents></Link>
             </nav>
         </header>
         <CookieBanner />
-        {scrolled && <aside className="public-floating-nav" ref={dockRef} aria-label="Quick navigation" data-open={dockOpen} onKeyDown={event => { if (event.key === 'Escape') { setDockOpen(false); dockButton.current?.focus(); } }}>
+        {scrolled && !formVisible && <aside className="public-floating-nav" ref={dockRef} aria-label="Quick navigation" data-open={dockOpen} onKeyDown={event => { if (event.key === 'Escape') { setDockOpen(false); dockButton.current?.focus(); } }}>
             <div className="public-floating-nav-inner">
                 <button className="public-dock-toggle" ref={dockButton} type="button" aria-label={dockOpen ? 'Close quick navigation' : 'Open quick navigation'} aria-expanded={dockOpen} aria-controls="public-dock-links" onClick={() => setDockOpen(value => !value)}><span className="mi" aria-hidden="true">{dockOpen ? 'close' : 'menu'}</span></button>
                 <nav id="public-dock-links" aria-label="Page shortcuts">{quickLinks.map(link => link.to.includes('#') ? <a href={link.to} key={link.to} aria-label={link.label} onClick={() => setDockOpen(false)}><span className="mi" aria-hidden="true">{link.icon}</span><span className="public-dock-label">{link.label}</span></a> : <Link to={link.to} key={link.to} aria-label={link.label} aria-current={pathname === link.to ? 'page' : undefined} onClick={() => setDockOpen(false)}><span className="mi" aria-hidden="true">{link.icon}</span><span className="public-dock-label">{link.label}</span></Link>)}
@@ -71,6 +84,6 @@ export default function SiteNav({ accountAction }: { accountAction?: ReactNode }
                 </nav>
             </div>
         </aside>}
-        <PublicHelp key={pathname} navigationOpen={dockOpen || open} />
+        <PublicHelp key={pathname} navigationOpen={dockOpen || open || formVisible} />
     </>;
 }

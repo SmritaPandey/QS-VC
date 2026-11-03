@@ -1,51 +1,35 @@
-# AWS backend preparation
+# Live AWS demo deployment
 
-Status: prepared locally; not provisioned or deployed. No live account settings
-were changed in this task. No database credentials were retrieved.
+Verified 2026-11-03.
 
-## Observed in the authenticated console
+- Backend origin: https://backend.qsvcmeet.com
+- Website: https://qsvcmeet.com
+- AWS region: ap-south-1 (Mumbai)
+- CloudFormation stack: qsvc-backend
+- EC2 instance: i-06746b0582544f1c6, t3.small, Elastic IP 13.201.247.97
+- Existing private PostgreSQL: qs-db; application connections use separate restricted accounts and verified TLS.
+- Private recordings bucket: qsvc-backend-recordingsbucket-sxdmpqufwgrm. No automatic recording expiry; host deletes recordings.
+- Runtime configuration: /opt/qsvc/deploy/aws/.env on EC2, mode 0600. No secrets copied into this report or repository.
+- Services running: auth, meeting, signaling, sfu, recording, TURN, Caddy and web fallback. Auth and meeting readiness checks passed.
+- Cloudflare Worker version: 1c0f380f-ec1f-4012-a8f5-594fa29ece6e.
+- Worker runtime variable BACKEND_ORIGIN=https://backend.qsvcmeet.com; static website assets remain served by Cloudflare.
+- DNS: backend.qsvcmeet.com A record points directly to the Elastic IP (DNS only).
 
-- Existing `qs-db` PostgreSQL database is Available in Mumbai, ap-south-1c.
-- Database VPC: vpc-04b920198a94df294. Publicly accessible: No.
-- Database security group: sg-00959f7a8c88ab900; no inbound rule was displayed.
-- Selected subnet: subnet-0969bcb33ff3a985a, ap-south-1a, in the same VPC.
-- Its route table has an Active 0.0.0.0/0 route to an Internet gateway.
-- Hostinger shows Cloudflare nameservers for qsvcmeet.com. DNS changes belong in
-  Cloudflare; Hostinger's DNS records are inactive under this delegation.
+## Verification
 
-## Prepared resources and scope
+- Backend /health: HTTPS 200.
+- Website /api/health: 200, runtime worker.
+- Website /api/auth/login with an empty test request: expected validation error, HTTP 400. This verifies backend routing without creating an account.
+- Website recording listing without authentication: expected HTTP 401.
+- Recording service can access the private S3 bucket using the instance role.
+- Website production build passed during deployment.
 
-`backend-stack.json`: one t3.medium Amazon Linux 2023 host, 40 GiB encrypted gp3,
-Standard CPU credits, IMDSv2, Elastic IPv4, SSM-only management role, public
-HTTP/HTTPS and media/TURN ports, and private database ingress from the backend
-security group only. No public SSH or database port. No new database, NAT gateway
-or load balancer. Application source, credentials and DNS are separate steps.
+## Remaining validation and operational limits
 
-Runtime config now separates backend DOMAIN from public WEB_URL/CORS_ORIGINS.
-The Worker forwards the existing admin/user and ICE discovery routes as well as
-auth/meeting/recording/signaling routes. Backend authorization still owns access.
+A real signed-in meeting, two-participant media/TURN connection, recording upload, playback, sharing and deletion still need end-to-end verification. Infrastructure checks do not establish those behaviors.
 
-## Scoped engineering self-review
+This is a single-server demo using AWS credits; it is not a guaranteed free or highly available production deployment. EC2, disk, public IPv4, RDS, storage and traffic can incur AWS charges according to the account plan and credit balance.
 
-Scope: AWS stack/config/proxy files and connected Cloudflare route allowlist.
-Assumed load: small concurrent demo meetings, no high-availability guarantee.
+Existing database migrations and application accounts were reused; no passwords were rotated. Temporary password input files remain root-only on EC2 and are not mounted into running services. Administrator credentials are not present in runtime service configuration.
 
-- Correctness: full service/frontend build passes; three Worker tests pass,
-  including additional public API forwarding. Stack JSON parses and structural
-  assertions pass. Bootstrap passes bash syntax check and matches stack user data.
-- Security/data loss: no secrets in template or user data; no SSH/database public
-  ingress; RDS remains private; instance role is SSM Core only. No migrations or
-  production writes executed. Public service access and IAM creation await approval.
-- Concurrency/load: one host and a bounded media range, suitable for evaluation;
-  no load measurements, redundancy or capacity claim.
-- Tests: no AWS CloudFormation service validation, host boot, container runtime,
-  real WebSocket handshake, HTTPS, media or RDS connectivity verified yet.
-- Speed: no extra gateway/load balancer or application dependencies; browser
-  build retains its pre-existing large-bundle warning.
-- Lean: reuses existing Docker Compose services and existing RDS. No duplicate
-  database or orchestration service introduced.
-
-Verdict: ready for user review of the proposed creation/access scope, not a live
-deployment pass. Docker is unavailable locally, so Compose/Caddy runtime checks
-remain unverified. AWS launch permissions, pricing, quota, database application
-accounts and private source transfer still need verification during deployment.
+The deployment used the current local source. No Git commit or push was made, so Git-connected future deployments must include the Worker configuration and code before rebuilding from main.
