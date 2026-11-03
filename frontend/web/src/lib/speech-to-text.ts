@@ -20,6 +20,7 @@ let captionCounter = 0;
 export class SpeechToTextEngine {
     private recognition: any = null;
     private active: boolean = false;
+    private generation = 0;
     private options: STTOptions;
     private speakerName: string;
 
@@ -37,91 +38,76 @@ export class SpeechToTextEngine {
 
     /** Check if Web Speech API is available in this browser. */
     static isSupported(): boolean {
-        return !!(
-            (window as any).SpeechRecognition ||
-            (window as any).webkitSpeechRecognition
+        return typeof window !== 'undefined' && !!(
+            (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
         );
     }
 
-    /** Start speech recognition. */
+    /** Start recognition; API availability does not guarantee a language or offline processing. */
     start(): void {
         if (this.active) return;
-
-        const SpeechRecognition =
-            (window as any).SpeechRecognition ||
-            (window as any).webkitSpeechRecognition;
-
-        if (!SpeechRecognition) {
+        if (!SpeechToTextEngine.isSupported()) {
             this.options.onError?.('Speech recognition not supported in this browser');
             return;
         }
-
-        this.recognition = new SpeechRecognition();
-        this.recognition.lang = this.options.language;
-        this.recognition.continuous = this.options.continuous;
-        this.recognition.interimResults = this.options.interimResults;
-        this.recognition.maxAlternatives = this.options.maxAlternatives;
-
-        this.recognition.onresult = (event: any) => {
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                const result = event.results[i];
-                const transcript = result[0].transcript.trim();
-                if (!transcript) continue;
-
-                const caption: CaptionEntry = {
-                    id: `stt-${++captionCounter}`,
-                    speakerName: this.speakerName,
-                    text: transcript,
-                    isFinal: result.isFinal,
-                    timestamp: Date.now(),
-                };
-
-                this.options.onCaption?.(caption);
-            }
-        };
-
-        this.recognition.onerror = (event: any) => {
-            const errorMsg = event.error === 'no-speech'
-                ? 'No speech detected'
-                : `Speech recognition error: ${event.error}`;
-
-            if (event.error !== 'no-speech' && event.error !== 'aborted') {
-                this.options.onError?.(errorMsg);
-            }
-        };
-
-        this.recognition.onend = () => {
-            // Auto-restart if still active (continuous mode)
-            if (this.active) {
-                try {
-                    this.recognition.start();
-                } catch {
-                    // May throw if already started
-                }
-            }
-        };
-
+        const generation = ++this.generation;
+        const current = () => this.active && generation === this.generation;
+        const utteranceIds = new Map<number, string>();
         try {
-            this.recognition.start();
+            const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+            const recognition = new SpeechRecognition();
+            this.recognition = recognition;
+            recognition.lang = this.options.language;
+            recognition.continuous = this.options.continuous;
+            recognition.interimResults = this.options.interimResults;
+            recognition.maxAlternatives = this.options.maxAlternatives;
+            recognition.onresult = (event: any) => {
+                if (!current()) return;
+                for (let i = event.resultIndex; i < event.results.length && current(); i++) {
+                    const result = event.results[i];
+                    const transcript = result[0]?.transcript?.trim();
+                    if (!transcript) continue;
+                    if (!utteranceIds.has(i)) utteranceIds.set(i, `stt-${++captionCounter}`);
+                    this.options.onCaption?.({
+                        id: utteranceIds.get(i)!, speakerName: this.speakerName,
+                        text: transcript, isFinal: result.isFinal, timestamp: Date.now(),
+                    });
+                }
+            };
+            recognition.onerror = (event: any) => {
+                if (!current() || event.error === 'no-speech') return;
+                // Permission, service and network failures need an explicit user retry.
+                this.stop();
+                if (event.error !== 'aborted') this.options.onError?.(`Speech recognition error: ${event.error}`);
+            };
+            recognition.onend = () => {
+                if (!current()) return;
+                const restart = this.options.continuous;
+                this.stop();
+                if (restart) this.start();
+            };
             this.active = true;
-            console.info('🎙️ Speech-to-text started');
-        } catch (err) {
+            recognition.start();
+        } catch {
+            this.stop();
             this.options.onError?.('Failed to start speech recognition');
         }
     }
 
-    /** Stop speech recognition. */
+    /** Discard pending results as well as releasing the browser recognizer. */
     stop(): void {
         this.active = false;
-        if (this.recognition) {
-            try {
-                this.recognition.stop();
-            } catch {
-                // May throw if already stopped
-            }
-            this.recognition = null;
-        }
-        console.info('🎙️ Speech-to-text stopped');
+        ++this.generation;
+        const recognition = this.recognition;
+        this.recognition = null;
+        if (!recognition) return;
+        recognition.onresult = null;
+        recognition.onerror = null;
+        recognition.onend = null;
+        try {
+            if (typeof recognition.abort === 'function') recognition.abort();
+            else recognition.stop();
+        } catch { /* Already stopped. */ }
     }
 
     /** Check if the engine is active. */

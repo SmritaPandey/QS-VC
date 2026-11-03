@@ -1,0 +1,38 @@
+.service-page { padding-top:32px; padding-bottom:80px; }
+.intranet-layout { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:28px; max-width:1000px; margin:auto; }
+.service-card { min-width:0; padding:32px; border-radius:24px; background:#fff; box-shadow:0 8px 30px #102a4309,0 0 0 1px #006d7714; }
+.service-card h2 { font-size:24px; margin-bottom:16px; }
+.service-card h3 { font-size:18px; margin-top:24px; }
+.service-card p { line-height:1.7; margin:10px 0 18px; color:#496374; }
+.service-card .public-auth-form { margin-top:24px; }
+.service-card #workspace-help,.intranet-destination p { font-size:13px; }
+.intranet-destination { margin-top:24px; padding:20px; border-radius:16px; background:#e7f6f3; }
+.intranet-destination strong { display:block; overflow-wrap:anywhere; margin-bottom:20px; }
+.legal-page { max-width:850px; }
+.legal-draft { padding:20px; background:#fff6df; color:#694d16; border-radius:16px; line-height:1.6; }
+.legal-contents { display:flex; flex-wrap:wrap; gap:12px 20px; margin:28px 0; }
+.legal-page section { margin:32px 0; scroll-margin-top:24px; }
+.legal-page section h2 { font-size:23px; margin-bottom:12px; }
+.legal-page section p { line-height:1.8; color:#496374; }
+@media(max-width:720px) { .intranet-layout { grid-template-columns:1fr; } .service-card { padding:24px; } }
+
+/* Match the shared light workspace without nesting a second form card. */
+.intranet-page .public-page-intro { max-width:780px; margin-inline:auto; text-align:center; }
+.intranet-page .public-page-intro h1 { font-size:clamp(32px,4.4vw,56px); }
+.intranet-page .service-card { background:linear-gradient(155deg,#fff,#f5f8fa); }
+.intranet-page .service-card h2 { font-size:26px; }
+.intranet-page .service-card h3 { margin-bottom:8px; }
+.intranet-page .public-auth-form { border:0; border-radius:0; padding:0; }
+.intranet-page .public-auth-form input { border:1px solid #cad9df; border-radius:12px; }
+.intranet-page .public-auth-form input[aria-invalid=true] { border-color:#c9364f; }
+.intranet-page #workspace-error { color:#aa253b; }
+.intranet-page .service-card .qsvc-action { max-width:100%; }
+.intranet-page .service-card> a:not(.qsvc-action) { display:inline-flex; align-items:center; min-height:44px; color:#006d77; text-decoration:underline; text-underline-offset:4px; }
+.intranet-page .intranet-destination { box-shadow:0 4px 20px #006d7710; }
+@media(max-width:420px) { .intranet-page { padding-inline:16px; } .intranet-page .service-card { padding:20px; } .intranet-page .intranet-destination { padding:16px; } }
+.enterprise-access-badge { display:inline-flex; padding:6px 12px; border-radius:999px; background:#e2f3ef; color:#006d77; font-size:12px; font-weight:500; margin-bottom:20px; }
+.enterprise-address { overflow-wrap:anywhere; }
+.intranet-guide-tabs,.intranet-guide-controls { display:flex; gap:10px; margin-bottom:24px; }
+.intranet-guide-tabs button,.intranet-guide-controls button { min-width:44px; min-height:44px; border:0; border-radius:999px; padding:10px 16px; color:#102a43; background:#e9f1f3; }
+.intranet-guide-tabs button[aria-pressed=true] { background:#006d77; color:white; }
+.intranet-page .meeting-scene { margin-bottom:20px; }

@@ -1,0 +1,26 @@
+{$DOMAIN} {
+    encode zstd gzip
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy strict-origin-when-cross-origin
+        X-Frame-Options DENY
+    }
+    handle /api/auth/* {
+        reverse_proxy 127.0.0.1:4002
+    }
+    @meetings path /api/meetings /api/meetings/* /api/users/* /api/admin/*
+    handle @meetings {
+        reverse_proxy 127.0.0.1:4003
+    }
+    @recording path /api/recordings /api/recordings/*
+    handle @recording {
+        reverse_proxy 127.0.0.1:4004
+    }
+    @signaling path /ws /api/ice-servers
+    handle @signaling {
+        reverse_proxy 127.0.0.1:4001
+    }
+    handle {
+        reverse_proxy 127.0.0.1:8080
+    }
+}

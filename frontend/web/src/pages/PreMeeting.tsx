@@ -1,5 +1,8 @@
+import ActionContents from '../components/ActionContents';
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
+import { haptic } from '../lib/haptics';
+import { CameraCapture, watchCameraVisibility, watchCameraTrack, cameraAccessMessage } from '../lib/camera-capture';
 
 export default function PreMeeting() {
     const { meetingCode } = useParams<{ meetingCode: string }>();
@@ -8,8 +11,20 @@ export default function PreMeeting() {
     const [stream, setStream] = useState<MediaStream | null>(null);
     const [displayName, setDisplayName] = useState('');
     const [audioMuted, setAudioMuted] = useState(false);
-    const [videoOff, setVideoOff] = useState(false);
+    const [videoOff, setVideoOff] = useState(document.hidden);
+    const [cameraNotice, setCameraNotice] = useState('');
+    const [cameraPending, setCameraPending] = useState(!document.hidden);
     const [copied, setCopied] = useState(false);
+    const [shareOpen, setShareOpen] = useState(false);
+    const [micId, setMicId] = useState('');
+    const [cameraId, setCameraId] = useState('');
+    const streamRef = useRef<MediaStream | null>(null);
+    // Mirrors of the toggles so a re-opened preview starts in the chosen state.
+    const audioMutedRef = useRef(false);
+    const videoOffRef = useRef(document.hidden);
+    const cameraCapture = useRef(new CameraCapture());
+    const captureEpoch = useRef(0);
+    const audioRequest = useRef(0);
     const [devices, setDevices] = useState<{
         cameras: MediaDeviceInfo[];
         mics: MediaDeviceInfo[];
@@ -18,29 +33,100 @@ export default function PreMeeting() {
 
     const inviteLink = `${window.location.origin}/meeting/${meetingCode}/preview`;
 
-    useEffect(() => {
-        navigator.mediaDevices
-            .getUserMedia({ audio: true, video: { width: 1280, height: 720 } })
-            .then((s) => {
-                setStream(s);
-                if (videoRef.current) {
-                    videoRef.current.srcObject = s;
-                }
-            })
-            .catch((err) => {
-                console.error('Media access denied:', err);
-            });
-
-        navigator.mediaDevices.enumerateDevices().then((devs) => {
-            setDevices({
-                cameras: devs.filter((d) => d.kind === 'videoinput'),
-                mics: devs.filter((d) => d.kind === 'audioinput'),
-                speakers: devs.filter((d) => d.kind === 'audiooutput'),
-            });
+    const refreshDevices = () => navigator.mediaDevices.enumerateDevices().then((devs) => {
+        setDevices({
+            cameras: devs.filter((d) => d.kind === 'videoinput'),
+            mics: devs.filter((d) => d.kind === 'audioinput'),
+            speakers: devs.filter((d) => d.kind === 'audiooutput'),
         });
+    }).catch(() => { });
 
+    // Microphone changes do not reopen a camera that the user has turned off.
+    useEffect(() => {
+        let cancelled = false;
+        if (!navigator.mediaDevices?.getUserMedia) { audioMutedRef.current = true; setAudioMuted(true); return; }
+        const epoch = captureEpoch.current;
+        const request = ++audioRequest.current;
+        streamRef.current?.getAudioTracks().forEach(t => t.stop());
+        const audio = micId ? { deviceId: { exact: micId } } : true;
+        navigator.mediaDevices.getUserMedia({ audio, video: false }).then(s => {
+            if (cancelled || request !== audioRequest.current || epoch !== captureEpoch.current) { s.getTracks().forEach(t => t.stop()); return; }
+            const current = streamRef.current ?? new MediaStream();
+            current.getAudioTracks().forEach(t => { t.stop(); current.removeTrack(t); });
+            s.getAudioTracks().forEach(t => {
+                t.enabled = !audioMutedRef.current;
+                t.onended = () => { audioMutedRef.current = true; setAudioMuted(true); };
+                current.addTrack(t);
+            });
+            streamRef.current = current;
+            setStream(new MediaStream(current.getTracks()));
+            refreshDevices();
+        }).catch(() => { if (!cancelled) { audioMutedRef.current = true; setAudioMuted(true); refreshDevices(); } });
+        return () => { cancelled = true; };
+    }, [micId]);
+
+    useEffect(() => {
+        let cancelled = false;
+        if (!navigator.mediaDevices?.getUserMedia) { videoOffRef.current = true; setVideoOff(true); setCameraPending(false); setCameraNotice('Camera access is not supported in this browser.'); return; }
+        if (videoOff) { cameraCapture.current.stop(); setCameraPending(false); return; }
+        setCameraPending(true);
+        const video = { width: 1280, height: 720, ...(cameraId ? { deviceId: { exact: cameraId } } : {}) };
+        cameraCapture.current.start(video).then(track => {
+            if (!track || cancelled) {
+                track?.stop();
+                if (!cancelled) { videoOffRef.current = true; setVideoOff(true); setCameraPending(false); }
+                return;
+            }
+            const current = streamRef.current ?? new MediaStream();
+            current.getVideoTracks().forEach(t => current.removeTrack(t));
+            current.addTrack(track);
+            const unavailable = () => {
+                if (!streamRef.current?.getVideoTracks().includes(track)) return;
+                cameraCapture.current.stop();
+                videoOffRef.current = true;
+                setVideoOff(true);
+                setCameraNotice('Camera stopped by your browser or device. Start it when you are ready.');
+            };
+            watchCameraTrack(track, unavailable, interrupted => {
+                if (!streamRef.current?.getVideoTracks().includes(track)) return;
+                setCameraNotice(current => interrupted ? 'Camera temporarily interrupted. Waiting for your browser.' : current.startsWith('Camera temporarily interrupted.') ? '' : current);
+            });
+            streamRef.current = current;
+            setStream(new MediaStream(current.getTracks()));
+            setCameraNotice(track.muted ? 'Camera temporarily interrupted. Waiting for your browser.' : '');
+            setCameraPending(false);
+            refreshDevices();
+        }).catch(error => {
+            if (!cancelled) { console.warn('[Preview] Camera access failed:', error); setCameraPending(false); videoOffRef.current = true; setVideoOff(true); setCameraNotice(cameraAccessMessage(error)); refreshDevices(); }
+        });
+        return () => { cancelled = true; cameraCapture.current.stop(); };
+    }, [cameraId, videoOff]);
+
+    useEffect(() => {
+        const stopCamera = () => {
+            cameraCapture.current.stop();
+            videoOffRef.current = true;
+            setVideoOff(true);
+            setCameraNotice('Camera off while you were away. Start it when you are ready.');
+        };
+        const stopWatchingVisibility = watchCameraVisibility(stopCamera);
+        const onPageHide = () => {
+            captureEpoch.current++;
+            stopCamera();
+            streamRef.current?.getTracks().forEach(t => t.stop());
+            audioMutedRef.current = true;
+            setAudioMuted(true);
+        };
+        window.addEventListener('pagehide', onPageHide);
+        navigator.mediaDevices?.addEventListener('devicechange', refreshDevices);
         return () => {
-            stream?.getTracks().forEach((t) => t.stop());
+            stopWatchingVisibility();
+            window.removeEventListener('pagehide', onPageHide);
+            navigator.mediaDevices?.removeEventListener('devicechange', refreshDevices);
+            captureEpoch.current++;
+            cameraCapture.current.stop();
+            streamRef.current?.getTracks().forEach(t => t.stop());
+            streamRef.current = null;
         };
     }, []);
 
@@ -50,18 +136,35 @@ export default function PreMeeting() {
         }
     }, [stream]);
 
-    const toggleAudio = () => {
-        if (stream) {
-            stream.getAudioTracks().forEach((t) => (t.enabled = audioMuted));
-            setAudioMuted(!audioMuted);
+    // The choice is kept even if no device is available yet; it is what the meeting starts with.
+    const toggleAudio = async () => {
+        const muted = !audioMuted;
+        haptic(muted ? 'toggleOff' : 'toggleOn');
+        const current = streamRef.current ?? new MediaStream();
+        if (!muted && !current.getAudioTracks().some(t => t.readyState === 'live')) {
+            const epoch = captureEpoch.current;
+            const request = ++audioRequest.current;
+            try {
+                const acquired = await navigator.mediaDevices.getUserMedia({ audio: micId ? { deviceId: { exact: micId } } : true, video: false });
+                if (request !== audioRequest.current || epoch !== captureEpoch.current) { acquired.getTracks().forEach(t => t.stop()); return; }
+                const latest = streamRef.current ?? current;
+                latest.getAudioTracks().forEach(t => { t.stop(); latest.removeTrack(t); });
+                acquired.getAudioTracks().forEach(t => { latest.addTrack(t); t.onended = () => { audioMutedRef.current = true; setAudioMuted(true); }; });
+                streamRef.current = latest;
+                setStream(new MediaStream(latest.getTracks()));
+            } catch { return; }
         }
+        audioMutedRef.current = muted;
+        streamRef.current?.getAudioTracks().forEach(t => { t.enabled = !muted; });
+        setAudioMuted(muted);
     };
 
     const toggleVideo = () => {
-        if (stream) {
-            stream.getVideoTracks().forEach((t) => (t.enabled = videoOff));
-            setVideoOff(!videoOff);
-        }
+        const off = !videoOff;
+        haptic(off ? 'toggleOff' : 'toggleOn');
+        videoOffRef.current = off;
+        if (off) cameraCapture.current.stop();
+        setVideoOff(off);
     };
 
     const handleCopyLink = async () => {
@@ -84,12 +187,16 @@ export default function PreMeeting() {
     const handleJoin = () => {
         const name = displayName.trim() || 'Guest';
         navigate(`/meeting/${meetingCode}`, {
-            state: { displayName: name, audioMuted, videoOff },
+            state: { displayName: name, audioMuted, videoOff, micId: micId || stream?.getAudioTracks()[0]?.getSettings().deviceId, cameraId: cameraId || stream?.getVideoTracks()[0]?.getSettings().deviceId },
         });
     };
 
     return (
         <div className="pre-meeting-page">
+            <button type="button" className="preview-back" onClick={() => navigate('/app', { replace: true })}>
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m12 5-7 7 7 7M5 12h14" /></svg>
+                Back to meetings
+            </button>
             <div className="pre-meeting-container">
                 <div className="preview-section">
                     <div className="video-preview-wrapper">
@@ -98,9 +205,9 @@ export default function PreMeeting() {
                             autoPlay
                             playsInline
                             muted
-                            className={`video-preview ${videoOff ? 'video-off' : ''}`}
+                            className={`video-preview ${videoOff || cameraPending ? 'video-off' : ''}`}
                         />
-                        {videoOff && (
+                        {(videoOff || cameraPending) && (
                             <div className="video-off-overlay">
                                 <div className="avatar-circle">
                                     {(displayName || 'G')[0].toUpperCase()}
@@ -111,6 +218,8 @@ export default function PreMeeting() {
                             <button
                                 className={`preview-btn ${audioMuted ? 'muted' : ''}`}
                                 onClick={toggleAudio}
+                                aria-pressed={!audioMuted}
+                                aria-label="Microphone"
                                 title={audioMuted ? 'Unmute' : 'Mute'}
                             >
                                 <span className="mi">{audioMuted ? 'mic_off' : 'mic'}</span>
@@ -118,6 +227,9 @@ export default function PreMeeting() {
                             <button
                                 className={`preview-btn ${videoOff ? 'muted' : ''}`}
                                 onClick={toggleVideo}
+                                aria-pressed={!videoOff && !cameraPending}
+                                aria-busy={cameraPending}
+                                aria-label="Camera"
                                 title={videoOff ? 'Turn on camera' : 'Turn off camera'}
                             >
                                 <span className="mi">{videoOff ? 'videocam_off' : 'videocam'}</span>
@@ -132,21 +244,34 @@ export default function PreMeeting() {
                         <span className="meeting-code-label">{meetingCode}</span>
                     </div>
 
-                    <h2>Ready to join?</h2>
+                    <h2>Before you join.</h2>
+                    {cameraNotice && <p role="status">{cameraNotice}</p>}
 
-                    {/* Copy Invite Link */}
+                    <div className="preview-invite-actions">
                     <button
-                        className="btn-copy-invite"
+                        className="btn-copy-invite qsvc-action qsvc-action--secondary"
                         onClick={handleCopyLink}
                         title="Copy meeting link to share with others"
-                    >
-                        <span className="mi mi-sm">{copied ? 'done' : 'link'}</span>
-                        {copied ? 'Link Copied!' : 'Copy Invite Link'}
-                    </button>
+                    ><ActionContents><span className="mi mi-sm" aria-hidden="true">{copied ? 'done' : 'link'}</span>
+                        {copied ? 'Link copied' : 'Copy invitation link'}</ActionContents></button>
+                    <button type="button" className="preview-share" aria-label="Share meeting invitation" title="Share invitation" aria-expanded={shareOpen} onClick={async () => {
+                        if (navigator.share) {
+                            try { await navigator.share({ title: 'Join my QS-VC meeting', text: 'Join me on QS-VC', url: inviteLink }); }
+                            catch (error) { if (!(error instanceof DOMException && error.name === 'AbortError')) setShareOpen(true); }
+                        } else setShareOpen(value => !value);
+                    }}><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m9 10 6-4M9 14l6 4"/></svg></button>
+                    </div>
+                    {shareOpen && <div className="preview-share-options" aria-label="Share invitation options" onKeyDown={event => { if (event.key === 'Escape') { setShareOpen(false); document.querySelector<HTMLButtonElement>('.preview-share')?.focus(); } }}>
+                        <a href={`https://wa.me/?text=${encodeURIComponent(`Join my QS-VC meeting: ${inviteLink}`)}`} target="_blank" rel="noopener noreferrer">WhatsApp</a>
+                        <a href={`mailto:?subject=${encodeURIComponent('Join my QS-VC meeting')}&body=${encodeURIComponent(inviteLink)}`}>Email</a>
+                        <button type="button" onClick={() => setShareOpen(false)}>Close</button>
+                    </div>}
 
+                    <label className="field-label" htmlFor="display-name">Your name</label>
                     <input
+                        id="display-name"
                         type="text"
-                        placeholder="Enter your name"
+                        aria-label="Your display name" placeholder="Enter your name"
                         value={displayName}
                         onChange={(e) => setDisplayName(e.target.value)}
                         className="input-name"
@@ -156,9 +281,9 @@ export default function PreMeeting() {
 
                     <div className="device-selectors">
                         <label>
-                            <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '4px' }}>videocam</span>
+                            <span className="mi mi-sm" aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: '4px' }}>videocam</span>
                             Camera
-                            <select className="device-select">
+                            <select className="device-select" value={cameraId || stream?.getVideoTracks()[0]?.getSettings().deviceId || ''} onChange={(e) => setCameraId(e.target.value)}>
                                 {devices.cameras.map((d) => (
                                     <option key={d.deviceId} value={d.deviceId}>
                                         {d.label || `Camera ${d.deviceId.slice(0, 8)}`}
@@ -167,9 +292,9 @@ export default function PreMeeting() {
                             </select>
                         </label>
                         <label>
-                            <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '4px' }}>mic</span>
+                            <span className="mi mi-sm" aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: '4px' }}>mic</span>
                             Microphone
-                            <select className="device-select">
+                            <select className="device-select" value={micId || stream?.getAudioTracks()[0]?.getSettings().deviceId || ''} onChange={(e) => setMicId(e.target.value)}>
                                 {devices.mics.map((d) => (
                                     <option key={d.deviceId} value={d.deviceId}>
                                         {d.label || `Mic ${d.deviceId.slice(0, 8)}`}
@@ -179,10 +304,8 @@ export default function PreMeeting() {
                         </label>
                     </div>
 
-                    <button className="btn-join-meeting" onClick={handleJoin}>
-                        <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '6px' }}>login</span>
-                        Join Meeting
-                    </button>
+                    <button className="btn-join-meeting qsvc-action" onClick={handleJoin}><ActionContents><span className="mi mi-sm" aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: '6px' }}>login</span>
+                        Join meeting</ActionContents></button>
                 </div>
             </div>
         </div>

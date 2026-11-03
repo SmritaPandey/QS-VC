@@ -1,18 +1,6 @@
 /**
- * Real-Time Voice Translation Engine for QS-VC.
- *
- * Pipeline: Speaker Audio → STT → Translation → TTS → Listener Audio
- *
- * Architecture:
- * 1. Speaker speaks in their language (captured via Web Speech API or Whisper)
- * 2. Transcript sent to translation service (LibreTranslate API / fallback to browser)
- * 3. Translated text either:
- *    a) Displayed as captions (always)
- *    b) Spoken via Web Speech Synthesis TTS (optional, per-listener choice)
- * 4. Each listener independently selects their preferred language
- *
- * Supports 50+ languages including all 22 Indian scheduled languages,
- * Chinese, Japanese, Korean, Arabic, Hebrew, Spanish, German, Dutch, etc.
+ * Translation helpers. A configured, disclosed service is required.
+ * These helpers are not yet connected to the active meeting media flow.
  */
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -126,14 +114,12 @@ export interface TranslationResult {
     translatedText: string;
     sourceLanguage: string;
     targetLanguage: string;
-    confidence: number;
+    confidence?: number;
     timestamp: number;
 }
 
 export interface TranslationEngineOptions {
     apiUrl?: string;                // LibreTranslate API endpoint
-    apiKey?: string;                // API key if required
-    fallbackToGoogle?: boolean;     // Use Google Translate as fallback
     cacheTranslations?: boolean;    // Cache repeated translations
     maxCacheSize?: number;          // Max cache entries
 }
@@ -145,8 +131,6 @@ export class TranslationEngine {
     constructor(options?: TranslationEngineOptions) {
         this.options = {
             apiUrl: options?.apiUrl || '/api/translate',
-            apiKey: options?.apiKey,
-            fallbackToGoogle: options?.fallbackToGoogle ?? true,
             cacheTranslations: options?.cacheTranslations ?? true,
             maxCacheSize: options?.maxCacheSize ?? 1000,
         };
@@ -154,7 +138,7 @@ export class TranslationEngine {
 
     /**
      * Translate text from source to target language.
-     * Uses cascading fallback: API → Google Translate → MyMemory → original text
+     * Uses only the configured endpoint. Failure must not look like a translation.
      */
     async translate(
         text: string,
@@ -173,33 +157,19 @@ export class TranslationEngine {
         }
 
         // Check cache
-        const cacheKey = `${srcBase}:${tgtBase}:${text.toLowerCase().trim()}`;
+        const cacheKey = `${sourceLang}:${targetLang}:${text}`;
         if (this.options.cacheTranslations && this.cache.has(cacheKey)) {
             return {
                 originalText: text,
                 translatedText: this.cache.get(cacheKey)!,
                 sourceLanguage: sourceLang,
                 targetLanguage: targetLang,
-                confidence: 0.95,
                 timestamp: Date.now(),
             };
         }
 
-        // Try primary API (LibreTranslate or custom)
-        let translated = await this.translateViaAPI(text, srcBase, tgtBase);
-        let confidence = 0.9;
-
-        // Fallback: MyMemory (free, no API key)
-        if (!translated) {
-            translated = await this.translateViaMyMemory(text, srcBase, tgtBase);
-            confidence = 0.75;
-        }
-
-        // Fallback: Browser-native (limited languages)
-        if (!translated) {
-            translated = text; // Return original if all fail
-            confidence = 0;
-        }
+        const translated = await this.translateViaAPI(text, srcBase, tgtBase);
+        if (!translated) throw new Error('Translation is unavailable. Original audio remains available.');
 
         // Cache result
         if (this.options.cacheTranslations && translated !== text) {
@@ -215,64 +185,28 @@ export class TranslationEngine {
             translatedText: translated,
             sourceLanguage: sourceLang,
             targetLanguage: targetLang,
-            confidence,
             timestamp: Date.now(),
         };
     }
 
-    /** Translate via LibreTranslate or custom API. */
+    /** Use only the configured service; never send meeting text to a fallback provider. */
     private async translateViaAPI(text: string, source: string, target: string): Promise<string | null> {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
         try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 5000);
-
             const res = await fetch(this.options.apiUrl!, {
-                method: 'POST',
-                signal: controller.signal,
+                method: 'POST', signal: controller.signal,
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    q: text,
-                    source,
-                    target,
-                    api_key: this.options.apiKey || '',
-                }),
+                body: JSON.stringify({ q: text, source, target }),
             });
-
-            clearTimeout(timeout);
             if (!res.ok) return null;
-
             const data = await res.json();
-            return data.translatedText || null;
+            return typeof data.translatedText === 'string' && data.translatedText.trim()
+                ? data.translatedText : null;
         } catch {
             return null;
-        }
-    }
-
-    /** Translate via MyMemory (free API, 5000 chars/day). */
-    private async translateViaMyMemory(text: string, source: string, target: string): Promise<string | null> {
-        try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 5000);
-
-            const langpair = `${source}|${target}`;
-            const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${encodeURIComponent(langpair)}`;
-
-            const res = await fetch(url, { signal: controller.signal });
+        } finally {
             clearTimeout(timeout);
-            if (!res.ok) return null;
-
-            const data = await res.json();
-            if (data.responseStatus === 200 && data.responseData?.translatedText) {
-                const result = data.responseData.translatedText;
-                // MyMemory returns CAPITALIZED text for some languages — fix
-                if (result === result.toUpperCase() && result.length > 5) {
-                    return result.charAt(0).toUpperCase() + result.slice(1).toLowerCase();
-                }
-                return result;
-            }
-            return null;
-        } catch {
-            return null;
         }
     }
 
@@ -292,141 +226,148 @@ export interface TTSOptions {
     pitch?: number;         // Pitch (0 – 2, default: 1)
     volume?: number;        // Volume (0 – 1, default: 0.8)
     preferredVoice?: string; // Preferred voice name (exact match)
+    onSpeakingChange?: (speaking: boolean) => void;
 }
 
 export class TextToSpeechEngine {
-    private synth: SpeechSynthesis;
+    private synth: SpeechSynthesis | null;
     private utteranceQueue: SpeechSynthesisUtterance[] = [];
-    private speaking: boolean = false;
-    private active: boolean = false;
+    private current: SpeechSynthesisUtterance | null = null;
+    private active = false;
+    private disposed = false;
     private options: TTSOptions;
-    private voiceCache: Map<string, SpeechSynthesisVoice> = new Map();
+    private voices: SpeechSynthesisVoice[] = [];
+    private onVoicesChanged = () => this.loadVoices();
 
     constructor(options: TTSOptions) {
-        this.synth = window.speechSynthesis;
-        this.options = {
-            rate: options.rate ?? 1.1,
-            pitch: options.pitch ?? 1,
-            volume: options.volume ?? 0.8,
-            ...options,
-        };
+        this.synth = typeof window !== 'undefined' && typeof SpeechSynthesisUtterance !== 'undefined'
+            ? window.speechSynthesis || null : null;
+        this.options = { rate: 1.1, pitch: 1, volume: 0.8, ...options };
         this.loadVoices();
-
-        // Voices may load asynchronously
-        this.synth.onvoiceschanged = () => this.loadVoices();
+        this.synth?.addEventListener('voiceschanged', this.onVoicesChanged);
     }
 
-    /** Get available voices. */
     private loadVoices(): void {
-        const voices = this.synth.getVoices();
-        this.voiceCache.clear();
-        for (const voice of voices) {
-            // Map by language code (first match wins)
-            const langBase = voice.lang.split('-')[0];
-            if (!this.voiceCache.has(voice.lang)) {
-                this.voiceCache.set(voice.lang, voice);
-            }
-            if (!this.voiceCache.has(langBase)) {
-                this.voiceCache.set(langBase, voice);
-            }
-        }
+        this.voices = this.synth?.getVoices() || [];
     }
 
-    /** Find the best voice for a language code. */
+    /** A matching language is mandatory; never rely on the browser's default voice. */
     getBestVoice(langCode: string): SpeechSynthesisVoice | null {
-        // Exact match
-        if (this.voiceCache.has(langCode)) return this.voiceCache.get(langCode)!;
-        // Base language match
-        const base = langCode.split('-')[0];
-        if (this.voiceCache.has(base)) return this.voiceCache.get(base)!;
-        return null;
+        const language = langCode.toLowerCase();
+        const base = language.split('-')[0];
+        const matches = this.voices.filter(voice => voice.lang.toLowerCase().split('-')[0] === base);
+        return matches.find(voice => voice.name === this.options.preferredVoice)
+            || matches.find(voice => voice.lang.toLowerCase() === language)
+            || matches[0] || null;
     }
 
-    /** Speak translated text. */
-    speak(text: string, langCode?: string): void {
-        if (!this.active) return;
-        if (!text.trim()) return;
+    getVoiceSupport(langCode: string): { supported: boolean; local: boolean; remote: boolean } {
+        const base = langCode.toLowerCase().split('-')[0];
+        const matches = this.voices.filter(voice => voice.lang.toLowerCase().split('-')[0] === base);
+        return {
+            supported: matches.length > 0,
+            local: matches.some(voice => voice.localService),
+            remote: matches.some(voice => !voice.localService),
+        };
+    }
 
-        const utterance = new SpeechSynthesisUtterance(text);
+    /** True means accepted for speech, not proof that audio was physically heard. */
+    speak(text: string, langCode?: string): boolean {
+        if (!this.active || !this.synth || this.disposed || !text.trim()) return false;
         const lang = langCode || this.options.language;
+        const voice = this.getBestVoice(lang);
+        if (!voice) return false;
+        const utterance = new SpeechSynthesisUtterance(text);
         utterance.lang = lang;
+        utterance.voice = voice;
         utterance.rate = this.options.rate!;
         utterance.pitch = this.options.pitch!;
         utterance.volume = this.options.volume!;
-
-        // Assign best voice
-        const voice = this.getBestVoice(lang);
-        if (voice) utterance.voice = voice;
-
-        utterance.onend = () => {
-            this.speaking = false;
+        const completed = () => {
+            if (this.current !== utterance) return;
+            this.current = null;
+            this.options.onSpeakingChange?.(false);
             this.processQueue();
         };
-
-        utterance.onerror = () => {
-            this.speaking = false;
-            this.processQueue();
+        utterance.onstart = () => {
+            if (this.current === utterance) this.options.onSpeakingChange?.(true);
         };
-
-        // Queue the utterance
+        utterance.onend = completed;
+        utterance.onerror = completed;
         this.utteranceQueue.push(utterance);
-        this.processQueue();
+        // Keep only the newest three waiting utterances during a backlog.
+        while (this.utteranceQueue.length > 3) this.utteranceQueue.shift();
+        return this.processQueue();
     }
 
-    /** Process the TTS queue. */
-    private processQueue(): void {
-        if (this.speaking || this.utteranceQueue.length === 0) return;
-
-        // Keep queue short — skip old utterances if backed up
-        while (this.utteranceQueue.length > 3) {
-            this.utteranceQueue.shift();
-        }
-
+    private processQueue(): boolean {
+        if (!this.active || !this.synth || this.disposed) return false;
+        if (this.current) return true;
         const next = this.utteranceQueue.shift();
-        if (next) {
-            this.speaking = true;
+        if (!next) return true;
+        this.current = next;
+        try {
             this.synth.speak(next);
+            return true;
+        } catch {
+            this.current = null;
+            this.options.onSpeakingChange?.(false);
+            next.onstart = null;
+            next.onend = null;
+            next.onerror = null;
+            return false;
         }
     }
 
-    /** Start TTS engine. */
     start(): void {
-        this.active = true;
+        if (!this.disposed) this.active = true;
     }
 
-    /** Stop TTS engine and clear queue. */
     stop(): void {
         this.active = false;
-        this.synth.cancel();
+        const current = this.current;
+        this.current = null;
         this.utteranceQueue = [];
-        this.speaking = false;
+        this.options.onSpeakingChange?.(false);
+        if (current) {
+            current.onstart = null;
+            current.onend = null;
+            current.onerror = null;
+            this.synth?.cancel();
+        }
     }
 
-    /** Set output language. */
     setLanguage(lang: string): void {
+        if (lang === this.options.language) return;
+        const wasActive = this.active;
+        this.stop();
         this.options.language = lang;
+        if (wasActive) this.start();
     }
 
-    /** Set volume. */
     setVolume(volume: number): void {
         this.options.volume = Math.max(0, Math.min(1, volume));
     }
 
-    /** Check if a language has TTS voice available. */
-    static hasVoice(langCode: string): boolean {
-        const voices = window.speechSynthesis.getVoices();
-        const base = langCode.split('-')[0];
-        return voices.some(v => v.lang === langCode || v.lang.startsWith(base));
+    dispose(): void {
+        this.stop();
+        this.disposed = true;
+        this.synth?.removeEventListener('voiceschanged', this.onVoicesChanged);
+        this.voices = [];
     }
 
-    /** Get all available TTS voices grouped by language. */
+    static hasVoice(langCode: string, localOnly = false): boolean {
+        const base = langCode.toLowerCase().split('-')[0];
+        return Object.values(this.getAvailableVoices()).flat().some(voice =>
+            voice.lang.toLowerCase().split('-')[0] === base && (!localOnly || voice.localService));
+    }
+
     static getAvailableVoices(): Record<string, SpeechSynthesisVoice[]> {
-        const voices = window.speechSynthesis.getVoices();
+        if (typeof window === 'undefined' || typeof SpeechSynthesisUtterance === 'undefined' || !window.speechSynthesis) return {};
         const grouped: Record<string, SpeechSynthesisVoice[]> = {};
-        for (const v of voices) {
-            const base = v.lang.split('-')[0];
-            if (!grouped[base]) grouped[base] = [];
-            grouped[base].push(v);
+        for (const voice of window.speechSynthesis.getVoices()) {
+            const base = voice.lang.toLowerCase().split('-')[0];
+            (grouped[base] ||= []).push(voice);
         }
         return grouped;
     }
@@ -530,8 +471,7 @@ export class RealtimeTranslationPipeline {
 
             // TTS: only speak final results
             if (isFinal && this.tts && this.config.enableTTS && result.translatedText) {
-                this.tts.speak(result.translatedText, this.config.listenerLanguage);
-                spokenAloud = true;
+                spokenAloud = this.tts.speak(result.translatedText, this.config.listenerLanguage);
             }
 
             this.config.onTranslation?.({ ...result, spokenAloud });
@@ -562,6 +502,8 @@ export class RealtimeTranslationPipeline {
                 volume: this.config.ttsVolume ?? 0.7,
             });
             if (this.active) this.tts.start();
+        } else if (enabled && this.active) {
+            this.tts?.start();
         } else if (!enabled && this.tts) {
             this.tts.stop();
         }

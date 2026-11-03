@@ -1,0 +1,6 @@
+.qsvc-logo.qsvc-logo--meeting { display:inline-flex; align-items:center; gap:7px; flex:none; white-space:nowrap; }
+.qsvc-logo--meeting .qsvc-logo-symbol { width:28px; height:28px; flex:none; filter:drop-shadow(0 0 5px rgb(120 98 235 / 25%)); }
+.qsvc-logo--meeting .qsvc-logo-name { font-size:15px; font-weight:600; line-height:1.2; color:#dce6ff; background:linear-gradient(100deg,#dce6ff,#aeb6ff,#43d9c2,#dce6ff); background-size:200% 100%; background-clip:text; -webkit-background-clip:text; -webkit-text-fill-color:transparent; animation:meeting-brand-flow 6s linear infinite; }
+@keyframes meeting-brand-flow { to { background-position:200% 50%; } }
+@media (prefers-reduced-motion:reduce) { .qsvc-logo--meeting .qsvc-logo-name { animation:none; } }
+@media (forced-colors:active) { .qsvc-logo--meeting .qsvc-logo-name { background:none; -webkit-text-fill-color:CanvasText; color:CanvasText; } }

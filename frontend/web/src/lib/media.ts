@@ -21,6 +21,7 @@ export interface ConsumerInfo {
 
 export class MediaManager {
     private device: Device | null = null;
+    private revision = 0;
     private sendTransport: msTypes.Transport | null = null;
     private recvTransport: msTypes.Transport | null = null;
     private producers: Map<string, msTypes.Producer> = new Map();
@@ -41,8 +42,11 @@ export class MediaManager {
      * Initialize the mediasoup Device with router RTP capabilities.
      */
     async loadDevice(routerRtpCapabilities: msTypes.RtpCapabilities): Promise<void> {
-        this.device = new Device();
-        await this.device.load({ routerRtpCapabilities });
+        const revision = this.revision;
+        const device = new Device();
+        await device.load({ routerRtpCapabilities });
+        if (revision !== this.revision) throw new Error('Media session closed');
+        this.device = device;
         console.log('[Media] Device loaded, capabilities:', this.device.rtpCapabilities);
     }
 
@@ -126,10 +130,14 @@ export class MediaManager {
      * Publish a local media track (audio or video).
      */
     async produce(track: MediaStreamTrack, appData: Record<string, unknown> = {}): Promise<msTypes.Producer> {
-        if (!this.sendTransport) throw new Error('Send transport not created');
+        const transport = this.sendTransport;
+        const revision = this.revision;
+        if (!transport) throw new Error('Send transport not created');
 
-        const producer = await this.sendTransport.produce({
+        const producer = await transport.produce({
             track,
+            // The page owns camera/screen lifetime; replacing a producer must not stop its previous source.
+            stopTracks: false,
             encodings: track.kind === 'video'
                 ? [
                     { maxBitrate: 100000, scaleResolutionDownBy: 4 },   // low
@@ -143,6 +151,7 @@ export class MediaManager {
             appData,
         });
 
+        if (revision !== this.revision || transport.closed) { producer.close(); throw new Error('Media session closed'); }
         this.producers.set(producer.id, producer);
         console.log(`[Media] Producing ${track.kind} [producer:${producer.id}]`);
         return producer;
@@ -152,25 +161,30 @@ export class MediaManager {
      * Consume a remote producer (audio or video from another peer).
      */
     async consume(producerPeerId: string, producerId: string): Promise<ConsumerInfo> {
-        if (!this.recvTransport) throw new Error('Recv transport not created');
+        const transport = this.recvTransport;
+        const revision = this.revision;
+        if (!transport) throw new Error('Recv transport not created');
 
         const result = await signaling.request('consume', {
             producerPeerId,
             producerId,
         });
 
-        const consumer = await this.recvTransport.consume({
+        if (revision !== this.revision || transport.closed) throw new Error('Media session closed');
+        const consumer = await transport.consume({
             id: result.consumerId,
             producerId: result.producerId,
             kind: result.kind,
             rtpParameters: result.rtpParameters,
         });
 
+        if (revision !== this.revision || transport.closed) { consumer.close(); throw new Error('Media session closed'); }
         // Resume the consumer on the server
         await signaling.request('resumeConsumer', {
             consumerId: consumer.id,
         });
 
+        if (revision !== this.revision || transport.closed) { consumer.close(); throw new Error('Media session closed'); }
         const info: ConsumerInfo = {
             id: consumer.id,
             kind: consumer.kind,
@@ -197,33 +211,33 @@ export class MediaManager {
     }
 
     /**
-     * Mute/unmute a producer's track.
+     * Pause or resume the producer of a kind explicitly (idempotent).
+     * Keeps the sent state matching the UI.
      */
-    async toggleMute(kind: msTypes.MediaKind): Promise<boolean> {
+    setPaused(kind: msTypes.MediaKind, paused: boolean): void {
         for (const producer of this.producers.values()) {
-            if (producer.kind === kind) {
-                if (producer.paused) {
-                    producer.resume();
-                    return false; // unmuted
-                } else {
-                    producer.pause();
-                    return true; // muted
-                }
-            }
+            if (producer.kind !== kind || producer.closed) continue;
+            if (paused && !producer.paused) producer.pause();
+            if (!paused && producer.paused) producer.resume();
         }
-        return false;
     }
 
     /**
      * Replace video track (e.g. switch camera or screen share).
      */
-    async replaceVideoTrack(newTrack: MediaStreamTrack): Promise<void> {
+    async replaceTrack(kind: msTypes.MediaKind, newTrack: MediaStreamTrack): Promise<void> {
         for (const producer of this.producers.values()) {
-            if (producer.kind === 'video') {
+            if (producer.kind === kind && !producer.closed) {
                 await producer.replaceTrack({ track: newTrack });
-                break;
+                return;
             }
         }
+    }
+
+    get canSend(): boolean { return !!this.sendTransport && !this.sendTransport.closed; }
+
+    hasProducer(kind: msTypes.MediaKind): boolean {
+        return Array.from(this.producers.values()).some(p => p.kind === kind && !p.closed);
     }
 
     getConsumers(): ConsumerInfo[] {
@@ -234,6 +248,7 @@ export class MediaManager {
      * Close everything gracefully.
      */
     close(): void {
+        this.revision++;
         for (const producer of this.producers.values()) {
             producer.close();
         }

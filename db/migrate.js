@@ -10,17 +10,17 @@ const { Pool } = require('pg');
 const fs = require('fs');
 const path = require('path');
 
-const pool = new Pool({
-    host: process.env.POSTGRES_HOST || 'localhost',
-    port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
-    database: process.env.POSTGRES_DB || 'qsvc',
-    user: process.env.POSTGRES_USER || 'qsvc',
-    password: process.env.POSTGRES_PASSWORD || 'qsvc_dev_2025',
-});
+require('dotenv').config({ path: path.join(__dirname, '../.env') });
+const { databaseConfig } = require('../shared/database.cjs');
+const pool = new Pool(databaseConfig());
+pool.on('error', () => console.error('Database connection lost'));
 
 async function migrate() {
-    const client = await pool.connect();
+    let client;
     try {
+        client = await pool.connect();
+        // Prevent two deployment processes from applying the same migration concurrently.
+        await client.query('SELECT pg_advisory_lock(75291001)');
         // Create migrations tracking table
         await client.query(`
             CREATE TABLE IF NOT EXISTS _migrations (
@@ -60,13 +60,15 @@ async function migrate() {
             } catch (err) {
                 await client.query('ROLLBACK');
                 console.error(`  ✗ ${file} FAILED:`, err.message);
-                process.exit(1);
+                throw new Error('Database migration failed');
             }
         }
 
         console.log(`\n  Migration complete. ${count} new migration(s) applied.`);
     } finally {
-        client.release();
+        if (client) {
+            client.release(true);
+        }
         await pool.end();
     }
 }
@@ -75,5 +77,5 @@ console.log('QS-VC Database Migration');
 console.log('========================\n');
 migrate().catch((err) => {
     console.error('Migration failed:', err);
-    process.exit(1);
+    process.exitCode = 1;
 });

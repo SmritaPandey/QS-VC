@@ -1,11 +1,22 @@
 import http from 'http';
 import url from 'url';
-import jwt from 'jsonwebtoken';
 import { WebSocketServer, WebSocket } from 'ws';
 import { handleRpcMessage, handlePeerDisconnect } from './rpc/handler.js';
 import { logger } from './logger.js';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production';
+const AUTH_URL = (process.env.AUTH_INTERNAL_URL || 'http://localhost:4002').replace(/\/$/, '');
+
+export async function verifySession(token: string): Promise<AuthPayload> {
+    const response = await fetch(`${AUTH_URL}/api/auth/verify`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(3000),
+    });
+    if (!response.ok) throw new Error('Invalid authentication');
+    const body = await response.json() as { valid?: boolean; payload?: AuthPayload };
+    const payload = body.payload;
+    if (!body.valid || !payload?.sub) throw new Error('Invalid authentication');
+    return payload;
+}
 
 interface AuthPayload {
     sub: string;
@@ -17,23 +28,26 @@ interface AuthPayload {
 
 /** Attach JSON-RPC signaling WebSocket to an existing HTTP server. */
 export function attachSignalingWebSocket(server: http.Server): WebSocketServer {
-    const wss = new WebSocketServer({ server, path: '/ws' });
+    const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024 });
 
     wss.on('connection', (ws: WebSocket, req) => {
         let authUser: AuthPayload | null = null;
+        let token: string | undefined;
         try {
             const parsedUrl = url.parse(req.url || '', true);
-            const token = (parsedUrl.query.token as string)
+            token = (parsedUrl.query.token as string)
                 || req.headers.authorization?.replace('Bearer ', '');
 
             if (token) {
-                authUser = jwt.verify(token, JWT_SECRET) as AuthPayload;
-                logger.info(`WebSocket authenticated: ${authUser.email} from ${req.socket.remoteAddress}`);
+                // Verify before every RPC below, including the initial join.
+                logger.info(`Authenticated WebSocket session requested from ${req.socket.remoteAddress}`);
             } else {
                 logger.info(`WebSocket connected (guest) from ${req.socket.remoteAddress}`);
             }
         } catch {
-            logger.warn(`WebSocket auth failed from ${req.socket.remoteAddress} — allowing as guest`);
+            logger.warn(`WebSocket auth failed from ${req.socket.remoteAddress}`);
+            ws.close(4003, 'Invalid authentication');
+            return;
         }
 
         const connectionState: {
@@ -48,6 +62,16 @@ export function attachSignalingWebSocket(server: http.Server): WebSocketServer {
 
         ws.on('message', async (data) => {
             try {
+                if (token) {
+                    try {
+                        authUser = await verifySession(token);
+                        connectionState.authUser = authUser;
+                    } catch {
+                        ws.close(4003, 'Session expired or invalid');
+                        return;
+                    }
+                }
+                if (ws.readyState !== WebSocket.OPEN) return;
                 const message = JSON.parse(data.toString());
 
                 if (message.jsonrpc !== '2.0' || !message.method) {

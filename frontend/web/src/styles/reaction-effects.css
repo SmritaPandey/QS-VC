@@ -1,0 +1,16 @@
+.meeting-room .reaction-picker.reaction-picker-personal { display:flex; flex-direction:column; align-items:stretch; width:min(420px,calc(100% - 24px)); max-height:calc(100% - 24px); overflow-y:auto; border-radius:18px; padding:12px; gap:12px; }
+.reaction-emoji-row { display:grid; grid-template-columns:repeat(8,minmax(0,1fr)); gap:4px; }
+.meeting-room .reaction-picker-personal .reaction-pick-btn { width:100%; min-width:0; min-height:40px; height:40px; }
+.reaction-preferences { display:flex; align-items:end; gap:8px; flex-wrap:wrap; }
+.reaction-preferences label { display:flex; flex:1; flex-direction:column; gap:4px; color:#dce9ef; font-size:12px; font-weight:400; }
+.reaction-preferences select { min-height:44px; width:100%; border:1px solid #78909e; border-radius:8px; padding:6px; background:#162331; color:#f5f8fa; font-size:14px; }
+.meeting-room .reaction-sound-preview { min-height:44px; padding:8px 10px; background:#16473f; color:#b8f6e9; border:1px solid #43d9c299; border-radius:8px; font-size:13px; }
+.meeting-room .reaction-sound-preview:disabled { opacity:.5; cursor:default; }
+.reaction-picker-personal :is(select,button):focus-visible { outline:2px solid #43d9c2; outline-offset:3px; }
+.meeting-room .reaction-private-note { margin:0; color:#b5ced6; font-size:12px; font-weight:400; line-height:1.5; }
+.reaction-effect-ring { pointer-events:none; position:absolute; top:0; left:50%; width:44px; height:44px; border:1px solid #43d9c2; border-radius:50%; box-shadow:0 0 14px #43d9c24d; animation:reactionPersonalGlow 650ms ease-out both; }
+.floating-reaction[data-effect=celebrate] .reaction-effect-ring { border-style:dashed; border-color:#b5a3ff; box-shadow:0 0 18px #43d9c24d; animation:reactionPersonalCelebrate 850ms ease-out both; }
+@keyframes reactionPersonalGlow { from { transform:translateX(-50%) scale(.7); opacity:.8; } to { transform:translateX(-50%) scale(1.6); opacity:0; } }
+@keyframes reactionPersonalCelebrate { from { transform:translateX(-50%) rotate(0) scale(.6); opacity:.8; } to { transform:translateX(-50%) rotate(100deg) scale(2); opacity:0; } }
+@media(max-width:767px) { .meeting-room .reaction-picker.reaction-picker-personal { left:12px; right:12px; width:auto; transform:none; } .reaction-emoji-row { grid-template-columns:repeat(4,minmax(0,1fr)); } }
+@media(prefers-reduced-motion:reduce) { .reaction-effect-ring { display:none; } .meeting-room .reaction-picker-personal,.meeting-room .reaction-picker-personal .reaction-pick-btn { animation:none; transition:none; } .meeting-room .reaction-picker-personal .reaction-pick-btn:is(:hover,:active,:focus-visible) { transform:none; } }

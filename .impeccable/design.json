@@ -1,0 +1,39 @@
+{
+  "scope": "Public homepage and shared labelled-action component",
+  "extensions": {
+    "motion": {
+      "pillEase": "cubic-bezier(0.165,0.84,0.44,1)",
+      "pillRevealMs": 500,
+      "arrowMs": 300,
+      "arrowDelayMs": 100,
+      "sceneArrivalMs": 800,
+      "scroll": "Ordinary page flow with upright alternating feature views; no camera rotation",
+      "reducedMotion": "upright chapter scenes and immediate arrow reveal",
+      "reveal": "One-time28px rise700ms on viewport entry; reducedmotion immediate"
+    },
+    "breakpoints": {
+      "uprightSceneBelowPx": 1100,
+      "shortHeightPx": 600
+    },
+    "elevation": {
+      "scenePlane": "12px 20px 32px #102a431c"
+    },
+    "narrative": {
+      "northStar": "A clear view of the conversation.",
+      "overview": "Descriptive feature content, upright product imagery and distinct native-language written examples.",
+      "rules": [
+        "Keep chapter text outside camera transforms.",
+        "Retain truthful illustrative labels and capability limits."
+      ],
+      "dos": [
+        "Keep public pages light.",
+        "Preserve native scrolling and real destinations."
+      ],
+      "donts": [
+        "Do not claim mesh geometry or literal four-dimensional rendering.",
+        "Do not canonize undersized projected microtext."
+      ]
+    },
+    "verification": "Current source builds;3 targeted tests pass. Browser disabled, current rendered coverage unavailable."
+  }
+}

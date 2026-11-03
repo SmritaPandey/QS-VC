@@ -1,4 +1,10 @@
-import { useState } from 'react';
+import ActionContents from '../components/ActionContents';
+import SiteNav from '../components/SiteNav';
+import SignedInWorkspace from '../components/SignedInWorkspace';
+import SiteFooter from '../components/SiteFooter';
+import { getToken, signOut } from '../lib/session';
+import LoadingMark from '../components/LoadingMark';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
@@ -44,18 +50,48 @@ async function createMeetingCode(): Promise<string> {
 }
 
 export default function Landing() {
+    const [signedIn, setSignedIn] = useState(() => Boolean(getToken()));
+    const [sessionError, setSessionError] = useState('');
+    const [signingOut, setSigningOut] = useState(false);
     const [joinCode, setJoinCode] = useState('');
     const [creating, setCreating] = useState(false);
     const [shareLink, setShareLink] = useState('');
     const [shareMeetingCode, setShareMeetingCode] = useState('');
+    const [copyError, setCopyError] = useState('');
     const [copied, setCopied] = useState(false);
     const navigate = useNavigate();
+    const shareDialogRef = useRef<HTMLDivElement>(null);
+    const createButtonRef = useRef<HTMLButtonElement>(null);
+    useEffect(() => {
+        if (!shareLink) return;
+        const returnTarget = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : createButtonRef.current;
+        const dialog = shareDialogRef.current;
+        const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input, a[href], [tabindex="0"]') || []);
+        focusable()[0]?.focus();
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') { event.preventDefault(); setShareLink(''); }
+            if (event.key !== 'Tab') return;
+            const items = focusable();
+            const first = items[0];
+            const last = items[items.length - 1];
+            if (!dialog?.contains(document.activeElement)) {
+                event.preventDefault();
+                (event.shiftKey ? last : first)?.focus();
+                return;
+            }
+            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+        };
+        document.addEventListener('keydown', onKeyDown);
+        return () => { document.removeEventListener('keydown', onKeyDown); returnTarget?.focus(); };
+    }, [shareLink]);
 
-    const handleCreate = async () => {
+    const handleCreate = async (startNow = false) => {
         setCreating(true);
         try {
             const meetingCode = await createMeetingCode();
             const fullLink = `${window.location.origin}/meeting/${meetingCode}/preview`;
+            if (startNow) { navigate(`/meeting/${meetingCode}/preview`); return; }
             setShareMeetingCode(meetingCode);
             setShareLink(fullLink);
         } catch (err) {
@@ -67,6 +103,7 @@ export default function Landing() {
     };
 
     const handleCopy = async () => {
+        setCopyError('');
         try {
             await navigator.clipboard.writeText(shareLink);
             setCopied(true);
@@ -77,10 +114,12 @@ export default function Landing() {
             ta.value = shareLink;
             document.body.appendChild(ta);
             ta.select();
-            document.execCommand('copy');
-            document.body.removeChild(ta);
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
+            try {
+                if (!document.execCommand('copy')) throw new Error();
+                setCopied(true);
+                setTimeout(() => setCopied(false), 2000);
+            } catch { setCopyError('Couldn’t copy. Select and copy the invitation link.'); }
+            finally { document.body.removeChild(ta); }
         }
     };
 
@@ -94,66 +133,57 @@ export default function Landing() {
         navigate(`/meeting/${code}/preview`);
     };
 
+    const handleExpired = useCallback(() => { setSignedIn(false); setSessionError('Your session expired. Sign in to see your meetings.'); }, []);
+    const handleSignOut = async () => {
+        setSigningOut(true); setSessionError('');
+        try { await signOut(); setSignedIn(false); }
+        catch (error) { setSessionError(error instanceof Error ? error.message : 'Sign out failed.'); }
+        finally { setSigningOut(false); }
+    };
+
     return (
-        <div className="landing-page">
+        <div className={`public-site ${signedIn ? 'workspace-page' : 'public-launcher landing-page'}`}>
             <div className="landing-bg-gradient" />
 
-            <nav className="landing-nav">
-                <div className="landing-nav-logo">
-                    <span className="mi" style={{ color: 'var(--accent-secondary)' }}>verified_user</span>
-                    <span className="landing-nav-brand">QS-VC</span>
-                </div>
-                <div className="landing-nav-links">
-                    <button className="btn-outline" onClick={() => navigate('/schedule')}>
-                        <span className="mi mi-sm">calendar_today</span>
-                        Schedule
-                    </button>
-                    <button className="btn-outline" onClick={() => navigate('/admin')}>
-                        <span className="mi mi-sm">admin_panel_settings</span>
-                        Admin
-                    </button>
-                </div>
-            </nav>
+            {signedIn ? <SignedInWorkspace creating={creating} signingOut={signingOut} sessionError={sessionError} onCreate={() => handleCreate()} onStart={() => handleCreate(true)} onSignOut={handleSignOut} onExpired={handleExpired} /> : <>
+            <SiteNav accountAction={<button className="btn-outline qsvc-action qsvc-action--secondary" onClick={() => navigate('/login')}><ActionContents>Sign in</ActionContents></button>} />
 
-            <div className="landing-container">
+            <main className="landing-container" id="main-content">
+                {sessionError && <p role="alert">{sessionError}</p>}
+                <p className="demo-notice">Demo environment. Use sample names and content. Recording is disabled.</p>
                 <div className="landing-hero">
-                    <div className="logo-badge">
-                        <span className="mi logo-icon">shield</span>
-                        <span className="logo-text">QS-VC</span>
-                    </div>
-                    <h1>Quantum Safe<br />Video Conferencing</h1>
+
+                    <h1>Make room for the conversation.</h1>
                     <p className="landing-subtitle">
-                        India's quantum-safe video conferencing — unbreakable meetings with
-                        AI captions, noise suppression, and post-quantum encryption.
+                        Create a meeting, invite your participants or join with a code.
                     </p>
                 </div>
 
                 <div className="landing-actions">
                     <div className="action-card">
-                        <h2>New Meeting</h2>
-                        <p>Create an instant meeting and invite others</p>
+                        <h2>Start a meeting</h2>
+                        <p>Create a link, then check your camera and microphone.</p>
                         <button
-                            className="btn-primary"
-                            onClick={handleCreate}
-                            disabled={creating}
-                        >
+                            className="btn-primary qsvc-action"
+                            ref={createButtonRef}
+                            onClick={() => handleCreate()}
+                            disabled={creating} aria-busy={creating}
+                        ><ActionContents>
                             {creating ? (
-                                <span className="spinner" />
+                                <LoadingMark label="Creating meeting…" />
                             ) : (
                                 <>
-                                    <span className="mi mi-sm">videocam</span>
-                                    Create Meeting
+                                    <span className="mi mi-sm" aria-hidden="true">videocam</span>
+                                    Create meeting
                                 </>
-                            )}
-                        </button>
+                            )}</ActionContents></button>
                         <button
-                            className="btn-outline"
+                            className="btn-outline qsvc-action qsvc-action--secondary"
                             onClick={() => navigate('/schedule')}
                             style={{ marginTop: '10px', width: '100%' }}
-                        >
-                            <span className="mi mi-sm">calendar_today</span>
-                            Schedule for Later
-                        </button>
+                        ><ActionContents>
+                            <span className="mi mi-sm" aria-hidden="true">calendar_today</span>
+                            Schedule a meeting</ActionContents></button>
                     </div>
 
                     <div className="action-divider">
@@ -161,48 +191,43 @@ export default function Landing() {
                     </div>
 
                     <div className="action-card">
-                        <h2>Join Meeting</h2>
+                        <h2>Have an invitation?</h2>
                         <p>Enter a meeting code to join</p>
+                        <label className="field-label" htmlFor="join-meeting-code">Meeting code</label>
                         <div className="join-input-group">
                             <input
                                 type="text"
-                                placeholder="QS-XXXX-XXXX-XXXX"
+                                id="join-meeting-code" aria-label="Meeting code" placeholder="QS-XXXX-XXXX-XXXX"
                                 value={joinCode}
                                 onChange={(e) => setJoinCode(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
                                 className="input-meeting-code"
                             />
                             <button
-                                className="btn-primary"
+                                className="btn-primary qsvc-action"
                                 onClick={handleJoin}
                                 disabled={!joinCode.trim()}
                                 style={{ padding: '12px 24px' }}
-                            >
-                                <span className="mi mi-sm">login</span>
-                                Join
-                            </button>
+                            ><ActionContents>Join</ActionContents></button>
                         </div>
                     </div>
                 </div>
 
-                <div className="landing-features">
-                    <div className="feature-chip"><span className="mi mi-sm">lock</span> Post-Quantum Encryption</div>
-                    <div className="feature-chip"><span className="mi mi-sm">smart_toy</span> AI Captions & Translation</div>
-                    <div className="feature-chip"><span className="mi mi-sm">mic_off</span> Noise Suppression</div>
-                    <div className="feature-chip"><span className="mi mi-sm">flag</span> Made in India 🇮🇳</div>
-                </div>
-            </div>
+                <div className="landing-features"><span className="feature-chip"><span className="mi mi-sm" aria-hidden="true">videocam</span> Video meetings</span><span className="feature-chip"><span className="mi mi-sm" aria-hidden="true">screen_share</span> Screen sharing</span><span className="feature-chip"><span className="mi mi-sm" aria-hidden="true">chat</span> In-meeting conversation</span></div>
+            </main>
+
+            </>}
 
             {/* ── Share Link Modal ── */}
             {shareLink && (
                 <div className="share-modal-overlay" onClick={() => setShareLink('')}>
-                    <div className="share-modal" onClick={(e) => e.stopPropagation()}>
+                    <div className="share-modal" ref={shareDialogRef} role="dialog" aria-modal="true" aria-label="Meeting invitation" onClick={(e) => e.stopPropagation()}>
                         <div className="share-modal-icon">
                             <span className="mi" style={{ fontSize: 48, color: 'var(--accent-success)' }}>check_circle</span>
                         </div>
-                        <h2>Meeting Created!</h2>
+                        <h2>Your meeting link is ready.</h2>
                         <p className="share-modal-code">
-                            <span className="mi mi-sm">lock</span> {shareMeetingCode}
+                            <span className="mi mi-sm" aria-hidden="true">lock</span> {shareMeetingCode}
                         </p>
                         <p style={{ color: 'var(--text-secondary)', margin: '8px 0 16px' }}>
                             Share this link with participants:
@@ -212,26 +237,23 @@ export default function Landing() {
                                 type="text"
                                 value={shareLink}
                                 readOnly
-                                className="share-link-input"
+                                className="share-link-input" aria-label="Meeting invitation link"
                                 onClick={(e) => (e.target as HTMLInputElement).select()}
                             />
-                            <button className="btn-copy" onClick={handleCopy}>
-                                <span className="mi mi-sm">{copied ? 'done' : 'content_copy'}</span>
-                                {copied ? 'Copied!' : 'Copy'}
-                            </button>
+                            <button className="btn-copy qsvc-action" onClick={handleCopy}><ActionContents><span className="mi mi-sm" aria-hidden="true">{copied ? 'done' : 'content_copy'}</span>
+                                {copied ? 'Copied' : 'Copy'}</ActionContents></button>
                         </div>
+                        {copyError && <p role="alert">{copyError}</p>}
                         <div className="share-modal-actions">
-                            <button className="btn-primary btn-lg" onClick={handleGoToMeeting}>
-                                <span className="mi mi-sm">videocam</span>
-                                Join Meeting Now
-                            </button>
-                            <button className="btn-outline" onClick={() => setShareLink('')}>
-                                Close
-                            </button>
+                            <button className="btn-primary btn-lg qsvc-action" onClick={handleGoToMeeting}><ActionContents><span className="mi mi-sm" aria-hidden="true">videocam</span>
+                                Check my devices</ActionContents></button>
+                            <button className="btn-outline qsvc-action qsvc-action--secondary" onClick={() => setShareLink('')}><ActionContents>
+                                Close</ActionContents></button>
                         </div>
                     </div>
                 </div>
             )}
+            {!signedIn && <SiteFooter />}
         </div>
     );
 }

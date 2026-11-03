@@ -1,3 +1,4 @@
+import ActionContents from '../components/ActionContents';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 
 interface MeetingEndState {
@@ -30,7 +31,7 @@ export default function MeetingEnd() {
                 <div className="meeting-end-icon">
                     <span className="mi" style={{ fontSize: '32px' }}>check</span>
                 </div>
-                <h1>Meeting Ended</h1>
+                <h1>You’ve left the meeting.</h1>
                 <p className="meeting-code">{meetingCode || state.meetingCode || 'Meeting'}</p>
 
                 <div className="meeting-end-stats">
@@ -60,21 +61,17 @@ export default function MeetingEnd() {
                 )}
 
                 {state.recordingAvailable && state.recordingUrl && (
-                    <a href={state.recordingUrl} className="btn-download-recording" download>
-                        <span className="mi mi-sm">download</span>
-                        Download Recording
-                    </a>
+                    <a href={state.recordingUrl} className="btn-download-recording qsvc-action" download><ActionContents><span className="mi mi-sm" aria-hidden="true">download</span>
+                        Download recording</ActionContents></a>
                 )}
 
                 <div className="meeting-end-actions">
-                    <button className="btn-new-meeting" onClick={() => navigate('/')}>
-                        <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '6px' }}>videocam</span>
-                        New Meeting
-                    </button>
-                    <button className="btn-rejoin" onClick={() => navigate('/')}>
-                        <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '6px' }}>arrow_back</span>
-                        Home
-                    </button>
+                    <button className="btn-new-meeting qsvc-action" onClick={() => navigate('/')}><ActionContents>
+                        <span className="mi mi-sm" aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: '6px' }}>videocam</span>
+                        Back to QS-VC</ActionContents></button>
+                    <button className="btn-rejoin qsvc-action qsvc-action--secondary" onClick={() => navigate('/')}><ActionContents>
+                        <span className="mi mi-sm" aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: '6px' }}>arrow_back</span>
+                        Home</ActionContents></button>
                 </div>
             </div>
         </div>

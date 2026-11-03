@@ -108,10 +108,12 @@ class RoomManager {
             throw new Error('Room is full');
         }
 
-        if (room.settings.locked && peer.role !== 'host') {
+        if (room.settings.locked) {
             throw new Error('Room is locked');
         }
 
+        // Roles on join are server-owned. Only the host can promote an existing member.
+        peer.role = 'member';
         // First peer becomes host
         if (!room.hostPeerId) {
             peer.role = 'host';
@@ -179,6 +181,7 @@ class RoomManager {
 
         const peer = room.peers.get(peerId);
         room.peers.delete(peerId);
+        room.waitingRoom.delete(peerId);
 
         // Transfer host role if host left
         if (room.hostPeerId === peerId && room.peers.size > 0) {
@@ -192,10 +195,12 @@ class RoomManager {
             }
         }
 
+        if (room.peers.size === 0) room.hostPeerId = null;
+
         if (room.peers.size === 0 && room.waitingRoom.size === 0) {
             setTimeout(() => {
                 const r = this.rooms.get(roomId);
-                if (r && r.peers.size === 0) {
+                if (r && r.peers.size === 0 && r.waitingRoom.size === 0) {
                     this.rooms.delete(roomId);
                     this.codeToRoomId.delete(room.meetingCode);
                     logger.info(`Room ${room.meetingCode} removed (empty)`);

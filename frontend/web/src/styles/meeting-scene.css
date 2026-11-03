@@ -1,0 +1,26 @@
+.meeting-scene { width:100%; max-width:520px; margin-inline:auto; padding:16px; border-radius:16px; background:#0b1420; color:#fff; font-weight:400; font-synthesis:none; box-sizing:border-box; }
+.meeting-scene-top,.meeting-scene-top>span { display:flex; align-items:center; gap:6px; }
+.meeting-scene-top { justify-content:space-between; margin-bottom:12px; color:#d5e2eb; font-size:13px; line-height:1.5; }
+.meeting-scene-top .mi { font-size:18px; }
+.meeting-scene-stage { display:grid; grid-template-columns:minmax(0,1fr) 36px; gap:10px; align-items:center; }
+.meeting-scene-side { display:flex; flex-direction:column; gap:8px; padding:4px; border-radius:18px; background:#162331; }
+.meeting-scene-control { display:flex; align-items:center; justify-content:center; width:28px; height:28px; flex-shrink:0; border-radius:50%; background:#233746; color:#dce9ef; }
+.meeting-scene-control .mi { font-size:17px; }
+.meeting-scene-language { background:#16473f; color:#75ecd7; }
+.meeting-scene-bottom { display:flex; justify-content:center; margin-top:12px; }
+.meeting-scene-dock { display:flex; gap:6px; padding:6px; border-radius:24px; background:#162331; }
+.meeting-scene-leave { width:40px; border-radius:18px; background:#c9364f; color:#fff; }
+.meeting-scene-heading { font-size:16px; line-height:1.5; margin-bottom:16px; }
+.meeting-scene-participants { display:grid; grid-template-columns:minmax(0,2fr) minmax(0,1fr); grid-template-rows:1fr 1fr; gap:8px; aspect-ratio:3/2; }
+.meeting-scene-person { position:relative; min-width:0; min-height:0; overflow:hidden; border-radius:10px; background:#d4e0df; }
+.meeting-scene-main { grid-row:1 / span 2; box-shadow:inset 0 0 0 2px #43d9c2; }
+.meeting-scene-main::after { content:""; position:absolute; inset:0; border:1px solid #43d9c2b3; border-radius:inherit; pointer-events:none; }
+.meeting-scene-person .demo-portrait { display:block; width:100%; height:100%; }
+.meeting-scene-person>.meeting-scene-name { position:absolute; bottom:8px; left:8px; display:flex; align-items:center; gap:4px; padding:4px 6px; border:1px solid #ffffff1f; border-radius:6px; background:#0b1420d9; color:#fff; font-size:13px; line-height:1.4; }
+.meeting-scene-name .mi { font-size:15px; }
+.meeting-scene-muted { color:#ff8092; }
+.meeting-scene-caption { margin-top:10px; padding:10px 14px; background:#e0f4ee; color:#102a43; border-radius:10px; }
+.meeting-scene-caption>span { font-size:13px; line-height:1.5; color:#385866; }
+.meeting-scene-caption p { font-size:16px; font-weight:400; line-height:1.5; margin:4px 0 0; overflow-wrap:anywhere; }
+@media(max-width:420px) { .meeting-scene { padding:12px; } .meeting-scene-caption { padding:12px; } .meeting-scene-caption p { font-size:16px; } .meeting-scene-person>span { left:4px; bottom:4px; padding:3px 5px; } }
+@media(max-width:420px) { .meeting-scene-dock { gap:4px; } .meeting-scene-dock .meeting-scene-control { width:24px; height:24px; } .meeting-scene-dock .meeting-scene-leave { width:36px; } .meeting-scene-person>.meeting-scene-name { left:4px; bottom:4px; gap:2px; padding:3px; } .meeting-scene-name .mi { font-size:13px; } }

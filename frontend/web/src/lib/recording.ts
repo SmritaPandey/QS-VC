@@ -18,43 +18,8 @@ export class RecordingManager {
     /**
      * Start recording from a MediaStream (composite of all video/audio).
      */
-    async startRecording(stream: MediaStream): Promise<void> {
-        if (this.isRecording) return;
-
-        const mimeTypes = [
-            'video/webm;codecs=vp9,opus',
-            'video/webm;codecs=vp8,opus',
-            'video/webm',
-            'video/mp4',
-        ];
-
-        let selectedMime = '';
-        for (const mime of mimeTypes) {
-            if (MediaRecorder.isTypeSupported(mime)) {
-                selectedMime = mime;
-                break;
-            }
-        }
-
-        if (!selectedMime) {
-            throw new Error('No supported recording format found');
-        }
-
-        this.recordedChunks = [];
-        this.mediaRecorder = new MediaRecorder(stream, {
-            mimeType: selectedMime,
-            videoBitsPerSecond: 2500000, // 2.5 Mbps
-        });
-
-        this.mediaRecorder.ondataavailable = (event) => {
-            if (event.data.size > 0) {
-                this.recordedChunks.push(event.data);
-            }
-        };
-
-        this.mediaRecorder.start(1000); // Capture in 1-second chunks
-        this.startTime = Date.now();
-        console.log(`[Recording] Started with ${selectedMime}`);
+    async startRecording(_stream: MediaStream): Promise<void> {
+        throw new Error('Recording is disabled for this demo.');
     }
 
     /**

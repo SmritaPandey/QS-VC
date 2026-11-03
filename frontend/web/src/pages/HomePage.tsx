@@ -1,304 +1,121 @@
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
+import ActionContents from '../components/ActionContents';
+import StoryScroll from '../components/StoryScroll';
+import MeetingScene from '../components/MeetingScene';
+import Portrait from '../components/Portrait';
+import SiteFooter from '../components/SiteFooter';
+import HeroAmbient from '../components/HeroAmbient';
+import SiteNav from '../components/SiteNav';
+import '../styles/homepage.css';
 
-const stats = [
-    { value: '256-bit', label: 'Post-Quantum Encryption' },
-    { value: '<100ms', label: 'Ultra-Low Latency' },
-    { value: '1000+', label: 'Participants per Call' },
-    { value: '22+', label: 'Indian Languages' },
-];
-
-const features = [
-    {
-        icon: 'shield',
-        title: 'Quantum-Safe Security',
-        desc: 'First-ever post-quantum encrypted video conferencing with Kyber + Dilithium. Future-proof against quantum computer attacks.',
-        accent: 'var(--accent-secondary)',
-    },
-    {
-        icon: 'smart_toy',
-        title: 'AI-Powered Meetings',
-        desc: 'Real-time captions in 22+ Indian languages, live translation, noise suppression, and AI meeting summaries.',
-        accent: 'var(--accent-info)',
-    },
-    {
-        icon: 'groups',
-        title: 'Enterprise Scale',
-        desc: 'Host meetings with 1000+ participants, breakout rooms, webinars with 10K+ attendees, and PSTN dial-in.',
-        accent: 'var(--accent-primary)',
-    },
-    {
-        icon: 'videocam',
-        title: 'Crystal Clear Video',
-        desc: 'Adaptive bitrate from 4K to audio-only. Works seamlessly even on 2G/3G connections across India.',
-        accent: 'var(--accent-warning)',
-    },
-    {
-        icon: 'record_voice_over',
-        title: 'Live Translation',
-        desc: 'Speak in Hindi, see subtitles in English. Real-time voice-to-voice translation across 100+ languages.',
-        accent: '#f472b6',
-    },
-    {
-        icon: 'cloud_done',
-        title: 'Cloud & On-Premise',
-        desc: 'SaaS for everyone, air-gapped on-premise for banks & government. Your data stays where you want it.',
-        accent: 'var(--accent-success)',
-    },
-];
-
-const comparisons = [
-    { feature: 'Post-Quantum Encryption (PQC)', qsvc: true, zoom: false, meet: false },
-    { feature: 'End-to-End Encryption', qsvc: true, zoom: true, meet: false },
-    { feature: 'AI Captions (22 Indian Languages)', qsvc: true, zoom: false, meet: false },
-    { feature: 'Real-Time Translation', qsvc: true, zoom: true, meet: true },
-    { feature: 'On-Premise Deployment', qsvc: true, zoom: false, meet: false },
-    { feature: 'Air-Gapped (No Internet)', qsvc: true, zoom: false, meet: false },
-    { feature: 'Data Residency in India', qsvc: true, zoom: false, meet: false },
-    { feature: 'UPI / INR Billing', qsvc: true, zoom: false, meet: false },
-    { feature: 'Open-Source Core', qsvc: true, zoom: false, meet: false },
-    { feature: '1000+ Participants', qsvc: true, zoom: true, meet: true },
-];
-
-const testimonials = [
-    {
-        quote: 'Finally, a VC solution that takes quantum threats seriously. QS-VC is the future of secure communications.',
-        name: 'Dr. Ravi Shankar',
-        role: 'CISO, National Bank of India',
-        avatar: 'RS',
-    },
-    {
-        quote: 'The AI captioning in Hindi and Tamil is game-changing for our pan-India team meetings.',
-        name: 'Priya Mehta',
-        role: 'VP Engineering, TechMahindra',
-        avatar: 'PM',
-    },
-    {
-        quote: 'Switching from Zoom saved us 45% on licensing while getting better security. No-brainer.',
-        name: 'Amit Joshi',
-        role: 'IT Director, Infosys BPO',
-        avatar: 'AJ',
-    },
-];
-
+const samples = {
+    hi: { label: 'हिन्दी', language: 'hi', text: 'क्या सभी प्रस्ताव देख पा रहे हैं?' },
+    en: { label: 'English', language: 'en', text: 'Can everyone see the proposal?' },
+    te: { label: 'తెలుగు', language: 'te', text: 'అందరికీ ప్రతిపాదన కనిపిస్తోందా?' },
+    ja: { label: '日本語', language: 'ja', text: '皆さん、提案書は見えていますか？' },
+    es: { label: 'Español', language: 'es', text: '¿Todos pueden ver la propuesta?' },
+    zh: { label: '中文', language: 'zh-Hans', text: '大家能看到提案吗？' },
+};
 export default function HomePage() {
     const navigate = useNavigate();
-
-    return (
-        <div className="home-page">
-            {/* Animated background */}
-            <div className="home-bg">
-                <div className="home-bg-orb home-bg-orb-1" />
-                <div className="home-bg-orb home-bg-orb-2" />
-                <div className="home-bg-orb home-bg-orb-3" />
-                <div className="home-bg-grid" />
+    const [code, setCode] = useState('');
+    const [sample, setSample] = useState<keyof typeof samples>('en');
+    const [manualSelection, setManualSelection] = useState(false);
+    const [exampleHovered, setExampleHovered] = useState(false);
+    const [exampleFocused, setExampleFocused] = useState(false);
+    const cyclePaused = exampleHovered || exampleFocused;
+    const caption = { ...samples[sample], announce: manualSelection };
+    useEffect(() => {
+        if (manualSelection) return;
+        const reduced = window.matchMedia('(prefers-reduced-motion: reduce)');
+        const connection = (navigator as Navigator & { connection?: EventTarget & { saveData?: boolean } }).connection;
+        let timer: ReturnType<typeof setInterval> | undefined;
+        const sync = () => {
+            clearInterval(timer);
+            if (cyclePaused || document.hidden || reduced.matches || connection?.saveData) return;
+            timer = setInterval(() => {
+                const keys = Object.keys(samples) as (keyof typeof samples)[];
+                setSample(current => keys[(keys.indexOf(current) + 1) % keys.length]);
+            }, 3000);
+        };
+        sync();
+        reduced.addEventListener('change', sync);
+        connection?.addEventListener('change', sync);
+        document.addEventListener('visibilitychange', sync);
+        return () => {
+            clearInterval(timer);
+            reduced.removeEventListener('change', sync);
+            connection?.removeEventListener('change', sync);
+            document.removeEventListener('visibilitychange', sync);
+        };
+    }, [manualSelection, cyclePaused]);
+    function join(event: FormEvent) {
+        event.preventDefault();
+        if (code.trim()) navigate(`/meeting/${encodeURIComponent(code.trim().toUpperCase())}/preview`);
+    }
+    return <div className="public-site public-home">
+        <SiteNav />
+        <main id="main-content">
+            <div className="public-hero-wrap home-overview"><HeroAmbient />
+                <section className="home-overview-layout public-container" aria-labelledby="public-home-title">
+                    <div className="home-message">
+                        <h1 id="public-home-title">One room.<br /><span>Your language.</span></h1>
+                        <p className="public-lead">Meet QS-VC. Speak your language. Share your ideas. Stay quantum-safe.</p>
+                        <Link className="qsvc-action" to="/app"><ActionContents>Open meeting app</ActionContents></Link>
+                        <form className="public-join" onSubmit={join}>
+                            <label htmlFor="home-meeting-code">Have an invitation?</label>
+                            <div><input id="home-meeting-code" aria-label="Meeting code" placeholder="Enter meeting code" value={code} onChange={event => setCode(event.target.value)} maxLength={30} required /><button className="qsvc-action qsvc-action--secondary" type="submit" disabled={!code.trim()}><ActionContents>Join meeting</ActionContents></button></div>
+                            <p>You’ll check your devices before entering.</p>
+                        </form>
+                    </div>
+                    <figure className="home-upright-example" aria-label="Meeting and caption examples" onMouseEnter={() => setExampleHovered(true)} onMouseLeave={() => setExampleHovered(false)} onFocusCapture={() => setExampleFocused(true)} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setExampleFocused(false); }}>
+                        <MeetingScene variant="hero" upright caption={caption} />
+                        <div className="public-sample-switch" role="group" aria-label="Caption example language">{(Object.keys(samples) as (keyof typeof samples)[]).map(key => <button type="button" key={key} lang={samples[key].language} aria-pressed={sample === key} onClick={() => { setManualSelection(true); setSample(key); }}>{samples[key].label}</button>)}</div>
+                        <p className="home-example-note">Caption examples. Open Language in your meeting for available languages and voices.</p>
+                    </figure>
+                </section>
             </div>
-
-            {/* Navigation */}
-            <nav className="home-nav" id="nav-top">
-                <div className="home-nav-inner">
-                    <div className="home-nav-logo" onClick={() => navigate('/')}>
-                        <span className="mi" style={{ color: 'var(--accent-secondary)', fontSize: 28 }}>verified_user</span>
-                        <span className="home-brand">QS-VC</span>
-                        <span className="home-brand-tag">Quantum Safe</span>
-                    </div>
-                    <div className="home-nav-links">
-                        <a href="#features" className="home-nav-link">Features</a>
-                        <a href="#comparison" className="home-nav-link">Compare</a>
-                        <button className="home-nav-link" onClick={() => navigate('/pricing')}>Pricing</button>
-                        <button className="btn-outline" onClick={() => navigate('/app')}>
-                            <span className="mi mi-sm">login</span>
-                            Sign In
-                        </button>
-                        <button className="btn-primary" onClick={() => navigate('/app')}>
-                            Start Free
-                        </button>
-                    </div>
-                </div>
-            </nav>
-
-            {/* Hero Section */}
-            <section className="home-hero" id="hero">
-                <div className="home-hero-content">
-                    <div className="home-hero-badge">
-                        <span className="mi mi-sm">flag</span>
-                        Made in India 🇮🇳 &nbsp;·&nbsp; Quantum Safe &nbsp;·&nbsp; AI Powered
-                    </div>
-                    <h1 className="home-hero-title">
-                        The World's First<br />
-                        <span className="home-hero-gradient">Quantum-Safe</span><br />
-                        Video Conferencing
-                    </h1>
-                    <p className="home-hero-sub">
-                        Unbreakable meetings with post-quantum encryption, AI-powered captions in 22+ Indian languages,
-                        and enterprise-grade security — at <strong>half the price</strong> of Zoom.
-                    </p>
-                    <div className="home-hero-actions">
-                        <button className="btn-primary btn-lg" onClick={() => navigate('/app')}>
-                            <span className="mi mi-sm">videocam</span>
-                            Start Free Meeting
-                        </button>
-                        <button className="btn-secondary btn-lg" onClick={() => navigate('/pricing')}>
-                            <span className="mi mi-sm">payments</span>
-                            View Pricing
-                        </button>
-                    </div>
-                    <p className="home-hero-note">No credit card required · Free plan forever · 40-min meetings</p>
-                </div>
-
-                {/* Floating Stats */}
-                <div className="home-stats">
-                    {stats.map((s, i) => (
-                        <div className="home-stat" key={i}>
-                            <div className="home-stat-value">{s.value}</div>
-                            <div className="home-stat-label">{s.label}</div>
-                        </div>
-                    ))}
+            <section className="home-offer-intro public-container home-arrival" id="features" aria-labelledby="home-offer-title"><h2 id="home-offer-title">What QS-VC offers</h2><p>Video meetings, screen sharing, chat and language choices, together in one workspace.</p></section>
+            <StoryScroll caption={caption} />
+            <section className="home-collaboration public-container" aria-labelledby="collaboration-title">
+                <h2 id="collaboration-title">Make room for ideas.</h2>
+                <div className="home-collaboration-grid">
+                    <article><span className="mi" aria-hidden="true">draw</span><h3>Sketch together</h3><p>Share a whiteboard, choose your pen colour and undo your strokes as ideas take shape.</p></article>
+                    <article><span className="mi" aria-hidden="true">poll</span><h3>Hear from everyone</h3><p>Run polls, upvote questions and let hosts share answers without interrupting the conversation.</p></article>
+                    <article><span className="mi" aria-hidden="true">edit_note</span><h3>Keep ideas together</h3><p>Write shared notes and exchange supported files up to 32 KB. Save what you need before the room closes.</p></article>
                 </div>
             </section>
-
-            {/* Features Grid */}
-            <section className="home-features" id="features">
-                <div className="home-section-header">
-                    <span className="home-section-badge">Features</span>
-                    <h2 className="home-section-title">Everything You Need for Secure Meetings</h2>
-                    <p className="home-section-sub">Built from the ground up with quantum-safe security and AI intelligence.</p>
-                </div>
-                <div className="home-features-grid">
-                    {features.map((f, i) => (
-                        <div className="home-feature-card" key={i} style={{ '--card-accent': f.accent } as React.CSSProperties}>
-                            <div className="home-feature-icon">
-                                <span className="mi" style={{ color: f.accent }}>{f.icon}</span>
-                            </div>
-                            <h3>{f.title}</h3>
-                            <p>{f.desc}</p>
-                        </div>
-                    ))}
-                </div>
+            <section className="home-expression public-container home-arrival" aria-labelledby="home-expression-title">
+                <div className="home-expression-visual" aria-hidden="true"><div className="home-expression-portrait"><Portrait person={2} label="Mei" /><span>Mei</span></div><div className="home-expression-reactions"><span>👏</span><span>❤️</span><span>🎉</span><span className="home-expression-hand"><span className="mi">back_hand</span></span></div><div className="home-expression-sound"><span className="mi">music_note</span><span>Your reactions. Your sound.</span></div></div>
+                <div className="home-expression-copy"><h2 id="home-expression-title">A little more expression.</h2><p>Applaud an idea, raise your hand or join in with chat and reactions.</p><p>Pick Chime, Pop or Sparkle, or keep sounds off. Only you hear your chosen sound.</p></div>
             </section>
-
-            {/* Comparison Table */}
-            <section className="home-comparison" id="comparison">
-                <div className="home-section-header">
-                    <span className="home-section-badge">Compare</span>
-                    <h2 className="home-section-title">Why QS-VC Over the Competition?</h2>
-                    <p className="home-section-sub">See how QS-VC stacks up against Zoom and Google Meet.</p>
+            <section className="home-meeting-options public-container home-arrival" aria-labelledby="home-options-title">
+                <div className="home-options-intro"><h2 id="home-options-title">More ways to meet.</h2><p>Language choices and hosting options for your team.</p></div>
+                <div className="home-options-grid">
+                    <article className="home-option">
+                        <div className="home-option-visual home-option-language" aria-hidden="true"><div className="home-option-visual-top"><span className="mi">translate</span><span>Captions &amp; audio</span></div><div className="home-option-caption"><span>{caption.label}</span><p lang={caption.language}>{caption.text}</p></div><div className="home-option-voice"><span className="mi">volume_up</span><span className="home-option-wave"><i /><i /><i /><i /><i /><i /><i /><i /><i /></span><span>Your language</span></div></div>
+                        <span className="home-option-badge">Language options</span><h3>Follow in your language</h3><p>Choose captions and translated audio. Languages and voices depend on your setup and device.</p>
+                    </article>
+                    <article className="home-option">
+                        <div className="home-option-visual home-option-recording" aria-hidden="true"><div className="home-option-visual-top"><span className="mi">video_library</span><span>Meeting recordings</span></div><div className="home-option-record"><span className="mi">lock</span><span>Recording unavailable</span></div><div className="home-option-record-track"><span className="mi">fiber_manual_record</span><span /><span className="mi">lock</span></div></div>
+                        <span className="home-option-badge">Paid option · planned</span><h3>Keep a record</h3><p>Recording is not currently available. Paid recording is planned.</p>
+                    </article>
+                    <article className="home-option">
+                        <div className="home-option-visual home-option-network" aria-hidden="true"><div className="home-option-visual-top"><span className="mi">lan</span><span>Your organisation</span></div><div className="home-option-network-map"><span className="home-option-network-person"><span className="mi">person</span></span><span className="home-option-network-hub"><span className="mi">apartment</span></span><span className="home-option-network-person"><span className="mi">person</span></span></div><div className="home-option-network-labels"><span>Office team</span><span>Remote access</span></div></div>
+                        <span className="home-option-badge">Organisation hosting</span><h3>Meet on your network</h3><p>Talk to us about private-network hosting and access for travelling colleagues.</p>
+                    </article>
                 </div>
-                <div className="home-comparison-table-wrap">
-                    <table className="home-comparison-table">
-                        <thead>
-                            <tr>
-                                <th>Feature</th>
-                                <th className="home-comp-highlight">
-                                    <span className="mi mi-sm" style={{ color: 'var(--accent-secondary)' }}>verified_user</span>
-                                    QS-VC
-                                </th>
-                                <th>Zoom</th>
-                                <th>Google Meet</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {comparisons.map((c, i) => (
-                                <tr key={i}>
-                                    <td>{c.feature}</td>
-                                    <td className="home-comp-highlight">
-                                        {c.qsvc ? <span className="mi mi-sm" style={{ color: 'var(--accent-success)' }}>check_circle</span> : <span className="mi mi-sm" style={{ color: 'var(--text-muted)' }}>cancel</span>}
-                                    </td>
-                                    <td>
-                                        {c.zoom ? <span className="mi mi-sm" style={{ color: 'var(--accent-success)' }}>check_circle</span> : <span className="mi mi-sm" style={{ color: 'var(--text-muted)' }}>cancel</span>}
-                                    </td>
-                                    <td>
-                                        {c.meet ? <span className="mi mi-sm" style={{ color: 'var(--accent-success)' }}>check_circle</span> : <span className="mi mi-sm" style={{ color: 'var(--text-muted)' }}>cancel</span>}
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
+                <Link className="qsvc-action" to="/pricing"><ActionContents>Explore plans</ActionContents></Link>
             </section>
-
-            {/* Testimonials */}
-            <section className="home-testimonials">
-                <div className="home-section-header">
-                    <span className="home-section-badge">Trusted By Leaders</span>
-                    <h2 className="home-section-title">What Our Customers Say</h2>
-                </div>
-                <div className="home-testimonials-grid">
-                    {testimonials.map((t, i) => (
-                        <div className="home-testimonial-card" key={i}>
-                            <div className="home-testimonial-quote">"{t.quote}"</div>
-                            <div className="home-testimonial-author">
-                                <div className="home-testimonial-avatar">{t.avatar}</div>
-                                <div>
-                                    <div className="home-testimonial-name">{t.name}</div>
-                                    <div className="home-testimonial-role">{t.role}</div>
-                                </div>
-                            </div>
-                        </div>
-                    ))}
-                </div>
+            <section className="home-security public-container home-arrival" aria-labelledby="home-security-title">
+                <div className="home-security-copy"><h2 id="home-security-title">Quantum-safe security</h2><p>Quantum-safe security is part of QS-VC’s design for the long-term privacy of sensitive conversations.</p><p>Check your devices before joining. Control your camera and microphone throughout.</p></div>
+                <div className="home-security-visual" aria-hidden="true"><div className="home-security-portrait"><Portrait person={1} label="Arjun" /><span>Arjun</span></div><div className="home-security-choices"><div><span className="mi">videocam</span><span>Camera</span><span>Your choice</span></div><div><span className="mi">mic</span><span>Microphone</span><span>Your choice</span></div><div><span className="mi">translate</span><span>Language</span><span>Your preference</span></div></div></div>
             </section>
-
-            {/* CTA Section */}
-            <section className="home-cta">
-                <div className="home-cta-inner">
-                    <h2>Ready for Quantum-Safe Meetings?</h2>
-                    <p>Start for free. No credit card. No setup. Just secure meetings.</p>
-                    <div className="home-hero-actions">
-                        <button className="btn-primary btn-lg" onClick={() => navigate('/app')}>
-                            <span className="mi mi-sm">rocket_launch</span>
-                            Get Started Free
-                        </button>
-                        <button className="btn-outline btn-lg" onClick={() => window.open('mailto:contact@qsvc.com')}>
-                            <span className="mi mi-sm">mail</span>
-                            Contact Sales
-                        </button>
-                    </div>
-                </div>
-            </section>
-
-            {/* Footer */}
-            <footer className="home-footer">
-                <div className="home-footer-inner">
-                    <div className="home-footer-brand">
-                        <div className="home-nav-logo">
-                            <span className="mi" style={{ color: 'var(--accent-secondary)', fontSize: 24 }}>verified_user</span>
-                            <span className="home-brand">QS-VC</span>
-                        </div>
-                        <p>India's Quantum-Safe Video Conferencing Platform</p>
-                    </div>
-                    <div className="home-footer-links">
-                        <div className="home-footer-col">
-                            <h4>Product</h4>
-                            <a href="#features">Features</a>
-                            <button onClick={() => navigate('/pricing')}>Pricing</button>
-                            <a href="#comparison">Compare</a>
-                            <button onClick={() => navigate('/app')}>Web App</button>
-                        </div>
-                        <div className="home-footer-col">
-                            <h4>Solutions</h4>
-                            <a href="#features">Enterprise</a>
-                            <a href="#features">Government</a>
-                            <a href="#features">Education</a>
-                            <a href="#features">Healthcare</a>
-                        </div>
-                        <div className="home-footer-col">
-                            <h4>Company</h4>
-                            <a href="mailto:contact@qsvc.com">Contact</a>
-                            <a href="#hero">About</a>
-                            <a href="#hero">Careers</a>
-                            <a href="#hero">Blog</a>
-                        </div>
-                    </div>
-                </div>
-                <div className="home-footer-bottom">
-                    <p>© 2026 QS-VC. All rights reserved. Made with ❤️ in India 🇮🇳</p>
-                    <div className="home-footer-bottom-links">
-                        <a href="#hero">Privacy Policy</a>
-                        <a href="#hero">Terms of Service</a>
-                        <a href="#hero">Security</a>
-                    </div>
-                </div>
-            </footer>
-        </div>
-    );
+            <section className="public-rollout public-container home-arrival" aria-labelledby="rollout-title"><div><h2 id="rollout-title">Plan for your team.</h2><p>Choose online or organisation-hosted meetings. Review private-network access and security requirements with us.</p></div><Link className="qsvc-action qsvc-action--secondary" to="/pricing"><ActionContents>Review the options</ActionContents></Link></section>
+            <section className="public-faq public-container" aria-labelledby="public-faq-title"><h2 id="public-faq-title">Before your first meeting.</h2><div><details><summary>Do I need an account?<span className="mi" aria-hidden="true">add</span></summary><p>Join as an invited guest, or sign in to your account.</p></details><details><summary>Which languages can I use?<span className="mi" aria-hidden="true">add</span></summary><p>Open Language for available captions and voices. Some languages offer captions without audio.</p></details><details><summary>Can I check my devices first?<span className="mi" aria-hidden="true">add</span></summary><p>Yes. Set your name and check your camera and microphone before joining.</p></details><details><summary>Can our organisation use an intranet?<span className="mi" aria-hidden="true">add</span></summary><p>Contact us about hosting and remote access. Offline operation needs separate validation.</p></details><details><summary>Can I record a meeting?<span className="mi" aria-hidden="true">add</span></summary><p>Recording is not currently available. Paid recording is planned.</p></details></div></section>
+            <section className="public-closing public-container home-arrival"><h2>Your next conversation starts here.</h2><Link className="qsvc-action" to="/app"><ActionContents>Open meeting app</ActionContents></Link></section>
+        </main>
+        <SiteFooter />
+    </div>;
 }

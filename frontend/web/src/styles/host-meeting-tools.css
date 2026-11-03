@@ -1,0 +1,22 @@
+.host-meeting-tools { display:flex; flex-direction:column; }
+.host-tools-content { padding:16px; overflow-y:auto; min-height:0; display:flex; flex-direction:column; gap:20px; }
+.host-tools-content h3 { margin:0; font-size:16px; font-weight:500; }
+.host-tools-content p { margin:8px 0; font-size:14px; line-height:1.5; color:#c0d0db; }
+.host-tools-content button,.host-tools-content select,.waiting-admission button { min-height:44px; padding:8px 12px; border:1px solid #547080; border-radius:10px; background:#203846; color:#eef7fa; font:inherit; font-size:13px; cursor:pointer; }
+.host-tools-content button:disabled,.host-tools-content select:disabled { opacity:.5; cursor:default; }
+.host-tools-content :is(button,select,input):focus-visible,.waiting-admission button:focus-visible { outline:3px solid #43d9c2; outline-offset:3px; }
+.host-tools-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+.host-waiting ul,.host-tools-people { margin:12px 0 0; padding:0; list-style:none; }
+.host-waiting li,.host-tools-people li { padding:12px 0; border-bottom:1px solid #354c5b; overflow-wrap:anywhere; }
+.host-tools-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.host-tools-settings label { display:flex; justify-content:space-between; align-items:center; gap:16px; min-height:48px; font-size:14px; }
+.host-tools-settings input { width:20px; height:20px; accent-color:#43d9c2; }
+.host-tools-people small { display:block; color:#a8bdcc; margin-top:4px; }
+.host-tools-content .host-tools-error { padding:12px; color:#ffbac5; border:1px solid #9c5362; border-radius:8px; }
+.host-tools-confirm,.host-tools-end { padding:12px; background:#30232f; border-radius:12px; }
+.host-tools-confirm button,.host-tools-end button { margin:4px; }
+.waiting-admission { min-height:100dvh; display:grid; place-items:center; padding:24px; background:#0b1420; color:#edf5fa; text-align:center; }
+.waiting-admission>div { max-width:440px; }
+.waiting-admission .mi { font-size:48px; color:#43d9c2; }
+.waiting-admission h1 { font-size:28px; font-weight:500; }
+.waiting-admission p { color:#b5c9d4; line-height:1.6; }

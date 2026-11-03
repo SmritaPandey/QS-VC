@@ -12,56 +12,7 @@ import { CascadeManager } from './mediasoup/cascade-manager.js';
 // VALIDATION SCHEMAS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-const peerIdSchema = z.string().min(1, 'peerId is required').max(128);
-const transportIdSchema = z.string().min(1, 'transportId is required').max(128);
-
-const createTransportBody = z.object({
-    peerId: peerIdSchema,
-    displayName: z.string().max(100).optional(),
-    direction: z.enum(['send', 'recv']).default('send'),
-});
-
-const connectTransportBody = z.object({
-    peerId: peerIdSchema,
-    dtlsParameters: z.object({
-        role: z.enum(['auto', 'client', 'server']).optional(),
-        fingerprints: z.array(z.object({
-            algorithm: z.string(),
-            value: z.string(),
-        })),
-    }),
-});
-
-const produceBody = z.object({
-    peerId: peerIdSchema,
-    transportId: transportIdSchema,
-    kind: z.enum(['audio', 'video']),
-    rtpParameters: z.record(z.unknown()),
-    appData: z.record(z.unknown()).optional(),
-});
-
-const consumeBody = z.object({
-    consumerPeerId: peerIdSchema,
-    producerPeerId: peerIdSchema,
-    producerId: z.string().min(1).max(128),
-    rtpCapabilities: z.record(z.unknown()),
-});
-
-const resumeBody = z.object({
-    peerId: peerIdSchema,
-});
-
-const cascadeNodeBody = z.object({
-    nodeId: z.string().min(1).max(128),
-    host: z.string().min(1).max(255),
-    port: z.number().int().min(1).max(65535),
-    maxParticipants: z.number().int().min(1).max(1000).default(50),
-});
-
-const cascadeHeartbeatBody = z.object({
-    nodeId: z.string().min(1).max(128),
-    participantCount: z.number().int().min(0),
-});
+import { createTransportBody, connectTransportBody, produceBody, consumeBody, resumeBody, cascadeNodeBody, cascadeHeartbeatBody } from './validation.js';
 
 function validateBody<T>(schema: z.ZodSchema<T>) {
     return (req: Request, res: Response, next: NextFunction) => {
@@ -131,7 +82,7 @@ app.get('/health', (_req, res) => {
 });
 
 // Get router RTP capabilities (needed by client before connecting)
-app.get('/api/rooms/:roomId/rtp-capabilities', async (req, res) => {
+app.get<{ roomId: string }>('/api/rooms/:roomId/rtp-capabilities', async (req, res) => {
     try {
         const room = await getOrCreateRoom(req.params.roomId);
         res.json({ rtpCapabilities: room.rtpCapabilities });
@@ -142,7 +93,7 @@ app.get('/api/rooms/:roomId/rtp-capabilities', async (req, res) => {
 });
 
 // Create WebRTC transport
-app.post('/api/rooms/:roomId/transports', validateBody(createTransportBody), async (req, res) => {
+app.post<{ roomId: string }>('/api/rooms/:roomId/transports', validateBody(createTransportBody), async (req, res) => {
     try {
         const { peerId, direction } = req.body;
         const room = await getOrCreateRoom(req.params.roomId);
@@ -173,7 +124,7 @@ app.post('/api/rooms/:roomId/transports', validateBody(createTransportBody), asy
 });
 
 // Connect transport (DTLS handshake)
-app.post('/api/rooms/:roomId/transports/:transportId/connect', validateBody(connectTransportBody), async (req, res) => {
+app.post<{ roomId: string; transportId: string }>('/api/rooms/:roomId/transports/:transportId/connect', validateBody(connectTransportBody), async (req, res) => {
     try {
         const { peerId, dtlsParameters } = req.body;
         const room = rooms.get(req.params.roomId);
@@ -194,7 +145,7 @@ app.post('/api/rooms/:roomId/transports/:transportId/connect', validateBody(conn
 });
 
 // Produce (publish media)
-app.post('/api/rooms/:roomId/produce', validateBody(produceBody), async (req, res) => {
+app.post<{ roomId: string }>('/api/rooms/:roomId/produce', validateBody(produceBody), async (req, res) => {
     try {
         const { peerId, transportId, kind, rtpParameters, appData } = req.body;
         const room = rooms.get(req.params.roomId);
@@ -209,7 +160,7 @@ app.post('/api/rooms/:roomId/produce', validateBody(produceBody), async (req, re
 });
 
 // Consume (receive media from a specific producer)
-app.post('/api/rooms/:roomId/consume', validateBody(consumeBody), async (req, res) => {
+app.post<{ roomId: string }>('/api/rooms/:roomId/consume', validateBody(consumeBody), async (req, res) => {
     try {
         const { consumerPeerId, producerPeerId, producerId, rtpCapabilities } = req.body;
         const room = rooms.get(req.params.roomId);
@@ -234,7 +185,7 @@ app.post('/api/rooms/:roomId/consume', validateBody(consumeBody), async (req, re
 });
 
 // Resume consumer (client sends this after setting up its recv transport)
-app.post('/api/rooms/:roomId/consumers/:consumerId/resume', validateBody(resumeBody), async (req, res) => {
+app.post<{ roomId: string; consumerId: string }>('/api/rooms/:roomId/consumers/:consumerId/resume', validateBody(resumeBody), async (req, res) => {
     try {
         const { peerId } = req.body;
         const room = rooms.get(req.params.roomId);
@@ -255,7 +206,7 @@ app.post('/api/rooms/:roomId/consumers/:consumerId/resume', validateBody(resumeB
 });
 
 // Get room info
-app.get('/api/rooms/:roomId', async (req, res) => {
+app.get<{ roomId: string }>('/api/rooms/:roomId', async (req, res) => {
     const room = rooms.get(req.params.roomId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
     res.json(room.toJSON());
@@ -274,7 +225,7 @@ app.get('/api/stats/workers', async (_req, res) => {
 });
 
 // Remove peer from room
-app.delete('/api/rooms/:roomId/peers/:peerId', async (req, res) => {
+app.delete<{ roomId: string; peerId: string }>('/api/rooms/:roomId/peers/:peerId', async (req, res) => {
     const room = rooms.get(req.params.roomId);
     if (!room) return res.status(404).json({ error: 'Room not found' });
 
@@ -308,7 +259,7 @@ app.post('/api/cascade/heartbeat', validateBody(cascadeHeartbeatBody), (req, res
 });
 
 // Get room cascade topology
-app.get('/api/cascade/rooms/:roomId/topology', (req, res) => {
+app.get<{ roomId: string }>('/api/cascade/rooms/:roomId/topology', (req, res) => {
     res.json(cascadeManager.getRoomTopology(req.params.roomId));
 });
 

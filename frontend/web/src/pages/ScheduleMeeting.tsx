@@ -1,3 +1,6 @@
+import ActionContents from '../components/ActionContents';
+import { getToken } from '../lib/session';
+import LoadingMark from '../components/LoadingMark';
 /**
  * Meeting Scheduling Page — Schedule future meetings with invitations.
  * Features: date/time picker, recurrence selector, participant invitations,
@@ -97,7 +100,7 @@ const ScheduleMeeting: React.FC = () => {
         try {
             const res = await fetch(`${MEETING_API}/api/meetings`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
                 body: JSON.stringify({
                     title: form.title || 'Scheduled Meeting',
                     type: form.recurrence !== 'none' ? 'recurring' : 'scheduled',
@@ -105,9 +108,9 @@ const ScheduleMeeting: React.FC = () => {
                     scheduledEnd: endDateTime.toISOString(),
                     settings: {
                         maxParticipants: form.maxParticipants,
-                        waitingRoom: form.enableWaitingRoom,
-                        e2eeRequired: form.enableE2EE,
-                        recordingAllowed: form.enableRecording,
+                        waitingRoom: false,
+                        e2eeRequired: false,
+                        recordingAllowed: false,
                         chatEnabled: true,
                         screenShareEnabled: true,
                     },
@@ -150,8 +153,8 @@ const ScheduleMeeting: React.FC = () => {
             <div className="schedule-page">
                 <div className="schedule-container">
                     <div className="schedule-success">
-                        <div className="success-icon">✅</div>
-                        <h1>Meeting Scheduled!</h1>
+                        <div className="success-icon"><span className="mi" aria-hidden="true">check_circle</span></div>
+                        <h1>Meeting scheduled.</h1>
                         <div className="success-details">
                             <div className="detail-row">
                                 <span className="detail-label">Title</span>
@@ -183,12 +186,9 @@ const ScheduleMeeting: React.FC = () => {
                             )}
                         </div>
                         <div className="success-actions">
-                            <button className="btn-primary" onClick={copyInvitation}>
-                                {copySuccess ? '✓ Copied!' : '📋 Copy Invitation'}
-                            </button>
-                            <button className="btn-secondary" onClick={() => navigate('/')}>
-                                ← Back to Home
-                            </button>
+                            <button className="btn-primary qsvc-action" onClick={copyInvitation}><ActionContents><span className="mi" aria-hidden="true">{copySuccess ? 'check' : 'content_copy'}</span>{copySuccess ? 'Copied' : 'Copy invitation'}</ActionContents></button>
+                            <button className="btn-secondary qsvc-action qsvc-action--secondary" onClick={() =>navigate('/')}><ActionContents>
+                                Back to home</ActionContents></button>
                         </div>
                     </div>
                 </div>
@@ -201,8 +201,8 @@ const ScheduleMeeting: React.FC = () => {
         <div className="schedule-page">
             <div className="schedule-container">
                 <header className="schedule-header">
-                    <button className="btn-back" onClick={() => navigate('/')}>← Back</button>
-                    <h1>📅 Schedule Meeting</h1>
+                    <button className="btn-back qsvc-action qsvc-action--secondary" onClick={() =>navigate('/')}><ActionContents><span className="mi" aria-hidden="true">arrow_back</span> Back</ActionContents></button>
+                    <h1>Schedule a meeting.</h1>
                     <p>Plan a future meeting and invite participants</p>
                 </header>
 
@@ -314,15 +314,13 @@ const ScheduleMeeting: React.FC = () => {
                         <div className="invite-input-row">
                             <input
                                 type="email"
-                                placeholder="colleague@company.com"
+                                aria-label="Participant email" placeholder="colleague@company.com"
                                 value={inviteInput}
                                 onChange={e => setInviteInput(e.target.value)}
                                 onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addInvitee(); } }}
                                 className="form-input"
                             />
-                            <button type="button" className="btn-add" onClick={addInvitee}>
-                                + Add
-                            </button>
+                            <button type="button" className="btn-add qsvc-action" onClick={addInvitee}><ActionContents>+ Add</ActionContents></button>
                         </div>
                         {form.invitees.length > 0 && (
                             <div className="invitee-list">
@@ -331,7 +329,7 @@ const ScheduleMeeting: React.FC = () => {
                                         {email}
                                         <button
                                             type="button"
-                                            className="chip-remove"
+                                            className="chip-remove" aria-label={`Remove ${email}`}
                                             onClick={() => removeInvitee(email)}
                                         >×</button>
                                     </span>
@@ -347,26 +345,29 @@ const ScheduleMeeting: React.FC = () => {
                             <label className="toggle-label">
                                 <input
                                     type="checkbox"
-                                    checked={form.enableWaitingRoom}
+                                    checked={false}
+                                    disabled
                                     onChange={e => updateField('enableWaitingRoom', e.target.checked)}
                                 />
-                                <span className="toggle-text">🚪 Waiting Room</span>
+                                <span className="toggle-text">Waiting room unavailable in demo</span>
                             </label>
                             <label className="toggle-label">
                                 <input
                                     type="checkbox"
-                                    checked={form.enableE2EE}
+                                    checked={false}
+                                    disabled
                                     onChange={e => updateField('enableE2EE', e.target.checked)}
                                 />
-                                <span className="toggle-text">🔐 End-to-End Encryption</span>
+                                <span className="toggle-text">End-to-end encryption unavailable in demo</span>
                             </label>
                             <label className="toggle-label">
                                 <input
                                     type="checkbox"
-                                    checked={form.enableRecording}
+                                    checked={false}
+                                    disabled
                                     onChange={e => updateField('enableRecording', e.target.checked)}
                                 />
-                                <span className="toggle-text">🎥 Allow Recording</span>
+                                <span className="toggle-text">Recording disabled for demo</span>
                             </label>
                         </div>
 
@@ -400,37 +401,35 @@ const ScheduleMeeting: React.FC = () => {
 
                     {/* ── Calendar Preview ── */}
                     <section className="form-section calendar-preview">
-                        <h2>📅 Preview</h2>
+                        <h2>Invitation preview</h2>
                         <div className="preview-card">
                             <div className="preview-title">{form.title || 'Untitled Meeting'}</div>
                             <div className="preview-meta">
-                                <span>📅 {form.date ? new Date(`${form.date}T${form.time}`).toLocaleDateString('en-US', {
+                                <span><span className="mi mi-sm" aria-hidden="true">calendar_today</span> {form.date ? new Date(`${form.date}T${form.time}`).toLocaleDateString('en-US', {
                                     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
                                 }) : 'Select date'}</span>
-                                <span>🕐 {form.time} ({form.duration} min)</span>
+                                <span><span className="mi mi-sm" aria-hidden="true">schedule</span> {form.time} ({form.duration} min)</span>
                                 {form.recurrence !== 'none' && (
-                                    <span>🔁 Repeats {form.recurrence}</span>
+                                    <span><span className="mi mi-sm" aria-hidden="true">event_repeat</span> Repeats {form.recurrence}</span>
                                 )}
                                 {form.invitees.length > 0 && (
-                                    <span>👥 {form.invitees.length} invitee{form.invitees.length > 1 ? 's' : ''}</span>
+                                    <span><span className="mi mi-sm" aria-hidden="true">group</span> {form.invitees.length} invitee{form.invitees.length > 1 ? 's' : ''}</span>
                                 )}
-                                {form.enableE2EE && <span>🔐 E2EE</span>}
-                                {form.enableWaitingRoom && <span>🚪 Waiting Room</span>}
+                                {form.enableE2EE && <span><span className="mi mi-sm" aria-hidden="true">lock</span> E2EE</span>}
+                                {form.enableWaitingRoom && <span>Waiting room unavailable in demo</span>}
                             </div>
                         </div>
                     </section>
 
                     <button
                         type="submit"
-                        className="btn-primary btn-schedule"
+                        className="btn-primary btn-schedule qsvc-action"
                         disabled={submitting || !form.date || !form.time}
-                    >
-                        {submitting ? (
-                            <span className="spinner" />
+                    ><ActionContents>{submitting ? (
+                            <LoadingMark label="Scheduling meeting…" />
                         ) : (
-                            <>📅 Schedule Meeting</>
-                        )}
-                    </button>
+                            <><span className="mi" aria-hidden="true">calendar_today</span> Schedule meeting</>
+                        )}</ActionContents></button>
                 </form>
             </div>
         </div>

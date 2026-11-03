@@ -1,3 +1,4 @@
+import { getToken, clearSession } from './session';
 /**
  * WebSocket + JSON-RPC 2.0 signaling client.
  */
@@ -11,16 +12,16 @@ export class SignalingClient {
     private pendingRequests: Map<number, RpcCallback> = new Map();
     private nextId = 1;
     private eventHandlers: Map<string, Set<(params: any) => void>> = new Map();
-    private reconnectAttempts = 0;
-    private maxReconnectAttempts = 5;
 
     async connect(): Promise<void> {
         return new Promise((resolve, reject) => {
-            this.ws = new WebSocket(SIGNALING_URL);
+            const url = new URL(SIGNALING_URL);
+            const token = getToken();
+            if (token) url.searchParams.set('token', token);
+            this.ws = new WebSocket(url);
 
             this.ws.onopen = () => {
                 console.log('[Signaling] Connected');
-                this.reconnectAttempts = 0;
                 resolve();
             };
 
@@ -36,7 +37,8 @@ export class SignalingClient {
             this.ws.onclose = (event) => {
                 console.log(`[Signaling] Disconnected: ${event.code}`);
                 this.emit('disconnected', { code: event.code });
-                this.tryReconnect();
+                if (event.code === 4003) { clearSession(); this.emit('reconnectFailed', {}); return; }
+
             };
 
             this.ws.onerror = (err) => {
@@ -129,26 +131,7 @@ export class SignalingClient {
         }
     }
 
-    private tryReconnect(): void {
-        if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-            console.error('[Signaling] Max reconnect attempts reached');
-            this.emit('reconnectFailed', {});
-            return;
-        }
-
-        const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts), 10000);
-        this.reconnectAttempts++;
-        console.log(`[Signaling] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
-
-        setTimeout(() => {
-            this.connect().catch(() => {
-                this.tryReconnect();
-            });
-        }, delay);
-    }
-
     disconnect(): void {
-        this.maxReconnectAttempts = 0; // Prevent reconnection
         if (this.ws) {
             this.ws.close(1000, 'Client closing');
             this.ws = null;

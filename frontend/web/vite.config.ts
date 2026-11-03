@@ -8,6 +8,7 @@ export default defineConfig({
         host: '0.0.0.0',
         allowedHosts: true,
         proxy: {
+            '/api/auth': { target: 'http://localhost:4002', changeOrigin: true },
             '/api': {
                 target: 'http://localhost:4001',
                 changeOrigin: true,

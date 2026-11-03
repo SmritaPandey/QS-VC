@@ -4,11 +4,33 @@
  * Handles all client↔server signaling messages for WebRTC negotiation,
  * waiting room, host controls, RBAC, and media stats.
  */
+import { collaborationRpc } from '../collaboration.js';
 import { sfuClient } from '../sfu-client.js';
 import { roomManager, PeerState, PeerRole } from '../room-manager.js';
 import { logger } from '../logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
+import { publishCaption, translationCapabilities, translateCaption, clearEmptyRoomCaptions } from '../captions.js';
+
+const admittingPeers = new Set<string>();
+function canManagePeer(roomId: string, actorId: string, targetId: string): boolean {
+    const room = roomManager.getRoom(roomId), actor = room?.peers.get(actorId), target = room?.peers.get(targetId);
+    return !!actor && !!target && actorId !== targetId && target.role !== 'host' &&
+        (actor.role === 'host' || (actor.role === 'co-host' && target.role !== 'co-host'));
+}
+async function admitWaitingPeer(roomId: string, targetId: string) {
+    const room = roomManager.getRoom(roomId), waiting = room?.waitingRoom.get(targetId);
+    if (!room || !waiting) throw createError(-32000, 'Peer not in waiting room');
+    if (admittingPeers.has(targetId)) throw createError(-32000, 'Admission already in progress');
+    admittingPeers.add(targetId);
+    try {
+        const result = await joinPeerToRoom(waiting.ws, roomId, waiting.id, waiting.displayName, waiting.rtpCapabilities, {}, null,
+            () => { if (room.waitingRoom.get(targetId) !== waiting) throw createError(-32000, 'Admission cancelled'); });
+        room.waitingRoom.delete(targetId);
+        if (waiting.ws.readyState === 1) waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'admitted', params: result?.result || {} }));
+        return result;
+    } finally { admittingPeers.delete(targetId); }
+}
 
 // Input sanitization helpers
 function sanitizeString(s: string, maxLen = 100): string {
@@ -22,10 +44,18 @@ function sanitizeChat(s: string): string {
 }
 
 // RPC param validation schemas
+const roomSettingsSchema = z.object({
+    maxParticipants: z.number().int().min(1).max(1000).optional(),
+    waitingRoomEnabled: z.boolean().optional(), locked: z.boolean().optional(),
+    password: z.string().max(50).nullable().optional(), muteOnEntry: z.boolean().optional(),
+    allowScreenShare: z.boolean().optional(), allowChat: z.boolean().optional(),
+    allowRecording: z.boolean().optional(),
+}).strict();
+
 const joinRoomSchema = z.object({
     meetingCode: z.string().min(1).max(30),
     displayName: z.string().min(1).max(100),
-    rtpCapabilities: z.record(z.unknown()).optional(),
+    rtpCapabilities: z.record(z.string(), z.unknown()).optional(),
     password: z.string().max(50).optional(),
     role: z.enum(['host', 'co-host', 'participant']).optional(),
 });
@@ -49,6 +79,8 @@ interface RpcResponse {
     error?: { code: number; message: string; data?: any };
 }
 
+const joiningSockets = new WeakSet<object>();
+
 /**
  * Handle a JSON-RPC request from a WebSocket client.
  */
@@ -59,12 +91,38 @@ export async function handleRpcMessage(
 ): Promise<RpcResponse | null> {
     const { method, params, id } = message;
 
+    // Waiting, removed and stale connections must not act as active participants.
+    if (method !== 'joinRoom' && method !== 'leaveRoom') {
+        const peer = roomManager.getRoom(connectionState.roomId || '')?.peers.get(connectionState.peerId || '');
+        if (!peer || peer.ws !== ws) {
+            return { jsonrpc: '2.0', id: id!, error: { code: -32000, message: 'Not joined a room' } };
+        }
+    }
+
+    if (method === 'joinRoom' && joiningSockets.has(ws)) {
+        return { jsonrpc: '2.0', id: id!, error: { code: -32000, message: 'Join already in progress' } };
+    }
+    if (method === 'joinRoom') joiningSockets.add(ws);
     try {
         switch (method) {
+            case 'getCollaborationState':
+            case 'getCollaborationFile':
+            case 'collaborationAction':
+                return { jsonrpc: '2.0', id: id!, result: collaborationRpc(ws, connectionState.roomId!, connectionState.peerId!, method, params) };
+            case 'captionPublish':
+                return { jsonrpc: '2.0', id: id!, result: publishCaption(ws, connectionState.roomId!, connectionState.peerId!, params) };
+            case 'translationCapabilities':
+                return { jsonrpc: '2.0', id: id!, result: await translationCapabilities(ws, connectionState.roomId!, connectionState.peerId!) };
+            case 'translateCaption':
+                return { jsonrpc: '2.0', id: id!, result: await translateCaption(ws, connectionState.roomId!, connectionState.peerId!, params) };
+
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             // JOIN ROOM (with waiting room + password support)
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             case 'joinRoom': {
+                if (connectionState.peerId || connectionState.roomId) {
+                    throw createError(-32000, 'Already joined or waiting for a room');
+                }
                 // Validate inputs
                 const joinParams = joinRoomSchema.safeParse(params);
                 if (!joinParams.success) {
@@ -73,7 +131,7 @@ export async function handleRpcMessage(
                         error: { code: -32602, message: 'Invalid params: ' + joinParams.error.issues.map(i => i.message).join(', ') },
                     };
                 }
-                const { meetingCode, displayName: rawName, rtpCapabilities, password, role } = joinParams.data;
+                const { meetingCode, displayName: rawName, rtpCapabilities, password } = joinParams.data;
                 const displayName = sanitizeString(rawName);
                 const peerId = uuidv4();
 
@@ -132,7 +190,7 @@ export async function handleRpcMessage(
                 }
 
                 // Direct join (no waiting room or first peer)
-                return await joinPeerToRoom(ws, room.id, peerId, displayName, rtpCapabilities, role, connectionState, id!);
+                return await joinPeerToRoom(ws, room.id, peerId, displayName, rtpCapabilities, connectionState, id!);
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -327,23 +385,7 @@ export async function handleRpcMessage(
                     throw createError(-32005, 'Only host/co-host can admit peers');
                 }
 
-                const waiting = roomManager.admitFromWaitingRoom(roomId, targetPeerId);
-                if (!waiting) throw createError(-32000, 'Peer not in waiting room');
-
-                // Join the admitted peer to the room
-                const admitResult = await joinPeerToRoom(
-                    waiting.ws, roomId, waiting.id, waiting.displayName,
-                    waiting.rtpCapabilities, 'member', {}, null
-                );
-
-                // Send the join result to the admitted peer
-                if (waiting.ws && waiting.ws.readyState === 1) {
-                    waiting.ws.send(JSON.stringify({
-                        jsonrpc: '2.0',
-                        method: 'admitted',
-                        params: admitResult?.result || {},
-                    }));
-                }
+                await admitWaitingPeer(roomId, targetPeerId);
 
                 return { jsonrpc: '2.0', id: id!, result: { admitted: true, peerId: targetPeerId } };
             }
@@ -384,22 +426,14 @@ export async function handleRpcMessage(
                     throw createError(-32005, 'Only host/co-host can admit peers');
                 }
 
-                const waitingPeers = roomManager.admitAllFromWaitingRoom(roomId);
+                const waitingPeers = roomManager.getWaitingRoom(roomId);
+                let admitted = 0;
+                const failed: { peerId: string; reason: string }[] = [];
                 for (const wp of waitingPeers) {
-                    const result = await joinPeerToRoom(
-                        wp.ws, roomId, wp.id, wp.displayName,
-                        wp.rtpCapabilities, 'member', {}, null
-                    );
-                    if (wp.ws && wp.ws.readyState === 1) {
-                        wp.ws.send(JSON.stringify({
-                            jsonrpc: '2.0',
-                            method: 'admitted',
-                            params: result?.result || {},
-                        }));
-                    }
+                    try { await admitWaitingPeer(roomId, wp.id); admitted++; }
+                    catch (error: any) { failed.push({ peerId: wp.id, reason: error.message || 'Admission failed' }); }
                 }
-
-                return { jsonrpc: '2.0', id: id!, result: { admitted: waitingPeers.length } };
+                return { jsonrpc: '2.0', id: id!, result: { admitted, failed } };
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -432,6 +466,8 @@ export async function handleRpcMessage(
                     throw createError(-32005, 'Only host/co-host can mute participants');
                 }
 
+                if (!canManagePeer(roomId, peerId, targetPeerId)) throw createError(-32005, 'Cannot manage this participant');
+
                 // Tell the target peer to mute
                 roomManager.sendToPeer(roomId, targetPeerId, 'forceMute', {
                     kind: kind || 'audio',
@@ -452,11 +488,11 @@ export async function handleRpcMessage(
                     throw createError(-32005, 'Only host/co-host can mute all');
                 }
 
-                // Broadcast forceMute to everyone except host
-                roomManager.broadcast(roomId, 'forceMute', {
-                    kind: kind || 'audio',
-                    by: connectionState.displayName,
-                }, peerId);
+                for (const target of roomManager.getRoom(roomId)!.peers.values()) {
+                    if (canManagePeer(roomId, peerId, target.id)) roomManager.sendToPeer(roomId, target.id, 'forceMute', {
+                        kind: kind || 'audio', by: connectionState.displayName,
+                    });
+                }
 
                 return { jsonrpc: '2.0', id: id!, result: { mutedAll: true } };
             }
@@ -471,6 +507,8 @@ export async function handleRpcMessage(
                 if (!roomManager.isHostOrCoHost(roomId, peerId)) {
                     throw createError(-32005, 'Only host/co-host can kick participants');
                 }
+
+                if (!canManagePeer(roomId, peerId, targetPeerId)) throw createError(-32005, 'Cannot manage this participant');
 
                 // Notify the kicked peer
                 roomManager.sendToPeer(roomId, targetPeerId, 'kicked', {
@@ -522,7 +560,7 @@ export async function handleRpcMessage(
                     throw createError(-32005, 'Only host/co-host can update settings');
                 }
 
-                roomManager.updateSettings(roomId, settings);
+                roomManager.updateSettings(roomId, roomSettingsSchema.parse(settings));
                 return { jsonrpc: '2.0', id: id!, result: { updated: true } };
             }
 
@@ -533,8 +571,8 @@ export async function handleRpcMessage(
                 const { targetPeerId, newRole } = params;
                 const { peerId, roomId } = connectionState;
                 if (!peerId || !roomId) throw createError(-32000, 'Not joined a room');
-                if (!roomManager.isHostOrCoHost(roomId, peerId)) {
-                    throw createError(-32005, 'Only host/co-host can change roles');
+                if (roomManager.getRoom(roomId)?.hostPeerId !== peerId) {
+                    throw createError(-32005, 'Only host can change roles');
                 }
 
                 const validRoles: PeerRole[] = ['co-host', 'member', 'guest'];
@@ -542,6 +580,7 @@ export async function handleRpcMessage(
                     throw createError(-32000, 'Invalid role');
                 }
 
+                if (targetPeerId === peerId) throw createError(-32005, 'Host cannot demote itself');
                 roomManager.changePeerRole(roomId, targetPeerId, newRole);
                 return { jsonrpc: '2.0', id: id!, result: { changed: true } };
             }
@@ -552,7 +591,7 @@ export async function handleRpcMessage(
             case 'endMeeting': {
                 const { peerId, roomId } = connectionState;
                 if (!peerId || !roomId) throw createError(-32000, 'Not joined a room');
-                if (!roomManager.isHostOrCoHost(roomId, peerId)) {
+                if (roomManager.getRoom(roomId)?.peers.get(peerId)?.role !== 'host') {
                     throw createError(-32005, 'Only host can end meeting');
                 }
 
@@ -572,6 +611,13 @@ export async function handleRpcMessage(
                         }
                     }
                     room.peers.clear();
+                    room.hostPeerId = null;
+                    for (const waiting of room.waitingRoom.values()) {
+                        if (waiting.ws?.readyState === 1) {
+                            waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'rejected', params: { reason: 'Host ended the meeting' } }));
+                            waiting.ws.close(4000, 'Meeting ended');
+                        }
+                    }
                     room.waitingRoom.clear();
                 }
 
@@ -640,7 +686,7 @@ export async function handleRpcMessage(
 
                 (peer as any).e2eePublicKey = publicKey;
 
-                roomManager.broadcastToPeers(connectionState.roomId!, 'e2eeKeyExchange', {
+                roomManager.broadcast(connectionState.roomId!, 'e2eeKeyExchange', {
                     peerId: connectionState.peerId,
                     publicKey,
                 }, connectionState.peerId!);
@@ -721,6 +767,8 @@ export async function handleRpcMessage(
                 message: err.message || 'Internal error',
             },
         };
+    } finally {
+        if (method === 'joinRoom') joiningSockets.delete(ws);
     }
 }
 
@@ -733,9 +781,9 @@ async function joinPeerToRoom(
     peerId: string,
     displayName: string,
     rtpCapabilities: any,
-    role: PeerRole | undefined,
     connectionState: any,
-    rpcId: number | string | null
+    rpcId: number | string | null,
+    beforeRegister?: () => void
 ): Promise<RpcResponse | null> {
     const room = roomManager.getRoom(roomId);
     if (!room) throw createError(-32000, 'Room not found');
@@ -763,14 +811,21 @@ async function joinPeerToRoom(
         ws,
         rtpCapabilities,
         producers: new Map(),
-        role: role as PeerRole || 'member',
+        role: 'member',
         audioMuted: false,
         videoOff: false,
         handRaised: false,
         screenSharing: false,
         joinedAt: new Date(),
     };
-    roomManager.addPeer(roomId, peerState);
+    try {
+        if (ws.readyState !== 1) throw createError(-32000, 'Connection closed during join');
+        beforeRegister?.();
+        roomManager.addPeer(roomId, peerState);
+    } catch (error) {
+        await sfuClient.removePeer(roomId, peerId).catch(() => { });
+        throw error;
+    }
 
     // Store connection state
     if (connectionState) {
@@ -840,6 +895,7 @@ export async function handlePeerDisconnect(
         await sfuClient.removePeer(roomId, peerId).catch(() => { });
 
         roomManager.removePeer(roomId, peerId);
+        clearEmptyRoomCaptions(roomId);
         roomManager.broadcast(roomId, 'peerLeft', { peerId, displayName });
     } catch (err) {
         logger.error(err, `Error during peer disconnect: ${peerId}`);
