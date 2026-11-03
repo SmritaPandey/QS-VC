@@ -1,4 +1,4 @@
-const publicApi = /^\/api\/(auth|meetings|recordings|sfu)(\/|$)/;
+const publicApi = /^\/api\/(auth|meetings|recordings|sfu|users|admin)(\/|$)/;
 
 function error(message, status) {
     return Response.json({ error: message }, { status, headers: { 'Cache-Control': 'no-store' } });
@@ -15,7 +15,7 @@ export default {
         const signaling = url.pathname === '/ws' || url.pathname.startsWith('/ws/');
         const api = url.pathname === '/api' || url.pathname.startsWith('/api/');
         if (!api && !signaling) return env.ASSETS.fetch(request);
-        if (api && !publicApi.test(url.pathname)) return error('API route not found.', 404);
+        if (api && !publicApi.test(url.pathname) && url.pathname !== '/api/ice-servers') return error('API route not found.', 404);
 
         let backend;
         try {

@@ -17,5 +17,11 @@ it('allows missing records as instant guest rooms but rejects ended meetings', a
 });
 it('maps the stored meeting-service setting names to live controls', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok:true,json:async()=>({hostId:'owner',status:'waiting',settings:{waitingRoom:true,chatEnabled:false,screenShareEnabled:false}})}));
-    expect((await loadMeetingPolicy('QS-TEST'))?.settings).toMatchObject({waitingRoomEnabled:true,allowChat:false,allowScreenShare:false,allowRecording:false});
+    expect((await loadMeetingPolicy('QS-TEST'))?.settings).toMatchObject({waitingRoomEnabled:true,allowChat:false,allowScreenShare:false,allowRecording:true});
+});
+it('preserves explicit recording restrictions in either stored setting form', async () => {
+    for (const settings of [{ allowRecording: false }, { recording_allowed: false }]) {
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok:true,json:async()=>({hostId:'owner',status:'waiting',settings})}));
+        expect((await loadMeetingPolicy('QS-TEST'))?.settings.allowRecording).toBe(false);
+    }
 });

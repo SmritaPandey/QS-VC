@@ -11,6 +11,9 @@ export async function attachSignalingIfAvailable(server: http.Server): Promise<b
         || path.join(process.cwd(), 'signaling-dist', 'ws-attach.js');
 
     try {
+        if (process.env.SIGNALING_DIST && !process.env.MEETING_INTERNAL_URL) {
+            process.env.MEETING_INTERNAL_URL = `http://127.0.0.1:${process.env.PORT || process.env.MEETING_PORT || '4003'}`;
+        }
         const mod = await import(pathToFileURL(signalingPath).href);
         if (typeof mod.attachSignalingWebSocket !== 'function') {
             throw new Error('attachSignalingWebSocket export missing');
@@ -19,6 +22,7 @@ export async function attachSignalingIfAvailable(server: http.Server): Promise<b
         logger.info(`WebSocket signaling attached at /ws (${signalingPath})`);
         return true;
     } catch (err: any) {
+        if (process.env.SIGNALING_DIST) throw err;
         logger.warn(`Signaling WebSocket unavailable: ${err.message}`);
         return false;
     }

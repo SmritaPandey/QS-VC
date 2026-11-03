@@ -483,9 +483,7 @@ attachSignalingIfAvailable(server).then((attached) => {
     });
 }).catch((err) => {
     logger.error(err, 'Failed to attach signaling WebSocket');
-    server.listen(PORT, HOST, () => {
-        logger.info(`📋 QS-VC Meeting Service running on ${HOST}:${PORT} (meeting-only)`);
-    });
+    process.exit(1);
 });
 
 process.on('SIGTERM', () => { rawPool.end(); process.exit(0); });

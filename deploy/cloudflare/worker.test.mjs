@@ -34,6 +34,10 @@ test('API requests retain method, body, query and auth; signaling retains upgrad
         assert.equal(seen[0].redirect, 'manual');
         await worker.fetch(new Request('https://site.test/ws', { headers: { Upgrade: 'websocket' } }), env);
         assert.equal(seen[1].headers.get('Upgrade'), 'websocket');
+        for (const path of ['/api/ice-servers', '/api/users/me', '/api/admin/stats']) {
+            assert.equal((await worker.fetch(new Request(`https://site.test${path}`), env)).status, 200);
+            assert.equal(seen.at(-1).url, `https://backend.test${path}`);
+        }
         globalThis.fetch = async () => { throw new Error('connection refused'); };
         assert.equal((await worker.fetch(new Request('https://site.test/api/auth/me'), env)).status, 502);
     } finally {

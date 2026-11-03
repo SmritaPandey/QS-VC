@@ -5,6 +5,9 @@
         Referrer-Policy strict-origin-when-cross-origin
         X-Frame-Options DENY
     }
+    handle /health {
+        respond "QS-VC backend gateway" 200
+    }
     handle /api/auth/* {
         reverse_proxy 127.0.0.1:4002
     }

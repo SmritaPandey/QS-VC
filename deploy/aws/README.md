@@ -3,10 +3,10 @@
 ## Proposed AWS resources — approval required before creation
 
 - Region: Mumbai, ap-south-1; existing default VPC shared with private qs-db.
-- One Amazon Linux 2023 x86_64 EC2 t3.medium (2 vCPU, 4 GiB RAM).
+- One Amazon Linux 2023 x86_64 EC2 t3.small (2 vCPU, 2 GiB RAM) for a light demo; t3.medium is an optional paid-plan upgrade.
 - 40 GiB encrypted gp3 root disk; one Elastic IPv4 address.
 - Instance metadata requires IMDSv2; CPU credits Standard to avoid surplus-credit fees.
-- EC2 role: AmazonSSMManagedInstanceCore only, for administration without public SSH.
+- EC2 role: SSM administration without public SSH, plus object access limited to the private recordings bucket prefixes.
 - No load balancer, NAT gateway, Kubernetes or RDS Proxy for this demo.
 - Internet inbound: TCP 80/443; TCP/UDP 3478; TCP/UDP 40000–40100 (media);
   UDP 49152–49200 (TURN relay). No SSH, database or internal service ports exposed.
@@ -18,6 +18,19 @@ Public IPv4 is $0.005/hour ($3.65 per 730 hours). Disk/database/transfer are add
 This is a small demo host, not a production capacity guarantee or high-availability cluster.
 
 ## Deployment sequence
+
+For the Cloudflare website + AWS backend split, `DOMAIN` is
+`backend.qsvcmeet.com`, while `WEB_URL` stays `https://qsvcmeet.com` and
+`CORS_ORIGINS` includes the public website origins. TURN uses the backend
+hostname, with a DNS-only record so media goes directly to the server.
+Do not move the public website's A record away from Cloudflare.
+
+`backend-stack.json` prepares the host, Elastic IP, SSM administration role and
+the backend-only RDS ingress rule. It does not deploy application source or
+credentials, change DNS, migrate the database or start the application. Create
+it in Mumbai only after cost and security-access approval, using the existing
+database VPC and an Internet-routed subnet. Never put credentials in stack inputs
+or EC2 user data. The stack creates an IAM role and needs `CAPABILITY_IAM`.
 
 1. Approve cost and creation of the EC2 role/security groups/public service ports.
 2. Launch using bootstrap.sh as user data, encrypted disk and IMDSv2 required.
@@ -43,13 +56,15 @@ This is a small demo host, not a production capacity guarantee or high-availabil
 9. Start: docker compose -f deploy/aws/compose.yml --env-file deploy/aws/.env up -d
 10. Verify /ready internally for auth/meeting; verify SQL migrations, login/logout,
     persisted contact enquiries and authenticated meeting scheduling against RDS.
-11. Update qsvcmeet.com A record to the Elastic IP in Hostinger after checking existing
+11. Update backend.qsvcmeet.com A record to the Elastic IP at the authoritative DNS provider after checking existing
     A/AAAA/CAA records. Preserve mail/MX/TXT records. Caddy obtains/renews HTTPS after
-    DNS reaches the server. No frontend secrets; website API/WebSocket URLs use its origin.
+    DNS reaches the server. Keep the record DNS-only for TURN/media. After HTTPS is
+    verified, set the Cloudflare Worker runtime `BACKEND_ORIGIN` to
+    `https://backend.qsvcmeet.com`. Frontend API/WebSocket URLs use the public
+    website origin. Preserve the public website's current Cloudflare routing.
 12. Test HTTPS, two external devices, camera/mic, chat, screen share, reconnect and TURN.
 
-Recording is currently disabled in the source API. This deployment does not enable paid
-recording or storage. Translation requires a separately configured available provider.
+Cloud recording requires RECORDING_BUCKET from the stack output and the instance role’s scoped S3 permissions. The bucket blocks public access, requires TLS, and encrypts objects. No automatic deletion lifecycle is configured: recordings stay until the host deletes them. Stack deletion retains the bucket to avoid accidental loss. Signed-in meeting owners record in their browser and upload on stop, with an 80 MiB upload cap and an earlier approximately 70 MiB capture cutoff. The host must keep the tab open until saving succeeds. Download happens only on request from the three-dot menu. Intentional share links are revocable; already-issued media URLs can last five minutes. S3 storage and data transfer consume credits or incur costs. Translation requires a separately configured available provider.
 RDS migrations and private connectivity have not been executed by writing these files.
 
 ## Intranet on Windows

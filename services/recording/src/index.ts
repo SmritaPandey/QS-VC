@@ -12,11 +12,11 @@ const logger = pino({
     name: 'qsvc-recording',
 });
 
-// Recording stays disabled until server-side authorization and retention are implemented.
+// Cloud recording is available only when private storage is configured.
 const app = createRecordingApp();
 const PORT = parseInt(process.env.RECORDING_PORT || '4004', 10);
 const server = app.listen(PORT, () => {
-    logger.info(`QS-VC Recording Service running on port ${PORT}; recording disabled for demo`);
+    logger.info(`QS-VC Recording Service running on port ${PORT}; cloud storage ${process.env.RECORDING_BUCKET ? 'configured' : 'not configured'}`);
 });
 
 function shutdown() {

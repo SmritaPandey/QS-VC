@@ -4,9 +4,11 @@ import { signaling } from '../lib/signaling';
 import { media, ConsumerInfo } from '../lib/media';
 import { CameraCapture, watchCameraVisibility, watchCameraTrack, cameraAccessMessage } from '../lib/camera-capture';
 import { watchMutedSpeech } from '../lib/muted-speech';
-import { recordingManager } from '../lib/recording';
+import { recordingManager, recordingRequest } from '../lib/recording';
+import { getToken } from '../lib/session';
+import '../styles/recordings.css';
 import { playSound } from '../lib/sounds';
-import { type MeetingComposite } from '../lib/meeting-recorder';
+import { createMeetingComposite, type MeetingComposite } from '../lib/meeting-recorder';
 import VideoGrid from '../components/VideoGrid';
 import BrandLogo from '../components/BrandLogo';
 import ControlBar from '../components/ControlBar';
@@ -75,6 +77,11 @@ export default function MeetingRoom() {
     const [screenSharing, setScreenSharing] = useState(false);
     const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
     const [isRecording, setIsRecording] = useState(false);
+    const [roomRecording, setRoomRecording] = useState<{ peerId: string; displayName: string } | null>(null);
+    const [recordingStatus, setRecordingStatus] = useState(recordingManager.pending ? 'A recording is waiting to save. Retry before leaving.' : '');
+    const pendingRecording = useRef(recordingManager.pending);
+    const finalizingRecording = useRef<Promise<boolean> | null>(null);
+    const finishRecordingRef = useRef<() => Promise<boolean>>(async () => true);
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [chatOpen, setChatOpen] = useState(false);
     const [participantsOpen, setParticipantsOpen] = useState(false);
@@ -201,6 +208,7 @@ export default function MeetingRoom() {
             if (!alive()) return;
             setWaitingAdmission(false);
             joinedRef.current = false;
+            if (recordingRef.current) void finishRecordingRef.current();
             stopLocalMedia(); media.close(); signaling.disconnect();
             setConnected(false); setLocalStream(null); setVideoOff(true); setAudioMuted(true);
             setConnectionLost(true);
@@ -230,6 +238,7 @@ export default function MeetingRoom() {
                 if (!alive()) return;
                 myPeerIdRef.current = joinResult.peerId;
                 setMyRole(joinResult.role || 'member');
+                setRoomRecording(joinResult.recording || null);
                 setRoomSettings(current => ({ ...current, ...joinResult.settings }));
                 joinedRef.current = true;
                 if (joinResult.settings?.muteOnEntry && joinResult.role !== 'host' && !audioMutedRef.current) {
@@ -239,6 +248,10 @@ export default function MeetingRoom() {
 
                 // Listeners first, so nothing sent while we set up media is missed.
                 unsubscribe.push(
+                    signaling.on('recordingStateChanged', ({ recording }) => {
+                        setRoomRecording(recording || null);
+                        if (recordingRef.current && (!recording || recording.peerId !== myPeerIdRef.current)) void finishRecordingRef.current();
+                    }),
                     signaling.on('settingsUpdated', ({ settings }) => {
                         setRoomSettings(current => ({ ...current, ...settings }));
                         roomSettingsRef.current = { ...roomSettingsRef.current, ...settings };
@@ -265,8 +278,8 @@ export default function MeetingRoom() {
                         playSound('notice');
                         showNotice(`${by || 'The host'} turned off your ${k === 'audio' ? 'microphone' : 'camera'}.`);
                     }),
-                    signaling.on('kicked', ({ reason }: any) => { stopLocalMedia(); media.close(); signaling.disconnect(); navigate('/', { state: { notice: reason || 'You were removed from the meeting.' } }); }),
-                    signaling.on('meetingEnded', ({ reason }: any) => { stopLocalMedia(); media.close(); signaling.disconnect(); navigate('/', { state: { notice: reason || 'The meeting has ended.' } }); }),
+                    signaling.on('kicked', async ({ reason }: any) => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/', { state: { notice: reason || 'You were removed from the meeting.' } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
+                    signaling.on('meetingEnded', async ({ reason }: any) => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/', { state: { notice: reason || 'The meeting has ended.' } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
                     signaling.on('chatMessage', (msg: ChatMessage) => { setChatMessages((prev) => [...prev, msg]); }),
                     signaling.on('reaction', ({ peerId, displayName: name, emoji }: any) => {
                         // The server echoes reactions to the sender too; ours is already on screen.
@@ -352,7 +365,7 @@ export default function MeetingRoom() {
             settleAdmission?.({ cancelled: true });
             unsubscribe.forEach((off) => off());
             joinedRef.current = false;
-            if (recordingRef.current) { recordingRef.current = false; recordingManager.stopRecording().catch(() => { }); }
+            if (recordingRef.current) void finishRecordingRef.current();
             compositeRef.current?.stop();
             compositeRef.current = null;
             stopLocalMedia();
@@ -472,7 +485,7 @@ export default function MeetingRoom() {
         const onPageHide = () => {
             stopLocalMedia();
             media.close();
-            if (recordingRef.current) { recordingRef.current = false; recordingManager.stopRecording().catch(() => { }); }
+            if (recordingRef.current) void finishRecordingRef.current();
             compositeRef.current?.stop();
             compositeRef.current = null;
             setIsRecording(false);
@@ -551,25 +564,90 @@ export default function MeetingRoom() {
         if (sharingRef.current) stopScreenShare(); else startScreenShare();
     }, [startScreenShare, stopScreenShare, roomSettings.allowScreenShare, showNotice]);
 
-    const finishRecording = useCallback(async () => {
-        if (!recordingRef.current) return; // guards double stop
-        recordingRef.current = false;
-        setIsRecording(false);
+    const savePendingRecording = useCallback(async () => {
+        const pending = pendingRecording.current;
+        if (!pending || !meetingCode || busyRef.current.record) return !pending;
+        busyRef.current.record = true;
+        setRecordingStatus('Saving recording privately… Keep this tab open.');
         try {
-            const result = await recordingManager.stopRecording();
-            recordingManager.downloadLocally(result.blob, `QS-VC-${meetingCode}-${Date.now()}.${result.format}`);
-        } catch (err) { console.error('Failed to stop recording:', err); }
-        compositeRef.current?.stop();
-        compositeRef.current = null;
+            await recordingManager.uploadRecording(pending.meetingCode, pending.blob, pending.id);
+            pendingRecording.current = null; recordingManager.pending = null;
+            setRecordingStatus('Recording saved.');
+            return true;
+        } catch (reason) {
+            setRecordingStatus(reason instanceof Error ? reason.message : 'Upload failed. Retry before leaving.');
+            return false;
+        } finally { busyRef.current.record = false; }
     }, [meetingCode]);
 
-    /**
-     * Record the meeting itself: the tiles on screen + everyone's audio.
-     * (Screen sharing is the one that asks which screen or window to use; recording no longer does.)
-     */
+    const finishRecording = useCallback((): Promise<boolean> => {
+        if (finalizingRecording.current) return finalizingRecording.current;
+        if (!recordingRef.current) return Promise.resolve(!pendingRecording.current);
+        recordingRef.current = false;
+        busyRef.current.record = true;
+        setIsRecording(false);
+        setRecordingStatus('Finishing recording… Keep this tab open.');
+        if (joinedRef.current) void signaling.request('setRecordingState', { recording: false }).catch(() => {});
+        const task = (async () => {
+            try {
+                const result = await recordingManager.stopRecording();
+                pendingRecording.current = { blob: result.blob, format: result.format, meetingCode: meetingCode || '', id: crypto.randomUUID() };
+                recordingManager.pending = pendingRecording.current;
+            } catch (reason) {
+                setRecordingStatus(reason instanceof Error ? reason.message : 'Recording could not be saved.');
+                return false;
+            } finally {
+                compositeRef.current?.stop(); compositeRef.current = null;
+                busyRef.current.record = false;
+            }
+            return savePendingRecording();
+        })();
+        finalizingRecording.current = task;
+        void task.finally(() => { finalizingRecording.current = null; });
+        return task;
+    }, [savePendingRecording, meetingCode]);
+    finishRecordingRef.current = finishRecording;
+
     const handleToggleRecording = useCallback(async () => {
-        showNotice('Recording is disabled for this demo.');
-    }, [finishRecording, meetingCode, showNotice]);
+        if (recordingRef.current) { await finishRecording(); return; }
+        if (busyRef.current.record || pendingRecording.current) { showNotice('Finish saving the previous recording first.'); return; }
+        if (myRole !== 'host' || !getToken()) { showNotice('Sign in as the meeting host to record.'); return; }
+        if (!connected || !meetingCode) return;
+        if (!window.confirm('Record this meeting? Everyone will see a recording indicator. This demo stops near 70 MB (roughly 7 minutes). Keep this tab open until the cloud save finishes.')) return;
+        busyRef.current.record = true;
+        try {
+            // Validate cloud readiness before capturing; lists require authenticated ownership.
+            await recordingRequest(`meeting/${encodeURIComponent(meetingCode)}`);
+            await signaling.request('setRecordingState', { recording: true });
+            if (!sessionActive.current || !joinedRef.current) throw new Error('The meeting has disconnected.');
+            const composite = createMeetingComposite(() => videoAreaRef.current, () => [
+                ...(localStreamRef.current?.getAudioTracks() || []),
+                ...(screenStreamRef.current?.getAudioTracks() || []),
+                ...Array.from(peersRef.current.values()).flatMap(peer => peer.audioTrack ? [peer.audioTrack] : []),
+            ], `QS-VC ${meetingCode}`);
+            compositeRef.current = composite;
+            await recordingManager.startRecording(composite.stream, () => {
+                if (!recordingRef.current) return;
+                setRecordingStatus('Recording stopped. Saving…');
+                void finishRecordingRef.current();
+            });
+            recordingRef.current = true;
+            setIsRecording(true);
+            setRecordingStatus('');
+        } catch (reason) {
+            compositeRef.current?.stop(); compositeRef.current = null;
+            void signaling.request('setRecordingState', { recording: false }).catch(() => {});
+            showNotice(reason instanceof Error ? reason.message : 'Recording could not start.');
+        } finally { busyRef.current.record = false; }
+    }, [finishRecording, meetingCode, myRole, connected, showNotice]);
+
+    useEffect(() => {
+        const warn = (event: BeforeUnloadEvent) => {
+            if (recordingRef.current || pendingRecording.current || busyRef.current.record) { event.preventDefault(); event.returnValue = ''; }
+        };
+        window.addEventListener('beforeunload', warn);
+        return () => window.removeEventListener('beforeunload', warn);
+    }, []);
 
     const handRaisedRef = useRef(false);
     const handleRaiseHand = useCallback(() => {
@@ -604,15 +682,17 @@ export default function MeetingRoom() {
         window.dispatchEvent(new CustomEvent(LANGUAGE_EVENT, { detail: { code: speechLanguage.code } }));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
-    const handleLeave = useCallback(() => {
-        if (recordingRef.current) finishRecording();
+    const handleLeave = useCallback(async () => {
+        if (busyRef.current.record) { showNotice('Wait until the recording finishes saving.'); return; }
+        if (recordingRef.current && !await finishRecording()) return;
+        if (pendingRecording.current) { showNotice('Retry saving, or open Recording actions to download or discard the unsaved copy.'); return; }
         stopLocalMedia();
         joinedRef.current = false;
         media.close();
         signaling.request('leaveRoom', {}).catch(() => { });
         signaling.disconnect();
         navigate('/');
-    }, [finishRecording, navigate, stopLocalMedia]);
+    }, [finishRecording, navigate, stopLocalMedia, showNotice]);
     const handleSendChat = useCallback((content: string) => { if (!roomSettings.allowChat && myRole !== 'host' && myRole !== 'co-host') { showNotice('Chat is disabled by the host.'); return; } signaling.request('chatMessage', { content, type: 'text' }).catch(() => { showNotice('Your message could not be sent.'); }); }, [roomSettings.allowChat, myRole, showNotice]);
     const closeChat = useCallback(() => {
         setChatOpen(false);
@@ -664,7 +744,7 @@ export default function MeetingRoom() {
                 </div>
                 <div className="top-bar-center">
                     <span className="meeting-timer">{formatDuration(duration)}</span>
-                    {isRecording && <span className="recording-indicator"><span className="mi mi-sm">fiber_manual_record</span> REC</span>}
+                    {roomRecording && <span className="recording-indicator" role="status"><span className="mi mi-sm" aria-hidden="true">fiber_manual_record</span> {roomRecording.displayName} is recording</span>}
                     {screenSharing && <span className="sharing-indicator"><span className="mi mi-sm">screen_share</span> Sharing</span>}
                 </div>
                 <div className="top-bar-right">
@@ -703,6 +783,9 @@ export default function MeetingRoom() {
                 {hostToolsOpen && manager && <HostMeetingTools role={myRole} myPeerId={myPeerIdRef.current} participants={[{ peerId: myPeerIdRef.current, displayName, role: myRole, audioMuted }, ...Array.from(peers.values()).map(peer => ({ ...peer, role: peer.role || 'member' }))]} settings={roomSettings} onClose={closeActivityPanel} />}
             </div>
 
+            {recordingStatus && <div className="meeting-recording-status" role="status">{recordingStatus}
+                {pendingRecording.current ? <details><summary>Recording actions</summary><button type="button" onClick={() => void savePendingRecording()}>Retry saving</button><button type="button" onClick={() => { const pending = pendingRecording.current; if (pending) recordingManager.downloadLocally(pending.blob, `QS-VC-${meetingCode}.${pending.format}`); }}>Download unsaved copy</button><button type="button" onClick={() => { if (window.confirm('Discard the unsaved recording? This copy cannot be recovered.')) { pendingRecording.current = null; recordingManager.pending = null; setRecordingStatus('Unsaved copy discarded. You can leave the meeting.'); } }}>Discard unsaved copy</button></details> : <a href={`/recordings/${encodeURIComponent(meetingCode || '')}`}>Manage recordings</a>}
+            </div>}
             <ControlBar
                 assistant={<AIChatBot onOpen={() => { setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen} />}
                 activitiesOpen={activitiesOpen} hostToolsOpen={hostToolsOpen}
@@ -710,7 +793,7 @@ export default function MeetingRoom() {
                 onToggleHostTools={manager ? () => { setHostToolsOpen(value => !value); setActivitiesOpen(false); setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); } : undefined}
                 viewMode={viewMode} onChangeView={setViewMode} activitySignal={mutedSpeechPulse} keepSideVisible={mutedSpeechNotice}
                 audioMuted={audioMuted} videoOff={videoOff} screenSharing={screenSharing}
-                isRecording={isRecording} chatOpen={chatOpen} participantsOpen={participantsOpen}
+                isRecording={isRecording} canRecord={myRole === 'host' && !!getToken()} chatOpen={chatOpen} participantsOpen={participantsOpen}
                 handRaised={handRaised} reactionsOpen={reactionsOpen}
                 onToggleReactions={() => { setReactionsOpen((open) => !open); setLanguageOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }}
                 languageOpen={languageOpen} languageLabel={findLanguage(speechLanguage.code)?.name} languageCode={speechLanguage.code.split('-')[0].toUpperCase()}

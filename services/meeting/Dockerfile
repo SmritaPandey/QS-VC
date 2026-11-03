@@ -29,9 +29,9 @@ RUN cd signaling && npm install --omit=dev
 
 COPY --from=meeting-build /meeting/dist ./dist
 COPY shared/database.cjs shared/tenant-database.cjs /shared/
-COPY --from=signaling-build /signaling/dist ./signaling-dist
+COPY --from=signaling-build /signaling/dist ./signaling/dist
 
 ENV HOST=0.0.0.0
-ENV SIGNALING_DIST=/app/signaling-dist/ws-attach.js
+ENV SIGNALING_DIST=/app/signaling/dist/ws-attach.js
 EXPOSE 4003
 CMD ["node", "dist/index.js"]

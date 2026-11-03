@@ -50,7 +50,8 @@ export function createMeetingComposite(
     const canvas = document.createElement('canvas');
     canvas.width = W;
     canvas.height = H;
-    const g = canvas.getContext('2d')!;
+    const g = canvas.getContext('2d');
+    if (!g || typeof canvas.captureStream !== 'function') throw new Error('Meeting recording is not supported in this browser.');
 
     const draw = () => {
         g.fillStyle = '#0b1420';
@@ -97,12 +98,15 @@ export function createMeetingComposite(
         g.fillText(caption, W - PAD - 4, H - 2);
     };
     draw();
-    const timer = window.setInterval(draw, 1000 / FPS);
+    const videoTrack = canvas.captureStream(FPS).getVideoTracks()[0];
+    if (!videoTrack) throw new Error('The browser could not capture the meeting.');
 
     // Audio mix: everyone's audio into one track; re-checked every second for people joining.
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ac = new AC();
-    const dest = ac.createMediaStreamDestination();
+    let ac: AudioContext;
+    try { ac = new AC(); } catch (error) { videoTrack.stop(); throw error; }
+    let dest: MediaStreamAudioDestinationNode;
+    try { dest = ac.createMediaStreamDestination(); } catch (error) { videoTrack.stop(); void ac.close(); throw error; }
     const connected = new Map<string, MediaStreamAudioSourceNode>();
     const syncAudio = () => {
         const live = audioTracks().filter((t) => t.readyState === 'live');
@@ -116,11 +120,11 @@ export function createMeetingComposite(
             if (!live.some((t) => t.id === id)) { node.disconnect(); connected.delete(id); }
         }
     };
-    syncAudio();
+    try { syncAudio(); } catch (error) { connected.forEach(node => node.disconnect()); videoTrack.stop(); void ac.close(); throw error; }
+    const timer = window.setInterval(draw, 1000 / FPS);
     const audioTimer = window.setInterval(syncAudio, 1000);
     if (ac.state === 'suspended') ac.resume().catch(() => { });
 
-    const videoTrack = canvas.captureStream(FPS).getVideoTracks()[0];
     const stream = new MediaStream([videoTrack, ...dest.stream.getAudioTracks()]);
 
     return {

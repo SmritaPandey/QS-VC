@@ -1,0 +1,404 @@
+{
+  "AWSTemplateFormatVersion": "2010-09-09",
+  "Description": "QS-VC Mumbai demo backend host. Application deployment and private credentials are separate steps.",
+  "Parameters": {
+    "VpcId": {
+      "Type": "AWS::EC2::VPC::Id",
+      "Default": "vpc-04b920198a94df294"
+    },
+    "SubnetId": {
+      "Type": "AWS::EC2::Subnet::Id",
+      "Default": "subnet-0969bcb33ff3a985a",
+      "Description": "Public subnet with an Internet gateway route, in the database VPC"
+    },
+    "DatabaseSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup::Id",
+      "Default": "sg-00959f7a8c88ab900"
+    },
+    "ImageId": {
+      "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
+      "Default": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
+    },
+    "InstanceType": {
+      "Type": "String",
+      "Default": "t3.small",
+      "AllowedValues": [
+        "t3.small",
+        "t3.medium"
+      ],
+      "Description": "t3.small for Free Plan demo testing; choose t3.medium only if the account plan permits it"
+    },
+    "PublicWebOrigin": {
+      "Type": "String",
+      "Default": "https://qsvcmeet.com",
+      "AllowedPattern": "https://[A-Za-z0-9.-]+",
+      "Description": "Public frontend origin for recording playback and downloads"
+    }
+  },
+  "Resources": {
+    "BackendSecurityGroup": {
+      "Type": "AWS::EC2::SecurityGroup",
+      "Properties": {
+        "GroupDescription": "QS-VC public HTTPS, signaling and media; no SSH or database ports",
+        "VpcId": {
+          "Ref": "VpcId"
+        },
+        "SecurityGroupIngress": [
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 80,
+            "ToPort": 80,
+            "CidrIp": "0.0.0.0/0",
+            "Description": "HTTPS certificate issuance and redirect"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 443,
+            "ToPort": 443,
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Public backend API and WebSocket signaling"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 3478,
+            "ToPort": 3478,
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Authenticated TURN TCP"
+          },
+          {
+            "IpProtocol": "udp",
+            "FromPort": 3478,
+            "ToPort": 3478,
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Authenticated TURN UDP"
+          },
+          {
+            "IpProtocol": "tcp",
+            "FromPort": 40000,
+            "ToPort": 40100,
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Meeting media TCP"
+          },
+          {
+            "IpProtocol": "udp",
+            "FromPort": 40000,
+            "ToPort": 40100,
+            "CidrIp": "0.0.0.0/0",
+            "Description": "Meeting media UDP"
+          },
+          {
+            "IpProtocol": "udp",
+            "FromPort": 49152,
+            "ToPort": 49200,
+            "CidrIp": "0.0.0.0/0",
+            "Description": "TURN relay UDP"
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "qsvc-backend"
+          }
+        ]
+      }
+    },
+    "DatabaseIngress": {
+      "Type": "AWS::EC2::SecurityGroupIngress",
+      "Properties": {
+        "GroupId": {
+          "Ref": "DatabaseSecurityGroup"
+        },
+        "IpProtocol": "tcp",
+        "FromPort": 5432,
+        "ToPort": 5432,
+        "SourceSecurityGroupId": {
+          "Ref": "BackendSecurityGroup"
+        },
+        "Description": "QS-VC backend only; database remains private"
+      }
+    },
+    "BackendRole": {
+      "Type": "AWS::IAM::Role",
+      "Properties": {
+        "AssumeRolePolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Principal": {
+                "Service": "ec2.amazonaws.com"
+              },
+              "Action": "sts:AssumeRole"
+            }
+          ]
+        },
+        "ManagedPolicyArns": [
+          {
+            "Fn::Sub": "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
+          }
+        ],
+        "Policies": [
+          {
+            "PolicyName": "PrivateMeetingRecordings",
+            "PolicyDocument": {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:ListBucket"
+                  ],
+                  "Resource": {
+                    "Fn::GetAtt": [
+                      "RecordingsBucket",
+                      "Arn"
+                    ]
+                  },
+                  "Condition": {
+                    "StringLike": {
+                      "s3:prefix": [
+                        "recordings/*",
+                        "shares/*"
+                      ]
+                    }
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject",
+                    "s3:PutObject",
+                    "s3:DeleteObject"
+                  ],
+                  "Resource": [
+                    {
+                      "Fn::Sub": "${RecordingsBucket.Arn}/recordings/*"
+                    },
+                    {
+                      "Fn::Sub": "${RecordingsBucket.Arn}/shares/*"
+                    }
+                  ]
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "${RecordingsBucket.Arn}/deployment/*"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    "BackendProfile": {
+      "Type": "AWS::IAM::InstanceProfile",
+      "Properties": {
+        "Roles": [
+          {
+            "Ref": "BackendRole"
+          }
+        ]
+      }
+    },
+    "Backend": {
+      "Type": "AWS::EC2::Instance",
+      "Properties": {
+        "ImageId": {
+          "Ref": "ImageId"
+        },
+        "InstanceType": {
+          "Ref": "InstanceType"
+        },
+        "IamInstanceProfile": {
+          "Ref": "BackendProfile"
+        },
+        "CreditSpecification": {
+          "CPUCredits": "standard"
+        },
+        "MetadataOptions": {
+          "HttpTokens": "required",
+          "HttpEndpoint": "enabled",
+          "HttpPutResponseHopLimit": 2
+        },
+        "NetworkInterfaces": [
+          {
+            "DeviceIndex": "0",
+            "AssociatePublicIpAddress": true,
+            "SubnetId": {
+              "Ref": "SubnetId"
+            },
+            "GroupSet": [
+              {
+                "Ref": "BackendSecurityGroup"
+              }
+            ]
+          }
+        ],
+        "BlockDeviceMappings": [
+          {
+            "DeviceName": "/dev/xvda",
+            "Ebs": {
+              "Encrypted": true,
+              "VolumeType": "gp3",
+              "VolumeSize": 40,
+              "DeleteOnTermination": true
+            }
+          }
+        ],
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "qsvc-backend"
+          }
+        ],
+        "UserData": {
+          "Fn::Base64": "#!/bin/bash\n# EC2 user data for the approved Amazon Linux 2023 x86_64 image.\nset -euo pipefail\ndnf install -y docker\nsystemctl enable --now docker\n# Build headroom for the 2 GiB demo host; the root volume is encrypted.\nfallocate -l 2G /swapfile\nchmod 0600 /swapfile\nmkswap /swapfile\nswapon /swapfile\nprintf '/swapfile none swap sw 0 0\\n' >> /etc/fstab\ninstall -d -m 0755 /usr/local/lib/docker/cli-plugins\ncurl --fail --location --retry 3 https://github.com/docker/compose/releases/download/v2.39.4/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose\nchmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose\ninstall -d -m 0700 /opt/qsvc\n# Bound host logs; application container logs are bounded in compose.yml.\nmkdir -p /etc/systemd/journald.conf.d\nprintf '[Journal]\\nSystemMaxUse=200M\\n' > /etc/systemd/journald.conf.d/qsvc.conf\nsystemctl restart systemd-journald\n"
+        }
+      }
+    },
+    "PublicAddress": {
+      "Type": "AWS::EC2::EIP",
+      "Properties": {
+        "Domain": "vpc",
+        "Tags": [
+          {
+            "Key": "Name",
+            "Value": "qsvc-backend"
+          }
+        ]
+      }
+    },
+    "AddressAssociation": {
+      "Type": "AWS::EC2::EIPAssociation",
+      "Properties": {
+        "AllocationId": {
+          "Fn::GetAtt": [
+            "PublicAddress",
+            "AllocationId"
+          ]
+        },
+        "InstanceId": {
+          "Ref": "Backend"
+        }
+      }
+    },
+    "RecordingsBucket": {
+      "Type": "AWS::S3::Bucket",
+      "DeletionPolicy": "Retain",
+      "UpdateReplacePolicy": "Retain",
+      "Properties": {
+        "PublicAccessBlockConfiguration": {
+          "BlockPublicAcls": true,
+          "IgnorePublicAcls": true,
+          "BlockPublicPolicy": true,
+          "RestrictPublicBuckets": true
+        },
+        "OwnershipControls": {
+          "Rules": [
+            {
+              "ObjectOwnership": "BucketOwnerEnforced"
+            }
+          ]
+        },
+        "BucketEncryption": {
+          "ServerSideEncryptionConfiguration": [
+            {
+              "ServerSideEncryptionByDefault": {
+                "SSEAlgorithm": "AES256"
+              }
+            }
+          ]
+        },
+        "CorsConfiguration": {
+          "CorsRules": [
+            {
+              "AllowedOrigins": [
+                {
+                  "Ref": "PublicWebOrigin"
+                },
+                "https://www.qsvcmeet.com"
+              ],
+              "AllowedMethods": [
+                "GET",
+                "HEAD"
+              ],
+              "AllowedHeaders": [
+                "Range"
+              ],
+              "MaxAge": 300,
+              "ExposedHeaders": [
+                "Content-Length",
+                "Content-Range",
+                "Accept-Ranges"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    "RecordingsBucketPolicy": {
+      "Type": "AWS::S3::BucketPolicy",
+      "Properties": {
+        "Bucket": {
+          "Ref": "RecordingsBucket"
+        },
+        "PolicyDocument": {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "TLSOnly",
+              "Effect": "Deny",
+              "Principal": "*",
+              "Action": "s3:*",
+              "Resource": [
+                {
+                  "Fn::GetAtt": [
+                    "RecordingsBucket",
+                    "Arn"
+                  ]
+                },
+                {
+                  "Fn::Sub": "${RecordingsBucket.Arn}/*"
+                }
+              ],
+              "Condition": {
+                "Bool": {
+                  "aws:SecureTransport": "false"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "Outputs": {
+    "InstanceId": {
+      "Value": {
+        "Ref": "Backend"
+      }
+    },
+    "PublicIp": {
+      "Value": {
+        "Ref": "PublicAddress"
+      }
+    },
+    "BackendSecurityGroup": {
+      "Value": {
+        "Ref": "BackendSecurityGroup"
+      }
+    },
+    "NextStep": {
+      "Value": "Deploy the application privately, point backend.qsvcmeet.com to PublicIp, verify HTTPS, then set Cloudflare BACKEND_ORIGIN."
+    },
+    "RecordingBucket": {
+      "Value": {
+        "Ref": "RecordingsBucket"
+      }
+    }
+  }
+}

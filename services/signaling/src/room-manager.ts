@@ -49,6 +49,7 @@ export interface RoomState {
     peers: Map<string, PeerState>;
     waitingRoom: Map<string, WaitingPeer>;
     settings: RoomSettings;
+    recording: { peerId: string; displayName: string } | null;
     createdAt: Date;
 }
 
@@ -83,6 +84,7 @@ class RoomManager {
             peers: new Map(),
             waitingRoom: new Map(),
             settings: { ...DEFAULT_SETTINGS, ...settings },
+            recording: null,
             createdAt: new Date(),
         };
 
@@ -184,6 +186,7 @@ class RoomManager {
         const peer = room.peers.get(peerId);
         room.peers.delete(peerId);
         room.waitingRoom.delete(peerId);
+        if (room.recording?.peerId === peerId) this.updateRecording(roomId, null);
 
         // Transfer host role if host left
         if (room.hostPeerId === peerId && room.peers.size > 0) {
@@ -226,7 +229,15 @@ class RoomManager {
         const room = this.rooms.get(roomId);
         if (!room) return;
         Object.assign(room.settings, settings);
+        if (!room.settings.allowRecording && room.recording) this.updateRecording(roomId, null);
         this.broadcast(roomId, 'settingsUpdated', { settings: { ...room.settings, password: undefined } });
+    }
+
+    updateRecording(roomId: string, recording: RoomState['recording']): void {
+        const room = this.rooms.get(roomId);
+        if (!room) return;
+        room.recording = recording;
+        this.broadcast(roomId, 'recordingStateChanged', { recording });
     }
 
     /** Promote/demote peer role (host only). */
@@ -236,6 +247,7 @@ class RoomManager {
         const peer = room.peers.get(targetPeerId);
         if (!peer) return;
         peer.role = newRole;
+        if (newRole !== 'host' && room.recording?.peerId === targetPeerId) this.updateRecording(roomId, null);
         this.broadcast(roomId, 'roleChanged', { peerId: targetPeerId, role: newRole, displayName: peer.displayName });
     }
 

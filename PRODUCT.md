@@ -74,3 +74,19 @@ The public header has Meetings, Plans, Contact and account access, without a Lan
 The create/join launcher uses two equal columns on larger screens and stacked full-width cards on phones. Hiding a decorative divider must not leave its grid track behind.
 
 The current language demo connects browser speech recognition, configured LibreTranslate and device voices. Whisper and Google remain permitted future/configured options, not active fallback providers in that meeting flow. Installed English/Hindi translation was checked with synthetic text; acoustic quality and other language pairs remain unverified.
+
+## Recording decisions, 3 November 2026
+
+The user requires cloud recording, with no automatic local download. Recordings
+remain until the host deletes them. The recordings library offers manual Download,
+Delete, Create share link and Disable sharing actions through a three-dot menu.
+Implementation composes video and audio in the signed-in host’s browser and uploads
+the result to private S3 storage on stop. Participant recording state is broadcast
+through signaling. Failed uploads retain an in-memory copy with retry, manual
+download and explicit discard actions; browser closure can still lose an unsaved
+copy. This is not unattended server-side recording.
+
+Source and local tests do not establish deployed availability. AWS bucket/server
+creation and actual multi-participant recording/playback remain unverified. The
+demo has an 80 MiB upload cap and stops capture near 70 MiB. Intentional share links
+are revocable; previously issued signed media URLs can remain usable for five minutes.
