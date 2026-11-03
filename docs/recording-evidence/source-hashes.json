@@ -1,0 +1,17 @@
+{
+  "frontend/web/src/lib/recording.ts": "590f7125c5229915fbb7e50c808b062a99480e9d1ff716a2cefbcb3ec3f50eff",
+  "frontend/web/src/lib/meeting-recorder.ts": "bdb38c01f743a5cbe9bcea7e00c9a3f543968afae742110e2cb77a44c87baaa2",
+  "frontend/web/src/pages/MeetingRoom.tsx": "54831c36ca1ba3cf45e17cf0021b188f3cba1664ad361038570533c3fe01c4c4",
+  "frontend/web/src/pages/RecordingPlayback.tsx": "7b23e46f71d08c15335c2e407ce5e6a5a942381041fd06104f99ee79ad3c3a4f",
+  "frontend/web/src/components/ControlBar.tsx": "50e022f056cb9f54f955b5e6886401d5da76f330a3be8df2520df42601349048",
+  "frontend/web/src/components/SignedInWorkspace.tsx": "432c9971a531375a76bdef28f53714668e87862c60f538b6c1228dcde730aa69",
+  "frontend/web/src/styles/recordings.css": "35935929fa338ed62e779aa2f03688b4e605c04967c08cbeec0bf52b278b3aa1",
+  "services/recording/src/app.ts": "b44e06043c6fd57d86cedf2fe5cab57880f37a7e6bb1db507d177e49168f62bc",
+  "services/recording/src/storage.ts": "b965a1b97863600287f222a18b41d441ab9ed5c42d6ce0dbc1a8eee4772a13e9",
+  "services/recording/src/app.test.ts": "34cf4d2b8932429d4ec6c4695d78df2422b18d5f88f73e68d14aa8304d4c8335",
+  "services/signaling/src/room-manager.ts": "e45fac85085d276602c349fe2ae7b5f1362a0d9785a845ab246ca5e8c22a856b",
+  "services/signaling/src/rpc/handler.ts": "ead481c67092350a936a4f1b29e5b596960f999b86326b0e4e587979085715c0",
+  "deploy/aws/backend-stack.json": "650acd03eacace1a43104ecd8d8198b188390b390916509ee4c9cbe00626d4b6",
+  "deploy/aws/compose.yml": "cd3dbebd0f2748153825d3af533dad9d96967b940b5c4f5528a879dc3ea78c9a",
+  "deploy/cloudflare/worker.mjs": "4efcfd8c2b0a03642209a2d0418558ab8dab67cc4288248d64125d192d4b7cdd"
+}

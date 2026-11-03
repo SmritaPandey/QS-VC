@@ -28,8 +28,6 @@ existing backend services. Adding them to this Worker does not configure those
 services. This gateway does not implement or migrate those services, database,
 SFU or TURN, and its health endpoint does not prove backend connectivity.
 
-The admin and recording UI retain pre-existing direct URL/localhost fallbacks;
-configure their `VITE_*_URL` values to the public frontend origin if those flows
-are needed. They have not been migrated or verified by this gateway change.
+The recording UI uses same-origin API requests by default. Existing explicit `VITE_RECORDING_URL` overrides must be removed or pointed at the public frontend origin before building. Admin pages retain pre-existing localhost fallbacks; set their `VITE_*_URL` values if needed. Real AWS playback remains unverified until deployment.
 
 Local handler checks: `node --test deploy/cloudflare/worker.test.mjs`.

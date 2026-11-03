@@ -11,8 +11,8 @@ x-app: &app
       max-file: '3'
 x-runtime: &runtime
   NODE_ENV: production
-  WEB_URL: https://${DOMAIN}
-  CORS_ORIGINS: https://${DOMAIN}
+  WEB_URL: ${WEB_URL:?Set the public Cloudflare website URL}
+  CORS_ORIGINS: ${CORS_ORIGINS:?Set allowed public website origins}
   POSTGRES_SSL: verify-full
   POSTGRES_CA_FILE: /opt/qsvc/certs/rds-ca.pem
   JWT_SECRET: ${JWT_SECRET:?Set a private JWT secret}
@@ -67,7 +67,10 @@ services:
     command: [node, services/sfu/dist/index.js]
   recording:
     <<: *app
-    environment: *runtime
+    environment:
+      <<: *runtime
+      AWS_REGION: ap-south-1
+      RECORDING_BUCKET: ${RECORDING_BUCKET:?Set the private recordings bucket}
     command: [node, services/recording/dist/index.js]
   migrate:
     <<: *app

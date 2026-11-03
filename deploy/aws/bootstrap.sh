@@ -3,6 +3,12 @@
 set -euo pipefail
 dnf install -y docker
 systemctl enable --now docker
+# Build headroom for the 2 GiB demo host; the root volume is encrypted.
+fallocate -l 2G /swapfile
+chmod 0600 /swapfile
+mkswap /swapfile
+swapon /swapfile
+printf '/swapfile none swap sw 0 0\n' >> /etc/fstab
 install -d -m 0755 /usr/local/lib/docker/cli-plugins
 curl --fail --location --retry 3 https://github.com/docker/compose/releases/download/v2.39.4/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose
 chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose

@@ -54,6 +54,7 @@ export default function App() {
                 <Route path="/meeting/:meetingCode" element={<MeetingRoom />} />
                 <Route path="/meeting-end" element={<MeetingEnd />} />
                 <Route path="/recordings/:meetingId" element={<RecordingPlayback />} />
+                <Route path="/recordings/shared/:shareToken" element={<RecordingPlayback />} />
                 <Route path="/admin" element={<AdminDashboard />} />
             </Routes>
             </BrowserRouter>

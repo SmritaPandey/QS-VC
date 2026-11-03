@@ -11,6 +11,7 @@ interface Props {
     videoOff: boolean;
     screenSharing: boolean;
     isRecording: boolean;
+    canRecord?: boolean;
     chatOpen: boolean;
     participantsOpen: boolean;
     handRaised: boolean;
@@ -94,7 +95,7 @@ function ToggleControl({ on, label, title, iconOn, iconOff, stateClass = '', off
 }
 
 export default function ControlBar({
-    assistant,
+    assistant, isRecording, canRecord = false, onToggleRecording,
     activitiesOpen = false, hostToolsOpen = false, onToggleActivities, onToggleHostTools,
     audioMuted, videoOff, screenSharing,
     chatOpen, participantsOpen, handRaised, reactionsOpen = false, languageOpen = false, languageLabel, languageCode,
@@ -182,6 +183,7 @@ export default function ControlBar({
                     {moreOpen && <div id="meeting-more-controls" className="meeting-more-panel" role="group" aria-label="Extra meeting controls">
                         {onToggleActivities && <button type="button" aria-expanded={activitiesOpen} aria-controls="meeting-activities" onClick={() => { setMoreOpen(false); onToggleActivities(); }}><span className="mi" aria-hidden="true">dashboard</span>Activities</button>}
                         {onToggleHostTools && <button type="button" aria-expanded={hostToolsOpen} aria-controls="meeting-host-tools" onClick={() => { setMoreOpen(false); onToggleHostTools(); }}><span className="mi" aria-hidden="true">admin_panel_settings</span>Host controls</button>}
+                        {canRecord && <button type="button" aria-pressed={isRecording} onClick={() => { setMoreOpen(false); onToggleRecording(); }}><span className="mi" aria-hidden="true">{isRecording ? 'stop_circle' : 'fiber_manual_record'}</span>{isRecording ? 'Stop recording' : 'Record meeting'}</button>}
                         <h3>View</h3>
                         <div className="meeting-view-options" role="group" aria-label="Meeting view">
                             {VIEWS.map(([view, icon, label]) => <button type="button" key={view} aria-pressed={viewMode === view} onClick={() => onChangeView(view)}><span className="mi" aria-hidden="true">{icon}</span>{label}</button>)}

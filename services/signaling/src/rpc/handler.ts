@@ -106,6 +106,24 @@ export async function handleRpcMessage(
     if (method === 'joinRoom') joiningSockets.add(ws);
     try {
         switch (method) {
+            case 'setRecordingState': {
+                const parsed = z.object({ recording: z.boolean() }).strict().safeParse(params);
+                if (!parsed.success) throw createError(-32602, 'Invalid recording state');
+                const { peerId, roomId } = connectionState;
+                const room = roomManager.getRoom(roomId!);
+                const peer = room?.peers.get(peerId!);
+                if (!room || !peer?.userId || peer.role !== 'host') {
+                    throw createError(-32005, 'Only the signed-in host can control recording');
+                }
+                if (room.recording && room.recording.peerId !== peerId) {
+                    throw createError(-32005, 'Another host session is recording');
+                }
+                if (parsed.data.recording && !room.settings.allowRecording) {
+                    throw createError(-32005, 'Recording is disabled for this meeting');
+                }
+                roomManager.updateRecording(room.id, parsed.data.recording ? { peerId: peer.id, displayName: peer.displayName } : null);
+                return { jsonrpc: '2.0', id: id!, result: { recording: room.recording } };
+            }
             case 'getCollaborationState':
             case 'getCollaborationFile':
             case 'collaborationAction':
@@ -603,6 +621,7 @@ export async function handleRpcMessage(
                 }
 
                 // Notify all peers
+                roomManager.updateRecording(roomId, null);
                 roomManager.broadcast(roomId, 'meetingEnded', {
                     by: connectionState.displayName,
                     reason: 'Host ended the meeting',
@@ -868,6 +887,7 @@ async function joinPeerToRoom(
         role: peerState.role,
         routerRtpCapabilities: routerCaps,
         settings: { ...room.settings, password: undefined },
+        recording: room.recording,
         sendTransport: sfuAvailable ? {
             id: sendTransport.id,
             iceParameters: sendTransport.iceParameters,

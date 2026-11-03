@@ -92,7 +92,7 @@ const capabilities = [
 ];
 const questions = [
     { question: 'Can I buy a plan now?', answer: 'Plans are not available to purchase here. The rates shown are proposed. Confirm pricing, included features and commercial terms before making a purchase decision.' },
-    { question: 'Can I record a meeting?', answer: 'Recording is disabled in this demo. A paid option is planned. Recording inclusions, storage and retention terms still need confirmation.' },
+    { question: 'Can I record a meeting?', answer: 'Cloud recording is available to signed-in meeting hosts when storage is configured. Hosts choose when to download, share or delete recordings. Paid-plan inclusions remain proposals.' },
     { question: 'Which languages can I use?', answer: 'Available caption languages depend on the configured meeting server. Translated speech also needs a matching voice on your device. Check the language control inside the meeting.' },
     { question: 'Can my organisation run QS-VC internally?', answer: 'An internal deployment needs a review of your network, devices, identity and hosting requirements. This demo does not establish offline or air-gapped operation.' },
 ];
