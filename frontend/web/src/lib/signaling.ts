@@ -18,14 +18,21 @@ export class SignalingClient {
             const url = new URL(SIGNALING_URL);
             const token = getToken();
             if (token) url.searchParams.set('token', token);
-            this.ws = new WebSocket(url);
+            const socket = new WebSocket(url);
+            this.ws = socket;
+            // Events from a socket that was already replaced or closed by disconnect() (for example
+            // React StrictMode mounting the meeting twice in development) must not tear down the
+            // current connection.
+            const current = () => this.ws === socket;
 
-            this.ws.onopen = () => {
+            socket.onopen = () => {
+                if (!current()) return;
                 console.log('[Signaling] Connected');
                 resolve();
             };
 
-            this.ws.onmessage = (event) => {
+            socket.onmessage = (event) => {
+                if (!current()) return;
                 try {
                     const data = JSON.parse(event.data);
                     this.handleMessage(data);
@@ -34,14 +41,16 @@ export class SignalingClient {
                 }
             };
 
-            this.ws.onclose = (event) => {
+            socket.onclose = (event) => {
+                if (!current()) { reject(new Error('Connection replaced')); return; }
+                this.ws = null;
                 console.log(`[Signaling] Disconnected: ${event.code}`);
                 this.emit('disconnected', { code: event.code });
                 if (event.code === 4003) { clearSession(); this.emit('reconnectFailed', {}); return; }
-
             };
 
-            this.ws.onerror = (err) => {
+            socket.onerror = (err) => {
+                if (!current()) return;
                 console.error('[Signaling] Error:', err);
                 reject(err);
             };
@@ -132,10 +141,12 @@ export class SignalingClient {
     }
 
     disconnect(): void {
-        if (this.ws) {
-            this.ws.close(1000, 'Client closing');
-            this.ws = null;
-        }
+        const socket = this.ws;
+        this.ws = null;
+        // Fail pending requests now instead of leaving callers waiting on a closed socket.
+        for (const callback of this.pendingRequests.values()) callback(undefined, { message: 'Disconnected' });
+        this.pendingRequests.clear();
+        if (socket && socket.readyState !== WebSocket.CLOSED) socket.close(1000, 'Client closing');
     }
 }
 

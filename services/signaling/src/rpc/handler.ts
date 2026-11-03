@@ -88,7 +88,7 @@ const joiningSockets = new WeakSet<object>();
 export async function handleRpcMessage(
     ws: any,
     message: RpcRequest,
-    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: { sub: string } | null }
+    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: { sub: string; role?: string } | null }
 ): Promise<RpcResponse | null> {
     const { method, params, id } = message;
 
@@ -160,7 +160,9 @@ export async function handleRpcMessage(
                 const policy = await loadMeetingPolicy(meetingCode);
                 const room = roomManager.getOrCreateRoom(meetingCode, policy?.settings);
                 if (policy?.hostId) room.ownerUserId = policy.hostId;
-                const isOwner = !!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub;
+                // Platform admins (role from the server-signed session) can enter and run any meeting.
+                const isPlatformAdmin = connectionState.authUser?.role === 'admin';
+                const isOwner = (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub) || isPlatformAdmin;
                 if (room.ownerUserId && !room.hostPeerId && !isOwner) throw createError(-32004, 'The meeting organiser must join first.');
 
                 // Check meeting password
@@ -180,7 +182,7 @@ export async function handleRpcMessage(
                 }
 
                 // Check max participants
-                if (room.peers.size >= room.settings.maxParticipants) {
+                if (!isPlatformAdmin && room.peers.size >= room.settings.maxParticipants) {
                     return {
                         jsonrpc: '2.0', id: id!,
                         error: { code: -32003, message: 'Meeting is full' },
@@ -285,6 +287,12 @@ export async function handleRpcMessage(
                 const room = roomManager.getRoom(roomId);
                 const peer = room?.peers.get(peerId);
                 if (!peer) throw createError(-32000, 'Peer not found');
+                // The browser only knows its receive capabilities after loading the router's
+                // capabilities returned by joinRoom, so it sends them with consume.
+                const capabilities = z.record(z.string(), z.unknown()).optional().safeParse(params?.rtpCapabilities);
+                if (!capabilities.success) throw createError(-32602, 'Invalid rtpCapabilities');
+                if (capabilities.data) peer.rtpCapabilities = capabilities.data;
+                if (!peer.rtpCapabilities) throw createError(-32602, 'rtpCapabilities required');
 
                 const result = await sfuClient.consume(
                     roomId, peerId, producerPeerId, producerId, peer.rtpCapabilities
@@ -839,6 +847,7 @@ async function joinPeerToRoom(
         producers: new Map(),
         role: 'member',
         userId: connectionState.authUser?.sub,
+        platformAdmin: connectionState.authUser?.role === 'admin',
         audioMuted: false,
         videoOff: false,
         handRaised: false,
@@ -914,7 +923,7 @@ async function joinPeerToRoom(
  * Handle peer disconnect (WebSocket close or leaveRoom).
  */
 export async function handlePeerDisconnect(
-    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: { sub: string } | null }
+    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: { sub: string; role?: string } | null }
 ): Promise<void> {
     const { peerId, roomId, displayName } = connectionState;
     if (!peerId || !roomId) return;

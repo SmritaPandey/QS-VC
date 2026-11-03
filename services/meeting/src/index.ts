@@ -83,6 +83,7 @@ function validateBody<T>(schema: z.ZodSchema<T>) {
 }
 
 const app = express();
+app.disable('x-powered-by'); // Do not advertise the framework (OWASP A05).
 
 // CORS: merge env with production defaults so stale Render env can't lock out Vercel
 const DEFAULT_CORS_ORIGINS = [
@@ -359,8 +360,9 @@ app.patch('/api/meetings/:id/status', authMiddleware, validateBody(updateMeeting
         const timestamp = status === 'active' ? ', actual_start = NOW()' : status === 'ended' ? ', actual_end = NOW()' : '';
         const result = await pool.query(
             `UPDATE meetings SET status = $1, updated_at = NOW()${timestamp}
-             WHERE id = $2 AND tenant_id = $3 AND host_id = $4 RETURNING id`,
-            [status, req.params.id, user.tenantId, user.sub]
+             WHERE id = $2 AND tenant_id = $3 AND (host_id = $4 OR $5) RETURNING id`,
+            // Platform admins can start or end any meeting in their tenant.
+            [status, req.params.id, user.tenantId, user.sub, user.role === 'admin']
         );
         if (!result.rows.length) return res.status(404).json({ error: 'Meeting not found or not owned by you' });
 

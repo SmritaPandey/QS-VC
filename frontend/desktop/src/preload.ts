@@ -19,25 +19,11 @@ contextBridge.exposeInMainWorld('qsvcDesktop', {
     close: () => ipcRenderer.invoke('window:close'),
     setFullscreen: (flag: boolean) => ipcRenderer.invoke('window:setFullscreen', flag),
 
-    // Meeting controls
-    setPiP: (flag: boolean) => ipcRenderer.invoke('meeting:setPiP', flag),
+    // First-run setup (the main process only answers the local setup screen)
+    getWorkspace: () => ipcRenderer.invoke('workspace:get'),
+    setWorkspace: (url: string) => ipcRenderer.invoke('workspace:set', url),
 
     // Event listeners
-    onQuickMeeting: (callback: () => void) => {
-        ipcRenderer.on('quick-meeting', callback);
-    },
-    onJoinMeeting: (callback: () => void) => {
-        ipcRenderer.on('join-meeting', callback);
-    },
-    onOpenSettings: (callback: () => void) => {
-        ipcRenderer.on('open-settings', callback);
-    },
-    onDeepLinkJoin: (callback: (meetingCode: string) => void) => {
-        ipcRenderer.on('deep-link-join', (_event, meetingCode) => callback(meetingCode));
-    },
-    onUpdateDownloaded: (callback: (version: string) => void) => {
-        ipcRenderer.on('update-downloaded', (_event, version) => callback(version));
-    },
 
     // Platform info
     platform: process.platform,

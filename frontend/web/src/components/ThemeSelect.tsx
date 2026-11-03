@@ -17,8 +17,13 @@ const OPTIONS: { value: Preference; label: string; icon: string }[] = [
     { value: 'dark', label: 'Dark', icon: 'dark_mode' },
 ];
 
-/** Where each spare option lands when the switch disperses: an arc below the trigger (down-left, down-right). */
-const SPREAD = [{ x: -34, y: 52 }, { x: 34, y: 52 }];
+/** Where the spare options land when the switch disperses: an arc below the trigger, bent away from a screen edge. */
+const SPREADS = {
+    center: [{ x: -34, y: 52 }, { x: 34, y: 52 }],
+    left: [{ x: -58, y: 20 }, { x: -24, y: 58 }],
+    right: [{ x: 24, y: 58 }, { x: 58, y: 20 }],
+};
+type Spread = keyof typeof SPREADS;
 
 /** Icon-only appearance switch: the current choice is the trigger; the other two disperse out of it as separate buttons. */
 export default function ThemeSelect() {
@@ -27,6 +32,7 @@ export default function ThemeSelect() {
     const preference = useSyncExternalStore(theme.subscribe, theme.getPreference);
     const [open, setOpen] = useState(false);
     const [closing, setClosing] = useState(false);
+    const [spread, setSpread] = useState<Spread>('center');
     const wasOpen = useRef(false);
     // Keep the options mounted for a moment after closing so they can gather back into the trigger.
     useEffect(() => {
@@ -64,11 +70,19 @@ export default function ThemeSelect() {
     };
 
     return <div ref={rootRef} className="theme-select" data-open={open} data-closing={closing || undefined} onKeyDown={onKeyDown}>
-        <button ref={triggerRef} type="button" className="theme-select-trigger" aria-label={`Appearance: ${current.label}`} aria-haspopup="menu" aria-expanded={open} aria-controls={menuId} title={`Appearance: ${current.label}`} onClick={() => setOpen(value => !value)}>
+        <button ref={triggerRef} type="button" className="theme-select-trigger" aria-label={`Appearance: ${current.label}`} aria-haspopup="menu" aria-expanded={open} aria-controls={menuId} title={`Appearance: ${current.label}`} onClick={() => {
+            if (!open) {
+                // Keep both options on screen: near the right edge fan out to the left, near the left edge to the right.
+                const box = triggerRef.current?.getBoundingClientRect();
+                const width = document.documentElement.clientWidth;
+                setSpread(!box ? 'center' : box.right + 64 > width ? 'left' : box.left - 64 < 0 ? 'right' : 'center');
+            }
+            setOpen(value => !value);
+        }}>
             <span key={open ? 'close' : current.value} className="mi theme-select-icon" aria-hidden="true">{open ? 'close' : current.icon}</span>
         </button>
         <div id={menuId} className="theme-select-menu" role="menu" aria-label="Appearance" hidden={!open && !closing}>
-            {others.map((option, index) => <button key={option.value} type="button" role="menuitemradio" aria-checked="false" className="theme-select-option" tabIndex={open ? 0 : -1} style={{ ['--i' as string]: index, ['--x' as string]: `${SPREAD[index].x}px`, ['--y' as string]: `${SPREAD[index].y}px` }} aria-label={option.label} data-tip={option.label} onClick={() => choose(option.value)}>
+            {others.map((option, index) => <button key={option.value} type="button" role="menuitemradio" aria-checked="false" className="theme-select-option" tabIndex={open ? 0 : -1} style={{ ['--i' as string]: index, ['--x' as string]: `${SPREADS[spread][index].x}px`, ['--y' as string]: `${SPREADS[spread][index].y}px` }} aria-label={option.label} data-tip={option.label} onClick={() => choose(option.value)}>
                 <span className="mi" aria-hidden="true">{option.icon}</span>
             </button>)}
         </div>

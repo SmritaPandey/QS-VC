@@ -168,6 +168,7 @@ export class MediaManager {
         const result = await signaling.request('consume', {
             producerPeerId,
             producerId,
+            rtpCapabilities: this.device?.rtpCapabilities,
         });
 
         if (revision !== this.revision || transport.closed) throw new Error('Media session closed');

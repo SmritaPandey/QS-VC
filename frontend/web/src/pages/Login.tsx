@@ -1,13 +1,14 @@
 import IdentityOptions from '../components/IdentityOptions';
 import ActionContents from '../components/ActionContents';
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { AUTH_API, clearSession } from '../lib/session';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { AUTH_API, clearSession, nextPath } from '../lib/session';
 import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
 
 export default function Login() {
     const navigate = useNavigate();
+    const location = useLocation();
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     async function submit(event: FormEvent<HTMLFormElement>) {
@@ -23,7 +24,7 @@ export default function Login() {
             const data = await response.json();
             if (!response.ok || !data.token) throw new Error(data.error || 'Sign in failed. Please try again.');
             sessionStorage.setItem('token', data.token);
-            navigate('/app', { replace: true });
+            navigate(nextPath(location.search), { replace: true });
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : 'Cannot reach sign in. Please try again.');
         } finally { setBusy(false); }
@@ -44,7 +45,7 @@ export default function Login() {
                 <input id="login-password" name="password" type="password" autoComplete="current-password" required maxLength={128} className="input-meeting-code" />
                 {error && <p role="alert">{error}</p>}
                 <button className="public-primary qsvc-action" disabled={busy}><ActionContents><span>{busy ? 'Signing in…' : 'Sign in'}</span></ActionContents></button>
-                <IdentityOptions /><p>Need an account? <Link to="/signup">Sign up</Link></p>
+                <IdentityOptions /><p>Need an account? <Link to={`/signup${location.search}`}>Sign up</Link></p>
             </form>
         </main>
         <SiteFooter />

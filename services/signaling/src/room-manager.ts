@@ -11,6 +11,8 @@ export interface PeerState {
     id: string;
     displayName: string;
     userId?: string;
+    /** Platform admin (server-verified): joins any meeting with host controls. */
+    platformAdmin?: boolean;
     ws: any; // WebSocket reference
     rtpCapabilities: any;
     producers: Map<string, { id: string; kind: string; appData: any }>;
@@ -108,11 +110,11 @@ class RoomManager {
         const room = this.rooms.get(roomId);
         if (!room) throw new Error(`Room ${roomId} not found`);
 
-        if (room.peers.size >= room.settings.maxParticipants) {
+        if (!peer.platformAdmin && room.peers.size >= room.settings.maxParticipants) {
             throw new Error('Room is full');
         }
 
-        if (room.settings.locked && !(room.ownerUserId && room.ownerUserId === peer.userId)) {
+        if (room.settings.locked && !peer.platformAdmin && !(room.ownerUserId && room.ownerUserId === peer.userId)) {
             throw new Error('Room is locked');
         }
 
@@ -122,6 +124,11 @@ class RoomManager {
         if ((!room.ownerUserId && !room.hostPeerId) || (!!room.ownerUserId && room.ownerUserId === peer.userId && ![...room.peers.values()].some(p => p.userId === peer.userId && p.role === 'host'))) {
             peer.role = 'host';
             room.hostPeerId = peer.id;
+        }
+        // Platform admins always get host controls (mute, remove, lock, record, end) in any meeting.
+        if (peer.platformAdmin && peer.role !== 'host') {
+            peer.role = 'host';
+            if (!room.hostPeerId) room.hostPeerId = peer.id;
         }
 
         // Apply mute-on-entry

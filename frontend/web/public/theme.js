@@ -5,9 +5,16 @@
   var media;
   try { media = window.matchMedia('(prefers-color-scheme: dark)'); } catch (_) {}
   function read(name) { try { return localStorage.getItem(name); } catch (_) { return null; } }
+  // This tab's own choice survives full page loads (links, Back, reloads) without consent:
+  // sessionStorage is functional, never shared across tabs and cleared when the tab closes.
+  function readTab() { try { return sessionStorage.getItem(key); } catch (_) { return null; } }
+  function writeTab() {
+    try { if (preference !== 'system') sessionStorage.setItem(key, preference); else sessionStorage.removeItem(key); }
+    catch (_) { /* Blocked storage must not prevent changing appearance. */ }
+  }
   function valid(value) { return value === 'light' || value === 'dark' ? value : 'system'; }
   var allowed = read(consentKey) === 'allow';
-  var preference = allowed ? valid(read(key)) : 'system';
+  var preference = allowed ? valid(read(key) || readTab()) : valid(readTab());
   function apply() {
     var resolved = preference === 'system' ? (media && media.matches ? 'dark' : 'light') : preference;
     root.dataset.theme = resolved;
@@ -24,7 +31,7 @@
   }
   window.qsvcTheme = {
     getPreference: function () { return preference; },
-    setPreference: function (value) { preference = valid(value); persist(); apply(); },
+    setPreference: function (value) { preference = valid(value); persist(); writeTab(); apply(); },
     subscribe: function (listener) { listeners.add(listener); return function () { listeners.delete(listener); }; }
   };
   if (media) {
@@ -34,7 +41,7 @@
   window.addEventListener('storage', function (event) {
     if (event.key !== key && event.key !== consentKey && event.key !== null) return;
     allowed = read(consentKey) === 'allow';
-    preference = allowed ? valid(read(key)) : 'system';
+    preference = allowed ? valid(read(key)) : valid(readTab());
     apply();
   });
   window.addEventListener('qsvc:storage-consent', function (event) {
