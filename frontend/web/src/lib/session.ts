@@ -22,3 +22,9 @@ export async function signOut(): Promise<void> {
     }
     clearSession();
 }
+
+/** Where to go after signing in: an in-app path from ?next=, otherwise the meetings app. Never an external URL. */
+export function nextPath(search: string, fallback = '/app'): string {
+    const next = new URLSearchParams(search).get('next') || '';
+    return next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\') ? next : fallback;
+}

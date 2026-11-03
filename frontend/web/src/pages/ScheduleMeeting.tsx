@@ -1,6 +1,6 @@
 import ThemeSelect from '../components/ThemeSelect';
 import ActionContents from '../components/ActionContents';
-import { getToken } from '../lib/session';
+import { clearSession, getToken } from '../lib/session';
 import LoadingMark from '../components/LoadingMark';
 /**
  * Meeting Scheduling Page — Schedule future meetings with invitations.
@@ -8,7 +8,7 @@ import LoadingMark from '../components/LoadingMark';
  * meeting settings, and calendar preview.
  */
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 const MEETING_API = import.meta.env.VITE_API_URL || import.meta.env.VITE_MEETING_URL || '';
 
@@ -54,6 +54,8 @@ const ScheduleMeeting: React.FC = () => {
     const [scheduled, setScheduled] = useState<{ meetingCode: string; meetingUrl: string } | null>(null);
     const [inviteInput, setInviteInput] = useState('');
     const [copySuccess, setCopySuccess] = useState(false);
+    // Scheduling saves a meeting to an account, so guests are asked to sign in first.
+    const [signedIn, setSignedIn] = useState(() => !!getToken());
 
     // Default to tomorrow at 10:00
     const tomorrow = new Date();
@@ -118,6 +120,7 @@ const ScheduleMeeting: React.FC = () => {
                 }),
             });
 
+            if (res.status === 401) { clearSession(); setSignedIn(false); return; }
             if (!res.ok) throw new Error('Failed to schedule');
             const data = await res.json();
 
@@ -147,6 +150,27 @@ const ScheduleMeeting: React.FC = () => {
         setCopySuccess(true);
         setTimeout(() => setCopySuccess(false), 2000);
     };
+
+    // ━━━ SIGN-IN PROMPT (guests) ━━━
+    if (!signedIn) {
+        const next = encodeURIComponent('/schedule');
+        return (
+            <div className="schedule-page">
+                <div className="schedule-container">
+                    <section className="schedule-signin" aria-labelledby="schedule-signin-title"><ThemeSelect />
+                        <div className="schedule-signin-icon"><span className="mi" aria-hidden="true">event_available</span></div>
+                        <h1 id="schedule-signin-title">Sign in to schedule a meeting.</h1>
+                        <p>Scheduled meetings are saved to your account, so you can share the invitation and start the meeting as host. Guests can still join any meeting with a code.</p>
+                        <div className="schedule-signin-actions">
+                            <Link className="public-primary qsvc-action" to={`/login?next=${next}`}><ActionContents><span className="mi" aria-hidden="true">login</span>Sign in</ActionContents></Link>
+                            <Link className="btn-secondary qsvc-action qsvc-action--secondary" to={`/signup?next=${next}`}><ActionContents>Create a free account</ActionContents></Link>
+                        </div>
+                        <Link className="schedule-signin-guest" to="/app">Join a meeting as a guest instead</Link>
+                    </section>
+                </div>
+            </div>
+        );
+    }
 
     // ━━━ CONFIRMATION VIEW ━━━
     if (scheduled) {

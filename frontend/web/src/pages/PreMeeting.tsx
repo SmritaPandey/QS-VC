@@ -3,6 +3,7 @@ import ActionContents from '../components/ActionContents';
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { haptic } from '../lib/haptics';
+import { AUTH_API, getToken } from '../lib/session';
 import { CameraCapture, watchCameraVisibility, watchCameraTrack, cameraAccessMessage } from '../lib/camera-capture';
 
 export default function PreMeeting() {
@@ -11,6 +12,19 @@ export default function PreMeeting() {
     const videoRef = useRef<HTMLVideoElement>(null);
     const [stream, setStream] = useState<MediaStream | null>(null);
     const [displayName, setDisplayName] = useState('');
+    // Signed-in people join under their account name instead of "Guest" (still editable).
+    useEffect(() => {
+        const token = getToken();
+        if (!token) return;
+        const controller = new AbortController();
+        fetch(`${AUTH_API}/api/auth/me`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
+            .then(response => response.ok ? response.json() : null)
+            .then(profile => {
+                const name = typeof profile?.displayName === 'string' ? profile.displayName.trim().slice(0, 100) : '';
+                if (name) setDisplayName(current => current || name);
+            }).catch(() => { /* Name stays editable; joining still works. */ });
+        return () => controller.abort();
+    }, []);
     const [audioMuted, setAudioMuted] = useState(false);
     const [videoOff, setVideoOff] = useState(document.hidden);
     const [cameraNotice, setCameraNotice] = useState('');

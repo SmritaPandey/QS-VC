@@ -1,338 +1,218 @@
 /**
- * QS-VC Desktop Client — Electron Main Process
+ * QS-VC Desktop Client — Electron main process (intranet edition).
  *
- * Features:
- * - BrowserWindow loading the web client
- * - System tray with quick actions
- * - Auto-updates via electron-updater
- * - Native notifications
- * - OS-level media device access
- * - Deep link handling (qsvc:// protocol)
+ * - First run asks for the organisation's workspace address (https only) and remembers it.
+ *   IT can pre-set it with a `workspace.json` next to QS-VC.exe: {"workspaceUrl":"https://..."}.
+ * - The window only ever shows that workspace; other links open in the system browser.
+ * - Camera, microphone and screen sharing are granted to the workspace origin only.
+ * - System tray, qsvc://join/<code> deep links, single instance.
  */
-import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell } from 'electron';
-import { autoUpdater } from 'electron-updater';
+import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell, session, desktopCapturer, dialog, net } from 'electron';
+import * as fs from 'fs';
 import * as path from 'path';
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// CONFIGURATION
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-const WEB_CLIENT_URL = process.env.QSVC_WEB_URL || 'http://localhost:5173';
-const IS_DEV = !app.isPackaged;
-
+const PROTOCOL = 'qsvc';
+const MEETING_CODE = /^[A-Z0-9-]{4,32}$/i;
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
+let quitting = false;
+let workspace: URL | null = null;
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// WINDOW MANAGEMENT
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━ Organisation address ━━━
+
+const configFile = () => path.join(app.getPath('userData'), 'config.json');
+
+function parseWorkspace(value: unknown): URL | null {
+    try {
+        const url = new URL(String(value).trim());
+        const localDev = !app.isPackaged && url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname);
+        if ((url.protocol !== 'https:' && !localDev) || url.username || url.password || url.search || url.hash) return null;
+        url.pathname = url.pathname.replace(/\/+$/, '') + '/';
+        return url;
+    } catch { return null; }
+}
+
+function loadWorkspace(): URL | null {
+    const candidates: unknown[] = [process.env.QSVC_WEB_URL];
+    for (const file of [configFile(), path.join(path.dirname(process.execPath), 'workspace.json')]) {
+        try { candidates.push(JSON.parse(fs.readFileSync(file, 'utf8')).workspaceUrl); } catch { /* not configured */ }
+    }
+    for (const value of candidates) { const url = value ? parseWorkspace(value) : null; if (url) return url; }
+    return null;
+}
+
+async function reachable(url: URL): Promise<boolean> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+        const response = await net.fetch(url.href, { method: 'GET', signal: controller.signal, redirect: 'manual' });
+        return response.status > 0 && response.status < 500;
+    } catch { return false; } finally { clearTimeout(timer); }
+}
+
+function showWorkspace(win: BrowserWindow, target?: string) {
+    if (!workspace) { void win.loadFile(path.join(__dirname, '..', 'static', 'setup.html')); return; }
+    void win.loadURL(target || workspace.href);
+}
+
+function sameOrigin(value: string): boolean {
+    try { return !!workspace && new URL(value).origin === workspace.origin; } catch { return false; }
+}
+
+function fromSetupPage(frameUrl: string | undefined): boolean {
+    return !!frameUrl && frameUrl.startsWith('file:') && frameUrl.endsWith('/static/setup.html');
+}
+
+// ━━━ Window ━━━
 
 function createMainWindow(): BrowserWindow {
     const win = new BrowserWindow({
-        width: 1280,
-        height: 800,
-        minWidth: 800,
-        minHeight: 600,
-        titleBarStyle: 'hiddenInset',
-        backgroundColor: '#0a0a0f',
-        icon: getIconPath(),
+        width: 1280, height: 800, minWidth: 800, minHeight: 600,
+        backgroundColor: '#0b1420',
+        title: 'QS-VC',
+        icon: path.join(__dirname, '..', 'assets', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
+        autoHideMenuBar: true,
         webPreferences: {
             preload: path.join(__dirname, 'preload.js'),
-            contextIsolation: true,
-            nodeIntegration: false,
-            sandbox: true,
-            webSecurity: true,
+            contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true,
         },
         show: false,
     });
+    win.once('ready-to-show', () => { win.show(); win.focus(); });
+    win.on('close', event => { if (!quitting && process.platform !== 'darwin' && tray) { event.preventDefault(); win.hide(); } });
 
-    // Load the web client
-    win.loadURL(WEB_CLIENT_URL);
-
-    // Show window when ready (avoid flash of white)
-    win.once('ready-to-show', () => {
-        win.show();
-        win.focus();
+    // Stay inside the organisation's workspace; everything else opens in the browser.
+    const openOutside = (url: string) => { if (/^https:\/\//i.test(url)) void shell.openExternal(url); };
+    win.webContents.setWindowOpenHandler(({ url }) => { if (!sameOrigin(url)) openOutside(url); else void win.loadURL(url); return { action: 'deny' }; });
+    win.webContents.on('will-navigate', (event, url) => { if (!sameOrigin(url) && !url.startsWith('file:')) { event.preventDefault(); openOutside(url); } });
+    win.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+        if (!isMainFrame || code === -3 || !workspace || !sameOrigin(url)) return;
+        void dialog.showMessageBox(win, {
+            type: 'warning', title: 'QS-VC', buttons: ['Retry', 'Change organisation address'], defaultId: 0, cancelId: 0,
+            message: 'Cannot reach your organisation workspace.',
+            detail: `${workspace.href}\n${description}\n\nConnect to your office network or VPN, then retry.`,
+        }).then(({ response }) => { if (response === 0) showWorkspace(win); else changeWorkspace(); });
     });
 
-    // Handle window close (minimize to tray on non-macOS)
-    win.on('close', (event) => {
-        if (process.platform !== 'darwin' && tray) {
-            event.preventDefault();
-            win.hide();
-        }
-    });
-
-    // Open external links in system browser
-    win.webContents.setWindowOpenHandler(({ url }) => {
-        if (url.startsWith('http')) {
-            shell.openExternal(url);
-        }
-        return { action: 'deny' };
-    });
-
-    // Grant media permissions automatically
-    win.webContents.session.setPermissionRequestHandler((_webContents, permission, callback) => {
-        const allowedPermissions = ['media', 'mediaKeySystem', 'notifications', 'fullscreen'];
-        callback(allowedPermissions.includes(permission));
-    });
-
+    showWorkspace(win);
     return win;
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// SYSTEM TRAY
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+function changeWorkspace() {
+    workspace = null;
+    if (!mainWindow) return;
+    mainWindow.show();
+    showWorkspace(mainWindow);
+}
+
+// ━━━ Media permissions and screen sharing ━━━
+
+function setupPermissions() {
+    const allowed = new Set(['media', 'display-capture', 'notifications', 'fullscreen', 'clipboard-sanitized-write']);
+    session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+        callback(allowed.has(permission) && sameOrigin(webContents.getURL()));
+    });
+    session.defaultSession.setPermissionCheckHandler((_webContents, permission, origin) => allowed.has(permission) && sameOrigin(origin));
+
+    // getDisplayMedia() needs a handler in Electron: let the person pick a screen or window.
+    session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
+        if (!sameOrigin(request.securityOrigin || request.frame?.url || '')) { callback({}); return; }
+        try {
+            const sources = (await desktopCapturer.getSources({ types: ['screen', 'window'] })).slice(0, 8);
+            if (!sources.length || !mainWindow) { callback({}); return; }
+            const { response } = await dialog.showMessageBox(mainWindow, {
+                type: 'question', title: 'Share your screen', message: 'Choose what to share',
+                buttons: [...sources.map(source => source.name.slice(0, 60) || 'Screen'), 'Cancel'],
+                cancelId: sources.length, defaultId: 0, noLink: true,
+            });
+            callback(response < sources.length ? { video: sources[response] } : {});
+        } catch { callback({}); }
+    });
+}
+
+// ━━━ Tray ━━━
 
 function createTray(): Tray {
-    const icon = nativeImage.createFromPath(getIconPath());
-    const trayInstance = new Tray(icon.resize({ width: 16, height: 16 }));
-
-    const contextMenu = Menu.buildFromTemplate([
-        {
-            label: 'Open QS-VC',
-            click: () => {
-                if (mainWindow) {
-                    mainWindow.show();
-                    mainWindow.focus();
-                }
-            },
-        },
+    const icon = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'icon.png')).resize({ width: 16, height: 16 });
+    const instance = new Tray(icon);
+    const show = () => { mainWindow?.show(); mainWindow?.focus(); };
+    instance.setToolTip('QS-VC');
+    instance.setContextMenu(Menu.buildFromTemplate([
+        { label: 'Open QS-VC', click: show },
+        { label: 'Change organisation address…', click: changeWorkspace },
         { type: 'separator' },
-        {
-            label: 'Quick Meeting',
-            click: () => {
-                if (mainWindow) {
-                    mainWindow.show();
-                    mainWindow.webContents.send('quick-meeting');
-                }
-            },
-        },
-        {
-            label: 'Join Meeting',
-            click: () => {
-                if (mainWindow) {
-                    mainWindow.show();
-                    mainWindow.webContents.send('join-meeting');
-                }
-            },
-        },
-        { type: 'separator' },
-        {
-            label: 'Settings',
-            click: () => {
-                if (mainWindow) {
-                    mainWindow.show();
-                    mainWindow.webContents.send('open-settings');
-                }
-            },
-        },
-        { type: 'separator' },
-        {
-            label: 'Check for Updates',
-            click: () => autoUpdater.checkForUpdatesAndNotify(),
-        },
-        { type: 'separator' },
-        {
-            label: 'Quit',
-            click: () => {
-                app.quit();
-            },
-        },
-    ]);
-
-    trayInstance.setToolTip('QS-VC Video Conferencing');
-    trayInstance.setContextMenu(contextMenu);
-
-    trayInstance.on('double-click', () => {
-        if (mainWindow) {
-            mainWindow.show();
-            mainWindow.focus();
-        }
-    });
-
-    return trayInstance;
+        { label: 'Quit QS-VC', click: () => { quitting = true; app.quit(); } },
+    ]));
+    instance.on('double-click', show);
+    return instance;
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// AUTO-UPDATER
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━ IPC ━━━
 
-function setupAutoUpdater(): void {
-    autoUpdater.autoDownload = true;
-    autoUpdater.autoInstallOnAppQuit = true;
-
-    autoUpdater.on('update-available', (info) => {
-        new Notification({
-            title: 'Update Available',
-            body: `Version ${info.version} is available. Downloading...`,
-        }).show();
+function setupIPC() {
+    ipcMain.handle('app:getInfo', () => ({ version: app.getVersion(), platform: process.platform, arch: process.arch, isPackaged: app.isPackaged }));
+    ipcMain.handle('app:notify', (event, title: unknown, body: unknown) => {
+        if (!sameOrigin(event.senderFrame?.url || '')) return;
+        new Notification({ title: String(title).slice(0, 80), body: String(body).slice(0, 200) }).show();
     });
-
-    autoUpdater.on('update-downloaded', (info) => {
-        new Notification({
-            title: 'Update Ready',
-            body: `Version ${info.version} will be installed on restart.`,
-        }).show();
-
-        if (mainWindow) {
-            mainWindow.webContents.send('update-downloaded', info.version);
-        }
-    });
-
-    autoUpdater.on('error', (err) => {
-        console.error('Auto-updater error:', err);
-    });
-
-    // Check for updates every 4 hours
-    setInterval(() => {
-        autoUpdater.checkForUpdatesAndNotify();
-    }, 4 * 60 * 60 * 1000);
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// IPC HANDLERS
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-function setupIPC(): void {
-    // Get app info
-    ipcMain.handle('app:getInfo', () => ({
-        version: app.getVersion(),
-        platform: process.platform,
-        arch: process.arch,
-        isPackaged: app.isPackaged,
-    }));
-
-    // Native notifications
-    ipcMain.handle('app:notify', (_event, title: string, body: string) => {
-        new Notification({ title, body }).show();
-    });
-
-    // Window controls
     ipcMain.handle('window:minimize', () => mainWindow?.minimize());
-    ipcMain.handle('window:maximize', () => {
-        if (mainWindow?.isMaximized()) {
-            mainWindow.unmaximize();
-        } else {
-            mainWindow?.maximize();
-        }
-    });
+    ipcMain.handle('window:maximize', () => { if (mainWindow?.isMaximized()) mainWindow.unmaximize(); else mainWindow?.maximize(); });
     ipcMain.handle('window:close', () => mainWindow?.close());
-    ipcMain.handle('window:setFullscreen', (_event, flag: boolean) => {
-        mainWindow?.setFullScreen(flag);
-    });
+    ipcMain.handle('window:setFullscreen', (_event, flag: unknown) => mainWindow?.setFullScreen(flag === true));
 
-    // Meeting-specific window controls
-    ipcMain.handle('meeting:setPiP', (_event, flag: boolean) => {
-        if (mainWindow) {
-            mainWindow.setAlwaysOnTop(flag);
-            if (flag) {
-                mainWindow.setSize(400, 300);
-                mainWindow.setPosition(
-                    require('electron').screen.getPrimaryDisplay().workAreaSize.width - 420,
-                    20
-                );
-            } else {
-                mainWindow.setSize(1280, 800);
-                mainWindow.center();
-            }
-        }
+    // Only the local setup screen may read or change the organisation address.
+    ipcMain.handle('workspace:get', event => fromSetupPage(event.senderFrame?.url) ? (loadWorkspace()?.href || '') : '');
+    ipcMain.handle('workspace:set', async (event, value: unknown) => {
+        if (!fromSetupPage(event.senderFrame?.url)) return { ok: false, error: 'Not allowed.' };
+        const url = parseWorkspace(value);
+        if (!url) return { ok: false, error: 'Enter a full secure address that starts with https://' };
+        if (!(await reachable(url))) return { ok: false, error: 'Cannot reach that address. Connect to your office network or VPN and try again.' };
+        fs.mkdirSync(path.dirname(configFile()), { recursive: true });
+        fs.writeFileSync(configFile(), JSON.stringify({ workspaceUrl: url.href }, null, 2), { mode: 0o600 });
+        workspace = url;
+        if (mainWindow) showWorkspace(mainWindow);
+        return { ok: true };
     });
 }
 
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// DEEP LINK (qsvc:// protocol)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// ━━━ Deep links: qsvc://join/<code> ━━━
 
-function setupDeepLinks(): void {
-    const PROTOCOL = 'qsvc';
+function handleDeepLink(link: string) {
+    try {
+        const parsed = new URL(link);
+        const code = decodeURIComponent((parsed.host === 'join' ? parsed.pathname : parsed.pathname.replace(/^\/+join/, '')).replace(/^\/+/, ''));
+        if (!MEETING_CODE.test(code) || !workspace || !mainWindow) return;
+        mainWindow.show();
+        showWorkspace(mainWindow, new URL(`meeting/${encodeURIComponent(code.toUpperCase())}/preview`, workspace).href);
+    } catch { /* ignore malformed links */ }
+}
 
-    if (process.defaultApp) {
-        if (process.argv.length >= 2) {
-            app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
-        }
-    } else {
-        app.setAsDefaultProtocolClient(PROTOCOL);
-    }
+// ━━━ Lifecycle ━━━
 
-    // Handle deep link on Windows/Linux (single instance)
-    const gotTheLock = app.requestSingleInstanceLock();
-    if (!gotTheLock) {
-        app.quit();
-        return;
-    }
+if (!app.requestSingleInstanceLock()) {
+    app.quit();
+} else {
+    if (process.defaultApp && process.argv.length >= 2) app.setAsDefaultProtocolClient(PROTOCOL, process.execPath, [path.resolve(process.argv[1])]);
+    else app.setAsDefaultProtocolClient(PROTOCOL);
 
     app.on('second-instance', (_event, argv) => {
-        if (mainWindow) {
-            if (mainWindow.isMinimized()) mainWindow.restore();
-            mainWindow.focus();
-        }
-
-        // Parse the deep link URL from argv
-        const url = argv.find((arg) => arg.startsWith(`${PROTOCOL}://`));
-        if (url) {
-            handleDeepLink(url);
-        }
+        if (mainWindow) { if (mainWindow.isMinimized()) mainWindow.restore(); mainWindow.show(); mainWindow.focus(); }
+        const link = argv.find(arg => arg.startsWith(`${PROTOCOL}://`));
+        if (link) handleDeepLink(link);
     });
+    app.on('open-url', (event, link) => { event.preventDefault(); handleDeepLink(link); });
+    app.on('before-quit', () => { quitting = true; });
 
-    // Handle deep link on macOS
-    app.on('open-url', (event, url) => {
-        event.preventDefault();
-        handleDeepLink(url);
-    });
-}
-
-function handleDeepLink(url: string): void {
-    // Parse: qsvc://join/MEETING_CODE
-    try {
-        const parsed = new URL(url);
-        if (parsed.pathname.startsWith('/join/')) {
-            const meetingCode = parsed.pathname.replace('/join/', '');
-            if (mainWindow) {
-                mainWindow.webContents.send('deep-link-join', meetingCode);
-            }
-        }
-    } catch (err) {
-        console.error('Invalid deep link:', url, err);
-    }
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// UTILITIES
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-function getIconPath(): string {
-    const ext = process.platform === 'win32' ? 'ico' : process.platform === 'darwin' ? 'icns' : 'png';
-    return path.join(__dirname, '..', 'assets', `icon.${ext}`);
-}
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// APP LIFECYCLE
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-setupDeepLinks();
-
-app.whenReady().then(() => {
-    mainWindow = createMainWindow();
-    tray = createTray();
-    setupIPC();
-
-    if (!IS_DEV) {
-        setupAutoUpdater();
-        autoUpdater.checkForUpdatesAndNotify();
-    }
-});
-
-app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-        app.quit();
-    }
-});
-
-app.on('activate', () => {
-    if (mainWindow === null) {
+    app.whenReady().then(() => {
+        workspace = loadWorkspace();
+        setupPermissions();
+        setupIPC();
         mainWindow = createMainWindow();
-    } else {
-        mainWindow.show();
-    }
-});
+        tray = createTray();
+        const link = process.argv.find(arg => arg.startsWith(`${PROTOCOL}://`));
+        if (link) handleDeepLink(link);
+    });
+
+    app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+    app.on('activate', () => { if (!mainWindow) mainWindow = createMainWindow(); else mainWindow.show(); });
+}

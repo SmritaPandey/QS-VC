@@ -1,13 +1,14 @@
 import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
 import IdentityOptions from '../components/IdentityOptions';
 import ActionContents from '../components/ActionContents';
-import { AUTH_API } from '../lib/session';
+import { AUTH_API, nextPath } from '../lib/session';
 
 export default function Signup() {
     const navigate = useNavigate();
+    const location = useLocation();
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     async function submit(event: FormEvent<HTMLFormElement>) {
@@ -23,7 +24,7 @@ export default function Signup() {
             const data = await response.json();
             if (!response.ok || !data.token) throw new Error(data.error || 'Could not create your account. Please try again.');
             sessionStorage.setItem('token', data.token);
-            navigate('/app', { replace: true });
+            navigate(nextPath(location.search), { replace: true });
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : 'Cannot reach sign up. Please try again.');
         } finally { setBusy(false); }
@@ -47,7 +48,7 @@ export default function Signup() {
                 <p>By creating an account, you agree to our <Link to="/terms">Terms</Link>. Read our <Link to="/privacy">Privacy Policy</Link>.</p>
                 <button className="public-primary qsvc-action" disabled={busy}><ActionContents>{busy ? 'Creating account…' : 'Create account'}</ActionContents></button>
                 <IdentityOptions />
-                <p>Already have an account? <Link to="/login">Sign in</Link></p>
+                <p>Already have an account? <Link to={`/login${location.search}`}>Sign in</Link></p>
             </form>
         </main><SiteFooter /></div>;
 }

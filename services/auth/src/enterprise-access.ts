@@ -13,7 +13,13 @@ export function enterpriseRouter(verify: (token: string) => Promise<Record<strin
             if (!header?.startsWith('Bearer ')) { res.status(401).json({ error: 'Sign in to check enterprise access.' }); return; }
             const user = await verify(header.slice(7));
             const grants = JSON.parse(process.env.ENTERPRISE_ACCESS_JSON || '[]');
-            const grant = Array.isArray(grants) ? grants.find(g => g.tenantId === user.tenantId && Array.isArray(g.userIds) && g.userIds.includes(user.sub)) : undefined;
+            let grant = Array.isArray(grants) ? grants.find(g => g.tenantId === user.tenantId && Array.isArray(g.userIds) && g.userIds.includes(user.sub)) : undefined;
+            // Platform admins (role from the server-signed session) may use the intranet without a
+            // per-user grant. They get QSVC_ADMIN_WORKSPACE_URL, or the first configured workspace.
+            if (!grant && user.role === 'admin') {
+                const workspaceUrl = process.env.QSVC_ADMIN_WORKSPACE_URL || (Array.isArray(grants) ? grants[0]?.workspaceUrl : undefined);
+                if (workspaceUrl) grant = { workspaceUrl };
+            }
             if (!grant) { res.status(403).json({ error: 'Your account has not been approved for enterprise access.' }); return; }
             const url = new URL(grant.workspaceUrl);
             if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new Error('Invalid workspace configuration');

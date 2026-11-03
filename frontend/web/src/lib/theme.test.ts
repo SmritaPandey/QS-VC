@@ -3,7 +3,7 @@ import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 
 const script = readFileSync(new URL('../../public/theme.js', import.meta.url), 'utf8');
-function boot({ dark = false, consent, preference, blocked = false, noMedia = false }: { dark?: boolean; consent?: string; preference?: string; blocked?: boolean; noMedia?: boolean } = {}) {
+function boot({ dark = false, consent, preference, blocked = false, noMedia = false, tab }: { dark?: boolean; consent?: string; preference?: string; blocked?: boolean; noMedia?: boolean; tab?: Map<string,string> } = {}) {
     const data = new Map<string,string>();
     if (consent) data.set('qsvc:storage-consent:v2', consent);
     if (preference) data.set('qsvc:theme', preference);
@@ -13,7 +13,8 @@ function boot({ dark = false, consent, preference, blocked = false, noMedia = fa
     const meta = { content: '' };
     const window = { matchMedia: () => { if (noMedia) throw Error('unavailable'); return media; }, addEventListener: (name: string, fn: () => void) => events.set(name, fn), qsvcTheme: null as any };
     const storage = { getItem: (key: string) => { if (blocked) throw Error('blocked'); return data.get(key) ?? null; }, setItem: (key: string, value: string) => { if (blocked) throw Error('blocked'); data.set(key,value); }, removeItem: (key: string) => { if (blocked) throw Error('blocked'); data.delete(key); } };
-    runInNewContext(script, { window, document: { documentElement: root, querySelector: () => meta }, localStorage: storage });
+    const sessionStorage = tab && { getItem: (key: string) => tab.get(key) ?? null, setItem: (key: string, value: string) => { tab.set(key, value); }, removeItem: (key: string) => { tab.delete(key); } };
+    runInNewContext(script, { window, document: { documentElement: root, querySelector: () => meta }, localStorage: storage, ...(sessionStorage ? { sessionStorage } : {}) });
     return { data, events, media, root, meta, theme: window.qsvcTheme };
 }
 
@@ -71,5 +72,17 @@ describe('the exact shared first-paint/runtime theme owner', () => {
         app.theme.setPreference('dark'); expect(count).toBe(1);
         unsubscribe(); app.theme.setPreference('light'); expect(count).toBe(1);
         expect(app.events.has('media')).toBe(true);
+    });
+    it('keeps this tab’s choice across full page loads without consent, and never in persistent storage', () => {
+        const tab = new Map<string,string>();
+        const first = boot({ tab }); first.theme.setPreference('dark');
+        expect(tab.get('qsvc:theme')).toBe('dark');
+        expect(first.data.has('qsvc:theme')).toBe(false);
+        const reloaded = boot({ tab });
+        expect(reloaded.theme.getPreference()).toBe('dark');
+        expect(reloaded.root.dataset.theme).toBe('dark');
+        reloaded.theme.setPreference('system');
+        expect(tab.has('qsvc:theme')).toBe(false);
+        expect(boot({ tab: new Map([['qsvc:theme','broken']]) }).theme.getPreference()).toBe('system');
     });
 });

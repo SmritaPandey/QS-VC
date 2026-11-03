@@ -44,3 +44,13 @@ test('API requests retain method, body, query and auth; signaling retains upgrad
         globalThis.fetch = originalFetch;
     }
 });
+
+test('website responses carry browser security headers', async () => {
+    const env = { ASSETS: { fetch: () => new Response('frontend', { headers: { 'Content-Type': 'text/html' } }) } };
+    const response = await worker.fetch(new Request('https://site.test/'), env);
+    assert.equal(response.headers.get('X-Frame-Options'), 'DENY');
+    assert.match(response.headers.get('Strict-Transport-Security'), /max-age=31536000/);
+    assert.match(response.headers.get('Permissions-Policy'), /camera=\(self\)/);
+    assert.match(response.headers.get('Content-Security-Policy-Report-Only'), /frame-ancestors 'none'/);
+    assert.equal(response.headers.get('Content-Type'), 'text/html');
+});

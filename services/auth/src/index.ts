@@ -3,7 +3,7 @@ import { enterpriseRouter } from './enterprise-access.js';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { z } from 'zod';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { Pool } from 'pg';
@@ -14,6 +14,7 @@ import dotenv from 'dotenv';
 import pino from 'pino';
 import { createSession, validateSession, endSession, sessionErrorStatus } from './sessions.js';
 import { contactRouter, contactRequestError } from './contact.js';
+import { effectiveRole, isPlatformAdmin } from './platform-admins.js';
 
 dotenv.config({ path: '../../.env' });
 
@@ -63,6 +64,7 @@ function validateBody<T>(schema: z.ZodSchema<T>) {
 }
 
 const app = express();
+app.disable('x-powered-by'); // Do not advertise the framework (OWASP A05).
 
 // CORS: merge env with production defaults so stale Render env can't lock out Vercel
 const DEFAULT_CORS_ORIGINS = [
@@ -89,7 +91,7 @@ app.use(express.json());
 const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } });
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many auth attempts, please try again later' } });
 // Signaling verifies each authenticated RPC, so do not apply the low browser API quota here.
-app.use('/api/auth/verify', rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, skip: req => { try { const value = jwt.verify(String(req.headers['x-qsvc-service-token'] || ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production') as jwt.JwtPayload; return value.aud === 'qsvc-auth-verify' && value.iss === 'qsvc-internal'; } catch { return false; } }, keyGenerator: req => crypto.createHash('sha256').update(req.headers.authorization || req.ip || 'unknown').digest('hex'), standardHeaders: true, legacyHeaders: false }));
+app.use('/api/auth/verify', rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, skip: req => { try { const value = jwt.verify(String(req.headers['x-qsvc-service-token'] || ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production') as jwt.JwtPayload; return value.aud === 'qsvc-auth-verify' && value.iss === 'qsvc-internal'; } catch { return false; } }, keyGenerator: req => req.headers.authorization ? crypto.createHash('sha256').update(req.headers.authorization).digest('hex') : ipKeyGenerator(req.ip || 'unknown'), standardHeaders: true, legacyHeaders: false }));
 app.use((req, res, next) => req.path === '/api/auth/verify' ? next() : generalLimiter(req, res, next));
 app.use('/api/auth/register', authLimiter);
 app.use('/api/auth/login', authLimiter);
@@ -135,6 +137,34 @@ function generateToken(user: { id: string; email: string; tenantId: string; role
     );
 }
 
+/**
+ * The free tenant that public sign-ups join. Created on demand when a database was set up
+ * without migration 004, which otherwise made every sign-up fail with "temporarily unavailable".
+ */
+async function personalTenantId(): Promise<string | null> {
+    const find = () => pool.query(
+        "SELECT id FROM tenants WHERE slug = 'personal-free' AND plan = 'free' AND is_active = true"
+    );
+    let result = await find();
+    if (result.rows.length === 1) return result.rows[0].id;
+    try {
+        await pool.query(
+            `INSERT INTO tenants (name, slug, plan, max_participants, max_duration_min, storage_quota_gb)
+             VALUES ('Personal accounts', 'personal-free', 'free', 100, 60, 0)
+             ON CONFLICT (slug) DO NOTHING`
+        );
+        result = await find();
+        if (result.rows.length === 1) {
+            logger.warn('Created the missing personal-free tenant; run db/migrate.js on this database');
+            return result.rows[0].id;
+        }
+        logger.error("A tenant with slug 'personal-free' exists but is inactive or not on the free plan");
+    } catch (err) {
+        logger.error(err, "The personal-free tenant is missing and could not be created; run db/migrate.js (migration 005 grants this)");
+    }
+    return null;
+}
+
 async function verifyToken(token: string) {
     const payload = jwt.verify(token, JWT_SECRET);
     if (typeof payload === 'string') throw new Error('Invalid token');
@@ -165,24 +195,30 @@ app.get('/ready', async (_req, res) => {
 // Register
 app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
     try {
-        const { email, password, displayName, tenantSlug } = req.body;
+        const { password, displayName, tenantSlug } = req.body;
+        const email = String(req.body.email).trim().toLowerCase();
 
         // Public signup cannot enrol users into an organisation or a paid tenant.
         if (tenantSlug) {
             return res.status(403).json({ error: 'Enterprise access requires organisation SSO / SAML.' });
         }
-        const tenantResult = await pool.query(
-            "SELECT id FROM tenants WHERE slug = 'personal-free' AND plan = 'free' AND is_active = true"
-        );
-        if (tenantResult.rows.length !== 1) {
+        const tenantId = await personalTenantId();
+        if (!tenantId) {
             return res.status(503).json({ error: 'Account creation is temporarily unavailable. Please try again later.' });
         }
-        const tenantId = tenantResult.rows[0].id;
+        // Platform-admin addresses cannot be claimed through public sign-up (there is no email
+        // verification yet). Operators open this briefly with QSVC_ADMIN_SIGNUP_OPEN=yes.
+        if (isPlatformAdmin(email) && process.env.QSVC_ADMIN_SIGNUP_OPEN !== 'yes') {
+            return res.status(403).json({ error: 'This address is reserved. Contact QS-VC support to set up this account.' });
+        }
+        const role = effectiveRole(email, 'member');
 
         // Check if email exists
+        // An address that already belongs to any organisation must not get a second account:
+        // the duplicate would make the original user's sign-in ambiguous and lock them out.
         const existing = await pool.query(
-            'SELECT id FROM users WHERE email = $1 AND tenant_id = $2',
-            [email, tenantId]
+            'SELECT 1 FROM users WHERE lower(email) = $1 LIMIT 1',
+            [email]
         );
         if (existing.rows.length > 0) {
             return res.status(409).json({ error: 'Email already registered' });
@@ -194,17 +230,17 @@ app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
 
         await pool.query(
             `INSERT INTO users (id, tenant_id, email, display_name, password_hash, role)
-       VALUES ($1, $2, $3, $4, $5, 'member')`,
-            [userId, tenantId, email, displayName, passwordHash]
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+            [userId, tenantId, email, displayName, passwordHash, role]
         );
 
         const sessionId = await createSession(pool, userId);
-        const token = generateToken({ id: userId, email, tenantId, role: 'member', displayName }, sessionId);
+        const token = generateToken({ id: userId, email, tenantId, role, displayName }, sessionId);
 
         logger.info(`User registered: ${email} [tenant:${tenantId}]`);
         res.status(201).json({
             token,
-            user: { id: userId, email, displayName, role: 'member', tenantId },
+            user: { id: userId, email, displayName, role, tenantId },
         });
     } catch (err: any) {
         logger.error(err, 'Registration failed');
@@ -219,7 +255,7 @@ app.post('/api/auth/login', validateBody(loginBody), async (req, res) => {
 
         const result = await pool.query(
             `SELECT id, tenant_id, email, display_name, password_hash, role, avatar_url
-       FROM users WHERE email = $1 AND is_active = true
+       FROM users WHERE lower(email) = lower($1) AND is_active = true
        AND tenant_id IN (SELECT id FROM tenants WHERE is_active = true AND ($2::text IS NULL OR slug = $2))`,
             [email, tenantSlug || null]
         );
@@ -233,6 +269,14 @@ app.post('/api/auth/login', validateBody(loginBody), async (req, res) => {
 
         if (!validPassword) {
             return res.status(401).json({ error: 'Invalid email or password' });
+        }
+
+        // Listed platform admins are promoted on sign-in, so existing accounts get full access too.
+        const role = effectiveRole(user.email, user.role);
+        if (role !== user.role) {
+            await pool.query('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2', [role, user.id]);
+            user.role = role;
+            logger.info(`Platform admin role applied: ${user.email}`);
         }
 
         // Update last login

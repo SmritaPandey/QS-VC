@@ -22,3 +22,12 @@ it('fails closed for invalid sessions and unsafe workspace configuration', async
     vi.stubEnv('ENTERPRISE_ACCESS_JSON', JSON.stringify([{ tenantId: 'org', userIds: ['approved'], workspaceUrl: 'http://office.example' }]));
     expect((await check({ sub: 'approved', tenantId: 'org' })).next).not.toHaveBeenCalled();
 });
+it('lets platform admins in without a per-user grant, using the admin workspace address', async () => {
+    vi.stubEnv('ENTERPRISE_ACCESS_JSON', '[]');
+    expect((await check({ sub: 'boss', tenantId: 'any', role: 'admin' })).res.status).toHaveBeenCalledWith(403);
+    vi.stubEnv('QSVC_ADMIN_WORKSPACE_URL', 'https://intranet.example/');
+    const allowed = await check({ sub: 'boss', tenantId: 'any', role: 'admin' });
+    expect(allowed.next).toHaveBeenCalledOnce();
+    expect((allowed.res.locals as { workspaceUrl?: string }).workspaceUrl).toBe('https://intranet.example/');
+    expect((await check({ sub: 'someone', tenantId: 'any', role: 'member' })).next).not.toHaveBeenCalled();
+});
