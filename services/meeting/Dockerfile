@@ -15,6 +15,7 @@ COPY services/meeting/package.json ./
 RUN npm install
 COPY services/meeting/tsconfig.json ./
 COPY services/meeting/src ./src
+COPY shared/database.cjs shared/database.d.cts shared/tenant-database.cjs shared/tenant-database.d.cts /shared/
 RUN npm run build
 
 FROM node:20-alpine
@@ -27,6 +28,7 @@ COPY services/signaling/package.json ./signaling/package.json
 RUN cd signaling && npm install --omit=dev
 
 COPY --from=meeting-build /meeting/dist ./dist
+COPY shared/database.cjs shared/tenant-database.cjs /shared/
 COPY --from=signaling-build /signaling/dist ./signaling-dist
 
 ENV HOST=0.0.0.0

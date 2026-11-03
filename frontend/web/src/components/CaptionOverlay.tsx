@@ -10,6 +10,8 @@ export interface CaptionEntry {
     text: string;
     isFinal: boolean;
     timestamp: number;
+    language?: string;
+    label?: string;
 }
 
 interface Props {
@@ -41,11 +43,12 @@ const CaptionOverlay: React.FC<Props> = ({ enabled, captions, fontSize = 'medium
 
     return (
         <div className="caption-overlay" style={{ fontSize: fontSizeMap[fontSize] }}>
-            <div className="caption-container" ref={scrollRef}>
+            <div className="caption-container" ref={scrollRef} role="log" aria-label="Meeting captions" aria-live="polite" aria-relevant="additions">
                 {visibleCaptions.map(c => (
                     <div key={c.id} className={`caption-line ${c.isFinal ? '' : 'caption-partial'}`}>
                         <span className="caption-speaker">{c.speakerName}:</span>
-                        <span className="caption-text">{c.text}</span>
+                        <span className="caption-text" lang={c.language} dir="auto">{c.text}</span>
+                        {c.label && <span className="caption-origin">{c.label}</span>}
                     </div>
                 ))}
             </div>

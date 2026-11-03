@@ -1,3 +1,4 @@
+import { getToken } from '../lib/session';
 /**
  * Admin Dashboard — Real-time monitoring, user management, and analytics.
  */
@@ -99,7 +100,7 @@ const AdminDashboard: React.FC = () => {
         const fetchUsers = async () => {
             try {
                 const res = await fetch(`${AUTH_URL}/api/auth/users`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+                    headers: { Authorization: `Bearer ${getToken()}` },
                 });
                 if (res.ok) {
                     const data = await res.json();
@@ -112,7 +113,7 @@ const AdminDashboard: React.FC = () => {
         const fetchRecordings = async () => {
             try {
                 const res = await fetch(`${RECORDING_URL}/api/recordings`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+                    headers: { Authorization: `Bearer ${getToken()}` },
                 });
                 if (res.ok) {
                     const data = await res.json();
@@ -125,7 +126,7 @@ const AdminDashboard: React.FC = () => {
         const fetchMeetings = async () => {
             try {
                 const res = await fetch(`${MEETING_URL}/api/meetings?status=active`, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
+                    headers: { Authorization: `Bearer ${getToken()}` },
                 });
                 if (res.ok) {
                     const data = await res.json();

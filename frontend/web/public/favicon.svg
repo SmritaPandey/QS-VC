@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 72">
+  <defs>
+    <linearGradient id="ring" x1="12" y1="5" x2="52" y2="60" gradientUnits="userSpaceOnUse"><stop stop-color="#7564ee"/><stop offset="1" stop-color="#893bd1"/></linearGradient>
+    <linearGradient id="play" x1="22" y1="32" x2="44" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#20528a"/><stop offset=".55" stop-color="#16c6b4"/><stop offset="1" stop-color="#079c9a"/></linearGradient>
+  </defs>
+  <g transform="translate(4 3)">
+    <path d="M47 50 A25 25 0 1 1 53 43" fill="none" stroke="url(#ring)" stroke-width="7"/>
+    <path d="M23 21 Q22 20 22 23 L22 42 Q22 44 24 43 L44 34 Q47 32.5 44 31 Z" fill="url(#play)"/>
+    <path d="M44 47 Q42 45 41 48 L49 61 Q50 63 52 61 L61 55 Q63 54 60 52 L46 46 Z" fill="url(#ring)" stroke="white" stroke-width="1.5"/>
+  </g>
+</svg>

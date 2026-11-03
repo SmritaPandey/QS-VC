@@ -1,0 +1,103 @@
+# Linux AWS host only. Windows intranet uses its own local deployment.
+x-app: &app
+  image: qsvc-demo:local
+  network_mode: host
+  restart: unless-stopped
+  working_dir: /opt/qsvc
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: '3'
+x-runtime: &runtime
+  NODE_ENV: production
+  WEB_URL: https://${DOMAIN}
+  CORS_ORIGINS: https://${DOMAIN}
+  POSTGRES_SSL: verify-full
+  POSTGRES_CA_FILE: /opt/qsvc/certs/rds-ca.pem
+  JWT_SECRET: ${JWT_SECRET:?Set a private JWT secret}
+  AUTH_INTERNAL_URL: http://127.0.0.1:4002
+  SFU_INTERNAL_URL: http://127.0.0.1:4000
+  SFU_ANNOUNCED_IP: ${SFU_ANNOUNCED_IP:?Set the public media IP}
+  SFU_NUM_WORKERS: '1'
+  SFU_MIN_PORT: '40000'
+  SFU_MAX_PORT: '40100'
+  TURN_SERVERS: ${TURN_SERVERS}
+  TURN_USERNAME: ${TURN_USERNAME}
+  TURN_PASSWORD: ${TURN_PASSWORD}
+services:
+  auth:
+    <<: *app
+    build:
+      context: ../..
+      dockerfile: deploy/aws/Dockerfile
+      target: build
+    environment:
+      <<: *runtime
+      DATABASE_URL: ${AUTH_DATABASE_URL:?Set the restricted auth database URL}
+    command: [node, services/auth/dist/index.js]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4002/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+  meeting:
+    <<: *app
+    environment:
+      <<: *runtime
+      DATABASE_URL: ${MEETING_DATABASE_URL:?Set the restricted meeting database URL}
+    command: [node, services/meeting/dist/index.js]
+    healthcheck:
+      test: [CMD, node, -e, "fetch('http://127.0.0.1:4003/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 12s
+      retries: 3
+  signaling:
+    <<: *app
+    environment: *runtime
+    command: [node, services/signaling/dist/index.js]
+  sfu:
+    <<: *app
+    environment: *runtime
+    command: [node, services/sfu/dist/index.js]
+  recording:
+    <<: *app
+    environment: *runtime
+    command: [node, services/recording/dist/index.js]
+  migrate:
+    <<: *app
+    profiles: [maintenance]
+    restart: 'no'
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${MIGRATION_DATABASE_URL:-}
+      POSTGRES_SSL: verify-full
+      POSTGRES_CA_FILE: /opt/qsvc/certs/rds-ca.pem
+    command: [node, db/migrate.js]
+  turn:
+    image: coturn/coturn:4.6.3
+    network_mode: host
+    restart: unless-stopped
+    command: ["-n", "--lt-cred-mech", "--user=${TURN_USERNAME}:${TURN_PASSWORD}", "--realm=${DOMAIN}", "--external-ip=${SFU_ANNOUNCED_IP}", "--listening-port=3478", "--min-port=49152", "--max-port=49200", "--no-cli", "--no-multicast-peers", "--log-file=stdout"]
+  web:
+    image: qsvc-web:local
+    build:
+      context: ../..
+      dockerfile: deploy/aws/Dockerfile
+      target: web
+    ports:
+      - 127.0.0.1:8080:5173
+    restart: unless-stopped
+  proxy:
+    image: caddy:2-alpine
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+volumes:
+  caddy_data:
+  caddy_config:

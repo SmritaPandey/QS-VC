@@ -1,0 +1,10 @@
+.qsvc-speaking { --voice-level:0; display:inline-flex; align-items:center; justify-content:center; gap:2px; width:16px; height:16px; flex-shrink:0; color:#86a1ad; }
+.qsvc-speaking>i { display:block; width:3px; height:12px; border-radius:3px; background:currentColor; transform:scaleY(calc(.2 + var(--voice-level) * .6)); transition:transform 100ms ease-out; }
+.qsvc-speaking>i:nth-child(2) { transform:scaleY(calc(.2 + var(--voice-level) * .8)); }
+.qsvc-speaking>i:nth-child(3) { transform:scaleY(calc(.2 + var(--voice-level) * .45)); }
+.qsvc-speaking[data-speaking=true],.qsvc-speaking--sample { color:#75ecd7; }
+.qsvc-speaking--sample>i { animation:qsvc-speaking-sample 900ms ease-in-out infinite alternate; }
+.qsvc-speaking--sample>i:nth-child(2) { animation-delay:-300ms; }
+.qsvc-speaking--sample>i:nth-child(3) { animation-delay:-600ms; }
+@keyframes qsvc-speaking-sample { from { transform:scaleY(.25); } to { transform:scaleY(.9); } }
+@media(prefers-reduced-motion:reduce) { .qsvc-speaking>i,.qsvc-speaking>i:nth-child(2),.qsvc-speaking>i:nth-child(3) { animation:none; transition:none; transform:scaleY(.25); } }

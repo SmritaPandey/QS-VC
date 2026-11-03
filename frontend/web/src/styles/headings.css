@@ -1,0 +1,19 @@
+:root { --qsvc-brand-gradient:linear-gradient(110deg,#233c86 0%,#5141be 25%,#006d77 50%,#5141be 75%,#233c86 100%); }
+
+@supports (background-clip:text) {
+ :is(.public-site,.workspace-shell,.schedule-page) :is(h1,h2,h3,h4) {
+  background-image:var(--qsvc-brand-gradient);
+  background-size:200% 100%;
+  background-clip:text;
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  animation:qsvc-heading-flow 6s linear infinite;
+ }
+}
+@keyframes qsvc-heading-flow { to { background-position:200% 50%; } }
+@media(prefers-reduced-motion:reduce) {
+ :is(.public-site,.workspace-shell,.schedule-page) :is(h1,h2,h3,h4) { animation:none; }
+}
+@media(forced-colors:active) {
+ :is(.public-site,.workspace-shell,.schedule-page) :is(h1,h2,h3,h4) { background:none; -webkit-text-fill-color:currentColor; animation:none; }
+}

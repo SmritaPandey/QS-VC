@@ -1,3 +1,4 @@
+import { enterpriseRouter } from './enterprise-access.js';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { z } from 'zod';
@@ -5,10 +6,13 @@ import rateLimit from 'express-rate-limit';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { Pool } from 'pg';
+import { databaseConfig } from '../../../shared/database.cjs';
 import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import pino from 'pino';
+import { createSession, validateSession, endSession } from './sessions.js';
+import { contactRouter, contactRequestError } from './contact.js';
 
 dotenv.config({ path: '../../.env' });
 
@@ -35,6 +39,7 @@ const registerBody = z.object({
 const loginBody = z.object({
     email: z.string().email('Invalid email').max(255),
     password: z.string().min(1, 'Password is required').max(128),
+    tenantSlug: z.string().min(1).max(100).optional(),
 });
 
 const updateProfileBody = z.object({
@@ -89,7 +94,9 @@ app.use(express.json());
 // Rate limiting
 const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } });
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many auth attempts, please try again later' } });
-app.use(generalLimiter);
+// Signaling verifies each authenticated RPC, so do not apply the low browser API quota here.
+app.use('/api/auth/verify', rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, standardHeaders: true, legacyHeaders: false }));
+app.use((req, res, next) => req.path === '/api/auth/verify' ? next() : generalLimiter(req, res, next));
 app.use('/api/auth/register', authLimiter);
 app.use('/api/auth/login', authLimiter);
 
@@ -109,25 +116,21 @@ function parseExpiry(val: string): number {
 }
 const JWT_EXPIRY = parseExpiry(process.env.JWT_EXPIRY || '24h');
 
-// Database pool — supports DATABASE_URL (Render) or individual env vars (local)
-const pool = process.env.DATABASE_URL
-    ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
-    : new Pool({
-        host: process.env.POSTGRES_HOST || 'localhost',
-        port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
-        database: process.env.POSTGRES_DB || 'qsvc',
-        user: process.env.POSTGRES_USER || 'qsvc',
-        password: process.env.POSTGRES_PASSWORD || 'qsvc_dev_2025',
-    });
+const pool = new Pool(databaseConfig({ ...process.env, DATABASE_URL: process.env.AUTH_DATABASE_URL || process.env.DATABASE_URL }));
+// Idle connections can fail during database restarts without a pending request.
+pool.on('error', () => logger.warn('Database connection lost; the pool will reconnect on demand'));
+
+app.use('/api/auth/contact', contactRouter(pool));
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // HELPERS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function generateToken(user: { id: string; email: string; tenantId: string; role: string; displayName: string }) {
+function generateToken(user: { id: string; email: string; tenantId: string; role: string; displayName: string }, sessionId: string) {
     return jwt.sign(
         {
             sub: user.id,
+            sessionId,
             email: user.email,
             tenantId: user.tenantId,
             role: user.role,
@@ -138,17 +141,31 @@ function generateToken(user: { id: string; email: string; tenantId: string; role
     );
 }
 
-function verifyToken(token: string) {
-    return jwt.verify(token, JWT_SECRET);
+async function verifyToken(token: string) {
+    const payload = jwt.verify(token, JWT_SECRET);
+    if (typeof payload === 'string') throw new Error('Invalid token');
+    await validateSession(pool, payload);
+    return payload;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ROUTES
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+app.use('/api/auth/enterprise', enterpriseRouter(verifyToken));
+
 // Health check
 app.get('/health', (_req, res) => {
     res.json({ status: 'ok', service: 'qsvc-auth' });
+});
+
+app.get('/ready', async (_req, res) => {
+    try {
+        await pool.query('SELECT 1');
+        res.json({ status: 'ready' });
+    } catch {
+        res.status(503).json({ status: 'unavailable', dependency: 'database' });
+    }
 });
 
 // Register
@@ -188,7 +205,8 @@ app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
             [userId, tenantId, email, displayName, passwordHash]
         );
 
-        const token = generateToken({ id: userId, email, tenantId, role: 'member', displayName });
+        const sessionId = await createSession(pool, userId);
+        const token = generateToken({ id: userId, email, tenantId, role: 'member', displayName }, sessionId);
 
         logger.info(`User registered: ${email} [tenant:${tenantId}]`);
         res.status(201).json({
@@ -204,27 +222,28 @@ app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
 // Login
 app.post('/api/auth/login', validateBody(loginBody), async (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { email, password, tenantSlug } = req.body;
 
         const result = await pool.query(
             `SELECT id, tenant_id, email, display_name, password_hash, role, avatar_url
-       FROM users WHERE email = $1 AND is_active = true`,
-            [email]
+       FROM users WHERE email = $1 AND is_active = true
+       AND tenant_id IN (SELECT id FROM tenants WHERE is_active = true AND ($2::text IS NULL OR slug = $2))`,
+            [email, tenantSlug || null]
         );
 
-        if (result.rows.length === 0) {
+        if (result.rows.length !== 1) {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
         const user = result.rows[0];
-        const validPassword = await bcrypt.compare(password, user.password_hash);
+        const validPassword = user.password_hash && await bcrypt.compare(password, user.password_hash);
 
         if (!validPassword) {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
         // Update last login
-        await pool.query('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+        const sessionId = await createSession(pool, user.id);
 
         const token = generateToken({
             id: user.id,
@@ -232,7 +251,7 @@ app.post('/api/auth/login', validateBody(loginBody), async (req, res) => {
             tenantId: user.tenant_id,
             role: user.role,
             displayName: user.display_name,
-        });
+        }, sessionId);
 
         logger.info(`User logged in: ${email}`);
         res.json({
@@ -253,7 +272,7 @@ app.post('/api/auth/login', validateBody(loginBody), async (req, res) => {
 });
 
 // Verify token
-app.get('/api/auth/verify', (req, res) => {
+app.get('/api/auth/verify', async (req, res) => {
     try {
         const authHeader = req.headers.authorization;
         if (!authHeader?.startsWith('Bearer ')) {
@@ -261,10 +280,23 @@ app.get('/api/auth/verify', (req, res) => {
         }
 
         const token = authHeader.slice(7);
-        const payload = verifyToken(token);
+        const payload = await verifyToken(token);
         res.json({ valid: true, payload });
     } catch (err) {
         res.status(401).json({ valid: false, error: 'Invalid token' });
+    }
+});
+
+// Invalidate this account session on the server, not just in browser storage.
+app.post('/api/auth/logout', async (req, res) => {
+    try {
+        const header = req.headers.authorization;
+        if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'No token provided' });
+        const payload = await verifyToken(header.slice(7));
+        await endSession(pool, payload);
+        res.json({ loggedOut: true });
+    } catch {
+        res.status(401).json({ error: 'Invalid token' });
     }
 });
 
@@ -276,7 +308,7 @@ app.get('/api/auth/me', async (req, res) => {
             return res.status(401).json({ error: 'No token provided' });
         }
 
-        const payload = verifyToken(authHeader.slice(7)) as any;
+        const payload = await verifyToken(authHeader.slice(7));
         const result = await pool.query(
             `SELECT id, tenant_id, email, display_name, role, avatar_url, preferences, created_at
        FROM users WHERE id = $1`,
@@ -294,7 +326,7 @@ app.get('/api/auth/me', async (req, res) => {
             displayName: user.display_name,
             role: user.role,
             avatarUrl: user.avatar_url,
-            preferences: user.preferences,
+            preferences: Object.fromEntries(Object.entries(user.preferences || {}).filter(([key]) => key !== '_authSessionId')),
             tenantId: user.tenant_id,
             createdAt: user.created_at,
         });
@@ -311,7 +343,7 @@ app.patch('/api/auth/me', validateBody(updateProfileBody), async (req, res) => {
             return res.status(401).json({ error: 'No token provided' });
         }
 
-        const payload = verifyToken(authHeader.slice(7)) as any;
+        const payload = await verifyToken(authHeader.slice(7));
         const { displayName, avatarUrl, preferences } = req.body;
 
         const fields: string[] = [];
@@ -320,7 +352,11 @@ app.patch('/api/auth/me', validateBody(updateProfileBody), async (req, res) => {
 
         if (displayName) { fields.push(`display_name = $${idx++}`); values.push(displayName); }
         if (avatarUrl !== undefined) { fields.push(`avatar_url = $${idx++}`); values.push(avatarUrl); }
-        if (preferences) { fields.push(`preferences = $${idx++}`); values.push(JSON.stringify(preferences)); }
+        if (preferences) {
+            delete preferences._authSessionId;
+            fields.push(`preferences = (COALESCE(preferences, '{}'::jsonb) - '_authSessionId') || $${idx++}::jsonb || jsonb_build_object('_authSessionId', preferences->'_authSessionId')`);
+            values.push(JSON.stringify(preferences));
+        }
 
         if (fields.length === 0) {
             return res.status(400).json({ error: 'No fields to update' });
@@ -372,6 +408,7 @@ app.get('/api/auth/turn-credentials', (req, res) => {
 // GLOBAL ERROR HANDLER
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+app.use(contactRequestError);
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     logger.error(err, 'Unhandled error');
     res.status(500).json({ error: 'Internal server error' });

@@ -1,0 +1,9 @@
+/* The launcher takes a real slot in the control dock; it never sits over video. */
+.meeting-room .control-bar .ai-fab.qsvc-assistant-launcher { position:relative; inset:auto; display:flex; align-items:center; justify-content:center; width:44px; min-width:44px; height:44px; padding:6px; flex-shrink:0; border:1px solid #437b76; border-radius:50%; background:#16473f; color:#b1f4e9; box-shadow:none; cursor:pointer; }
+.qsvc-assistant-symbol { display:block; width:32px; height:32px; transition:transform 180ms ease-out; }
+.qsvc-assistant-eyes { transform-origin:24px 23px; animation:qsvc-assistant-blink 5s ease-in-out infinite; }
+.meeting-room .control-bar .qsvc-assistant-launcher:hover .qsvc-assistant-symbol { transform:rotate(-6deg); }
+.meeting-room .control-bar .qsvc-assistant-launcher:focus-visible { outline:3px solid #75ecd7; outline-offset:3px; }
+.meeting-room .control-bar .qsvc-assistant-launcher[aria-expanded=true] { background:#235f53; }
+@keyframes qsvc-assistant-blink { 0%,92%,100% { transform:scaleY(1); } 96% { transform:scaleY(.12); } }
+@media(prefers-reduced-motion:reduce) { .qsvc-assistant-eyes { animation:none; } .qsvc-assistant-symbol { transition:none; } .meeting-room .control-bar .qsvc-assistant-launcher:hover .qsvc-assistant-symbol { transform:none; } }

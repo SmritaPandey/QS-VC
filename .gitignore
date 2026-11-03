@@ -37,3 +37,6 @@ tmp/
 .tmp/
 .vercel
 .env*.local
+
+# Private cloud deployment input
+.env.aws.private

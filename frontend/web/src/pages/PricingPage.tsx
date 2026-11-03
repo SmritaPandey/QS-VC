@@ -1,10 +1,12 @@
-import { useNavigate } from 'react-router-dom';
+import ActionContents from '../components/ActionContents';
+import { Link } from 'react-router-dom';
+import SiteNav from '../components/SiteNav';
+import SiteFooter from '../components/SiteFooter';
 
-const plans = [
+export const plans = [
     {
         name: 'Free',
         price: '₹0',
-        priceUsd: '$0',
         period: 'forever',
         desc: 'Perfect for personal use and quick meetings.',
         highlight: false,
@@ -20,17 +22,13 @@ const plans = [
             { text: 'Admin dashboard', included: false },
             { text: 'SSO / SAML', included: false },
         ],
-        cta: 'Get Started Free',
-        ctaIcon: 'rocket_launch',
     },
     {
         name: 'Starter',
         price: '₹499',
-        priceUsd: '$5.99',
         period: '/user/month',
         desc: 'For small teams that need longer meetings.',
         highlight: false,
-        badge: 'SAVE 50% vs Zoom',
         features: [
             { text: 'Up to 300 participants', included: true },
             { text: '24-hour meeting limit', included: true },
@@ -43,17 +41,13 @@ const plans = [
             { text: 'AI translation', included: false },
             { text: 'Admin dashboard', included: false },
         ],
-        cta: 'Start Free Trial',
-        ctaIcon: 'start',
     },
     {
         name: 'Pro',
         price: '₹999',
-        priceUsd: '$11.99',
         period: '/user/month',
         desc: 'For growing businesses with advanced needs.',
         highlight: true,
-        badge: 'MOST POPULAR',
         features: [
             { text: 'Up to 500 participants', included: true },
             { text: 'Unlimited meeting duration', included: true },
@@ -66,17 +60,13 @@ const plans = [
             { text: 'SSO / Google / Microsoft', included: true },
             { text: 'Admin dashboard & analytics', included: true },
         ],
-        cta: 'Start Free Trial',
-        ctaIcon: 'star',
     },
     {
         name: 'Enterprise',
         price: 'Custom',
-        priceUsd: '',
         period: 'tailored pricing',
         desc: 'For large organizations, banks, government.',
         highlight: false,
-        badge: 'QUANTUM SAFE',
         features: [
             { text: '1000+ participants', included: true },
             { text: 'Unlimited everything', included: true },
@@ -89,247 +79,65 @@ const plans = [
             { text: 'White-label / Custom branding', included: true },
             { text: 'Dedicated support engineer', included: true },
         ],
-        cta: 'Contact Sales',
-        ctaIcon: 'mail',
     },
 ];
 
-const faqs = [
-    {
-        q: 'How does QS-VC compare to Zoom pricing?',
-        a: 'QS-VC offers the same (and more) features at 40-50% lower pricing. Our Starter plan at ₹499/user/month includes features that Zoom charges ₹1,100+ for.',
-    },
-    {
-        q: 'What is Post-Quantum Encryption?',
-        a: 'PQC uses algorithms (Kyber + Dilithium) that are resistant to attacks from future quantum computers. QS-VC is the first VC platform to offer this.',
-    },
-    {
-        q: 'Can I deploy on my own servers?',
-        a: 'Yes! Our Enterprise plan supports on-premise deployment, including air-gapped environments with no internet connectivity — perfect for banks, defence, and government.',
-    },
-    {
-        q: 'Do you support Indian regional languages?',
-        a: 'Yes! Our Pro plan includes AI captions and real-time translation for all 22 scheduled Indian languages including Hindi, Tamil, Telugu, Bengali, Marathi, and more.',
-    },
-    {
-        q: 'Is there a free trial?',
-        a: 'Yes! All paid plans include a 14-day free trial. The Free plan is available forever with no credit card required.',
-    },
-    {
-        q: 'What payment methods do you accept?',
-        a: 'We accept UPI, credit/debit cards, net banking, and international cards via Razorpay and Stripe. Enterprise billing is available with invoicing.',
-    },
+
+const capabilities = [
+    ['Browser meetings', 'Available in the demo'],
+    ['Screen sharing and chat', 'Available in the demo'],
+    ['Captions and speech options', 'Depend on browser, device and meeting server'],
+    ['Meeting recording', 'Disabled in the demo. Paid recording is planned.'],
+    ['Organisation hosting and identity', 'Require a separate deployment review'],
+];
+const questions = [
+    { question: 'Can I buy a plan now?', answer: 'Plans are not available to purchase here. The rates shown are proposed. Confirm pricing, included features and commercial terms before making a purchase decision.' },
+    { question: 'Can I record a meeting?', answer: 'Recording is disabled in this demo. A paid option is planned. Recording inclusions, storage and retention terms still need confirmation.' },
+    { question: 'Which languages can I use?', answer: 'Available caption languages depend on the configured meeting server. Translated speech also needs a matching voice on your device. Check the language control inside the meeting.' },
+    { question: 'Can my organisation run QS-VC internally?', answer: 'An internal deployment needs a review of your network, devices, identity and hosting requirements. This demo does not establish offline or air-gapped operation.' },
 ];
 
 export default function PricingPage() {
-    const navigate = useNavigate();
-
-    return (
-        <div className="home-page">
-            {/* Background */}
-            <div className="home-bg">
-                <div className="home-bg-orb home-bg-orb-1" />
-                <div className="home-bg-orb home-bg-orb-2" />
-            </div>
-
-            {/* Navigation */}
-            <nav className="home-nav" id="nav-top">
-                <div className="home-nav-inner">
-                    <div className="home-nav-logo" onClick={() => navigate('/')}>
-                        <span className="mi" style={{ color: 'var(--accent-secondary)', fontSize: 28 }}>verified_user</span>
-                        <span className="home-brand">QS-VC</span>
+    return <div className="public-site public-plans pricing-page">
+        <SiteNav />
+        <main id="main-content" className="public-container">
+            <header className="public-page-intro">
+                <h1>Plan your QS-VC rollout.</h1>
+                <p>Try the meeting demo and see which capabilities need a separate rollout.</p>
+            </header>
+            <p className="public-pricing-notice">Proposed pricing. Rates and inclusions are proposed and require confirmation before purchase.</p>
+                    <div className="pricing-grid">
+                        {plans.map(plan => <article className={`pricing-card ${plan.highlight ? 'pricing-card-highlight' : ''}`} key={plan.name}>
+                            <div className="pricing-card-header"><h2>{plan.name}{plan.name === 'Pro' && <span className="pricing-crown" aria-label="Pro premium plan"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 6 5 4 4-7 4 7 5-4-2 12H5L3 6Z" fill="currentColor"/><path d="M6 21h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></span>}{plan.name === 'Enterprise' && <span className="pricing-corporate" aria-hidden="true"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 21V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v17M15 9h4a1 1 0 0 1 1 1v11M2 21h20M8 7h3M8 11h3M8 15h3M9 21v-3M17 13h1M17 17h1"/></svg></span>}</h2><p className="pricing-desc">{plan.desc}</p></div>
+                            <div className="pricing-price"><span className="pricing-amount">{plan.price}</span><span className="pricing-period">{plan.period}</span></div>
+                            <p className="pricing-sample-label">Proposed inclusions</p>
+                            <ul className="pricing-features">{plan.features.map(feature => <li className={feature.included ? '' : 'pricing-feature-disabled'} key={feature.text}><span className="mi mi-sm" aria-hidden="true">{feature.included ? 'check' : 'remove'}</span><span>{feature.text}{!feature.included && <span className="sr-only">, not included in this proposal</span>}</span></li>)}</ul>
+                            <>{plan.name === 'Free' ? <button type="button" className="btn-secondary pricing-current-plan" disabled>Current plan</button> : <Link className={plan.highlight ? 'btn-primary qsvc-action' : 'btn-secondary qsvc-action qsvc-action--secondary'} to={plan.name === 'Enterprise' ? '/contact?interest=Enterprise' : plan.name === 'Free' ? '/app' : `/payment?plan=${plan.name}`}><ActionContents>{plan.name === 'Enterprise' ? 'Contact the team' : 'Get now'}</ActionContents></Link>}</>
+                        </article>)}
                     </div>
-                    <div className="home-nav-links">
-                        <button className="home-nav-link" onClick={() => navigate('/')}>Home</button>
-                        <button className="home-nav-link" onClick={() => navigate('/pricing')}>Pricing</button>
-                        <button className="btn-outline" onClick={() => navigate('/app')}>
-                            <span className="mi mi-sm">login</span>
-                            Sign In
-                        </button>
-                        <button className="btn-primary" onClick={() => navigate('/app')}>
-                            Start Free
-                        </button>
-                    </div>
-                </div>
-            </nav>
-
-            {/* Pricing Header */}
-            <section className="pricing-hero">
-                <div className="home-section-header">
-                    <span className="home-section-badge">Pricing</span>
-                    <h1 className="home-section-title" style={{ fontSize: 42 }}>
-                        Simple, Transparent Pricing
-                    </h1>
-                    <p className="home-section-sub">
-                        Up to <strong style={{ color: 'var(--accent-secondary)' }}>50% cheaper</strong> than Zoom & Google Meet.
-                        No hidden fees. Cancel anytime.
-                    </p>
-                </div>
-
-                {/* Pricing Cards */}
-                <div className="pricing-grid">
-                    {plans.map((plan, i) => (
-                        <div
-                            className={`pricing-card ${plan.highlight ? 'pricing-card-highlight' : ''}`}
-                            key={i}
-                        >
-                            {plan.badge && (
-                                <div className={`pricing-badge ${plan.highlight ? 'pricing-badge-primary' : ''}`}>
-                                    {plan.badge}
-                                </div>
-                            )}
-                            <div className="pricing-card-header">
-                                <h3>{plan.name}</h3>
-                                <p className="pricing-desc">{plan.desc}</p>
-                            </div>
-                            <div className="pricing-price">
-                                <span className="pricing-amount">{plan.price}</span>
-                                {plan.priceUsd && <span className="pricing-usd">{plan.priceUsd}</span>}
-                                <span className="pricing-period">{plan.period}</span>
-                            </div>
-                            <ul className="pricing-features">
-                                {plan.features.map((f, j) => (
-                                    <li key={j} className={f.included ? '' : 'pricing-feature-disabled'}>
-                                        <span className="mi mi-sm" style={{
-                                            color: f.included ? 'var(--accent-success)' : 'var(--text-muted)',
-                                            fontSize: 16
-                                        }}>
-                                            {f.included ? 'check_circle' : 'cancel'}
-                                        </span>
-                                        {f.text}
-                                    </li>
-                                ))}
-                            </ul>
-                            <button
-                                className={plan.highlight ? 'btn-primary' : 'btn-secondary'}
-                                style={{ width: '100%', marginTop: 'auto' }}
-                                onClick={() => plan.name === 'Enterprise' ? window.open('mailto:sales@qsvc.com') : navigate('/app')}
-                            >
-                                <span className="mi mi-sm">{plan.ctaIcon}</span>
-                                {plan.cta}
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            </section>
-
-            {/* Price Comparison */}
-            <section className="pricing-compare">
-                <div className="home-section-header">
-                    <h2 className="home-section-title">How We Compare</h2>
-                    <p className="home-section-sub">Real pricing. Real savings. Real features.</p>
-                </div>
-                <div className="home-comparison-table-wrap">
-                    <table className="home-comparison-table pricing-compare-table">
-                        <thead>
-                            <tr>
-                                <th>Plan Tier</th>
-                                <th className="home-comp-highlight">QS-VC</th>
-                                <th>Zoom</th>
-                                <th>Google Meet</th>
-                                <th>PeopleLink</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td>Free</td>
-                                <td className="home-comp-highlight"><strong>₹0</strong> (100 users, 40 min)</td>
-                                <td>₹0 (100 users, 40 min)</td>
-                                <td>₹0 (100 users, 60 min)</td>
-                                <td>N/A</td>
-                            </tr>
-                            <tr>
-                                <td>Starter / Basic</td>
-                                <td className="home-comp-highlight"><strong>₹499</strong>/user/mo</td>
-                                <td>₹1,100/user/mo</td>
-                                <td>₹825/user/mo</td>
-                                <td>₹800+/user/mo</td>
-                            </tr>
-                            <tr>
-                                <td>Pro / Business</td>
-                                <td className="home-comp-highlight"><strong>₹999</strong>/user/mo</td>
-                                <td>₹1,650/user/mo</td>
-                                <td>₹1,380/user/mo</td>
-                                <td>₹1,200+/user/mo</td>
-                            </tr>
-                            <tr>
-                                <td>Enterprise</td>
-                                <td className="home-comp-highlight"><strong>Custom</strong></td>
-                                <td>Custom ($25-40)</td>
-                                <td>Custom ($25+)</td>
-                                <td>Custom</td>
-                            </tr>
-                            <tr>
-                                <td>Quantum-Safe (PQC)</td>
-                                <td className="home-comp-highlight"><span className="mi mi-sm" style={{color:'var(--accent-success)'}}>check_circle</span></td>
-                                <td><span className="mi mi-sm" style={{color:'var(--text-muted)'}}>cancel</span></td>
-                                <td><span className="mi mi-sm" style={{color:'var(--text-muted)'}}>cancel</span></td>
-                                <td><span className="mi mi-sm" style={{color:'var(--text-muted)'}}>cancel</span></td>
-                            </tr>
-                            <tr>
-                                <td>Indian Language AI</td>
-                                <td className="home-comp-highlight"><span className="mi mi-sm" style={{color:'var(--accent-success)'}}>check_circle</span> 22 languages</td>
-                                <td>English only</td>
-                                <td>Limited</td>
-                                <td>Limited</td>
-                            </tr>
-                            <tr>
-                                <td>On-Premise Deploy</td>
-                                <td className="home-comp-highlight"><span className="mi mi-sm" style={{color:'var(--accent-success)'}}>check_circle</span></td>
-                                <td><span className="mi mi-sm" style={{color:'var(--text-muted)'}}>cancel</span></td>
-                                <td><span className="mi mi-sm" style={{color:'var(--text-muted)'}}>cancel</span></td>
-                                <td><span className="mi mi-sm" style={{color:'var(--accent-success)'}}>check_circle</span></td>
-                            </tr>
-                            <tr>
-                                <td>UPI / INR Billing</td>
-                                <td className="home-comp-highlight"><span className="mi mi-sm" style={{color:'var(--accent-success)'}}>check_circle</span></td>
-                                <td><span className="mi mi-sm" style={{color:'var(--text-muted)'}}>cancel</span></td>
-                                <td><span className="mi mi-sm" style={{color:'var(--text-muted)'}}>cancel</span></td>
-                                <td><span className="mi mi-sm" style={{color:'var(--accent-success)'}}>check_circle</span></td>
-                            </tr>
-                        </tbody>
+            <section className="public-plan-details" aria-labelledby="capabilities-title">
+                <h2 id="capabilities-title">What you can try today.</h2>
+                <div className="public-comparison">
+                    <table>
+                        <caption className="sr-only">Capabilities and their current availability in the QS-VC demo</caption>
+                        <thead><tr><th scope="col">Capability</th><th scope="col">Current demo status</th></tr></thead>
+                        <tbody>{capabilities.map(([name, status]) => <tr key={name}><th scope="row">{name}</th><td data-label="Current demo status">{status}</td></tr>)}</tbody>
                     </table>
                 </div>
             </section>
-
-            {/* FAQ */}
-            <section className="pricing-faq">
-                <div className="home-section-header">
-                    <h2 className="home-section-title">Frequently Asked Questions</h2>
-                </div>
-                <div className="pricing-faq-grid">
-                    {faqs.map((f, i) => (
-                        <div className="pricing-faq-item" key={i}>
-                            <h4>
-                                <span className="mi mi-sm" style={{ color: 'var(--accent-primary)' }}>help</span>
-                                {f.q}
-                            </h4>
-                            <p>{f.a}</p>
-                        </div>
-                    ))}
-                </div>
+            <section className="public-plan-details" id="recording-status" aria-labelledby="recording-status-title">
+                <h2 id="recording-status-title">Recording is a planned option.</h2>
+                <p>Paid recording is intended for teams that need a record of their meetings. It is not enabled or available to buy in this demo. Storage, participant notices, access and retention terms need to be agreed before a rollout.</p>
             </section>
-
-            {/* CTA */}
-            <section className="home-cta">
-                <div className="home-cta-inner">
-                    <h2>Start Your Free Trial Today</h2>
-                    <p>14 days free. No credit card required. Cancel anytime.</p>
-                    <div className="home-hero-actions">
-                        <button className="btn-primary btn-lg" onClick={() => navigate('/app')}>
-                            <span className="mi mi-sm">rocket_launch</span>
-                            Get Started Free
-                        </button>
-                    </div>
-                </div>
+            <section className="public-plan-details" id="deployment-considerations" aria-labelledby="deployment-title">
+                <h2 id="deployment-title">Start with your requirements.</h2>
+                <p>Identify who needs to join, the devices they use and where meeting data may be processed. Then review your network, account access and hosting needs. Security features and offline operation require separate validation.</p>
             </section>
-
-            {/* Footer */}
-            <footer className="home-footer">
-                <div className="home-footer-bottom">
-                    <p>© 2026 QS-VC. All rights reserved. Made with ❤️ in India 🇮🇳</p>
-                </div>
-            </footer>
-        </div>
-    );
+            <section className="public-faq" aria-labelledby="plans-questions-title">
+                <h2 id="plans-questions-title">Before you decide.</h2>
+                <div>{questions.map(({ question, answer }) => <details key={question}><summary>{question}<span className="mi" aria-hidden="true">add</span></summary><p>{answer}</p></details>)}</div>
+            </section>
+        </main>
+        <SiteFooter />
+    </div>;
 }

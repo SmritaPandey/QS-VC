@@ -2,13 +2,16 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
-import jwt from 'jsonwebtoken';
 import http from 'http';
 import { Pool } from 'pg';
+import { databaseConfig } from '../../../shared/database.cjs';
+import { tenantDatabase } from '../../../shared/tenant-database.cjs';
+import { meetingRange } from './meeting-range.js';
 import { v4 as uuidv4 } from 'uuid';
 import dotenv from 'dotenv';
 import pino from 'pino';
 import { attachSignalingIfAvailable } from './signaling-bridge.js';
+import { disableDemoPersistence } from './demo-storage-policy.js';
 
 dotenv.config({ path: '../../.env' });
 
@@ -103,18 +106,12 @@ app.use(express.json());
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } }));
 
 const PORT = parseInt(process.env.PORT || process.env.MEETING_PORT || '4003', 10);
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production';
+const AUTH_URL = process.env.AUTH_INTERNAL_URL || 'http://localhost:4002';
 
-// Database pool — supports DATABASE_URL (Render) or individual env vars (local)
-const pool = process.env.DATABASE_URL
-    ? new Pool({ connectionString: process.env.DATABASE_URL, ssl: { rejectUnauthorized: false } })
-    : new Pool({
-        host: process.env.POSTGRES_HOST || 'localhost',
-        port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
-        database: process.env.POSTGRES_DB || 'qsvc',
-        user: process.env.POSTGRES_USER || 'qsvc',
-        password: process.env.POSTGRES_PASSWORD || 'qsvc_dev_2025',
-    });
+const rawPool = new Pool(databaseConfig({ ...process.env, DATABASE_URL: process.env.MEETING_DATABASE_URL || process.env.DATABASE_URL }));
+const pool = tenantDatabase(rawPool);
+// Idle connections can fail during database restarts without a pending request.
+rawPool.on('error', () => logger.warn('Database connection lost; the pool will reconnect on demand'));
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // AUTH MIDDLEWARE
@@ -122,15 +119,21 @@ const pool = process.env.DATABASE_URL
 
 interface AuthPayload { sub: string; tenantId: string; role: string; displayName: string; }
 
-function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
+async function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
     const authHeader = req.headers.authorization;
     if (!authHeader?.startsWith('Bearer ')) {
         return res.status(401).json({ error: 'No token provided' });
     }
     try {
-        const payload = jwt.verify(authHeader.slice(7), JWT_SECRET) as AuthPayload;
+        const response = await fetch(`${AUTH_URL}/api/auth/verify`, {
+            headers: { Authorization: authHeader }, signal: AbortSignal.timeout(5000),
+        });
+        if (!response.ok) throw new Error('Invalid session');
+        const verified = await response.json() as { valid: boolean; payload: AuthPayload };
+        if (!verified.valid || !verified.payload?.sub) throw new Error('Invalid session');
+        const payload = verified.payload;
         (req as any).user = payload;
-        next();
+        pool.runWithTenant(payload.tenantId, next);
     } catch {
         return res.status(401).json({ error: 'Invalid token' });
     }
@@ -161,6 +164,15 @@ app.get('/health', (_req, res) => {
     res.json({ status: 'ok', service: 'qsvc-meeting' });
 });
 
+app.get('/ready', async (_req, res) => {
+    try {
+        await pool.query('SELECT 1');
+        res.json({ status: 'ready' });
+    } catch {
+        res.status(503).json({ status: 'unavailable', dependency: 'database' });
+    }
+});
+
 // Quick meeting creation (no auth required — for demo/guest access)
 app.post('/api/meetings/create', async (_req, res) => {
     try {
@@ -170,11 +182,11 @@ app.post('/api/meetings/create', async (_req, res) => {
         // Try to persist to DB, fall back to in-memory if DB isn't ready
         try {
             const id = uuidv4();
-            await pool.query(
+            await pool.runWithTenant('00000000-0000-0000-0000-000000000001', () => pool.query(
                 `INSERT INTO meetings (id, tenant_id, meeting_code, title, host_id, type, status, settings)
-                 VALUES ($1, 'demo', $2, 'Quick Meeting', NULL, 'instant', 'waiting', '{}')`,
+                 VALUES ($1, '00000000-0000-0000-0000-000000000001', $2, 'Quick Meeting', NULL, 'instant', 'waiting', '{}')`,
                 [id, meetingCode]
-            );
+            ));
         } catch (dbErr: any) {
             logger.warn('DB insert skipped (demo mode): ' + dbErr.message);
         }
@@ -252,10 +264,8 @@ app.post('/api/meetings/schedule', authMiddleware, validateBody(createMeetingBod
 app.get('/api/meetings/code/:code', async (req, res) => {
     try {
         const result = await pool.query(
-            `SELECT m.*, u.display_name as host_name
-       FROM meetings m LEFT JOIN users u ON m.host_id = u.id
-       WHERE m.meeting_code = $1`,
-            [req.params.code.toUpperCase()]
+            `SELECT * FROM public.qsvc_meeting_by_code($1)`,
+            [String(req.params.code).toUpperCase()]
         );
 
         if (result.rows.length === 0) {
@@ -287,15 +297,24 @@ app.get('/api/meetings', authMiddleware, async (req, res) => {
     try {
         const user = (req as any).user as AuthPayload;
         const { status, type, limit, offset } = req.query;
+        let range;
+        try { range = meetingRange(req.query.start, req.query.end); }
+        catch { return res.status(400).json({ error: 'Provide a valid start/end date range of up to 31 days.' }); }
 
         let query = `SELECT * FROM meetings WHERE tenant_id = $1`;
         const params: any[] = [user.tenantId];
         let idx = 2;
 
+        if (range) {
+            query += ` AND COALESCE(scheduled_start, created_at) >= $${idx++} AND COALESCE(scheduled_start, created_at) < $${idx++}`;
+            params.push(range.start, range.end);
+        }
         if (status) { query += ` AND status = $${idx++}`; params.push(status); }
         if (type) { query += ` AND type = $${idx++}`; params.push(type); }
 
-        query += ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
+        query += range
+            ? ` ORDER BY COALESCE(scheduled_start, created_at) ASC, id ASC LIMIT $${idx++} OFFSET $${idx++}`
+            : ` ORDER BY created_at DESC LIMIT $${idx++} OFFSET $${idx++}`;
         params.push(parseInt(limit as string) || 50, parseInt(offset as string) || 0);
 
         const result = await pool.query(query, params);
@@ -322,23 +341,14 @@ app.get('/api/meetings', authMiddleware, async (req, res) => {
 app.patch('/api/meetings/:id/status', authMiddleware, validateBody(updateMeetingStatusBody), async (req, res) => {
     try {
         const { status } = req.body;
-
-        if (status === 'active') {
-            await pool.query(
-                'UPDATE meetings SET status = $1, actual_start = NOW(), updated_at = NOW() WHERE id = $2',
-                [status, req.params.id]
-            );
-        } else if (status === 'ended') {
-            await pool.query(
-                'UPDATE meetings SET status = $1, actual_end = NOW(), updated_at = NOW() WHERE id = $2',
-                [status, req.params.id]
-            );
-        } else {
-            await pool.query(
-                'UPDATE meetings SET status = $1, updated_at = NOW() WHERE id = $2',
-                [status, req.params.id]
-            );
-        }
+        const user = (req as any).user as AuthPayload;
+        const timestamp = status === 'active' ? ', actual_start = NOW()' : status === 'ended' ? ', actual_end = NOW()' : '';
+        const result = await pool.query(
+            `UPDATE meetings SET status = $1, updated_at = NOW()${timestamp}
+             WHERE id = $2 AND tenant_id = $3 AND host_id = $4 RETURNING id`,
+            [status, req.params.id, user.tenantId, user.sub]
+        );
+        if (!result.rows.length) return res.status(404).json({ error: 'Meeting not found or not owned by you' });
 
         res.json({ updated: true, status });
     } catch (err: any) {
@@ -346,6 +356,10 @@ app.patch('/api/meetings/:id/status', authMiddleware, validateBody(updateMeeting
         res.status(500).json({ error: 'Failed to update meeting status' });
     }
 });
+
+// These legacy endpoints have no membership checks; keep them closed in the demo.
+app.use('/api/meetings/:meetingId/participants', disableDemoPersistence);
+app.use('/api/meetings/:meetingId/chat', disableDemoPersistence);
 
 // Record participant join
 app.post('/api/meetings/:meetingId/participants', validateBody(joinParticipantBody), async (req, res) => {
@@ -460,5 +474,5 @@ attachSignalingIfAvailable(server).then((attached) => {
     });
 });
 
-process.on('SIGTERM', () => { pool.end(); process.exit(0); });
-process.on('SIGINT', () => { pool.end(); process.exit(0); });
+process.on('SIGTERM', () => { rawPool.end(); process.exit(0); });
+process.on('SIGINT', () => { rawPool.end(); process.exit(0); });

@@ -243,7 +243,7 @@ const TranslationPanel: React.FC<TranslationPanelProps> = ({
                         background: 'rgba(255,255,255,0.03)',
                         borderRadius: '10px',
                         padding: '10px 12px',
-                        borderLeft: `3px solid ${t.confidence > 0.8 ? '#22c55e' : t.confidence > 0.5 ? '#eab308' : '#ef4444'}`,
+                        borderLeft: '1px solid rgba(255,255,255,0.15)',
                     }}>
                         {/* Speaker name */}
                         {t.speakerName && (
@@ -291,7 +291,7 @@ const TranslationPanel: React.FC<TranslationPanelProps> = ({
                             </span>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                 {/* Confidence bar */}
-                                <div style={{
+                                {typeof t.confidence === 'number' && <div style={{
                                     width: '40px',
                                     height: '3px',
                                     background: 'rgba(255,255,255,0.1)',
@@ -304,7 +304,7 @@ const TranslationPanel: React.FC<TranslationPanelProps> = ({
                                         background: t.confidence > 0.8 ? '#22c55e' : t.confidence > 0.5 ? '#eab308' : '#ef4444',
                                         borderRadius: '2px',
                                     }} />
-                                </div>
+                                </div>}
                                 <span>
                                     {new Date(t.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
                                 </span>

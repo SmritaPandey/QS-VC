@@ -181,7 +181,10 @@ export class CascadeManager {
         });
 
         logger.info(`Producer ${producerId} piped from ${sourceNodeId} to ${targetNodeId}`);
-        return result;
+        if (!result.pipeConsumer || !result.pipeProducer) {
+            throw new Error('Media pipe did not produce a consumer and producer');
+        }
+        return { pipeConsumer: result.pipeConsumer, pipeProducer: result.pipeProducer };
     }
 
     /** Get cascade routing info for a room. */
