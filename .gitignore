@@ -40,3 +40,4 @@ tmp/
 
 # Private cloud deployment input
 .env.aws.private
+/deploy/aws/installers/*.exe

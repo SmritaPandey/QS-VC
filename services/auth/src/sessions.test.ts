@@ -31,3 +31,9 @@ describe('persistent account sessions', () => {
         expect(query.mock.calls[0][1]).toEqual(['user', 'tenant', 'old']);
     });
 });
+
+it('classifies database failures as retryable rather than invalid sessions', async () => {
+    const { sessionErrorStatus, InvalidSessionError } = await import('./sessions.js');
+    expect(sessionErrorStatus(new Error('database unavailable'))).toBe(503);
+    expect(sessionErrorStatus(new InvalidSessionError('revoked'))).toBe(401);
+});

@@ -1,3 +1,4 @@
+import { loadMeetingPolicy } from '../meeting-policy.js';
 /**
  * JSON-RPC 2.0 Method Handler for QS-VC Signaling.
  *
@@ -87,7 +88,7 @@ const joiningSockets = new WeakSet<object>();
 export async function handleRpcMessage(
     ws: any,
     message: RpcRequest,
-    connectionState: { peerId?: string; roomId?: string; displayName?: string }
+    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: { sub: string } | null }
 ): Promise<RpcResponse | null> {
     const { method, params, id } = message;
 
@@ -136,10 +137,16 @@ export async function handleRpcMessage(
                 const peerId = uuidv4();
 
                 // Get or create the signaling room
-                const room = roomManager.getOrCreateRoom(meetingCode);
+                // Always resolve persisted ownership before creating a room. An unavailable
+                // database must not turn a scheduled meeting into a guest-owned room.
+                const policy = await loadMeetingPolicy(meetingCode);
+                const room = roomManager.getOrCreateRoom(meetingCode, policy?.settings);
+                if (policy?.hostId) room.ownerUserId = policy.hostId;
+                const isOwner = !!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub;
+                if (room.ownerUserId && !room.hostPeerId && !isOwner) throw createError(-32004, 'The meeting organiser must join first.');
 
                 // Check meeting password
-                if (room.settings.password && room.settings.password !== password) {
+                if (!isOwner && room.settings.password && room.settings.password !== password) {
                     return {
                         jsonrpc: '2.0', id: id!,
                         error: { code: -32001, message: 'Invalid meeting password' },
@@ -147,7 +154,7 @@ export async function handleRpcMessage(
                 }
 
                 // Check if room is locked
-                if (room.settings.locked && room.peers.size > 0) {
+                if (!isOwner && room.settings.locked && room.peers.size > 0) {
                     return {
                         jsonrpc: '2.0', id: id!,
                         error: { code: -32002, message: 'Meeting is locked' },
@@ -163,7 +170,7 @@ export async function handleRpcMessage(
                 }
 
                 // Waiting room: if enabled and not the first peer (host), put in waiting room
-                if (room.settings.waitingRoomEnabled && room.peers.size > 0) {
+                if (!isOwner && room.settings.waitingRoomEnabled && room.peers.size > 0) {
                     roomManager.addToWaitingRoom(room.id, {
                         id: peerId,
                         displayName,
@@ -665,7 +672,7 @@ export async function handleRpcMessage(
                     result: {
                         roomId: room.id,
                         meetingCode: room.meetingCode,
-                        settings: room.settings,
+                        settings: { ...room.settings, password: undefined },
                         participants: peers,
                         waitingCount: room.waitingRoom.size,
                     },
@@ -812,6 +819,7 @@ async function joinPeerToRoom(
         rtpCapabilities,
         producers: new Map(),
         role: 'member',
+        userId: connectionState.authUser?.sub,
         audioMuted: false,
         videoOff: false,
         handRaised: false,
@@ -859,7 +867,7 @@ async function joinPeerToRoom(
         roomId,
         role: peerState.role,
         routerRtpCapabilities: routerCaps,
-        settings: room.settings,
+        settings: { ...room.settings, password: undefined },
         sendTransport: sfuAvailable ? {
             id: sendTransport.id,
             iceParameters: sendTransport.iceParameters,
@@ -886,7 +894,7 @@ async function joinPeerToRoom(
  * Handle peer disconnect (WebSocket close or leaveRoom).
  */
 export async function handlePeerDisconnect(
-    connectionState: { peerId?: string; roomId?: string; displayName?: string }
+    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: { sub: string } | null }
 ): Promise<void> {
     const { peerId, roomId, displayName } = connectionState;
     if (!peerId || !roomId) return;

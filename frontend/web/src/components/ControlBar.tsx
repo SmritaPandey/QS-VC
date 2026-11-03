@@ -188,6 +188,11 @@ export default function ControlBar({
                         </div>
                         <p className="meeting-more-hint">Muted-mic reminders analyse sound locally. Nothing is saved or sent.</p>
                         <div className="meeting-more-mobile-actions">
+                            {onToggleLanguage && <button type="button" onClick={() => { setMoreOpen(false); onToggleLanguage(); }}><span className="mi" aria-hidden="true">translate</span>Language and captions</button>}
+                            <button type="button" onClick={() => { setMoreOpen(false); onToggleScreen(); }}><span className="mi" aria-hidden="true">screen_share</span>{screenSharing ? 'Stop presenting' : 'Present screen'}</button>
+                            {onToggleReactions && <button type="button" onClick={() => { setMoreOpen(false); onToggleReactions(); }}><span className="mi" aria-hidden="true">add_reaction</span>Reactions</button>}
+                            <button type="button" onClick={() => { setMoreOpen(false); onToggleParticipants(); }}><span className="mi" aria-hidden="true">group</span>Participants</button>
+                            <button type="button" onClick={() => { setMoreOpen(false); onToggleChat(); }}><span className="mi" aria-hidden="true">chat</span>Chat</button>
 
                             <button type="button" aria-pressed={handRaised} onClick={() => { onRaiseHand(); setMoreOpen(false); moreButtonRef.current?.focus(); }}><span className="mi" aria-hidden="true">front_hand</span>{handRaised ? 'Lower hand' : 'Raise hand'}</button>
                         </div>

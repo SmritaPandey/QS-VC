@@ -10,6 +10,7 @@ export type PeerRole = 'host' | 'co-host' | 'member' | 'guest';
 export interface PeerState {
     id: string;
     displayName: string;
+    userId?: string;
     ws: any; // WebSocket reference
     rtpCapabilities: any;
     producers: Map<string, { id: string; kind: string; appData: any }>;
@@ -44,6 +45,7 @@ export interface RoomState {
     id: string;
     meetingCode: string;
     hostPeerId: string | null;
+    ownerUserId?: string | null;
     peers: Map<string, PeerState>;
     waitingRoom: Map<string, WaitingPeer>;
     settings: RoomSettings;
@@ -108,14 +110,14 @@ class RoomManager {
             throw new Error('Room is full');
         }
 
-        if (room.settings.locked) {
+        if (room.settings.locked && !(room.ownerUserId && room.ownerUserId === peer.userId)) {
             throw new Error('Room is locked');
         }
 
         // Roles on join are server-owned. Only the host can promote an existing member.
         peer.role = 'member';
         // First peer becomes host
-        if (!room.hostPeerId) {
+        if ((!room.ownerUserId && !room.hostPeerId) || (!!room.ownerUserId && room.ownerUserId === peer.userId && ![...room.peers.values()].some(p => p.userId === peer.userId && p.role === 'host'))) {
             peer.role = 'host';
             room.hostPeerId = peer.id;
         }
@@ -224,7 +226,7 @@ class RoomManager {
         const room = this.rooms.get(roomId);
         if (!room) return;
         Object.assign(room.settings, settings);
-        this.broadcast(roomId, 'settingsUpdated', { settings: room.settings });
+        this.broadcast(roomId, 'settingsUpdated', { settings: { ...room.settings, password: undefined } });
     }
 
     /** Promote/demote peer role (host only). */

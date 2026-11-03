@@ -38,6 +38,7 @@ export default function App() {
                 {/* Commercial website */}
                 <Route path="/" element={<HomePage />} />
                 <Route path="/contact" element={<Contact />} />
+                <Route path="/request-demo" element={<Contact demo />} />
                 <Route path="/pricing" element={<PricingPage />} />
                 <Route path="/payment" element={<PaymentPage />} />
                 <Route path="/intranet" element={<IntranetPage />} />

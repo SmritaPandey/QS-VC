@@ -1,0 +1,58 @@
+/* Small screens keep essential call controls visible; secondary actions live in More. */
+@media(max-width:767px) {
+  .meeting-room { height:100dvh; min-height:0; overflow:hidden; }
+  .meeting-room .meeting-top-bar { padding:8px 12px; min-height:52px; gap:8px; }
+  .meeting-room .top-bar-left { min-width:0; gap:8px; }
+  .meeting-room .share-link-btn { min-width:0; max-width:150px; }
+  .meeting-room .meeting-code-display { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .meeting-room .control-bar { display:flex; justify-content:space-between; gap:8px; padding:10px; width:calc(100% - 20px); max-width:420px; bottom:calc(8px + env(safe-area-inset-bottom)); border-radius:24px; }
+  .meeting-room .control-bar .controls-left { display:flex; position:static; flex-direction:row; width:auto; height:auto; padding:0; margin:0; gap:8px; border:0; box-shadow:none; background:none; opacity:1; visibility:visible; pointer-events:auto; transform:none; }
+  .meeting-room .control-bar .controls-left[data-idle=true] { opacity:1; transform:none; pointer-events:auto; }
+  .meeting-room .control-bar .controls-left .ctrl-language { display:none; }
+  .meeting-room .control-bar .controls-center { display:none; }
+  .meeting-room .control-bar .controls-right { display:flex; gap:8px; margin:0; }
+  .meeting-room .meeting-more-mobile-actions { display:grid; gap:8px; }
+  .meeting-room .meeting-more-panel { position:fixed; left:0; right:0; bottom:calc(100% + 10px); width:100%; max-height:calc(100dvh - 160px); box-sizing:border-box; }
+  .meeting-room .meeting-content { min-height:0; padding:8px 10px calc(92px + env(safe-area-inset-bottom)); }
+  .meeting-room .side-panel:not(.meeting-chat-overlay),.meeting-room .ai-chat-panel,.meeting-room .meeting-collaboration { position:fixed; inset:64px 10px calc(88px + env(safe-area-inset-bottom)); width:auto; height:auto; max-width:none; max-height:none; border-radius:20px; }
+  .meeting-room .meeting-language-settings { position:fixed; inset:64px 10px calc(88px + env(safe-area-inset-bottom)); width:auto; max-height:none; overflow:auto; }
+  .meeting-room .meeting-notices { top:64px; left:12px; right:12px; }
+  .meeting-room .meeting-chat-overlay { right:54px; bottom:calc(100px + env(safe-area-inset-bottom)); }
+  .meeting-room .caption-overlay { bottom:calc(94px + env(safe-area-inset-bottom)); }
+  .pre-meeting-page { padding:76px 16px 24px; align-content:start; }
+  .pre-meeting-page .pre-meeting-container { grid-template-columns:minmax(0,1fr); gap:24px; width:100%; }
+  .pre-meeting-page .video-preview-wrapper { aspect-ratio:4/3; max-height:42dvh; width:100%; }
+  .pre-meeting-page .join-section { min-width:0; padding:0; }
+  .pre-meeting-page .join-section h2 { font-size:28px; margin:16px 0; }
+  .pre-meeting-page .preview-invite-actions .qsvc-action { flex:1; width:auto; }
+  .pre-meeting-page .device-selectors { gap:12px; }
+  .pre-meeting-page input,.pre-meeting-page select { max-width:100%; font-size:16px; }
+  .public-site .public-auth-layout { padding-inline:16px; }
+  .public-site .public-auth-form { min-width:0; padding:20px; }
+  .public-site .pricing-grid { grid-template-columns:minmax(0,1fr); }
+  .public-site .payment-layout,.public-site .intranet-layout { grid-template-columns:minmax(0,1fr); }
+}
+@media(min-width:768px) and (max-width:1100px) { .public-site .pricing-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:767px) and (orientation:landscape) {
+  .pre-meeting-page .pre-meeting-container { grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; }
+  .pre-meeting-page .video-preview-wrapper { max-height:none; }
+  .meeting-room .side-panel:not(.meeting-chat-overlay),.meeting-room .ai-chat-panel,.meeting-room .meeting-collaboration,.meeting-room .meeting-language-settings { top:8px; }
+}
+.host-tools-settings input[type=checkbox],.collaboration-poll-choice input[type=radio] { min-height:20px; width:20px; height:20px; padding:0; margin:0; flex:0 0 20px; }
+
+/* Keep authentication controls aligned with the full form width. */
+.public-site .public-auth-form > .qsvc-action.qsvc-action.qsvc-action,
+.public-site .identity-options-grid > .qsvc-action.qsvc-action.qsvc-action {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+}
+.public-login .public-auth-form,
+.public-signup .public-auth-form { gap: 10px; background: #fff; }
+.public-login .public-auth-form label:not(:first-child),
+.public-signup .public-auth-form label:not(:first-child) { margin-top: 8px; }
+.public-login .public-auth-form > button,
+.public-signup .public-auth-form > button { margin-top: 10px; }
+.public-site .identity-options-grid > button:last-child { grid-column: 1 / -1; }
+.public-site .identity-options-grid .qsvc-action__inner { padding-inline: 12px; }
+.public-site .identity-options { border-top: 1px solid #e5ecef; margin-top: 10px; }
