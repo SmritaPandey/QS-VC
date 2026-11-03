@@ -1,29 +1,29 @@
-.recordings-page { min-height:100vh; background:#f5f8fa; color:#102a43; }
+.recordings-page { min-height:100vh; background:var(--bg-primary); color:var(--text-primary); }
 .recordings-shell { max-width:1080px; margin:auto; padding:48px 24px 96px; font-family:'IBM Plex Sans',sans-serif; }
-.recordings-back { display:inline-flex; align-items:center; min-height:44px; color:#006d77; margin-bottom:24px; }
+.recordings-back { display:inline-flex; align-items:center; min-height:44px; color:var(--accent-primary); margin-bottom:24px; }
 .recordings-shell>header { display:flex; justify-content:space-between; gap:24px; align-items:start; margin-bottom:48px; }
 .recordings-shell h1 { font-size:clamp(32px,5vw,48px); font-weight:500; line-height:1.15; margin:0 0 16px; }
-.recordings-shell p { font-size:16px; font-weight:400; line-height:1.6; color:#486274; margin:0; }
+.recordings-shell p { font-size:16px; font-weight:400; line-height:1.6; color:var(--text-secondary); margin:0; }
 .recordings-code { font-size:16px; padding-top:12px; overflow-wrap:anywhere; }
-.recordings-shell button,.recordings-shell summary { min-width:44px; min-height:44px; border:0; border-radius:8px; color:#102a43; font-size:16px; font-weight:400; cursor:pointer; background:#e4edef; }
+.recordings-shell button,.recordings-shell summary { min-width:44px; min-height:44px; border:0; border-radius:8px; color:var(--text-primary); font-size:16px; font-weight:400; cursor:pointer; background:var(--surface-tint, #e4edef); }
 .recordings-shell button { padding:10px 16px; }
-.recordings-shell button:hover { background:#d2e6e5; }
+.recordings-shell button:hover { background:var(--surface-tint, #d2e6e5); }
 .recordings-shell button:disabled { opacity:.55; cursor:wait; }
-.recordings-shell :is(button,summary,input,a):focus-visible { outline:3px solid #006d77; outline-offset:4px; }
+.recordings-shell :is(button,summary,input,a):focus-visible { outline:3px solid var(--accent-primary); outline-offset:4px; }
 .recordings-list { padding:0; margin:0; list-style:none; }
-.recordings-list>li { display:flex; flex-wrap:wrap; align-items:center; gap:24px; padding:24px 0; border-bottom:1px solid #c5d4dc; }
+.recordings-list>li { display:flex; flex-wrap:wrap; align-items:center; gap:24px; padding:24px 0; border-bottom:1px solid var(--border-tone, #c5d4dc); }
 .recordings-info { flex:1; min-width:120px; }
 .recordings-info h2 { font-size:18px; line-height:1.4; font-weight:500; margin:0 0 8px; }
 .recordings-actions { position:relative; }
 .recordings-actions summary { display:grid; place-items:center; list-style:none; }
 .recordings-actions summary::-webkit-details-marker { display:none; }
-.recordings-menu { position:absolute; z-index:5; right:0; top:52px; width:220px; display:grid; gap:8px; padding:8px; border:1px solid #c5d4dc; border-radius:12px; background:#fff; box-shadow:0 12px 24px #102a4314; }
+.recordings-menu { position:absolute; z-index:5; right:0; top:52px; width:220px; display:grid; gap:8px; padding:8px; border:1px solid var(--border-tone, #c5d4dc); border-radius:12px; background:var(--bg-secondary); box-shadow:0 12px 24px #102a4314; }
 .recordings-menu button { text-align:left; background:transparent; }
-.recordings-confirm,.recordings-share { flex-basis:100%; padding:24px; border:1px solid #b9ccd4; border-radius:12px; background:#fff; }
+.recordings-confirm,.recordings-share { flex-basis:100%; padding:24px; border:1px solid var(--border-tone, #b9ccd4); border-radius:12px; background:var(--bg-secondary); }
 .recordings-confirm button { margin:16px 8px 0 0; }
 .recordings-share label { display:block; font-size:16px; line-height:1.6; margin-bottom:12px; }
-.recordings-share input { width:100%; min-height:48px; padding:12px; font-size:16px; color:#102a43; background:#f5f8fa; border:1px solid #90a7b4; border-radius:8px; margin-bottom:12px; }
-.recordings-message,.recordings-empty { padding:24px; margin-bottom:24px; border:1px solid #b9ccd4; border-radius:12px; }
+.recordings-share input { width:100%; min-height:48px; padding:12px; font-size:16px; color:var(--text-primary); background:var(--bg-primary); border:1px solid var(--border-tone, #90a7b4); border-radius:8px; margin-bottom:12px; }
+.recordings-message,.recordings-empty { padding:24px; margin-bottom:24px; border:1px solid var(--border-tone, #b9ccd4); border-radius:12px; }
 .recordings-message button { margin-top:16px; }
 .recordings-empty h2 { font-size:24px; font-weight:500; margin:0 0 16px; }
 .recordings-player { margin-bottom:48px; }

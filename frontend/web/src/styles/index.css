@@ -151,7 +151,7 @@ code,.code,.meeting-code-display,.meeting-code-label {
   background:#43d9c2;
   color:#102a43;
 }
-.app-theme {
+:root {
   --bg-primary:#f5f8fa;
   --bg-secondary:#fff;
   --bg-tertiary:#eaf0f4;
@@ -181,11 +181,9 @@ code,.code,.meeting-code-display,.meeting-code-label {
   --shadow-lg:0 24px 72px #102a4320;
   --shadow-glow:none;
   --shadow-glow-sm:none;
-  background:var(--bg-primary);
-  color:var(--text-primary);
-  min-height:100dvh;
   color-scheme:light;
 }
+.app-theme { background:var(--bg-primary); color:var(--text-primary); min-height:100dvh; }
 .meeting-room {
   --bg-primary:#0b1420;
   --bg-secondary:#162331;
@@ -721,7 +719,7 @@ label {
 .pricing-crown svg { width:20px; height:20px; }
 .pricing-corporate { display:inline-flex; vertical-align:middle; align-items:center; justify-content:center; width:32px; height:32px; margin-left:10px; border-radius:50%; color:#006d77; background:#e7f6f3; }
 .pricing-corporate .mi { font-size:21px; }
-.pricing-current-plan:disabled { width:100%; min-height:48px; border:0; border-radius:999px; background:#e9eef1; color:#617483; box-shadow:none; cursor:default; opacity:1; }
+.pricing-current-plan:disabled { width:100%; min-height:48px; border:0; border-radius:999px; background:#e9eef1; color:#526676; box-shadow:none; cursor:default; opacity:1; }
 .pricing-desc {
   font-size:16px;
   color:var(--text-secondary);
@@ -4881,15 +4879,15 @@ label {
 .meeting-room .caption-speaker { margin-inline-end: .35em; }
 
 .pre-meeting-page { position:relative; }
-.preview-back { position:absolute; top:20px; left:24px; display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:10px 16px; border:0; border-radius:999px; background:#fff; color:#102a43; box-shadow:0 3px 16px #006d7714; cursor:pointer; font-size:14px; font-weight:500; }
-.preview-back:hover { background:#e7f6f3; }
+.preview-back { position:absolute; top:20px; left:24px; display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:10px 16px; border:0; border-radius:999px; background:var(--bg-secondary); color:var(--text-primary); box-shadow:0 3px 16px #006d7714; cursor:pointer; font-size:14px; font-weight:500; }
+.preview-back:hover { background:var(--bg-tertiary); }
 @media(max-width:760px) { .pre-meeting-page { padding-top:84px; } .preview-back { top:16px; left:16px; } }
 .preview-invite-actions { display:flex; align-items:center; gap:10px; margin-bottom:20px; }
 .preview-invite-actions .btn-copy-invite { margin:0; min-width:0; }
-.preview-share { display:inline-flex; align-items:center; justify-content:center; flex:0 0 44px; width:44px; height:44px; padding:0; border:0; border-radius:50%; background:#e7f6f3; color:#006d77; cursor:pointer; }
+.preview-share { display:inline-flex; align-items:center; justify-content:center; flex:0 0 44px; width:44px; height:44px; padding:0; border:0; border-radius:50%; background:var(--bg-tertiary); color:var(--accent-primary); cursor:pointer; }
 .preview-share:hover { box-shadow:0 0 14px #006d7726; }
-.preview-share-options { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:12px; margin-bottom:20px; border-radius:14px; background:#fff; }
-.preview-share-options a,.preview-share-options button { padding:10px; min-height:44px; border:0; background:none; color:#006d77; font:inherit; cursor:pointer; }
+.preview-share-options { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:12px; margin-bottom:20px; border-radius:14px; background:var(--bg-secondary); }
+.preview-share-options a,.preview-share-options button { padding:10px; min-height:44px; border:0; background:none; color:var(--accent-primary); font:inherit; cursor:pointer; }
 
 /* Legal links and ownership text wrap across all shared public footers. */
 .public-site .footer-meta { flex-wrap:wrap; gap:12px 24px; }

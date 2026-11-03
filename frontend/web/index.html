@@ -7,18 +7,22 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="description"
     content="QS-VC: a workspace for video meetings, scheduling and conversation." />
+  <meta name="theme-color" content="#f5f8fa" />
+  <script src="/theme.js"></script>
   <title>QS-VC | Video meetings</title>
   <style>
     html.qsvc-boot #root { visibility: hidden; }
-    html { background: #F5F8FA; }
-    #qsvc-startup { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; background: #F5F8FA; color: #102A43; font: 16px/1.6 Arial, sans-serif; }
+    html { --boot-bg:#f5f8fa; --boot-ink:#102a43; --boot-muted:#526676; background:var(--boot-bg); }
+    html[data-theme="dark"] { --boot-bg:#0b1420; --boot-ink:#edf5fa; --boot-muted:#b6c8d5; }
+    #qsvc-startup { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; background: var(--boot-bg); color: var(--boot-ink); font: 16px/1.6 Arial, sans-serif; }
     #qsvc-startup .boot-content { width: min(280px, calc(100% - 48px)); text-align: center; }
     .boot-mark { display: flex; gap: 12px; align-items: center; justify-content: center; min-height: 56px; margin-bottom: 12px; }
     .boot-symbol { width: 48px; height: 48px; flex-shrink: 0; overflow: visible; }
     .boot-ring { stroke-dasharray: 160; stroke-dashoffset: 0; animation: boot-ring-trace 3s ease-in-out infinite; }
     .boot-play, .boot-tail { animation: boot-symbol-arrive 650ms ease-out 250ms both; }
     .boot-wordmark { font-size: 28px; font-weight: 600; letter-spacing: -.04em; line-height: 1.2; color: #102A43; background: linear-gradient(110deg,#233c86,#006d77); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: boot-wordmark-arrive 800ms cubic-bezier(.165,.84,.44,1) 300ms both; }
-    .boot-lines { position: relative; height: 44px; color: #526676; font-size: 14px; line-height: 1.5; }
+    html[data-theme="dark"] .boot-wordmark { background:none; -webkit-text-fill-color:var(--boot-ink); color:var(--boot-ink); }
+    .boot-lines { position: relative; height: 44px; color: var(--boot-muted); font-size: 14px; line-height: 1.5; }
     .boot-lines>span { position: absolute; inset: 0; display: grid; place-items: start center; opacity: 0; animation: boot-line-change 6s ease-in-out infinite both; }
     .boot-lines>span:nth-child(2) { animation-delay: 2s; }
     .boot-lines>span:nth-child(3) { animation-delay: 4s; }

@@ -1,3 +1,4 @@
+import ThemeSelect from '../components/ThemeSelect';
 import { getToken } from '../lib/session';
 /**
  * Admin Dashboard — Real-time monitoring, user management, and analytics.
@@ -169,7 +170,7 @@ const AdminDashboard: React.FC = () => {
                     <span className="logo-mark">QS</span>
                     <span className="logo-text">Admin Console</span>
                 </div>
-                <div className="admin-header-actions">
+                <div className="admin-header-actions"><ThemeSelect />
                     <button className="btn-back-to-app" onClick={() => navigate('/schedule')}>
                         <span className="mi mi-sm">calendar_today</span> Schedule
                     </button>
