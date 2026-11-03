@@ -1,0 +1,3 @@
+[console_scripts]
+argos-translate = argostranslate.cli:main
+argospm = argostranslate.argospm:main

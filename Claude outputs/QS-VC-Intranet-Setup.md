@@ -2,12 +2,15 @@
 
 Version 1.0.0 · 3 November 2026
 
-This guide covers three jobs: installing QS-VC for Windows, connecting it to your organisation, and giving the three platform admins full access.
+This guide covers three jobs: installing QS-VC on Windows or Mac, connecting it to your organisation, and giving the three platform admins full access.
 
-| File | Details |
-| --- | --- |
-| `QS-VC-Windows-Setup.exe` | Windows 10/11, 64-bit, about 78 MB |
-| SHA-256 | `f1e9c21a2fa38beb6d680299858618f82b91253f3543fe144d840f9ea7aa6e39` |
+| File | For | SHA-256 |
+| --- | --- | --- |
+| `QS-VC-Windows-Setup.exe` | Windows 10/11, 64-bit (about 78 MB) | `f1e9c21a2fa38beb6d680299858618f82b91253f3543fe144d840f9ea7aa6e39` |
+| `QS-VC-macOS-AppleSilicon.zip` | Mac with M1/M2/M3/M4 chip (about 94 MB) | `fcb2a5361a0975a40bd75696f36f479cbb67ab7b8b604e988c6c2060dfc6e510` |
+| `QS-VC-macOS-Intel.zip` | Mac with Intel chip (about 100 MB) | `df60ed17dff7f3763b83aa06a3aebf4dc4741d46a4ffb3572b1b806e4adf57b5` |
+
+The `.exe` opens only on Windows; a Mac cannot open it. On a Mac, use one of the macOS zips: Apple menu → **About This Mac** shows "Chip: Apple M…" (use Apple Silicon) or "Processor: Intel" (use Intel).
 
 > **Keep this file private.** It contains the shared admin password. Do not commit it to Git, email it as plain text, or post it in chat channels.
 
@@ -61,6 +64,7 @@ QSVC_ADMIN_PASSWORD='Intranet26@' \
 node services/auth/scripts/create-platform-admins.cjs
 ```
 
+- On the AWS demo, run it on the EC2 instance from `/opt/qsvc`, with the same database user and TLS settings (`POSTGRES_CA_FILE`) used for migrations. The private database is not reachable from outside AWS.
 - Creates any of the three accounts that don't exist yet. Existing accounts get the new password and the admin role.
 - Run it again any time to reset the shared password. Doing so also signs the admins out everywhere.
 - The script never prints or stores the password; only a bcrypt hash goes into the database.
@@ -98,6 +102,22 @@ Do **not** set `QSVC_ADMIN_SIGNUP_OPEN`. The script in 2.3 creates the admin acc
    The result must match the SHA-256 at the top of this guide.
 3. Run `QS-VC-Windows-Setup.exe`. The installer is not code-signed yet, so Windows SmartScreen may say "Windows protected your PC". Select **More info**, then **Run anyway**. Do this only if the checksum matched.
 4. Choose the install folder, then **Install**. A desktop and Start-menu shortcut called **QS-VC** is created. No administrator rights are needed; it installs for the current user.
+
+---
+
+## 3b. Install QS-VC on a Mac
+
+1. Download the zip for your Mac (see the table at the top) and double-click it. **QS-VC.app** appears next to it.
+2. Drag **QS-VC.app** into **Applications**.
+3. Open it once from Applications. The app is not notarised by Apple yet, so macOS says it "cannot be opened because Apple cannot check it for malicious software". Select **Done** (not Move to Bin).
+4. Open **System Settings → Privacy & Security**, scroll down to "QS-VC was blocked", select **Open Anyway**, then confirm with your Mac password.
+5. If macOS instead says the app "is damaged", run this once in **Terminal**, then open it again:
+   ```bash
+   xattr -cr /Applications/QS-VC.app
+   ```
+6. When asked, allow **Camera** and **Microphone**. For screen sharing, allow QS-VC under **System Settings → Privacy & Security → Screen & System Audio Recording**, then restart the app.
+
+To check the download first, run `shasum -a 256 ~/Downloads/QS-VC-macOS-AppleSilicon.zip` in Terminal and compare it with the table.
 
 ---
 
