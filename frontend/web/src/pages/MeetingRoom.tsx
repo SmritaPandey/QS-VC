@@ -31,6 +31,9 @@ import { WaitingAdmission, type WaitingMode } from '../components/WaitingRoom';
 import { openMicrophone, startCameraWithFallback, microphoneMessage, deviceLabel } from '../lib/device-access';
 import { initialMeetingLanguage, detectLanguage, setMeetingLanguage, clearSavedLanguage, findLanguage, LANGUAGE_EVENT, type MeetingLanguage } from '../lib/meeting-language';
 
+const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
+const MAX_MEETING_TITLE_LENGTH = 52;
+
 interface PeerData {
     peerId: string;
     displayName: string;
@@ -125,6 +128,23 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const navigate = useNavigate();
     const entitlements = useEntitlements();
     const state = { ...((location.state as any) || {}), ...(reconnecting ? carried : {}) };
+    const initialMeetingTitle = typeof state.title === 'string' ? state.title.trim() : '';
+    const [meetingTitle, setMeetingTitle] = useState(initialMeetingTitle);
+    useEffect(() => {
+        if (!meetingCode || initialMeetingTitle) return;
+        const controller = new AbortController();
+        fetch(`${MEETING_API}/api/meetings/code/${encodeURIComponent(meetingCode)}`, { signal: controller.signal })
+            .then(response => response.ok ? response.json() : null)
+            .then(meeting => {
+                if (typeof meeting?.title === 'string' && meeting.title.trim()) setMeetingTitle(meeting.title.trim());
+            })
+            .catch(() => { /* The room remains usable if its title is unavailable. */ });
+        return () => controller.abort();
+    }, [meetingCode, initialMeetingTitle]);
+    const displayedMeetingTitle = meetingTitle.length > MAX_MEETING_TITLE_LENGTH
+        ? `${meetingTitle.slice(0, MAX_MEETING_TITLE_LENGTH - 1).trimEnd()}…`
+        : meetingTitle || 'Meeting';
+    const meetingTitleLength = meetingTitle.length > 36 ? 'long' : meetingTitle.length > 20 ? 'medium' : 'short';
     const [clockNow, setClockNow] = useState(() => new Date());
     useEffect(() => {
         const timer = window.setInterval(() => setClockNow(new Date()), 15_000);
@@ -1129,6 +1149,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     </div>
                 </div>
                 <div className="top-bar-center">
+                    <h1 className="meeting-room-title" data-length={meetingTitleLength} title={meetingTitle || 'Meeting'} aria-label={meetingTitle || 'Meeting'}>{displayedMeetingTitle}</h1>
                     <span className="meeting-timer">{formatDuration(duration)}</span>
                     {roomRecording && <span className="recording-indicator" role="status"><span className="mi mi-sm" aria-hidden="true">fiber_manual_record</span> {roomRecording.displayName} is recording</span>}
                     {(() => {
