@@ -42,6 +42,7 @@ tmp/
 .env.aws.private
 /deploy/aws/installers/*.exe
 /deploy/aws/installers/*.zip
+/deploy/aws/installers/*.sha256
 /frontend/desktop/release/
 
 # md

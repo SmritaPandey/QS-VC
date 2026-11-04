@@ -1,18 +1,18 @@
 # QS-VC Intranet — install, connect and admin access
 
-Version 1.2.0 · 4 November 2026
+Version 1.3.0 · 4 November 2026
 
 This guide covers signing in as a platform admin, testing the website and desktop clients, installing QS-VC on Windows or Mac, and connecting it to an organisation workspace.
 
 | File | For | SHA-256 |
 | --- | --- | --- |
-| `QS-VC-Windows-Setup.exe` | Windows 10/11, 64-bit (about 78 MB) | `807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45` |
+| `QS-VC-Windows-x64.zip` | Windows 10/11, 64-bit (contains the setup app) | ZIP hash is release-specific; setup EXE SHA-256: `807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45` |
 | `QS-VC-macOS-arm64.zip` | Mac with Apple silicon (M1/M2/M3/M4) | Release-specific; shown after download and recorded in the deployment artifact |
 | `QS-VC-macOS-x64.zip` | Mac with Intel chip | Release-specific; shown after download and recorded in the deployment artifact |
 
 Choose the matching operating system in the signed-in Intranet page. For Mac,
 Apple menu → **About This Mac** shows "Chip: Apple M…" (choose Apple silicon)
-or "Processor: Intel" (choose Intel). The `.exe` opens only on Windows.
+or "Processor: Intel" (choose Intel). The Windows ZIP contains the `.exe` installer.
 
 > The shared admin password is not stored in this repository. Get it from the operator.
 
@@ -131,18 +131,19 @@ QSVC_ADMIN_WORKSPACE_URL=https://qsvcmeet.com
 ENTERPRISE_ACCESS_JSON=[{"tenantId":"<tenant id>","userIds":["<user id>"],"workspaceUrl":"https://<your intranet address>/"}]
 
 # The auth container reads this path; deploy/aws/compose.yml mounts the host installer folder here.
-ENTERPRISE_WINDOWS_INSTALLER=/opt/qsvc/installers/QS-VC-Windows-Setup.exe
+ENTERPRISE_WINDOWS_INSTALLER=/opt/qsvc/installers/QS-VC-Windows-x64.zip
 ENTERPRISE_MACOS_ARM64_INSTALLER=/opt/qsvc/installers/QS-VC-macOS-arm64.zip
 ENTERPRISE_MACOS_X64_INSTALLER=/opt/qsvc/installers/QS-VC-macOS-x64.zip
 ```
 
-The protected production workflow assembles and verifies Windows, then builds
-both Mac zips on a macOS runner and includes their release-specific checksum
-files in the deployment artifact. For manual builds, use
+The protected production workflow verifies the Windows setup executable,
+packages it as a ZIP, builds both Mac zips on a macOS runner, and includes all
+three archives with release-specific checksum files in the deployment artifact.
+For manual Mac builds, use
 `npm --prefix frontend/desktop run package:mac:arm64` or
 `npm --prefix frontend/desktop run package:mac:x64`. The download screen shows
-the checksum for the exact file downloaded. For a manual/local Windows staging
-run, assemble and check it from the repository root:
+the checksum for the exact archive downloaded. For a manual/local Windows
+staging run, assemble and check it from the repository root:
 
 ```bash
 cat deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part00 \
@@ -151,12 +152,16 @@ cat deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part00 \
     deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part03 \
     > deploy/aws/installers/QS-VC-Windows-Setup.exe
 shasum -a 256 deploy/aws/installers/QS-VC-Windows-Setup.exe
+printf '%s  %s\n' '807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45' 'QS-VC-Windows-Setup.exe' > deploy/aws/installers/QS-VC-Windows-Setup.exe.sha256
+(cd deploy/aws/installers && zip -j QS-VC-Windows-x64.zip QS-VC-Windows-Setup.exe QS-VC-Windows-Setup.exe.sha256)
+shasum -a 256 deploy/aws/installers/QS-VC-Windows-x64.zip > deploy/aws/installers/QS-VC-Windows-x64.zip.sha256
 ```
 
-Confirm the result is `807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45`,
-then transfer that file to the same relative folder on the deployment host and
-redeploy/restart auth. The Intranet page enables each device choice only when
-auth can read its installer file.
+Confirm the setup EXE hash is
+`807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45`. The
+Windows archive contains the `.exe` and its checksum file. Transfer the archive
+and its `.sha256` sidecar into the deployment installer folder. The Intranet
+page enables each device choice only when auth can read its archive.
 
 The platform admin fallback opens `https://qsvcmeet.com/app` and is labelled as
 an online test workspace. For a real organisation deployment, set
@@ -325,12 +330,12 @@ interoperability. For capability limits and reference details, see
 
 ## 3. Install QS-VC on Windows
 
-1. Sign in on the website, open **Intranet**, select your device under **Download QS-VC**, then select **Download selected app**. The window edge glows while it downloads and shows a SHA-256 checksum when done. You can also use the file you were given directly.
-2. Check the file before running it. In PowerShell:
+1. Sign in on the website, open **Intranet**, choose **Windows 10/11 (64-bit)** under **Your device**, then select **Download selected app**.
+2. In File Explorer, right-click `QS-VC-Windows-x64.zip` and choose **Extract All**. In PowerShell, check the extracted setup file:
    ```powershell
    Get-FileHash .\QS-VC-Windows-Setup.exe -Algorithm SHA256
    ```
-   The result must match the SHA-256 at the top of this guide.
+   The result must match the setup EXE SHA-256 at the top of this guide.
 3. Run `QS-VC-Windows-Setup.exe`. The installer is not code-signed yet, so Windows SmartScreen may say "Windows protected your PC". Select **More info**, then **Run anyway**. Do this only if the checksum matched.
 4. Choose the install folder, then **Install**. A desktop and Start-menu shortcut called **QS-VC** is created. No administrator rights are needed; it installs for the current user.
 

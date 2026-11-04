@@ -51,8 +51,10 @@ it('reports only the Windows and Mac installers that are actually staged', async
     try {
         const arm = path.join(folder, 'arm64.zip');
         const intel = path.join(folder, 'x64.zip');
+        const windows = path.join(folder, 'windows-x64.zip');
         writeFileSync(arm, 'apple-silicon-test-artifact');
-        vi.stubEnv('ENTERPRISE_WINDOWS_INSTALLER', path.join(folder, 'missing.exe'));
+        writeFileSync(windows, 'windows-installer-archive');
+        vi.stubEnv('ENTERPRISE_WINDOWS_INSTALLER', windows);
         vi.stubEnv('ENTERPRISE_MACOS_ARM64_INSTALLER', arm);
         vi.stubEnv('ENTERPRISE_MACOS_X64_INSTALLER', intel);
         const router = enterpriseRouter(async () => ({}));
@@ -60,8 +62,8 @@ it('reports only the Windows and Mac installers that are actually staged', async
         const res = { locals: {}, json: vi.fn() };
         await route.stack[0].handle({} as Request, res as unknown as Response, vi.fn());
         expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-            downloads: { windows: false, macAppleSilicon: true, macIntel: false },
-            windowsAvailable: false,
+            downloads: { windows: true, macAppleSilicon: true, macIntel: false },
+            windowsAvailable: true,
         }));
     } finally {
         rmSync(folder, { recursive: true, force: true });

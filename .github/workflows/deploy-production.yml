@@ -16,8 +16,8 @@ jobs:
     name: Verify production revision
     uses: ./.github/workflows/ci.yml
 
-  build-mac-installers:
-    name: Build Mac installers
+  build-installers:
+    name: Build Windows and Mac installers
     needs: verify
     runs-on: macos-latest
     timeout-minutes: 45
@@ -43,21 +43,56 @@ jobs:
       - name: Build Intel app
         run: npm --prefix frontend/desktop run package:mac:x64
 
-      - name: Verify and checksum Mac installers
+      - name: Package the verified Windows installer as ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          release=frontend/desktop/release
+          cat \
+            deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part00 \
+            deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part01 \
+            deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part02 \
+            deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part03 \
+            > "$release/QS-VC-Windows-Setup.exe"
+          printf '%s  %s\n' \
+            '807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45' \
+            "$release/QS-VC-Windows-Setup.exe" \
+            | shasum -a 256 --check
+          printf '%s  %s\n' \
+            '807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45' \
+            'QS-VC-Windows-Setup.exe' \
+            > "$release/QS-VC-Windows-Setup.exe.sha256"
+          python3 - "$release" <<'PY'
+          from pathlib import Path
+          from zipfile import ZIP_DEFLATED, ZipFile
+          import sys
+
+          release = Path(sys.argv[1])
+          archive = release / 'QS-VC-Windows-x64.zip'
+          with ZipFile(archive, 'w', ZIP_DEFLATED) as bundle:
+              bundle.write(release / 'QS-VC-Windows-Setup.exe', 'QS-VC-Windows-Setup.exe')
+              bundle.write(release / 'QS-VC-Windows-Setup.exe.sha256', 'QS-VC-Windows-Setup.exe.sha256')
+          PY
+
+      - name: Verify and checksum installer archives
         shell: bash
         run: |
           set -euo pipefail
           cd frontend/desktop/release
+          unzip -t QS-VC-Windows-x64.zip
           unzip -t QS-VC-macOS-arm64.zip
           unzip -t QS-VC-macOS-x64.zip
+          shasum -a 256 QS-VC-Windows-x64.zip > QS-VC-Windows-x64.zip.sha256
           shasum -a 256 QS-VC-macOS-arm64.zip > QS-VC-macOS-arm64.zip.sha256
           shasum -a 256 QS-VC-macOS-x64.zip > QS-VC-macOS-x64.zip.sha256
 
-      - name: Upload Mac installers
+      - name: Upload platform installers
         uses: actions/upload-artifact@v4
         with:
-          name: qsvc-macos-installers
+          name: qsvc-platform-installers
           path: |
+            frontend/desktop/release/QS-VC-Windows-x64.zip
+            frontend/desktop/release/QS-VC-Windows-x64.zip.sha256
             frontend/desktop/release/QS-VC-macOS-arm64.zip
             frontend/desktop/release/QS-VC-macOS-arm64.zip.sha256
             frontend/desktop/release/QS-VC-macOS-x64.zip
@@ -66,7 +101,7 @@ jobs:
           retention-days: 7
 
   deploy:
-    needs: [verify, build-mac-installers]
+    needs: [verify, build-installers]
     name: Deploy QSVC to AWS
     runs-on: ubuntu-latest
     environment: production
@@ -88,11 +123,11 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download Mac installers
+      - name: Download platform installers
         uses: actions/download-artifact@v4
         with:
-          name: qsvc-macos-installers
-          path: /tmp/qsvc-macos-installers
+          name: qsvc-platform-installers
+          path: /tmp/qsvc-platform-installers
 
       - name: Validate deployment files
         shell: bash
@@ -157,10 +192,12 @@ jobs:
           RELEASE_DIR="/tmp/qsvc-release-source"
           mkdir -p "$RELEASE_DIR/deploy/aws/installers"
           git archive --format=tar "$RELEASE_SHA" | tar -x -C "$RELEASE_DIR"
-          install -m 0644 /tmp/qsvc-macos-installers/QS-VC-macOS-arm64.zip "$RELEASE_DIR/deploy/aws/installers/"
-          install -m 0644 /tmp/qsvc-macos-installers/QS-VC-macOS-arm64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
-          install -m 0644 /tmp/qsvc-macos-installers/QS-VC-macOS-x64.zip "$RELEASE_DIR/deploy/aws/installers/"
-          install -m 0644 /tmp/qsvc-macos-installers/QS-VC-macOS-x64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
+          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Windows-x64.zip "$RELEASE_DIR/deploy/aws/installers/"
+          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Windows-x64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
+          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-arm64.zip "$RELEASE_DIR/deploy/aws/installers/"
+          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-arm64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
+          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-x64.zip "$RELEASE_DIR/deploy/aws/installers/"
+          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-x64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
           tar -czf /tmp/qsvc-release.tar.gz -C "$RELEASE_DIR" .
 
           sha256sum /tmp/qsvc-release.tar.gz \

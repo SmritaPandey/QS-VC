@@ -19,15 +19,15 @@ export default function DownloadFeedback({ state, onDismiss }: { state: Download
             <span className="download-toast-icon mi" aria-hidden="true">{state.phase === 'working' ? 'downloading' : state.phase === 'done' ? 'task_alt' : 'error'}</span>
             <div className="download-toast-body">
                 {state.phase === 'working' && <>
-                    <strong>Downloading QS-VC for Windows…</strong>
+                    <strong>Downloading QS-VC…</strong>
                     <span>{percent !== null ? `${percent}% · ${megabytes(state.received)} of ${megabytes(state.total!)}` : `${megabytes(state.received)} received`}</span>
                     <span className="download-progress" data-indeterminate={percent === null || undefined}><i style={percent !== null ? { width: `${percent}%` } : undefined} /></span>
                 </>}
                 {state.phase === 'done' && <>
                     <strong>Download complete.</strong>
-                    <span>QS-VC-Windows-Setup.exe ({megabytes(state.size)}) is in your Downloads folder. Run it, then sign in with your organisation address.</span>
+                    <span>The QS-VC installation ZIP ({megabytes(state.size)}) is in your Downloads folder. Extract it and follow the platform instructions in the setup guide.</span>
                     <span className="download-checksum">SHA-256: <code>{state.checksum}</code></span>
-                    <span>Compare this checksum with the one from your administrator before installing.</span>
+                    <span>Compare the checksum with the value supplied by your administrator before installing.</span>
                 </>}
                 {state.phase === 'error' && <>
                     <strong>Download failed.</strong>
