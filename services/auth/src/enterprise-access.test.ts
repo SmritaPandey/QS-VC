@@ -32,10 +32,14 @@ it('fails closed for invalid sessions and unsafe workspace configuration', async
 it('lets platform admins in without a per-user grant, using the admin workspace address', async () => {
     vi.stubEnv('ENTERPRISE_ACCESS_JSON', '[]');
     expect((await check({ sub: 'boss', tenantId: 'any', role: 'admin' })).res.status).toHaveBeenCalledWith(403);
+    const admin = { sub: 'boss', tenantId: 'any', role: 'admin', email: 'services@madylabs.xyz' };
+    const demo = await check(admin);
+    expect(demo.next).toHaveBeenCalledOnce();
+    expect(demo.res.locals).toMatchObject({ workspaceUrl: 'https://qsvcmeet.com/app', workspaceMode: 'online-demo' });
     vi.stubEnv('QSVC_ADMIN_WORKSPACE_URL', 'https://intranet.example/');
-    const allowed = await check({ sub: 'boss', tenantId: 'any', role: 'admin' });
+    const allowed = await check(admin);
     expect(allowed.next).toHaveBeenCalledOnce();
-    expect((allowed.res.locals as { workspaceUrl?: string }).workspaceUrl).toBe('https://intranet.example/');
+    expect(allowed.res.locals).toMatchObject({ workspaceUrl: 'https://intranet.example/', workspaceMode: 'organisation' });
     expect((await check({ sub: 'someone', tenantId: 'any', role: 'member' })).next).not.toHaveBeenCalled();
 });
 

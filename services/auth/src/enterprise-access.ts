@@ -83,14 +83,22 @@ export function enterpriseRouter(verify: (token: string) => Promise<Record<strin
             let grant = term ? { workspaceUrl: term.workspace_url } : Array.isArray(grants) ? grants.find(g => g.tenantId === user.tenantId && Array.isArray(g.userIds) && g.userIds.includes(user.sub)) : undefined;
             // Platform admins (role from the server-signed session) may use the intranet without a
             // per-user grant. They get QSVC_ADMIN_WORKSPACE_URL, or the first configured workspace.
-            if (!grant && user.role === 'admin') {
-                const workspaceUrl = process.env.QSVC_ADMIN_WORKSPACE_URL || (Array.isArray(grants) ? grants[0]?.workspaceUrl : undefined);
+            const platformAdmin = typeof user.email === 'string' && isPlatformAdmin(user.email);
+            if (!grant && platformAdmin) {
+                // Until an isolated enterprise workspace is configured, platform
+                // admins can use the shared online QS-VC app as a clearly marked test workspace.
+                const workspaceUrl = process.env.QSVC_ADMIN_WORKSPACE_URL
+                    || (Array.isArray(grants) ? grants[0]?.workspaceUrl : undefined)
+                    || 'https://qsvcmeet.com/app';
                 if (workspaceUrl) grant = { workspaceUrl };
             }
             if (!grant) { res.status(403).json({ error: 'Your account has not been approved for enterprise access.' }); return; }
             const url = new URL(grant.workspaceUrl);
             if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new Error('Invalid workspace configuration');
             res.locals.workspaceUrl = url.href;
+            res.locals.workspaceMode = platformAdmin && ['qsvcmeet.com', 'www.qsvcmeet.com'].includes(url.hostname.toLowerCase())
+                ? 'online-demo'
+                : 'organisation';
             next();
         } catch (error) {
             const status = sessionErrorStatus(error);
@@ -104,7 +112,7 @@ export function enterpriseRouter(verify: (token: string) => Promise<Record<strin
         if (!file || !path.isAbsolute(file) || !file.toLowerCase().endsWith('.exe')) return null;
         try { return (await stat(file)).isFile() ? file : null; } catch { return null; }
     }
-    router.get('/', async (_req, res) => res.json({ workspaceUrl: res.locals.workspaceUrl, windowsAvailable: !!(await installer()), expiresAt: res.locals.expiresAt }));
+    router.get('/', async (_req, res) => res.json({ workspaceUrl: res.locals.workspaceUrl, workspaceMode: res.locals.workspaceMode, windowsAvailable: !!(await installer()), expiresAt: res.locals.expiresAt }));
     router.get('/windows', async (_req, res) => {
         const file = await installer();
         if (!file) { res.status(503).json({ error: 'The Windows installer is not available yet.' }); return; }
