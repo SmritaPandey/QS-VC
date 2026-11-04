@@ -12,6 +12,14 @@ SET LOCAL ROLE qsvc_auth_service;
 DO $$ BEGIN
  IF NOT EXISTS(SELECT 1 FROM users WHERE email='db-check@example.test' AND password_hash=crypt('synthetic-test-only',password_hash)) THEN RAISE EXCEPTION 'Authentication lookup failed'; END IF;
  IF has_table_privilege(current_user,'public.meetings','SELECT') OR has_schema_privilege(current_user,'public','CREATE') THEN RAISE EXCEPTION 'Auth service has excessive privileges'; END IF;
+ IF has_table_privilege(current_user,'public.platform_financial_entries','SELECT') OR has_table_privilege(current_user,'public.platform_financial_entries','INSERT') THEN RAISE EXCEPTION 'Auth service can access the financial ledger directly'; END IF;
+ IF NOT has_function_privilege(current_user,'public.qsvc_platform_admin_analytics(integer)','EXECUTE') OR NOT has_function_privilege(current_user,'public.qsvc_add_platform_financial_entry(uuid,text,text,numeric,text,date,text)','EXECUTE') THEN RAISE EXCEPTION 'Platform analytics functions are not granted to the auth service'; END IF;
+END $$;
+SELECT public.qsvc_record_desktop_activation('win32','x64','0.0.0-test');
+SELECT public.qsvc_record_installer_download('windows');
+SELECT public.qsvc_add_platform_financial_entry('aaaaaaaa-0000-0000-0000-000000000002','revenue','test','1.00','INR','2026-01-01','Synthetic DB privilege check');
+DO $$ BEGIN
+ IF public.qsvc_platform_admin_analytics(4)->'totals'->>'desktopAppActivations' IS NULL THEN RAISE EXCEPTION 'Platform analytics did not return aggregate metrics'; END IF;
 END $$;
 UPDATE users SET preferences=jsonb_build_object('_authSessionId','synthetic-session') WHERE email='db-check@example.test';
 DO $$ BEGIN

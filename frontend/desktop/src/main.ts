@@ -18,7 +18,7 @@ const MEETING_CODE = /^[A-Z0-9]{2,8}(-[A-Z0-9]{2,8}){1,4}$/;
 const APP_PAGE = path.join(__dirname, '..', 'static', 'app.html');
 
 type Theme = 'system' | 'light' | 'dark';
-interface Config { workspaceUrl?: string; theme?: Theme; keepSignedIn?: boolean }
+interface Config { workspaceUrl?: string; theme?: Theme; keepSignedIn?: boolean; activationReportedWorkspaces?: string[] }
 interface User { id: string; email: string; displayName: string; role: string; tenantId?: string }
 
 let mainWindow: BrowserWindow | null = null;
@@ -95,6 +95,27 @@ async function api(route: string, init: { method?: string; body?: unknown; auth?
     } catch {
         return { ok: false, status: 0, data: null, error: 'Cannot reach your organisation. Check the office network or VPN.' };
     } finally { clearTimeout(timer); }
+}
+
+const activationRequests = new Set<string>();
+async function reportDesktopActivation() {
+    if (!workspace || !token) return;
+    const workspaceKey = workspace.origin;
+    const reported = readConfig().activationReportedWorkspaces || [];
+    if (reported.includes(workspaceKey) || activationRequests.has(workspaceKey)) return;
+    activationRequests.add(workspaceKey);
+    try {
+        const result = await api('api/auth/enterprise/activation', {
+            method: 'POST',
+            body: { platform: process.platform, architecture: process.arch, appVersion: app.getVersion() },
+        });
+        if (result.ok) {
+            const current = readConfig().activationReportedWorkspaces || [];
+            writeConfig({ activationReportedWorkspaces: [...new Set([...current, workspaceKey])] });
+        }
+    } finally {
+        activationRequests.delete(workspaceKey);
+    }
 }
 
 async function reachable(url: URL): Promise<boolean> {
@@ -224,6 +245,7 @@ function setupIPC() {
             user = me.ok ? cleanUser(me.data) : null;
             if (!me.ok && me.status !== 0) clearSession();
         }
+        if (user) void reportDesktopActivation();
         const config = readConfig();
         return { workspace: workspace?.href || '', host: workspace?.host || '', user, version: app.getVersion(), theme: config.theme || 'system', keepSignedIn: !!config.keepSignedIn, platform: process.platform };
     });
@@ -245,6 +267,7 @@ function setupIPC() {
         user = cleanUser(result.data.user);
         writeConfig({ keepSignedIn: keep === true });
         saveSession();
+        void reportDesktopActivation();
         return { ok: true, user };
     });
 

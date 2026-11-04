@@ -139,6 +139,11 @@ ENTERPRISE_MACOS_X64_INSTALLER=/opt/qsvc/installers/QS-VC-macOS-x64.zip
 The protected production workflow verifies the Windows setup executable,
 packages it as a ZIP, builds both Mac zips on a macOS runner, and includes all
 three archives with release-specific checksum files in the deployment artifact.
+Rebuild all three packages from the same source revision after desktop changes.
+The enterprise app-activation metric is reported only by client versions that
+include its first-sign-in reporting code; older staged ZIPs do not send that
+metric even though they remain downloadable. Replace each ZIP and its checksum
+together after the protected platform builds.
 For manual Mac builds, use
 `npm --prefix frontend/desktop run package:mac:arm64` or
 `npm --prefix frontend/desktop run package:mac:x64`. The download screen shows

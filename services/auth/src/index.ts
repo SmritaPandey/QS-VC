@@ -2,6 +2,7 @@ import { assertJwtSecret } from '../../../shared/jwt-secret.cjs';
 import { profileHandler } from './profile.js';
 import { registerBody } from './registration';
 import { enterpriseRouter } from './enterprise-access.js';
+import { platformAdminAnalyticsRouter } from './platform-admin-analytics.js';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { z } from 'zod';
@@ -180,6 +181,7 @@ async function verifyToken(token: string) {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 app.use('/api/auth/enterprise', enterpriseRouter(verifyToken, pool));
+app.use('/api/auth/admin', platformAdminAnalyticsRouter(verifyToken, pool));
 
 // Health check
 app.get('/health', (_req, res) => {

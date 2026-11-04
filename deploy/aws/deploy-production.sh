@@ -20,8 +20,9 @@ test -f "$ENV_FILE"
 test -f "db/migrate.js"
 test -f "certs/rds-ca.pem"
 
-# Ensure the deployment includes the expected migration.
+# Ensure the deployment includes the latest required access and admin analytics migrations.
 test -f "db/migrations/006_enterprise_access_terms.sql"
+test -f "db/migrations/009_platform_admin_analytics.sql"
 
 # Installer ZIPs and their release checksums are built on the protected
 # platform runners and included in the approved release archive.
