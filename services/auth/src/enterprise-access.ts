@@ -15,6 +15,11 @@ const termBody = z.object({
     }),
     expiresAt: z.string().datetime({ offset: true }),
 });
+const activationBody = z.object({
+    platform: z.enum(['win32', 'darwin']),
+    architecture: z.enum(['x64', 'arm64']),
+    appVersion: z.string().trim().min(1).max(40).regex(/^[A-Za-z0-9.+-]+$/),
+});
 
 export function enterpriseRouter(verify: (token: string) => Promise<Record<string, any>>, db?: Pick<Pool, 'query'>) {
     const router = Router();
@@ -125,6 +130,19 @@ export function enterpriseRouter(verify: (token: string) => Promise<Record<strin
             macIntel: await available('macIntel'),
         };
     }
+    if (db) router.post('/activation', async (req, res) => {
+        const activation = activationBody.safeParse(req.body);
+        if (!activation.success) return res.status(400).json({ error: 'Desktop activation details are invalid.' });
+        try {
+            await db.query(
+                'SELECT public.qsvc_record_desktop_activation($1, $2, $3)',
+                [activation.data.platform, activation.data.architecture, activation.data.appVersion],
+            );
+            return res.status(202).json({ recorded: true });
+        } catch {
+            return res.status(503).json({ error: 'Desktop activation could not be recorded.' });
+        }
+    });
     router.get('/', async (_req, res) => {
         const downloads = await installer();
         res.json({ workspaceUrl: res.locals.workspaceUrl, workspaceMode: res.locals.workspaceMode, downloads, windowsAvailable: downloads.windows, expiresAt: res.locals.expiresAt });
@@ -145,7 +163,21 @@ export function enterpriseRouter(verify: (token: string) => Promise<Record<strin
             macAppleSilicon: 'QS-VC-macOS-arm64.zip',
             macIntel: 'QS-VC-macOS-x64.zip',
         }[platform];
-        res.download(file, filename, error => { if (error && !res.headersSent) res.status(503).json({ error: 'Download unavailable. Please retry.' }); });
+        res.download(file, filename, async error => {
+            if (error) {
+                if (!res.headersSent) res.status(503).json({ error: 'Download unavailable. Please retry.' });
+                return;
+            }
+            if (db) {
+                const artifact = {
+                    windows: 'windows',
+                    macAppleSilicon: 'macos-arm64',
+                    macIntel: 'macos-x64',
+                }[platform];
+                try { await db.query('SELECT public.qsvc_record_installer_download($1)', [artifact]); }
+                catch { console.error('QS-VC installer download completed but could not be counted.'); }
+            }
+        });
     };
     router.get('/windows', (_req, res) => downloadAsset('windows', res));
     router.get('/macos/arm64', (_req, res) => downloadAsset('macAppleSilicon', res));

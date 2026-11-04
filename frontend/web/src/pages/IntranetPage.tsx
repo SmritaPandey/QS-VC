@@ -12,7 +12,7 @@ import '../styles/service-pages.css';
 
 const steps = [
     { title: 'Connect to your organisation', text: 'At the office, connect to your organisation’s network. When travelling, connect to the VPN supplied by your IT team first.' },
-    { title: 'Choose browser or Windows', text: 'Approved accounts receive a workspace link and, when released, a Windows installer. Both connect to the same organisation-hosted service.' },
+    { title: 'Choose browser or desktop app', text: 'Approved accounts can open the workspace in a browser or download the ZIP for Windows, Mac with Apple silicon, or Mac with Intel. Each connects to the same organisation-hosted service.' },
     { title: 'Check your devices and join', text: 'Sign in to your organisation’s workspace, check your camera and microphone, then join an authorised meeting. Your administrator manages access.' },
     { title: 'Work together', text: 'Meet with video, chat and screen sharing. Use available whiteboard, polls, Q&A and notes. Language features depend on your organisation’s configuration.' },
 ];
@@ -20,8 +20,8 @@ type DesktopDownload = 'windows' | 'macos-arm64' | 'macos-x64';
 type DownloadAvailability = { windows: boolean; macAppleSilicon: boolean; macIntel: boolean };
 const downloadChoices: Array<{ id: DesktopDownload; label: string; availableKey: keyof DownloadAvailability; endpoint: string; filename: string; mime: string }> = [
     { id: 'windows', label: 'Windows 10/11 (64-bit)', availableKey: 'windows', endpoint: 'windows', filename: 'QS-VC-Windows-x64.zip', mime: 'application/zip' },
-    { id: 'macos-arm64', label: 'Mac · Apple silicon (M1–M4)', availableKey: 'macAppleSilicon', endpoint: 'macos-arm64', filename: 'QS-VC-macOS-arm64.zip', mime: 'application/zip' },
-    { id: 'macos-x64', label: 'Mac · Intel', availableKey: 'macIntel', endpoint: 'macos-x64', filename: 'QS-VC-macOS-x64.zip', mime: 'application/zip' },
+    { id: 'macos-arm64', label: 'Mac · Apple silicon (M1–M4)', availableKey: 'macAppleSilicon', endpoint: 'macos/arm64', filename: 'QS-VC-macOS-arm64.zip', mime: 'application/zip' },
+    { id: 'macos-x64', label: 'Mac · Intel', availableKey: 'macIntel', endpoint: 'macos/x64', filename: 'QS-VC-macOS-x64.zip', mime: 'application/zip' },
 ];
 export default function IntranetPage() {
     const session = useSession();
@@ -97,16 +97,30 @@ export default function IntranetPage() {
         const isCurrent = () => !controller.signal.aborted && getToken() === token;
         setDownloadState({ phase: 'working', received: 0, total: null });
         try {
-            const response = await fetch(`${AUTH_API}/api/auth/enterprise/download/${chosenDownload.endpoint}`, {
+            const request = (endpoint: string) => fetch(`${AUTH_API}/api/auth/enterprise/${endpoint}`, {
                 headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
             });
+            let response = await request(chosenDownload.endpoint);
+            // Older deployed auth services may expose only /download/:platform.
+            // Keep the ZIP flow working during a rolling frontend/backend upgrade.
+            if (response.status === 404 && isCurrent()) {
+                const legacyPlatform = chosenDownload.id;
+                response = await request(`download/${legacyPlatform}`);
+            }
             if (!isCurrent()) return;
             if (response.status === 401) { clearSession(token); return; }
             if (response.status === 403) {
                 setResult({ token });
                 throw new Error('Your account no longer has intranet access. Contact your administrator.');
             }
-            if (!response.ok) throw new Error('The installer is unavailable. Try again or contact your administrator.');
+            if (response.status === 404) {
+                throw new Error('This workspace’s download route is missing. Refresh the page; if it still fails, its administrator must update the QS-VC auth service.');
+            }
+            if (response.status === 503) {
+                const body = await response.json().catch(() => null) as { error?: unknown } | null;
+                throw new Error(typeof body?.error === 'string' ? body.error : 'The installer ZIP is not staged on this server yet. Contact your administrator.');
+            }
+            if (!response.ok) throw new Error(`The installer request failed (HTTP ${response.status}). Try again or contact your administrator.`);
             const total = Number(response.headers.get('Content-Length')) || null;
             // Stream the body so the message can show real progress.
             const chunks: Uint8Array[] = [];

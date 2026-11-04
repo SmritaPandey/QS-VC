@@ -70,6 +70,31 @@ it('reports only the Windows and Mac installers that are actually staged', async
     }
 });
 
+it('registers explicit Windows and both Mac ZIP routes plus the legacy route', () => {
+    const router = enterpriseRouter(async () => ({}));
+    const paths = router.stack.filter(layer => layer.route).map(layer => layer.route?.path);
+    expect(paths).toEqual(expect.arrayContaining([
+        '/windows', '/macos/arm64', '/macos/x64', '/download/:platform',
+    ]));
+});
+
+it('records only aggregate desktop activation fields for an approved enterprise session', async () => {
+    vi.stubEnv('ENTERPRISE_ACCESS_JSON', JSON.stringify([{
+        tenantId: 'org', userIds: ['approved'], workspaceUrl: 'https://office.example/',
+    }]));
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    const router = enterpriseRouter(async () => ({ sub: 'approved', tenantId: 'org' }), { query });
+    const guard = router.stack.find(layer => !layer.route)!.handle;
+    const activationRoute = router.stack.find(layer => layer.route?.path === '/activation')!.route!;
+    const res = { locals: {}, setHeader: vi.fn(), status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const next = vi.fn();
+    await guard({ headers: { authorization: 'Bearer test' } } as Request, res as unknown as Response, next);
+    expect(next).toHaveBeenCalledOnce();
+    await activationRoute.stack[0].handle({ body: { platform: 'darwin', architecture: 'arm64', appVersion: '1.2.3' } } as Request, res as unknown as Response, vi.fn());
+    expect(query).toHaveBeenCalledWith('SELECT public.qsvc_record_desktop_activation($1, $2, $3)', ['darwin', 'arm64', '1.2.3']);
+    expect(res.status).toHaveBeenCalledWith(202);
+});
+
 it('blocks expired terms even when the user also has a legacy grant', async () => {
     vi.stubEnv('ENTERPRISE_ACCESS_JSON', JSON.stringify([{ tenantId: 'org', userIds: ['approved'], workspaceUrl: 'https://legacy.example/' }]));
     const query = vi.fn().mockResolvedValue({ rows: [{ active: false, workspace_url: 'https://office.example/' }] });

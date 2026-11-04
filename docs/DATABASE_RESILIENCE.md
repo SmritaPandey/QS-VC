@@ -19,6 +19,15 @@ Auth, meeting and migration connections share `shared/database.cjs`:
 Run `npm run db:migrate` from the repository root; the runner loads the private root .env.
 Use the RDS endpoint hostname, not its current IP, so reconnection follows DNS changes.
 
+Migration 009 adds the platform-admin analytics aggregate and admin financial ledger. It
+must be applied separately to each deployment database before that deployment can serve
+the dashboard. Internet and intranet totals are shared only among admins using the same
+database; independently hosted intranet databases are not combined. The protected AWS
+release runs pending migrations before restarting services. For a standalone intranet,
+back up its database and run the reviewed migration with its approved maintenance account,
+then execute `db/verify-access.sql` against that database. Do not run the check using an
+application login, and do not treat a dashboard total as a cross-deployment count.
+
 These bounds prevent indefinite normal connection/query waits. They do not guarantee
 availability during machine failure, resource exhaustion, network partitions or data loss.
 Existing API error responses are preserved; not all DB errors have a uniform 503 response.

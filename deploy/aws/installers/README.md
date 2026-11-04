@@ -11,3 +11,9 @@ The protected production workflow checks the Windows executable, packages it
 as a ZIP, builds both Mac architectures on macOS, and includes all three
 archives with release-specific checksum files. The deploy script verifies all
 three before restarting services. Keep installer binaries and checksums out of Git.
+
+Rebuild all three desktop packages from the same source revision whenever the
+desktop client changes. In particular, the enterprise activation count is sent
+only by clients that include the first-sign-in reporting code; older staged ZIPs
+can still download and install but will not report that metric. Replace the
+archives and sidecar checksums together after the protected platform builds.
