@@ -1,0 +1,56 @@
+<!-- Copy to /etc/freeswitch/dialplan/qsvc.xml -->
+<include>
+
+  <!-- 1) Bridge legs from the QSVC SFU. Join the room directly (no lobby). -->
+  <context name="qsvc-bridge">
+    <extension name="qsvc_bridge_leg">
+      <condition field="destination_number" expression="^qsvc-bridge-([\w-]+)$">
+        <action application="set" data="qsvc_room=$1"/>
+        <action application="set" data="qsvc_bridge_leg=true"/>
+        <action application="export" data="nolocal:qsvc_bridge_leg=true"/>
+        <!-- Downlink: make FreeSWITCH send with the SSRCs mediasoup expects. -->
+        <action application="set" data="rtp_use_ssrc=${sip_h_X-Qsvc-Audio-Ssrc}"/>
+        <action application="set" data="rtp_use_video_ssrc=${sip_h_X-Qsvc-Video-Ssrc}"/>
+        <action application="set" data="rtp_secure_media=${cond(${sip_h_X-Qsvc-Plain} == true ? forbidden : mandatory)}"/>
+        <action application="set" data="conference_member_flags=${cond(${sip_h_X-Qsvc-Leg} == downlink ? mute|ghost : nomoh)}"/>
+        <action application="answer"/>
+        <action application="conference" data="$1@qsvc"/>
+      </condition>
+    </extension>
+  </context>
+
+  <!-- 2) Poly endpoints (SIP on qsvc-poly profile, H.323 via mod_h323). -->
+  <context name="qsvc-rooms">
+
+    <!-- After host admits: ESL uuid_transfer -> qsvc-join-<room> -->
+    <extension name="qsvc_join">
+      <condition field="destination_number" expression="^qsvc-join-([\w-]+)$">
+        <action application="set" data="qsvc_lobby=false"/>
+        <action application="answer"/>
+        <action application="send_display" data="QSVC|${caller_id_name}"/>
+        <action application="conference" data="$1@qsvc"/>
+      </condition>
+    </extension>
+
+    <!-- Branch-to-branch: room ids prefixed with another site's code are trunked there. -->
+    <extension name="qsvc_branch_trunk">
+      <condition field="destination_number" expression="^(br\d{2})-([\w-]+)$">
+        <action application="bridge" data="{rtp_secure_media=mandatory}sofia/qsvc-poly/$2@${qsvc_branch_$1}:${qsvc_poly_tls_port};transport=tls"/>
+      </condition>
+    </extension>
+
+    <!-- Dial-in: sip:<room>@mcu  or  H.323 <mcu-ip>##<room>. Goes to the LOBBY. -->
+    <extension name="qsvc_lobby">
+      <condition field="destination_number" expression="^(?:##)?([\w-]+)$">
+        <action application="set" data="qsvc_room=$1"/>
+        <action application="set" data="qsvc_lobby=true"/>
+        <!-- Encryption policy for SIP Poly endpoints: require SRTP when room says so -->
+        <action application="set" data="rtp_secure_media=${cond(${qsvc_room_encryption_$1} == required ? mandatory : optional)}"/>
+        <action application="answer"/>
+        <action application="playback" data="silence_stream://500"/>
+        <!-- CHANNEL_PARK fires -> bridge -> QSVC host sees "waiting in lobby". No conference media yet. -->
+        <action application="park"/>
+      </condition>
+    </extension>
+  </context>
+</include>

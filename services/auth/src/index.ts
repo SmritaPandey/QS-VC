@@ -1,3 +1,4 @@
+import { assertJwtSecret } from '../../../shared/jwt-secret.cjs';
 import { profileHandler } from './profile.js';
 import { registerBody } from './registration';
 import { enterpriseRouter } from './enterprise-access.js';
@@ -18,6 +19,7 @@ import { contactRouter, contactRequestError } from './contact.js';
 import { effectiveRole, isPlatformAdmin } from './platform-admins.js';
 
 dotenv.config({ path: '../../.env' });
+assertJwtSecret();
 
 const logger = pino({
     transport: process.env.NODE_ENV === 'development'

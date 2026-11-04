@@ -1,0 +1,10 @@
+<!-- Merge into acl.conf.xml <network-lists> -->
+<list name="qsvc-bridge" default="deny">
+  <node type="allow" cidr="10.0.0.10/32"/>   <!-- QSVC SFU/bridge host -->
+</list>
+<list name="poly-endpoints" default="deny">
+  <node type="allow" cidr="10.20.0.0/16"/>   <!-- Poly endpoint VLANs, all branches -->
+</list>
+<list name="qsvc-branch-mcus" default="deny">
+  <node type="allow" cidr="10.30.0.0/24"/>   <!-- other branches' MCUs (branch-to-branch trunk) -->
+</list>

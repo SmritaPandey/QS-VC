@@ -488,37 +488,12 @@ app.get('/api/mcu/rooms', (_req, res) => {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 app.get('/api/gateway/status', (_req, res) => {
-    res.json({
-        sip: {
-            enabled: DEFAULT_MCU_CONFIG.sipEnabled,
-            port: DEFAULT_MCU_CONFIG.sipPort,
-            protocol: 'SIP/TLS',
-            registrar: 'sip.qsvc.local',
-            supportedCodecs: ['opus', 'pcma', 'pcmu', 'g722'],
-            activeCalls: 0,
-        },
-        h323: {
-            enabled: DEFAULT_MCU_CONFIG.h323Enabled,
-            port: DEFAULT_MCU_CONFIG.h323Port,
-            gatekeeper: 'gk.qsvc.local',
-            supportedCodecs: ['h264', 'h263', 'pcma', 'pcmu'],
-            activeCalls: 0,
-            supportedEndpoints: [
-                'Polycom HDX/VVX/Group/Trio',
-                'Cisco TelePresence/SX/MX/DX',
-                'Tandberg Edge/Codec',
-                'Lifesize Icon/Cloud',
-                'Avaya Scopia',
-                'Huawei TE/CE Series',
-                'StarLeaf',
-                'PeopleLink Ultra/Sky/Blaze',
-            ],
-        },
-        rtmp: {
-            enabled: DEFAULT_MCU_CONFIG.rtmpEnabled,
-            ingestUrl: 'rtmp://mcu.qsvc.local/live',
-            activeStreams: 0,
-        },
+    res.status(503).json({
+        status: 'unavailable',
+        reason: 'A SIP/H.323 media gateway is not integrated with this service.',
+        sip: { enabled: false },
+        h323: { enabled: false },
+        rtmp: { enabled: false },
     });
 });
 
@@ -528,12 +503,10 @@ app.get('/api/gateway/status', (_req, res) => {
 
 const PORT = DEFAULT_MCU_CONFIG.port;
 
-app.listen(PORT, () => {
+app.listen(PORT, '127.0.0.1', () => {
     console.log(`🎬 QS-VC MCU Service running on port ${PORT}`);
     console.log(`   Layouts: grid, speaker, presentation, spotlight, filmstrip`);
-    console.log(`   SIP Gateway: ${DEFAULT_MCU_CONFIG.sipEnabled ? `port ${DEFAULT_MCU_CONFIG.sipPort}` : 'disabled'}`);
-    console.log(`   H.323 Gateway: ${DEFAULT_MCU_CONFIG.h323Enabled ? `port ${DEFAULT_MCU_CONFIG.h323Port}` : 'disabled'}`);
-    console.log(`   RTMP Ingest: ${DEFAULT_MCU_CONFIG.rtmpEnabled ? 'enabled' : 'disabled'}`);
+    console.log('   SIP/H.323 media gateway unavailable');
     console.log(`   Recording: ${DEFAULT_MCU_CONFIG.recordingEnabled ? DEFAULT_MCU_CONFIG.recordingPath : 'disabled'}`);
 });
 

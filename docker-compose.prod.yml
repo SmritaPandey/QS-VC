@@ -122,8 +122,8 @@ services:
 
   signaling:
     build:
-      context: ./services/signaling
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/signaling/Dockerfile
     container_name: qsvc-signaling
     environment:
       - QSVC_ENTERPRISE_TERMS_REQUIRED=${QSVC_ENTERPRISE_TERMS_REQUIRED:-no}

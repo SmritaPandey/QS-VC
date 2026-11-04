@@ -4,6 +4,8 @@ vi.mock('../sfu-client.js', () => ({ sfuClient: {
     getRtpCapabilities: vi.fn().mockResolvedValue({ rtpCapabilities: {} }),
     createTransport: vi.fn().mockResolvedValue({ id: 'transport' }),
     removePeer: vi.fn().mockResolvedValue({}),
+    polySnapshot: vi.fn().mockResolvedValue({ producers: [{ producerId: 'composite' }], roster: [{ callId: 'member' }], lobby: [{ callId: 'waiting' }] }),
+    polyLobbyAction: vi.fn().mockResolvedValue({}),
 } }));
 import { handleRpcMessage, handlePeerDisconnect } from './handler.js';
 import { roomManager } from '../room-manager.js';
@@ -296,5 +298,30 @@ it('lets webinar hosts invite attendees on stage, and removes their media when t
     } finally {
         await handlePeerDisconnect(attendeeState); await handlePeerDisconnect(hostState);
         vi.mocked(loadMeetingPolicy).mockResolvedValue(null);
+    }
+});
+
+it('scopes Poly snapshots and admission to the joined room and hides lobby data from attendees', async () => {
+    const { sfuClient } = await import('../sfu-client.js');
+    vi.stubEnv('POLY_BRIDGE_ENABLED', 'true');
+    const host = socket(), guest = socket();
+    const hostState: any = {}, guestState: any = {};
+    const meetingCode = `poly-${crypto.randomUUID().slice(0, 10)}`;
+    try {
+        expect((await rpc(guest, guestState, 'polySnapshot'))?.error?.code).toBe(-32000);
+        await rpc(host, hostState, 'joinRoom', { meetingCode, displayName: 'Host' });
+        await rpc(guest, guestState, 'joinRoom', { meetingCode, displayName: 'Guest' });
+        expect((await rpc(guest, guestState, 'polySnapshot', { roomId: 'other' }))?.result).toEqual({
+            producers: [{ producerId: 'composite' }], roster: [{ callId: 'member' }], lobby: [],
+        });
+        expect(sfuClient.polySnapshot).toHaveBeenLastCalledWith(guestState.roomId);
+        expect((await rpc(host, hostState, 'polySnapshot'))?.result.lobby).toEqual([{ callId: 'waiting' }]);
+        expect((await rpc(guest, guestState, 'admitPeer', { targetPeerId: 'poly:waiting' }))?.error?.code).toBe(-32005);
+        expect((await rpc(host, hostState, 'admitPeer', { targetPeerId: 'poly:waiting' }))?.result.admitted).toBe(true);
+        expect(sfuClient.polyLobbyAction).toHaveBeenLastCalledWith(hostState.roomId, 'waiting', 'admit');
+    } finally {
+        await handlePeerDisconnect(guestState);
+        await handlePeerDisconnect(hostState);
+        vi.unstubAllEnvs();
     }
 });

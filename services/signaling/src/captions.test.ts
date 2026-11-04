@@ -97,7 +97,7 @@ describe('room caption and configured translation owners', () => {
         const next = participant(peer.roomId);
         await expect(translateCaption(next.ws, next.roomId, next.id, { id: `${peer.id}:part-100`, target: 'hi' })).rejects.toThrow('not found');
     });
-    it('coalesces identical in-flight translation across peers and rejects concurrent work per peer', async () => {
+    it('coalesces identical in-flight translation across peers and rejects duplicate concurrent work per peer', async () => {
         const request = provider(); const peer = participant(); const other = participant(peer.roomId);
         const { id } = publishCaption(peer.ws, peer.roomId, peer.id, final);
         let resolve!: (value: any) => void;
@@ -109,6 +109,18 @@ describe('room caption and configured translation owners', () => {
         resolve({ ok: true, text: async () => JSON.stringify({ translatedText: 'नमस्ते' }) });
         await Promise.all([first, second]);
         expect(request).toHaveBeenCalledTimes(2);
+    });
+    it('allows separate caption and voice targets concurrently for one listener', async () => {
+        provider();
+        const peer = participant();
+        const { id } = publishCaption(peer.ws, peer.roomId, peer.id, final);
+        await expect(Promise.all([
+            translateCaption(peer.ws, peer.roomId, peer.id, { id, target: 'hi' }),
+            translateCaption(peer.ws, peer.roomId, peer.id, { id, target: 'en' }),
+        ])).resolves.toEqual([
+            expect.objectContaining({ targetLanguage: 'hi' }),
+            expect.objectContaining({ targetLanguage: 'en' }),
+        ]);
     });
     it('sanitizes provider failures and refuses malformed capability data', async () => {
         provider(); const peer = participant();

@@ -1,3 +1,5 @@
+import { createPolyAdapter } from './poly-adapter.js';
+import { resolve } from 'node:path';
 import { authorizedControlRequest } from './control-auth.js';
 import { coalesceRoomCreation } from './room-creation.js';
 import express, { Request, Response, NextFunction } from 'express';
@@ -71,10 +73,13 @@ const workerManager = new WorkerManager();
 const rooms: Map<string, Room> = new Map();
 const cascadeManager = new CascadeManager(`sfu-${process.pid}`);
 
+let onPolyRoomCreated: ((room: Room) => void) | undefined;
+
 const createRoom = coalesceRoomCreation(async roomId => {
     const router = await workerManager.createRouter();
     const room = new Room(roomId, router);
     rooms.set(roomId, room);
+    onPolyRoomCreated?.(room);
 
     room.on('close', () => {
         if (rooms.get(roomId) === room) rooms.delete(roomId);
@@ -86,6 +91,27 @@ const createRoom = coalesceRoomCreation(async roomId => {
 async function getOrCreateRoom(roomId: string): Promise<Room> {
     const room = rooms.get(roomId);
     return room && !room.isClosed() ? room : createRoom(roomId);
+}
+
+function mountPolyBridge() {
+    const modulePath = process.env.POLY_BRIDGE_MODULE;
+    if (!modulePath) return;
+    if (!controlToken || process.env.BRIDGE_API_TOKEN !== controlToken) {
+        throw new Error('Poly bridge requires matching SFU_CONTROL_TOKEN and BRIDGE_API_TOKEN');
+    }
+    const adapter = createPolyAdapter(id => rooms.get(id));
+    const { createPolyBridge } = require(resolve(modulePath));
+    const bridge = createPolyBridge(adapter);
+    app.get('/api/poly/rooms/:room/snapshot', (req, res) => {
+        if (!rooms.has(req.params.room)) return res.status(404).json({ error: 'QSVC media room unavailable' });
+        res.json(adapter.snapshot(req.params.room));
+    });
+    app.use('/api/poly', bridge.http);
+    const watch = (room: Room) => room.once('close', () => {
+        void bridge.stopRoom(room.id).catch((err: Error) => logger.warn(err, 'Poly room teardown failed'));
+    });
+    for (const room of rooms.values()) watch(room);
+    onPolyRoomCreated = watch;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -278,6 +304,8 @@ app.post('/api/cascade/heartbeat', validateBody(cascadeHeartbeatBody), (req, res
 app.get<{ roomId: string }>('/api/cascade/rooms/:roomId/topology', (req, res) => {
     res.json(cascadeManager.getRoomTopology(req.params.roomId));
 });
+
+mountPolyBridge();
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GLOBAL ERROR HANDLER

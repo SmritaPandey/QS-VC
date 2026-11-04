@@ -46,7 +46,7 @@ function releaseAwaitingHost(roomId: string): void {
     for (const waiting of [...room.waitingRoom.values()]) {
         if (!waiting.awaitingHost) continue;
         waiting.awaitingHost = false;
-        if (room.settings.waitingRoomEnabled || room.settings.locked) {
+        if (room.settings.waitingRoomEnabled || room.settings.locked || (room.settings.webinar && !waiting.authUser?.sub)) {
             if (waiting.ws?.readyState === 1) waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'waitingStatus', params: { status: 'knocking' } }));
             if (room.hostPeerId) roomManager.sendToPeer(roomId, room.hostPeerId, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
             for (const peer of room.peers.values()) if (peer.role === 'co-host') roomManager.sendToPeer(roomId, peer.id, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
@@ -210,6 +210,9 @@ export async function handleRpcMessage(
                 const isOwner = (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub) || isPlatformAdmin;
                 // Google Meet rule: nobody gets in before the host starts the meeting. They wait, and
                 // are let in (or asked to knock) automatically when the host arrives.
+                if (policy?.status === 'ended' && !room.hostStarted && !isOwner) {
+                    throw createError(-32004, 'This meeting has ended. Ask the organiser to restart it or send a new invitation.');
+                }
                 if (room.ownerUserId && !room.hostStarted && !isOwner) {
                     if (room.settings.password && room.settings.password !== password) {
                         return { jsonrpc: '2.0', id: id!, error: { code: -32001, message: 'Invalid meeting password' } };
@@ -560,7 +563,11 @@ export async function handleRpcMessage(
                     throw createError(-32005, 'Only host/co-host can admit peers');
                 }
 
-                await admitWaitingPeer(roomId, targetPeerId);
+                if (process.env.POLY_BRIDGE_ENABLED === 'true' && typeof targetPeerId === 'string' && targetPeerId.startsWith('poly:')) {
+                    await sfuClient.polyLobbyAction(roomId, targetPeerId.slice(5), 'admit');
+                } else {
+                    await admitWaitingPeer(roomId, targetPeerId);
+                }
 
                 return { jsonrpc: '2.0', id: id!, result: { admitted: true, peerId: targetPeerId } };
             }
@@ -576,6 +583,10 @@ export async function handleRpcMessage(
                     throw createError(-32005, 'Only host/co-host can reject peers');
                 }
 
+                if (process.env.POLY_BRIDGE_ENABLED === 'true' && typeof targetPeerId === 'string' && targetPeerId.startsWith('poly:')) {
+                    await sfuClient.polyLobbyAction(roomId, targetPeerId.slice(5), 'deny');
+                    return { jsonrpc: '2.0', id: id!, result: { rejected: true, peerId: targetPeerId } };
+                }
                 const waiting = roomManager.rejectFromWaitingRoom(roomId, targetPeerId);
                 if (!waiting) throw createError(-32000, 'Peer not in waiting room');
 
@@ -753,7 +764,7 @@ export async function handleRpcMessage(
                 }
                 if (parsedSettings.data.waitingRoomEnabled === false && settingsRoom) {
                     // Quick access back on: let in everyone who was asking to join.
-                    for (const w of roomManager.getWaitingRoom(roomId).filter(w => !w.awaitingHost)) {
+                    for (const w of roomManager.getWaitingRoom(roomId).filter(w => !w.awaitingHost && (!settingsRoom.settings.webinar || w.authUser?.sub))) {
                         void admitWaitingPeer(roomId, w.id).catch(() => {});
                     }
                 }
@@ -793,6 +804,9 @@ export async function handleRpcMessage(
 
                 // Notify all peers
                 roomManager.updateRecording(roomId, null);
+                if (process.env.POLY_BRIDGE_ENABLED === 'true') {
+                    await sfuClient.stopPolyRoom(roomId).catch(error => logger.warn(error, 'Poly bridge stop failed'));
+                }
                 const endedRoom = roomManager.getRoom(roomId);
                 if (endedRoom?.ownerUserId) void reportMeetingStatus(endedRoom.meetingCode, 'ended');
                 roomManager.broadcast(roomId, 'meetingEnded', {
@@ -841,6 +855,19 @@ export async function handleRpcMessage(
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             // GET ROOM INFO (for participants)
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            case 'polySnapshot': {
+                const { roomId, peerId } = connectionState;
+                if (process.env.POLY_BRIDGE_ENABLED !== 'true' || !roomId || !peerId || !roomManager.getRoom(roomId)?.peers.has(peerId)) {
+                    throw createError(-32005, 'Poly bridge unavailable');
+                }
+                const snapshot = await sfuClient.polySnapshot(roomId);
+                return { jsonrpc: '2.0', id: id!, result: {
+                    producers: snapshot.producers,
+                    roster: snapshot.roster,
+                    lobby: roomManager.isHostOrCoHost(roomId, peerId) ? snapshot.lobby : [],
+                } };
+            }
+
             case 'getRoomInfo': {
                 const { peerId, roomId } = connectionState;
                 if (!peerId || !roomId) throw createError(-32000, 'Not joined a room');
@@ -1082,6 +1109,7 @@ async function joinPeerToRoom(
         } : null,
         existingPeers,
         sfuAvailable,
+        polyBridgeEnabled: process.env.POLY_BRIDGE_ENABLED === 'true',
         hostPresent: !!room.hostPeerId,
         isOwner: !!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub,
     };

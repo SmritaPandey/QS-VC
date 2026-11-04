@@ -47,7 +47,7 @@ const ScheduleMeeting: React.FC = () => {
     const { pathname, search } = useLocation();
     const schedulingWebinar = new URLSearchParams(search).get('type') === 'webinar';
     const [submitting, setSubmitting] = useState(false);
-    const [scheduled, setScheduled] = useState<(CalendarEvent & { occurrences?: { meetingCode: string; scheduledStart: string; scheduledEnd: string }[] }) | null>(null);
+    const [scheduled, setScheduled] = useState<(CalendarEvent & { webinar: boolean; occurrences?: { meetingCode: string; scheduledStart: string; scheduledEnd: string }[] }) | null>(null);
     const [inviteInput, setInviteInput] = useState('');
     const [copySuccess, setCopySuccess] = useState(false);
     // Scheduling saves a meeting to an account, so guests are asked to sign in first.
@@ -134,6 +134,7 @@ const ScheduleMeeting: React.FC = () => {
             setScheduled({
                 title: form.title || 'Scheduled Meeting',
                 occurrences: data.occurrences,
+                webinar: form.webinar,
                 startTime: startDateTime,
                 endTime: endDateTime,
                 timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -196,7 +197,8 @@ const ScheduleMeeting: React.FC = () => {
                 <div className="schedule-container">
                     <div className="schedule-success"><ThemeSelect />
                         <div className="success-icon"><span className="mi" aria-hidden="true">check_circle</span></div>
-                        <h1>Meeting scheduled.</h1>
+                        <h1>{scheduled.webinar ? 'Webinar scheduled.' : 'Meeting scheduled.'}</h1>
+                        {scheduled.webinar && <p>Share the webinar link with attendees. Signed-out guests need host approval to enter.</p>}
                         <div className="success-details">
                             <div className="detail-row">
                                 <span className="detail-label">Title</span>

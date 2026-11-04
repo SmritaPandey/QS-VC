@@ -1,10 +1,11 @@
+import { playbackFailure, translationFailure, type SpeechDiagnostic } from '../lib/translated-speech-status';
 import { useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { signaling } from '../lib/signaling';
 import { SpeechToTextEngine } from '../lib/speech-to-text';
 import { LANGUAGES, TextToSpeechEngine } from '../lib/realtime-translation';
 import CaptionOverlay, { type CaptionEntry } from './CaptionOverlay';
 
-interface RoomCaption { id: string; peerId: string; displayName: string; text: string; language: string; isFinal: boolean; timestamp: number }
+interface RoomCaption { receivedAt?: number; id: string; peerId: string; displayName: string; text: string; language: string; isFinal: boolean; timestamp: number }
 interface Capabilities { configured: boolean; languages: { code: string; name: string; targets?: string[] }[]; processing?: string }
 interface Props {
     open: boolean; onClose: () => void; connected: boolean; audioMuted: boolean; translatedSpeaking: boolean;
@@ -33,6 +34,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     const [allowGoogleTranslation, setAllowGoogleTranslation] = useState(false);
     const [capabilityError, setCapabilityError] = useState('');
     const [status, setStatus] = useState('');
+    const [voiceDiagnostic, setVoiceDiagnostic] = useState<SpeechDiagnostic | null>(null);
     const [captions, setCaptions] = useState<CaptionEntry[]>([]);
     const panelRef = useRef<HTMLElement>(null);
     const recognitionSupported = SpeechToTextEngine.isSupported();
@@ -47,7 +49,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
         if (open) panelRef.current?.querySelector<HTMLElement>('button')?.focus();
     }, [open]);
     useEffect(() => {
-        if (!open || !connected) return;
+        if (!connected) return;
         let active = true;
         setCapabilityError('Checking translation server…');
         signaling.request('translationCapabilities').then((result: Capabilities) => {
@@ -56,7 +58,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
             setCapabilityError(result.configured ? '' : 'Translation server is not configured. Original captions are available.');
         }).catch(() => { if (active) setCapabilityError('Translation server is unavailable. Original captions are available.'); });
         return () => { active = false; };
-    }, [open, connected]);
+    }, [connected]);
 
     useEffect(() => {
         if (!connected || !shareSpeech || audioMuted || translatedSpeaking) return;
@@ -65,7 +67,9 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
             language: speakingLanguage, interimResults: false,
             onCaption: (caption) => {
                 if (!active || !caption.isFinal) return;
+                const recognizedAt = performance.now();
                 signaling.request('captionPublish', { id: caption.id, text: caption.text, language: speakingLanguage, isFinal: true, allowGoogleTranslation: capabilities.processing === 'google-cloud' && allowGoogleTranslation })
+                    .then(() => { performance.measure('qsvc:caption:recognition-to-ack', { start: recognizedAt, end: performance.now() }); })
                     .catch(() => { if (active) setStatus('Could not share that caption. Speech is not being saved.'); });
             },
             onError: (message) => { if (active) { setStatus(message); onShareSpeechChange(false); } },
@@ -87,7 +91,18 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
         let running = false;
         const queue: RoomCaption[] = [];
         const seen = new Set<string>();
-        const tts = voiceEnabled ? new TextToSpeechEngine({ language: hearLanguage, onSpeakingChange }) : null;
+        setVoiceDiagnostic(voiceEnabled ? {
+            gate: 'sharing',
+            message: 'Waiting for shared speech in a different language. Speakers must enable speech sharing.',
+        } : null);
+        const tts = voiceEnabled ? new TextToSpeechEngine({
+            language: hearLanguage,
+            onSpeakingChange: speaking => {
+                onSpeakingChange(speaking);
+                if (speaking) setVoiceDiagnostic(null);
+            },
+            onPlaybackError: code => setVoiceDiagnostic(playbackFailure(code)),
+        }) : null;
         tts?.start();
         const current = () => !stopped && revision === generation.current;
         const translate = async (caption: RoomCaption, target: string): Promise<string> => {
@@ -109,18 +124,26 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
                     if (!results.has(target)) results.set(target, translate(caption, target));
                     return results.get(target)!;
                 };
-                if (showCaptions) {
+                const renderCaption = async () => {
+                    if (!showCaptions) return;
                     try { text = await output(captionLanguage); language = captionLanguage === 'original' ? caption.language : captionLanguage; label = text === caption.text ? 'Original' : 'Translated'; }
-                    catch { label = 'Original · translation unavailable'; }
-                    if (!current()) break;
-                    setCaptions(previous => [...previous.slice(-39), { id: caption.id, speakerName: caption.displayName, text, isFinal: true, timestamp: caption.timestamp, language, label }]);
-                }
-                if (tts && caption.peerId !== myPeerId() && hearLanguage.split('-')[0] !== caption.language.split('-')[0]) {
+                    catch { text = ''; if (current()) setStatus('Translation unavailable for the selected caption language.'); }
+                    if (!current()) return;
+                    if (text && caption.receivedAt !== undefined) {
+                        performance.measure('qsvc:caption:receive-to-display-update', { start: caption.receivedAt, end: performance.now() });
+                    }
+                    if (text) setCaptions(previous => [...previous.slice(-39), { id: caption.id, speakerName: caption.displayName, text, isFinal: true, timestamp: caption.timestamp, language, label }]);
+                };
+                const playVoice = async () => {
+                    if (!tts || caption.peerId === myPeerId() || hearLanguage.split('-')[0] === caption.language.split('-')[0]) return;
                     try {
                         const spoken = await output(hearLanguage);
-                        if (current() && !tts.speak(spoken, hearLanguage)) setStatus('No matching voice is available. Original audio stays on.');
-                    } catch { if (current()) setStatus('Translated audio is unavailable. Original audio stays on.'); }
-                }
+                        if (!current()) return;
+                        if (!tts.getBestVoice(hearLanguage)) setVoiceDiagnostic({ gate: 'voice', message: 'No device voice matches your selected language.' });
+                        else tts.speak(spoken, hearLanguage);
+                    } catch (error) { if (current()) setVoiceDiagnostic(translationFailure(error)); }
+                };
+                await Promise.all([renderCaption(), playVoice()]);
             }
             running = false;
         };
@@ -128,7 +151,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
             if (!current() || (!showCaptions && !voiceEnabled) || !caption.isFinal || seen.has(caption.id)) return;
             seen.add(caption.id); if (seen.size > 100) seen.delete(seen.values().next().value!);
             if (queue.length >= 6) { queue.shift(); setStatus('Captions are catching up. An older segment was skipped.'); }
-            queue.push(caption); void process();
+            queue.push({ ...caption, receivedAt: performance.now() }); void process();
         });
         return () => { stopped = true; queue.length = 0; unsubscribe(); tts?.dispose(); onSpeakingChange(false); };
     }, [connected, showCaptions, captionLanguage, voiceEnabled, hearLanguage, myPeerId, onSpeakingChange]);
@@ -137,6 +160,9 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     const hasVoice = (code: string) => voices.some(lang => lang === code || lang.split('-')[0] === code.split('-')[0]);
     const name = (code: string, fallback: string) => LANGUAGES.find(item => item.code === code)?.name || LANGUAGES.find(item => item.code.split('-')[0] === code)?.name || fallback;
     return <>
+        {voiceEnabled && voiceDiagnostic && !open && <div className="meeting-notice" role="status" data-speech-gate={voiceDiagnostic.gate}>
+            {voiceDiagnostic.message} Original meeting audio stays on.
+        </div>}
         <CaptionOverlay enabled={showCaptions} captions={captions} fontSize="large" />
         {open && <section ref={panelRef} className="meeting-language-settings" id="meeting-language-settings" role="dialog" aria-labelledby="caption-settings-title" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
             <div className="caption-settings-head"><h2 id="caption-settings-title">Captions & language</h2><button type="button" className="neu-icon-btn" aria-label="Close language settings" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></div>
@@ -154,7 +180,10 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
             <label htmlFor="heard-output-language">Hear translated audio in</label>
             <select id="heard-output-language" value={hearLanguage} onChange={event => { setVoiceEnabled(false); setHearLanguage(event.target.value); }}><option value="">Choose a language</option>{outputs.map(lang => <option value={lang.code} key={lang.code} disabled={!hasVoice(lang.code)}>{name(lang.code, lang.name)}{hasVoice(lang.code) ? '' : ' · no device voice'}</option>)}</select>
             <label className="caption-toggle"><input type="checkbox" checked={voiceEnabled} disabled={!connected || !hearLanguage || !hasVoice(hearLanguage)} onChange={event => { setVoiceEnabled(event.target.checked); setStatus(''); }} />Listen to translated speech</label>
-            <p className="caption-settings-note">Device voices may use a remote service. Original audio lowers only while translated speech plays. Use headphones.</p>
+            <p className="caption-settings-note">Device voices use the browser’s default audio output and may use a remote service. QS-VC cannot select or verify their output device. Original audio lowers only while translated speech plays.</p>
+            {voiceEnabled && voiceDiagnostic && <div role="status" className="caption-settings-status" data-speech-gate={voiceDiagnostic.gate}>
+                {voiceDiagnostic.message} Original meeting audio stays on.
+            </div>}
             <div role="status" className="caption-settings-status">{status || capabilityError}</div>
         </section>}
     </>;

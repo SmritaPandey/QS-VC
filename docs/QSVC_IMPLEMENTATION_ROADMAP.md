@@ -179,7 +179,9 @@ Before adopting vendor assurances, request certificate legal entity/scope/expiry
 
 ## 8. ISO-aligned control and evidence structure
 
-These are implementation/evidence workstreams, not certification or a clause-complete ISO audit. Obtain licensed current texts and an accredited assessor’s scope before formal conformity mapping. Current catalog editions verified:27001:2022 (catalog lists an amendment),27017:2026,27018:2025 and27701:2025. ISO27701 is now an independent PIMS management-system standard. [27001](https://www.iso.org/standard/27001), [27017](https://www.iso.org/standard/27017), [27018](https://www.iso.org/standard/27018), [27701](https://www.iso.org/standard/27701).
+These are implementation/evidence workstreams, not certification or a clause-complete ISO audit. Obtain licensed current texts and an accredited assessor’s scope before formal conformity mapping. Current catalog editions verified:27001:2022 with Amd 1:2024,27017:2026,27018:2025 and27701:2025. ISO/IEC 27701:2025 defines standalone privacy information management system requirements. Record its own scope, accountable roles, privacy risks, internal audit and management review evidence, even when shared controls are operated through the ISMS. [27001](https://www.iso.org/standard/27001), [27017](https://www.iso.org/standard/27017), [27018](https://www.iso.org/standard/27018), [27701](https://www.iso.org/standard/27701).
+
+Use ISO/IEC 27002:2022 as control implementation guidance. Assess ISO/IEC 42001:2023 for AI management and ISO 22301:2019 with Amd 1:2024 for business continuity only where the respective management systems are in scope. Track public and intranet evidence separately for each applicable scope. [27002](https://www.iso.org/standard/75652.html) · [42001](https://www.iso.org/standard/42001) · [22301](https://www.iso.org/standard/75106.html) · [22301 amendment](https://www.iso.org/standard/88412.html).
 
 | Workstream / owner | Applies to | Required implementation and evidence | Initial verification frequency |
 |---|---|---|---|
@@ -197,9 +199,22 @@ Use evidence folders: `01-scope-assets`, `02-risk-SoA`, `03-identity-secrets`, `
 
 Relevant WebRTC baseline: RFC 8826 threat model and RFC 8827 security architecture. Verify HTTPS/WSS origin integrity, permission/capture lifecycle, DTLS-SRTP media, ICE consent/fingerprints, authenticated signaling and membership, private control interfaces, TURN abuse protection and media-resource limits. Transport encryption terminates at the SFU unless a separately integrated E2EE layer protects media payloads. [RFC 8826](https://www.rfc-editor.org/info/rfc8826/), [RFC 8827](https://www.rfc-editor.org/info/rfc8827/). Do not treat a helper filename or AES setting as protocol verification.
 
+## Secure software development lifecycle
+
+Use the final NIST SP 800-218 SSDF v1.1 as the baseline. Record the controls below for each release, with separate runtime evidence for public internet and intranet deployments. [NIST SSDF v1.1](https://csrc.nist.gov/pubs/sp/800/218/final).
+
+| Stage | Owner | Required evidence |
+|---|---|---|
+| Plan and design (PO, PW) | Product and security owners | Scope, asset and data flows, threat model, security acceptance criteria, third-party risks, and privacy decisions. Include gateway, recording and translation trust boundaries where enabled. |
+| Protect and develop (PS, PW) | Engineering and reviewer | Reviewed changes, protected source and credentials, locked dependencies, security test cases for changed boundaries, and a traceable build revision. |
+| Verify and release (PW, PS) | Release and security owners | Passing tests and build, production dependency audit, artifact inventory, reviewed scan findings, deployment-specific acceptance evidence and rollback procedure. CI audits the root and Poly bridge lockfiles and fails on high or critical production advisories. Required branch checks and release approval are repository settings to verify separately. |
+| Operate and respond (RV) | Operations and security owners | Advisory monitoring, intake and reproduction, assigned remediation owner, time-limited exception where approved, retest evidence and root-cause follow-up. |
+
+Keep the release revision, environment, reviewer, results and exception expiry together. CI checks are one part of this lifecycle. Live VAPT and management-system conformity remain unverified.
+
 ## 9. OWASP verification and LLM threats
 
-Use ASVS 5.0.0 Level 2 as the proposed application verification baseline, with risk-selected higher-assurance controls for tenant boundaries/admin/recordings. Pin exact requirement IDs from the adopted release in the assessment workbook; this roadmap is not a statement that ASVS has passed. Supplement with OWASP Top 10:2025, API Top 10:2023 and a pinned WSTG stable version. [ASVS](https://asvs.owasp.org/), [Top10](https://owasp.org/projects/top-ten), [API risks](https://api-security.owasp.org/).
+Use ASVS 5.0.0 Level 2 as the proposed application verification baseline, with risk-selected higher-assurance controls for tenant boundaries/admin/recordings. Pin exact requirement IDs from the adopted release in the assessment workbook; this roadmap is not a statement that ASVS has passed. Supplement with OWASP Top 10:2025, API Top 10:2023 and WSTG v4.2. [WSTG v4.2](https://owasp.org/www-project-web-security-testing-guide/v42/). [ASVS](https://asvs.owasp.org/), [Top10](https://owasp.org/projects/top-ten), [API risks](https://api-security.owasp.org/).
 
 | Risk group | QSVC-specific test |
 |---|---|
@@ -213,7 +228,7 @@ Use ASVS 5.0.0 Level 2 as the proposed application verification baseline, with r
 | Recording/privacy | Host vs guest/other tenant read/write/share/delete; share revocation and signed URL expiry; logs/storage do not expose media/text |
 | Supply chain/crypto | Lockfiles/SBOM/image and model hashes/licenses, installer signature/update trust, actual crypto integration and dependency advisories |
 
-The active assistant is fixed-reply help, so an operational LLM attack surface is not established. For a future LLM translator/summarizer, pin the catalog release used; the canonical OWASP page currently presents the2025 list. Map all ten: prompt injection; sensitive disclosure; supply chain; data/model poisoning; improper output handling; excessive agency; system-prompt leakage; vector/embedding weaknesses; misinformation; unbounded consumption. [OWASP GenAI catalog](https://genai.owasp.org/llm-top-10/).
+The active assistant is fixed-reply help, so an operational LLM attack surface is not established. For a future LLM translator/summarizer, pin the catalog release used; the canonical OWASP page currently presents the 2025 list. Map all ten: prompt injection; sensitive disclosure; supply chain; data/model poisoning; improper output handling; excessive agency; system-prompt leakage; vector/embedding weaknesses; misinformation; unbounded consumption. [OWASP GenAI catalog](https://genai.owasp.org/llm-top-10/).
 
 Treat spoken instructions/transcripts as untrusted content, never tool policy. Keep model outputs as inert text; validate any structured output independently. No model may grant roles, invite/export/delete or query another tenant merely because the transcript asks. Use tenant canaries, retrieval prefilters plus output authorization, model/source provenance, poisoned-corpus tests, and budgets/kill switch. Never put secrets in prompts or rely on a hidden prompt as access control. Test negation/numbers/speaker attribution and harmful omissions as quality risks. Retrieval/vector controls are conditional on adding retrieval, not a finding against today’s static helper.
 

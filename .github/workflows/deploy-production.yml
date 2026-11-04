@@ -12,7 +12,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    name: Verify production revision
+    uses: ./.github/workflows/ci.yml
+
   deploy:
+    needs: verify
     name: Deploy QSVC to AWS
     runs-on: ubuntu-latest
     environment: production

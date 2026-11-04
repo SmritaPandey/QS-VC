@@ -1,0 +1,12 @@
+# drachtio = SIP stack used by the bridge to place SIP legs to FreeSWITCH.
+# FreeSWITCH itself runs on the MCU host (see scripts/install-freeswitch.sh) because
+# mod_h323 and video transcoding are easiest from packages/source on bare metal/VM.
+services:
+  drachtio:
+    image: drachtio/drachtio-server:0.8.26
+    network_mode: host
+    restart: unless-stopped
+    command: >
+      drachtio --contact "sip:*:5070;transport=udp,tcp"
+               --secret ${DRACHTIO_SECRET:-change-me}
+               --admin-port 9022 --loglevel info --sofia-loglevel 3

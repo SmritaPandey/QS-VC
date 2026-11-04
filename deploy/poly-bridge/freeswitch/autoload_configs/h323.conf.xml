@@ -1,0 +1,25 @@
+<!-- mod_h323 (h323plus). Legacy HDX / Group Series dial <mcu-ip>##<room> or room alias via gatekeeper.
+     NOTE: mod_h323 does not do H.235 media encryption or H.239 content.
+     For encrypted H.323 (AT-11) and H.239 (AT-05) see README phase 3 (Poly RMX / DMA in front). -->
+<configuration name="h323.conf" description="H323 Endpoints">
+  <settings>
+    <param name="trace-level" value="2"/>
+    <param name="context" value="qsvc-rooms"/>
+    <param name="dialplan" value="XML"/>
+    <param name="codec-prefs" value="G722,PCMU,PCMA,H264,H263"/>
+    <param name="use-rtp-timer" value="true"/>
+    <param name="rtp-timer-name" value="soft"/>
+    <param name="faststart" value="true"/>
+    <param name="h245tunneling" value="true"/>
+    <param name="h245insetup" value="true"/>
+    <!-- <param name="gk-address" value="10.0.0.20"/>  register to DMA/gatekeeper -->
+    <!-- <param name="gk-identifer" value="DMA"/> -->
+    <param name="ptime-override-value" value="20"/>
+  </settings>
+  <listeners>
+    <listener name="default">
+      <param name="h323-ip" value="$${local_ip_v4}"/>
+      <param name="h323-port" value="1720"/>
+    </listener>
+  </listeners>
+</configuration>

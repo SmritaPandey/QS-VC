@@ -227,12 +227,14 @@ export interface TTSOptions {
     volume?: number;        // Volume (0 – 1, default: 0.8)
     preferredVoice?: string; // Preferred voice name (exact match)
     onSpeakingChange?: (speaking: boolean) => void;
+    onPlaybackError?: (code: string) => void;
 }
 
 export class TextToSpeechEngine {
     private synth: SpeechSynthesis | null;
     private utteranceQueue: SpeechSynthesisUtterance[] = [];
     private current: SpeechSynthesisUtterance | null = null;
+    private playbackStartTimer?: ReturnType<typeof setTimeout>;
     private active = false;
     private disposed = false;
     private options: TTSOptions;
@@ -285,15 +287,22 @@ export class TextToSpeechEngine {
         utterance.volume = this.options.volume!;
         const completed = () => {
             if (this.current !== utterance) return;
+            clearTimeout(this.playbackStartTimer);
             this.current = null;
             this.options.onSpeakingChange?.(false);
             this.processQueue();
         };
         utterance.onstart = () => {
-            if (this.current === utterance) this.options.onSpeakingChange?.(true);
+            if (this.current !== utterance) return;
+            clearTimeout(this.playbackStartTimer);
+            this.options.onSpeakingChange?.(true);
         };
         utterance.onend = completed;
-        utterance.onerror = completed;
+        utterance.onerror = event => {
+            if (this.current !== utterance) return;
+            this.options.onPlaybackError?.(event.error);
+            completed();
+        };
         this.utteranceQueue.push(utterance);
         // Keep only the newest three waiting utterances during a backlog.
         while (this.utteranceQueue.length > 3) this.utteranceQueue.shift();
@@ -307,14 +316,19 @@ export class TextToSpeechEngine {
         if (!next) return true;
         this.current = next;
         try {
+            if (this.options.onPlaybackError) {
+                this.playbackStartTimer = setTimeout(() => this.options.onPlaybackError?.('start-timeout'), 5000);
+            }
             this.synth.speak(next);
             return true;
         } catch {
+            clearTimeout(this.playbackStartTimer);
             this.current = null;
             this.options.onSpeakingChange?.(false);
             next.onstart = null;
             next.onend = null;
             next.onerror = null;
+            this.options.onPlaybackError?.('synthesis-failed');
             return false;
         }
     }
@@ -325,6 +339,7 @@ export class TextToSpeechEngine {
 
     stop(): void {
         this.active = false;
+        clearTimeout(this.playbackStartTimer);
         const current = this.current;
         this.current = null;
         this.utteranceQueue = [];
