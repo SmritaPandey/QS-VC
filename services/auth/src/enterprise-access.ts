@@ -108,15 +108,54 @@ export function enterpriseRouter(verify: (token: string) => Promise<Record<strin
         }
     });
     async function installer() {
-        const file = process.env.ENTERPRISE_WINDOWS_INSTALLER;
-        if (!file || !path.isAbsolute(file) || !file.toLowerCase().endsWith('.exe')) return null;
-        try { return (await stat(file)).isFile() ? file : null; } catch { return null; }
+        const configured = {
+            windows: process.env.ENTERPRISE_WINDOWS_INSTALLER,
+            macAppleSilicon: process.env.ENTERPRISE_MACOS_ARM64_INSTALLER,
+            macIntel: process.env.ENTERPRISE_MACOS_X64_INSTALLER,
+        };
+        const extensions = { windows: '.exe', macAppleSilicon: '.zip', macIntel: '.zip' } as const;
+        const available = async (platform: keyof typeof configured) => {
+            const file = configured[platform];
+            if (!file || !path.isAbsolute(file) || !file.toLowerCase().endsWith(extensions[platform])) return false;
+            try { return (await stat(file)).isFile(); } catch { return false; }
+        };
+        return {
+            windows: await available('windows'),
+            macAppleSilicon: await available('macAppleSilicon'),
+            macIntel: await available('macIntel'),
+        };
     }
-    router.get('/', async (_req, res) => res.json({ workspaceUrl: res.locals.workspaceUrl, workspaceMode: res.locals.workspaceMode, windowsAvailable: !!(await installer()), expiresAt: res.locals.expiresAt }));
-    router.get('/windows', async (_req, res) => {
-        const file = await installer();
-        if (!file) { res.status(503).json({ error: 'The Windows installer is not available yet.' }); return; }
-        res.download(file, 'QS-VC-Windows-Setup.exe', error => { if (error && !res.headersSent) res.status(503).json({ error: 'Download unavailable. Please retry.' }); });
+    router.get('/', async (_req, res) => {
+        const downloads = await installer();
+        res.json({ workspaceUrl: res.locals.workspaceUrl, workspaceMode: res.locals.workspaceMode, downloads, windowsAvailable: downloads.windows, expiresAt: res.locals.expiresAt });
+    });
+    const downloadAsset = async (platform: 'windows' | 'macAppleSilicon' | 'macIntel', res: Response) => {
+        const availability = await installer();
+        if (!availability[platform]) {
+            res.status(503).json({ error: 'This installer is not available yet.' });
+            return;
+        }
+        const file = {
+            windows: process.env.ENTERPRISE_WINDOWS_INSTALLER!,
+            macAppleSilicon: process.env.ENTERPRISE_MACOS_ARM64_INSTALLER!,
+            macIntel: process.env.ENTERPRISE_MACOS_X64_INSTALLER!,
+        }[platform];
+        const filename = {
+            windows: 'QS-VC-Windows-Setup.exe',
+            macAppleSilicon: 'QS-VC-macOS-arm64.zip',
+            macIntel: 'QS-VC-macOS-x64.zip',
+        }[platform];
+        res.download(file, filename, error => { if (error && !res.headersSent) res.status(503).json({ error: 'Download unavailable. Please retry.' }); });
+    };
+    router.get('/windows', (_req, res) => downloadAsset('windows', res));
+    router.get('/macos/arm64', (_req, res) => downloadAsset('macAppleSilicon', res));
+    router.get('/macos/x64', (_req, res) => downloadAsset('macIntel', res));
+    router.get('/download/:platform', (req, res) => {
+        const platform = req.params.platform;
+        if (platform === 'windows') return downloadAsset('windows', res);
+        if (platform === 'macos-arm64') return downloadAsset('macAppleSilicon', res);
+        if (platform === 'macos-x64') return downloadAsset('macIntel', res);
+        return res.sendStatus(404);
     });
     return router;
 }

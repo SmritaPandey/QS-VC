@@ -1,5 +1,8 @@
 import type { Pool } from 'pg';
 import type { Request, Response } from 'express';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { enterpriseRouter } from './enterprise-access';
 import { InvalidSessionError } from './sessions';
@@ -41,6 +44,28 @@ it('lets platform admins in without a per-user grant, using the admin workspace 
     expect(allowed.next).toHaveBeenCalledOnce();
     expect(allowed.res.locals).toMatchObject({ workspaceUrl: 'https://intranet.example/', workspaceMode: 'organisation' });
     expect((await check({ sub: 'someone', tenantId: 'any', role: 'member' })).next).not.toHaveBeenCalled();
+});
+
+it('reports only the Windows and Mac installers that are actually staged', async () => {
+    const folder = mkdtempSync(path.join(tmpdir(), 'qsvc-enterprise-downloads-'));
+    try {
+        const arm = path.join(folder, 'arm64.zip');
+        const intel = path.join(folder, 'x64.zip');
+        writeFileSync(arm, 'apple-silicon-test-artifact');
+        vi.stubEnv('ENTERPRISE_WINDOWS_INSTALLER', path.join(folder, 'missing.exe'));
+        vi.stubEnv('ENTERPRISE_MACOS_ARM64_INSTALLER', arm);
+        vi.stubEnv('ENTERPRISE_MACOS_X64_INSTALLER', intel);
+        const router = enterpriseRouter(async () => ({}));
+        const route = router.stack.find(layer => layer.route?.path === '/')!.route!;
+        const res = { locals: {}, json: vi.fn() };
+        await route.stack[0].handle({} as Request, res as unknown as Response, vi.fn());
+        expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
+            downloads: { windows: false, macAppleSilicon: true, macIntel: false },
+            windowsAvailable: false,
+        }));
+    } finally {
+        rmSync(folder, { recursive: true, force: true });
+    }
 });
 
 it('blocks expired terms even when the user also has a legacy grant', async () => {

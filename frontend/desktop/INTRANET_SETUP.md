@@ -2,15 +2,17 @@
 
 Version 1.2.0 · 4 November 2026
 
-This guide covers three jobs: installing QS-VC on Windows or Mac, connecting it to your organisation, and giving the three platform admins full access.
+This guide covers signing in as a platform admin, testing the website and desktop clients, installing QS-VC on Windows or Mac, and connecting it to an organisation workspace.
 
 | File | For | SHA-256 |
 | --- | --- | --- |
 | `QS-VC-Windows-Setup.exe` | Windows 10/11, 64-bit (about 78 MB) | `807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45` |
-| `QS-VC-macOS-AppleSilicon.zip` | Mac with M1/M2/M3/M4 chip (about 94 MB) | `fdaec4887f0dcd408d803e654823a74ccf8a4cdee6740168e1164989cdc9bc04` |
-| `QS-VC-macOS-Intel.zip` | Mac with Intel chip (about 100 MB) | `1004550b95b3d921fc1e3cd44b1d2b2fedc3d9daebcbf75fdc3e2dea3db6d974` |
+| `QS-VC-macOS-arm64.zip` | Mac with Apple silicon (M1/M2/M3/M4) | Release-specific; shown after download and recorded in the deployment artifact |
+| `QS-VC-macOS-x64.zip` | Mac with Intel chip | Release-specific; shown after download and recorded in the deployment artifact |
 
-The `.exe` opens only on Windows; a Mac cannot open it. On a Mac, use one of the macOS zips: Apple menu → **About This Mac** shows "Chip: Apple M…" (use Apple Silicon) or "Processor: Intel" (use Intel).
+Choose the matching operating system in the signed-in Intranet page. For Mac,
+Apple menu → **About This Mac** shows "Chip: Apple M…" (choose Apple silicon)
+or "Processor: Intel" (choose Intel). The `.exe` opens only on Windows.
 
 > The shared admin password is not stored in this repository. Get it from the operator.
 
@@ -30,13 +32,59 @@ These three accounts have the **admin** role, which gives full access to every f
 
 What admin unlocks:
 
-- Sign in on the website or the QS-VC app (Windows or Mac) with the email above and the password.
-- Open the **Intranet** page and download QS-VC for Windows without a per-user approval.
+- Sign in on the website or the QS-VC app (Windows or Mac) with the email above and the password supplied privately by the operator.
+- Open the **Intranet** page to open the configured test workspace and choose an available Windows or Mac installer.
 - Join **any** meeting as host, even before the organiser arrives. This bypasses meeting passwords, locked rooms, the waiting room and participant limits.
 - Mute, remove, lock, record and end any meeting.
 - Start or end any meeting in their organisation through the meeting service.
 
 Each admin should change this password after the first sign-in. The password screen is not built yet, so until it is, the operator re-runs step 2.3 with a new password.
+
+### 1.1 Admin test: website, workspace and desktop app
+
+Use this flow to confirm that the signed-in admin experience and the available
+Windows/Mac downloads work. The default admin destination is the shared online
+QS-VC test workspace; it is **not** a private intranet or an isolated tenant.
+Use sample names and meeting content there.
+
+1. Get the admin email and current password from the operator. The password is
+   intentionally not written in this guide or stored in Git.
+2. In a browser, open [qsvcmeet.com](https://qsvcmeet.com), sign in with that
+   admin account, then open **Intranet** from the website navigation. You can
+   also go directly to `https://qsvcmeet.com/intranet` after signing in.
+3. Confirm the signed-in view shows **Open workspace** and **Download QS-VC**.
+   The workspace button should open `https://qsvcmeet.com/app` and identify it
+   as the online test workspace. The website session is not automatically
+   passed into a separately running desktop app, so sign in there too.
+4. Under **Your device**, choose the computer you are testing:
+   - **Windows 10/11 (64-bit)** for a 64-bit Windows PC.
+   - **Mac · Apple silicon (M1–M4)** for an M-series Mac.
+   - **Mac · Intel** for an Intel Mac.
+   Select **Download selected app**. An unavailable build appears disabled; it
+   means that installer has not been staged by the deployed service.
+5. After the download, note the SHA-256 shown by the page. Compare it with the
+   value from the matching approved release before installing. The Windows
+   release value is in the table above. Mac checksums are release-specific and
+   are stored alongside each Mac archive in the protected deployment artifact;
+   ask the operator for that release's value. The page's displayed hash is a
+   fingerprint of the received file, not an independent authenticity check.
+6. Install the downloaded app using the matching section below. At first
+   launch, enter `https://qsvcmeet.com` as the organisation address, then sign
+   in with the admin credentials. If the app reports invalid credentials,
+   ask the operator to confirm that the same account is provisioned in the
+   meeting service; website sign-in alone does not create a desktop workspace
+   account.
+7. Verify the basics with sample data: create a test meeting, join it from a
+   second browser/device, check camera and microphone, then leave and sign out.
+   Sign out separately from the website and desktop app because they have
+   separate sessions.
+
+If **Intranet** says access is not approved, first confirm the signed-in email
+is one of the platform admins above and that its admin account exists in the
+auth service. If **Open workspace** is missing or points elsewhere, the
+operator must set `QSVC_ADMIN_WORKSPACE_URL=https://qsvcmeet.com` and deploy the
+updated auth service. Seeing the correct controls in source code does not
+change the live website until that deployment is completed.
 
 ---
 
@@ -84,12 +132,17 @@ ENTERPRISE_ACCESS_JSON=[{"tenantId":"<tenant id>","userIds":["<user id>"],"works
 
 # The auth container reads this path; deploy/aws/compose.yml mounts the host installer folder here.
 ENTERPRISE_WINDOWS_INSTALLER=/opt/qsvc/installers/QS-VC-Windows-Setup.exe
+ENTERPRISE_MACOS_ARM64_INSTALLER=/opt/qsvc/installers/QS-VC-macOS-arm64.zip
+ENTERPRISE_MACOS_X64_INSTALLER=/opt/qsvc/installers/QS-VC-macOS-x64.zip
 ```
 
-For the Windows download option, place the verified installer in the host folder
-`/opt/qsvc/deploy/aws/installers/` (the read-only volume mounted by
-`deploy/aws/compose.yml`). For the release split into `.part00` through
-`.part03`, assemble and check it from the repository root:
+The protected production workflow assembles and verifies Windows, then builds
+both Mac zips on a macOS runner and includes their release-specific checksum
+files in the deployment artifact. For manual builds, use
+`npm --prefix frontend/desktop run package:mac:arm64` or
+`npm --prefix frontend/desktop run package:mac:x64`. The download screen shows
+the checksum for the exact file downloaded. For a manual/local Windows staging
+run, assemble and check it from the repository root:
 
 ```bash
 cat deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part00 \
@@ -102,8 +155,8 @@ shasum -a 256 deploy/aws/installers/QS-VC-Windows-Setup.exe
 
 Confirm the result is `807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45`,
 then transfer that file to the same relative folder on the deployment host and
-redeploy/restart auth. The Intranet page enables **Download for Windows** only
-when auth can read the file.
+redeploy/restart auth. The Intranet page enables each device choice only when
+auth can read its installer file.
 
 The platform admin fallback opens `https://qsvcmeet.com/app` and is labelled as
 an online test workspace. For a real organisation deployment, set
@@ -119,48 +172,160 @@ separately operated FreeSWITCH MCU and the QS-VC Poly bridge; the Windows/Mac
 installer does not include or install either service. The old `services/mcu`
 package is control-only and must not be presented as the media MCU.
 
-Before enabling the bridge, the operator must configure and verify:
+#### Step-by-step setup and test
 
-- A built `deploy/poly-bridge` package and an SFU deployment that mounts it.
-- A FreeSWITCH host with the QSVC conference and SIP profiles configured.
-- A reachable drachtio service, private RTP routes/firewall rules, and strong
-  non-default ESL and drachtio secrets.
-- Matching private `SFU_CONTROL_TOKEN` and `BRIDGE_API_TOKEN` values.
-- A working FreeSWITCH H.323 module or an external H.323-to-SIP gateway for
-  legacy H.323 devices. SIP support alone does not provide H.323.
+This is a **server-side Linux deployment**. Windows and Mac QS-VC clients can
+join it from the intranet, but neither desktop installer runs FreeSWITCH or
+drachtio. Use an approved Debian 12 media host for FreeSWITCH and a Linux
+host/container for drachtio. The local Mac/Windows launcher can only connect
+to services already running and reachable on the private network.
 
-For a self-hosted intranet running this repository's local launcher, build the
-bridge and select the required MCU profile:
+1. **Plan the private network.** Reserve addresses for the QS-VC SFU/bridge,
+   FreeSWITCH and Poly endpoint VLANs. Confirm routes in both directions and
+   choose the FreeSWITCH RTP range. Allow only required traffic: SIP/TLS and
+   H.323 from approved endpoint networks, bridge SIP/RTP between QS-VC and
+   FreeSWITCH, media UDP between endpoints and the MCU, and private control
+   access for ESL (8021) and drachtio (9022). Do not expose ESL, drachtio
+   control, or the SFU bridge API to the public internet. Firewall values in
+   the sample config are examples; replace them with your real addresses.
+2. **Install FreeSWITCH on the Debian 12 MCU host.** Review
+   [`install-freeswitch.sh`](../../deploy/poly-bridge/scripts/install-freeswitch.sh)
+   first. It installs FreeSWITCH and conference/media modules and requires a
+   SignalWire token securely provided to the operator. Run it only on the
+   dedicated media host with the approved privileged account. It may not find
+   `mod_h323` in packages; if so, build that module from source or use an
+   existing Poly RMX/DMA or other H.323-to-SIP gateway. Do not assume H.323 is
+   available just because FreeSWITCH installed.
+3. **Apply the FreeSWITCH configuration.** Use the files under
+   [`deploy/poly-bridge/freeswitch`](../../deploy/poly-bridge/freeswitch) as
+   templates. Replace all sample IPs and ACL ranges. Merge `vars.xml.snippet`,
+   `acl.conf.xml.snippet` and `conference.conf.xml.snippet` into their named
+   FreeSWITCH configuration files. Install `qsvc-bridge.xml` and
+   `qsvc-poly.xml` in the loaded SIP profiles, and ensure FreeSWITCH loads
+   those profiles. Install `dialplan/qsvc.xml` in an included dialplan context.
+   Configure a valid TLS certificate for the Poly TLS profile and set the
+   event socket password to the same private value as `FS_ESL_PASSWORD` below.
+   Restrict the event socket and trusted bridge profile to the QS-VC host only.
+   Install `h323.conf.xml` only when `mod_h323` is actually present. Review
+   encryption policy and endpoint compatibility before allowing calls.
+4. **Start and check FreeSWITCH.** Restart the service after configuration.
+   From the MCU host, use `fs_cli` to check that FreeSWITCH responds, the
+   `qsvc` conference profile and SIP profiles are loaded, and (if required)
+   `mod_h323` is loaded:
 
-```bash
-npm --prefix deploy/poly-bridge ci
-npm --prefix deploy/poly-bridge run build
-npm run intranet:mcu
-```
+   ```bash
+   sudo systemctl restart freeswitch
+   fs_cli -x "show modules"
+   fs_cli -x "sofia status"
+   fs_cli -x "conference list"
+   ```
 
-The launcher fails instead of silently falling back when its module, secrets,
-or configured FreeSWITCH/drachtio services are missing. It does not install or
-start those media services. In a separately managed production deployment,
-the operator must apply the equivalent bridge module and environment settings
-to the deployed SFU and signaling services; running this local launcher does
-not change the hosted workspace.
+   Check service logs for XML parse, TLS certificate, ACL and module errors.
+   Do not proceed until the private ESL endpoint is reachable from the QS-VC
+   host.
+5. **Start drachtio on the Linux QS-VC bridge/SFU host.** Set a unique,
+   non-default `DRACHTIO_SECRET` in the root QS-VC `.env` first (keep it for
+   the matching value in step 6), then start the supplied container from the
+   repository root:
 
-In an unlocked regular meeting, the signed-in host selects **Host controls →
-Enable room devices**. The endpoint then calls the room alias through the
-organisation's configured gateway route, and the host admits it from the
-waiting list. QS-VC does not provide public SIP/PSTN dial-in numbers.
+   ```bash
+   docker compose --env-file .env -f deploy/poly-bridge/docker-compose.yml up -d
+   ```
 
-The bridge and host controls are integrated in code, but no SIP Poly ↔ H.323
-Polycom ↔ browser end-to-end call has been verified. The operator must complete
-AT-01 with real devices and record the media observations before claiming
-interoperability. See [the MCU setup and status guide](../../docs/MCU_USER_MANUAL.md)
-and [Poly bridge instructions](../../deploy/poly-bridge/README.md).
+   Verify the drachtio container is running and its private admin port is
+   reachable from the SFU process. This is a separate service; the QS-VC
+   launcher does not install or start it.
+6. **Configure QS-VC secrets and addresses.** In the root `.env` on the host
+   running the SFU/bridge, set the following using real routable private IPs.
+   Generate strong random secrets outside source control; set the two bridge
+   tokens to the same value. Use the FreeSWITCH event-socket password and
+   drachtio secret configured in the previous steps:
+
+   ```dotenv
+   POLY_BRIDGE_ENABLED=true
+   SFU_CONTROL_TOKEN=REPLACE_WITH_STRONG_RANDOM_SECRET
+   BRIDGE_API_TOKEN=REPLACE_WITH_THE_SAME_SECRET
+   BRIDGE_RTP_LISTEN_IP=0.0.0.0
+   BRIDGE_RTP_ANNOUNCED_IP=REPLACE_WITH_QSVC_PRIVATE_IP
+   FS_SIP_HOST=REPLACE_WITH_FREESWITCH_PRIVATE_IP:5090
+   FS_ESL_HOST=REPLACE_WITH_FREESWITCH_PRIVATE_IP
+   FS_ESL_PORT=8021
+   FS_ESL_PASSWORD=REPLACE_WITH_PRIVATE_EVENT_SOCKET_PASSWORD
+   FS_CONF_PROFILE=qsvc
+   DRACHTIO_HOST=REPLACE_WITH_DRACHTIO_PRIVATE_IP
+   DRACHTIO_PORT=9022
+   DRACHTIO_SECRET=REPLACE_WITH_PRIVATE_DRACHTIO_SECRET
+   BRIDGE_SRTP=mandatory
+   BRIDGE_LEG_VIDEO_CODEC=VP8
+   ```
+
+   Keep `.env` out of Git and limit file access to the service operator. Set
+   `BRIDGE_RTP_ANNOUNCED_IP` to the QS-VC address FreeSWITCH can reach, not
+   `127.0.0.1`. Confirm the selected codec is supported by your FreeSWITCH
+   build and apply the organisation's approved TLS/SRTP policy.
+7. **Build and start the MCU-enabled intranet profile.** From the repository
+   root, install/build the bridge dependencies, stop any existing local QS-VC
+   processes on the SFU/signaling ports, then start the required profile:
+
+   ```bash
+   npm --prefix deploy/poly-bridge ci
+   npm --prefix deploy/poly-bridge run build
+   npm run intranet:mcu
+   ```
+
+   The launcher fails if the bridge build, matching tokens, non-default
+   credentials, FreeSWITCH ESL or drachtio are missing or unreachable. A
+   separately managed server deployment must configure and mount the bridge
+   in the deployed SFU and enable its signaling relay; this local command does
+   not change a hosted workspace.
+8. **Run a controlled SIP room-device check.** Open the intranet workspace
+   from a Windows or Mac client, sign in as an approved host, create a regular
+   unlocked test meeting and select **Host controls → Enable room devices**.
+   Have an approved SIP Poly endpoint dial the room alias through the configured
+   FreeSWITCH route. Admit it from the waiting list. Verify it appears in the
+   roster and test two-way audio and video with a QS-VC browser/client. Dial
+   strings depend on the endpoint/gateway; the included dialplan accepts a
+   room alias and the documented legacy form is `<MCU-IP>##<room-alias>`.
+   For H.323, continue only after confirming the H.323 module or gateway is
+   installed and reachable.
+9. **Run and record AT-01.** Join one H.323 Poly device, one SIP Poly device,
+   and one QS-VC browser in the same meeting at the same time. During that call,
+   run the collector from the MCU host (or a host with `fs_cli`, `curl` and
+   authorized bridge access). Use the live SFU room ID, not the public meeting
+   code:
+
+   ```bash
+   read -r -p "Live SFU room ID: " ROOM
+   read -r -p "Private SFU bridge URL: " BRIDGE
+   read -r -s -p "Bridge API token: " TOKEN
+   printf '\n'
+   export ROOM BRIDGE TOKEN
+   bash deploy/poly-bridge/scripts/verify-at01.sh
+   unset TOKEN
+   ```
+
+   Save the generated evidence with endpoint models, firmware, negotiated
+   codecs, encryption and human observations in the lab's
+   `QSVC_Poly_Interop_Tracker.xlsx` workbook (the workbook is maintained
+   separately from this repository).
+   Confirm each audio/video direction by actually hearing and seeing it on
+   the browser, SIP endpoint and H.323 endpoint. Collector output and service
+   health alone do not prove endpoint media interoperability.
+
+When the MCU services are not configured, use browser-only mode with
+`npm run intranet`; room-device MCU functions are unavailable in that mode.
+QS-VC does not provide public SIP/PSTN dial-in numbers. No SIP Poly ↔ H.323
+Polycom ↔ browser end-to-end call has been verified in this checkout. Complete
+AT-01 with real devices and record media observations before claiming
+interoperability. For capability limits and reference details, see
+[the MCU status guide](../../docs/MCU_USER_MANUAL.md) and
+[Poly bridge reference](../../deploy/poly-bridge/README.md).
 
 ---
 
 ## 3. Install QS-VC on Windows
 
-1. Download the installer: sign in on the website, open **Intranet**, then select **Download for Windows**. The window edge glows while it downloads and shows a SHA-256 checksum when done. You can also use the file you were given directly.
+1. Sign in on the website, open **Intranet**, select your device under **Download QS-VC**, then select **Download selected app**. The window edge glows while it downloads and shows a SHA-256 checksum when done. You can also use the file you were given directly.
 2. Check the file before running it. In PowerShell:
    ```powershell
    Get-FileHash .\QS-VC-Windows-Setup.exe -Algorithm SHA256
@@ -183,7 +348,7 @@ and [Poly bridge instructions](../../deploy/poly-bridge/README.md).
    ```
 6. When asked, allow **Camera** and **Microphone**. For screen sharing, allow QS-VC under **System Settings → Privacy & Security → Screen & System Audio Recording**, then restart the app.
 
-To check the download first, run `shasum -a 256 ~/Downloads/QS-VC-macOS-AppleSilicon.zip` in Terminal and compare it with the table.
+To check the download first, run `shasum -a 256 ~/Downloads/QS-VC-macOS-arm64.zip` (or `QS-VC-macOS-x64.zip`) in Terminal and compare it with the checksum supplied by the operator for the same release.
 
 ---
 
@@ -226,6 +391,9 @@ Not signed in? On the sign-in screen, **or join as a guest** lets you enter a me
 | Sign-in says "Too many auth attempts" | Wait 15 minutes; the limit is 10 tries per 15 minutes per network address |
 | Sign-up says "This address is reserved" | Expected for the three admin emails; use step 2.3 instead |
 | Intranet page says access is not approved | The user needs an entry in `ENTERPRISE_ACCESS_JSON`, or is not an admin |
+| Signed-in admin sees no Open workspace option | Confirm the deployed auth service has `QSVC_ADMIN_WORKSPACE_URL=https://qsvcmeet.com` and reload `/intranet` |
+| A device option is disabled | That platform's installer is not staged in the deployed auth service. Check the installer folder and redeploy auth |
+| Desktop app rejects the website admin credentials | Desktop sign-in is separate from the browser session. Confirm the account exists in the workspace's auth service and use that workspace's credentials |
 | Screen share shows nothing to pick | Allow QS-VC under Windows Settings → Privacy → Screen capture, then retry |
 | Camera or microphone blocked | Windows Settings → Privacy → Camera / Microphone → allow desktop apps |
 | Closing the window doesn't quit (Windows) | It keeps running in the tray; right-click the tray icon → **Quit QS-VC** |

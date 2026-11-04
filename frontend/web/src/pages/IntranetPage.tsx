@@ -7,7 +7,7 @@ import MeetingScene from '../components/MeetingScene';
 import DownloadFeedback, { type DownloadState } from '../components/DownloadFeedback';
 import { AUTH_API, clearSession, getToken, refreshSession } from '../lib/session';
 import { useSession } from '../lib/use-session';
-import { intranetUrl } from '../lib/intranet-url';
+import { intranetUrl, isOnlineTestWorkspace } from '../lib/intranet-url';
 import '../styles/service-pages.css';
 
 const steps = [
@@ -16,10 +16,17 @@ const steps = [
     { title: 'Check your devices and join', text: 'Sign in to your organisation’s workspace, check your camera and microphone, then join an authorised meeting. Your administrator manages access.' },
     { title: 'Work together', text: 'Meet with video, chat and screen sharing. Use available whiteboard, polls, Q&A and notes. Language features depend on your organisation’s configuration.' },
 ];
+type DesktopDownload = 'windows' | 'macos-arm64' | 'macos-x64';
+type DownloadAvailability = { windows: boolean; macAppleSilicon: boolean; macIntel: boolean };
+const downloadChoices: Array<{ id: DesktopDownload; label: string; availableKey: keyof DownloadAvailability; endpoint: string; filename: string; mime: string }> = [
+    { id: 'windows', label: 'Windows 10/11 (64-bit)', availableKey: 'windows', endpoint: 'windows', filename: 'QS-VC-Windows-Setup.exe', mime: 'application/vnd.microsoft.portable-executable' },
+    { id: 'macos-arm64', label: 'Mac · Apple silicon (M1–M4)', availableKey: 'macAppleSilicon', endpoint: 'macos-arm64', filename: 'QS-VC-macOS-arm64.zip', mime: 'application/zip' },
+    { id: 'macos-x64', label: 'Mac · Intel', availableKey: 'macIntel', endpoint: 'macos-x64', filename: 'QS-VC-macOS-x64.zip', mime: 'application/zip' },
+];
 export default function IntranetPage() {
     const session = useSession();
     const token = session.profile ? getToken() : '';
-    const [result, setResult] = useState<{ token: string; access?: { workspaceUrl: string; windowsAvailable: boolean; onlineDemo: boolean }; error?: string }>();
+    const [result, setResult] = useState<{ token: string; access?: { workspaceUrl: string; downloads: DownloadAvailability; onlineDemo: boolean }; error?: string }>();
     const [attempt, setAttempt] = useState(0);
     const current = token && result?.token === token ? result : undefined;
     const access = session.status === 'unavailable' ? undefined : current?.access;
@@ -29,6 +36,9 @@ export default function IntranetPage() {
     const downloadOwner = useRef('');
     const [step, setStep] = useState(0);
     const [downloadState, setDownloadState] = useState<DownloadState>({ phase: 'idle' });
+    const [downloadPlatform, setDownloadPlatform] = useState<DesktopDownload>('windows');
+    const chosenDownload = downloadChoices.find(choice => choice.id === downloadPlatform)!;
+    const chosenDownloadAvailable = Boolean(access?.downloads[chosenDownload.availableKey]);
     const downloading = downloadState.phase === 'working';
     // Success and failure messages fade on their own; Esc dismisses them sooner.
     useEffect(() => {
@@ -59,11 +69,20 @@ export default function IntranetPage() {
             if (response.status === 403) { setResult({ token }); return; }
             if (!response.ok) throw new Error('Access check failed');
             const data = await response.json();
-            const onlineDemo = data.workspaceMode === 'online-demo' && session.profile?.role === 'admin';
+            const onlineDemo = session.profile?.role === 'admin'
+                && (data.workspaceMode === 'online-demo' || isOnlineTestWorkspace(data.workspaceUrl));
             const url = intranetUrl(data.workspaceUrl, window.location.origin, onlineDemo);
             if (!currentRequest()) return;
             setResult(url
-                ? { token, access: { workspaceUrl: url, windowsAvailable: data.windowsAvailable === true, onlineDemo } }
+                ? { token, access: {
+                    workspaceUrl: url,
+                    downloads: {
+                        windows: data.downloads?.windows === true || data.windowsAvailable === true,
+                        macAppleSilicon: data.downloads?.macAppleSilicon === true,
+                        macIntel: data.downloads?.macIntel === true,
+                    },
+                    onlineDemo,
+                } }
                 : { token, error: 'The configured address does not point to a separate HTTPS workspace. Ask your administrator to update it.' });
         }).catch(() => {
             if (currentRequest()) setResult({ token, error: 'We couldn’t check your intranet access. Try again.' });
@@ -71,14 +90,14 @@ export default function IntranetPage() {
         return () => controller.abort();
     }, [token, attempt, session.status]);
     async function download() {
-        if (session.status !== 'authenticated' || !token || !access?.windowsAvailable || downloadRequest.current) return;
+        if (session.status !== 'authenticated' || !token || !chosenDownloadAvailable || downloadRequest.current) return;
         const controller = new AbortController();
         downloadRequest.current = controller;
         downloadOwner.current = token;
         const isCurrent = () => !controller.signal.aborted && getToken() === token;
         setDownloadState({ phase: 'working', received: 0, total: null });
         try {
-            const response = await fetch(`${AUTH_API}/api/auth/enterprise/windows`, {
+            const response = await fetch(`${AUTH_API}/api/auth/enterprise/download/${chosenDownload.endpoint}`, {
                 headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
             });
             if (!isCurrent()) return;
@@ -106,12 +125,12 @@ export default function IntranetPage() {
                 chunks.push(buffer); received = buffer.byteLength;
             }
             if (!received || (total && received !== total)) throw new Error('The download was incomplete. Check your connection and retry.');
-            const blob = new Blob(chunks as BlobPart[], { type: 'application/vnd.microsoft.portable-executable' });
+            const blob = new Blob(chunks as BlobPart[], { type: chosenDownload.mime });
             const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
             if (!isCurrent()) return;
             const checksum = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
             const url = URL.createObjectURL(blob);
-            const link = document.createElement('a'); link.href = url; link.download = 'QS-VC-Windows-Setup.exe'; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+            const link = document.createElement('a'); link.href = url; link.download = chosenDownload.filename; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
             setDownloadState({ phase: 'done', checksum, size: received });
         } catch (reason) {
             if (isCurrent()) setDownloadState({ phase: 'error', message: reason instanceof Error ? reason.message : 'Download failed. Please retry.' });
@@ -126,7 +145,7 @@ export default function IntranetPage() {
             else { setResult(undefined); setAttempt(value => value + 1); }
         }}><ActionContents>Try again</ActionContents></button></section> : access ? <div className="intranet-layout">
             <section className="service-card"><span className="enterprise-access-badge">{access.onlineDemo ? 'Admin · Online test workspace' : 'Approved enterprise access'}</span><h2>Open in your browser</h2><p>{access.onlineDemo ? 'This opens the shared QS-VC online app for testing. It is not an isolated organisation deployment.' : 'Connect to your office network or approved VPN, then sign in to your organisation’s workspace.'}</p><p className="enterprise-address">{access.workspaceUrl}</p><a className="qsvc-action" href={access.workspaceUrl} rel="noreferrer"><ActionContents>Open workspace</ActionContents></a></section>
-            <section className="service-card"><h2>QS-VC for Windows</h2><p>{access.onlineDemo ? 'Download the Windows app and use the same online test workspace.' : 'Access the same organisation workspace from the Windows desktop client. Your office network or VPN is still required.'}</p><button className="qsvc-action intranet-download" type="button" aria-busy={downloading} disabled={!access.windowsAvailable || downloading || session.status !== 'authenticated'} onClick={download}><ActionContents><span className="mi" aria-hidden="true">download</span>{downloading ? 'Downloading…' : 'Download for Windows'}</ActionContents></button>{!access.windowsAvailable && <p role="status">Your Windows installer has not been released yet.</p>}<p>{access.onlineDemo ? 'For an isolated enterprise workspace, use the address supplied by your organisation.' : 'After installation, use the organisation address above.'} A download does not grant additional meeting permissions.</p></section>
+            <section className="service-card"><h2>Download QS-VC</h2><p>{access.onlineDemo ? 'Choose your computer and use the same online test workspace.' : 'Choose the app for your computer. The app connects to the organisation workspace above.'}</p><label className="intranet-platform-label" htmlFor="intranet-download-platform">Your device</label><select id="intranet-download-platform" value={downloadPlatform} disabled={downloading} onChange={event => setDownloadPlatform(event.target.value as DesktopDownload)}>{downloadChoices.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}</select><button className="qsvc-action intranet-download" type="button" aria-busy={downloading} disabled={!chosenDownloadAvailable || downloading || session.status !== 'authenticated'} onClick={download}><ActionContents><span className="mi" aria-hidden="true">download</span>{downloading ? 'Downloading…' : 'Download selected app'}</ActionContents></button>{!chosenDownloadAvailable && <p role="status">This installer is not available yet. Choose a device with an available build or contact your administrator.</p>}<p>{access.onlineDemo ? 'For an isolated enterprise workspace, use the address supplied by your organisation.' : 'After installation, use the organisation address above.'} A download does not grant additional meeting permissions.</p></section>
         </div> : <><div className="intranet-layout"><section className="service-card"><span className="enterprise-access-badge">Guided demo · No live connection</span><h2>See what to expect</h2><MeetingScene /><p>This preview uses sample participants. It does not start your camera, microphone or a meeting.</p></section><section className="service-card"><div className="intranet-guide-tabs" aria-label="Guide steps">{steps.map((item, index) => <button type="button" key={item.title} aria-pressed={step === index} onClick={() => setStep(index)}>{index + 1}<span className="sr-only"> {item.title}</span></button>)}</div><div aria-live="polite"><h2>{steps[step].title}</h2><p>{steps[step].text}</p></div><div className="intranet-guide-controls"><button type="button" disabled={step === 0} onClick={() => setStep(value => value - 1)}>Back</button><button type="button" disabled={step === steps.length - 1} onClick={() => setStep(value => value + 1)}>Next</button></div><p>Ask your administrator which features are enabled in your workspace. Offline captions and translated speech require locally available recognition, translation and voices. Poly room-device access requires a configured gateway and compatibility testing for your devices. Remote access requires your organisation’s approved network connection.</p><Link className="qsvc-action" to="/contact?interest=Intranet"><ActionContents>Request access</ActionContents></Link>{session.status === 'anonymous' ? <p><Link to="/login?next=%2Fintranet">Sign in to check access</Link></p> : <p>Your account does not have intranet access. Ask your administrator to approve it.</p>}</section></div></>}
     </main><SiteFooter /><DownloadFeedback state={token && downloadOwner.current === token ? downloadState : { phase: 'idle' }} onDismiss={() => setDownloadState({ phase: 'idle' })} /></div>;
 }
