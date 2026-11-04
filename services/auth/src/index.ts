@@ -355,6 +355,27 @@ app.post('/api/auth/logout', async (req, res) => {
 // Get current user profile
 app.get('/api/auth/me', profileHandler(verifyToken, pool));
 
+// Administrative plan information is scoped to the verified caller's tenant.
+app.get('/api/auth/admin/plan', async (req, res) => {
+    const authorization = req.get('authorization');
+    if (!authorization?.startsWith('Bearer ')) return res.status(401).json({ error: 'Sign in required' });
+    try {
+        const user = await verifyToken(authorization.slice(7));
+        if (user.role !== 'admin') return res.status(403).json({ error: 'Administrator access required' });
+        const result = await pool.query(
+            `SELECT name, plan, max_participants AS "maxParticipants",
+                    max_duration_min AS "maxDurationMinutes", storage_quota_gb AS "storageQuotaGb"
+             FROM tenants WHERE id = $1 AND is_active`,
+            [user.tenantId],
+        );
+        if (!result.rows.length) return res.status(404).json({ error: 'Organisation not found' });
+        res.set('Cache-Control', 'no-store').json(result.rows[0]);
+    } catch (error) {
+        const status = sessionErrorStatus(error);
+        res.status(status).json({ error: status === 401 ? 'Invalid session' : 'Plan information unavailable' });
+    }
+});
+
 // Update profile
 app.patch('/api/auth/me', validateBody(updateProfileBody), async (req, res) => {
     try {

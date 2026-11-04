@@ -59,11 +59,11 @@ export default function IntranetPage() {
             if (response.status === 403) { setResult({ token }); return; }
             if (!response.ok) throw new Error('Access check failed');
             const data = await response.json();
-            const url = intranetUrl(data.workspaceUrl);
+            const url = intranetUrl(data.workspaceUrl, window.location.origin);
             if (!currentRequest()) return;
             setResult(url
                 ? { token, access: { workspaceUrl: url, windowsAvailable: data.windowsAvailable === true } }
-                : { token, error: 'Ask your administrator to check the workspace address.' });
+                : { token, error: 'The configured address does not point to a separate HTTPS workspace. Ask your administrator to update it.' });
         }).catch(() => {
             if (currentRequest()) setResult({ token, error: 'We couldn’t check your intranet access. Try again.' });
         });

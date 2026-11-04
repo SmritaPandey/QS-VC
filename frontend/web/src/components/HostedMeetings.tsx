@@ -1,3 +1,4 @@
+import CancelScheduledMeeting from './CancelScheduledMeeting';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { clearSession, getToken } from '../lib/session';
@@ -28,7 +29,7 @@ export function groupHosted(meetings: HostedMeeting[], now = Date.now()) {
     return { live, upcoming, past };
 }
 
-function Row({ meeting, label }: { meeting: HostedMeeting; label: string }) {
+function Row({ meeting, label, onCancelled, onExpired }: { meeting: HostedMeeting; label: string; onCancelled: () => void; onExpired: () => void }) {
     const [copied, setCopied] = useState(false);
     const start = when(meeting);
     const link = `${window.location.origin}/meeting/${encodeURIComponent(meeting.meetingCode)}/preview`;
@@ -40,6 +41,8 @@ function Row({ meeting, label }: { meeting: HostedMeeting; label: string }) {
             <p><span className="workspace-code">{meeting.meetingCode}</span><span className="workspace-status">{label}</span></p>
         </div>
         <div className="workspace-row-actions">
+            {meeting.scheduledStart && meeting.status === 'waiting' && <CancelScheduledMeeting id={meeting.id}
+                title={meeting.title || meeting.meetingCode} onCancelled={onCancelled} onExpired={onExpired} />}
             <button type="button" className="workspace-row-join workspace-row-secondary" aria-label={`Copy invite link for ${meeting.title || meeting.meetingCode}`} onClick={() => { void navigator.clipboard?.writeText(link).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1800); }).catch(() => {}); }}>
                 <span className="mi mi-sm" aria-hidden="true">{copied ? 'check' : 'link'}</span>{copied ? 'Copied' : 'Copy link'}
             </button>
@@ -56,6 +59,15 @@ export default function HostedMeetings({ onExpired }: { onExpired: () => void })
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
     const [refresh, setRefresh] = useState(0);
+    const [notice, setNotice] = useState('');
+    const cancelled = (id: string) => {
+        setMeetings(items => items.filter(item => item.id !== id));
+        setNotice('Meeting cancelled.');
+        setRefresh(value => value + 1);
+    };
+    const [summary, setSummary] = useState<{ links: number; scheduled: number; active: number } | null>(null);
+    const [summaryUnavailable, setSummaryUnavailable] = useState(false);
+    const [filter, setFilter] = useState<'all' | 'upcoming' | 'live' | 'past'>('all');
     const [showAllPast, setShowAllPast] = useState(false);
     useEffect(() => {
         const controller = new AbortController();
@@ -76,18 +88,48 @@ export default function HostedMeetings({ onExpired }: { onExpired: () => void })
         return () => { active = false; window.clearTimeout(timer); controller.abort(); };
     }, [refresh, onExpired]);
 
+    useEffect(() => {
+        const controller = new AbortController();
+        const token = getToken();
+        setSummaryUnavailable(false);
+        fetch(`${API}/api/meetings/me/analytics?quarters=1`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]),
+        }).then(async response => {
+            if (!response.ok) throw new Error('Summary unavailable');
+            const { totals } = await response.json();
+            if (![totals?.links, totals?.scheduled, totals?.active].every(Number.isSafeInteger)) throw new Error('Invalid summary');
+            if (!controller.signal.aborted && token === getToken()) setSummary(totals);
+        }).catch(() => { if (!controller.signal.aborted && token === getToken()) { setSummary(null); setSummaryUnavailable(true); } });
+        return () => controller.abort();
+    }, [refresh]);
+
     if (loading) return <div className="workspace-state" role="status"><span className="mi" aria-hidden="true">calendar_month</span><h2>Loading your meetings…</h2><p>Meetings you created will appear here.</p></div>;
     if (error) return <div className="workspace-state" role="alert"><span className="mi" aria-hidden="true">cloud_off</span><h2>Your meetings aren’t available right now</h2><p>{error}</p><button className="qsvc-action qsvc-action--secondary" onClick={() => setRefresh(v => v + 1)}><ActionContents>Try again</ActionContents></button></div>;
     const { live, upcoming, past } = groupHosted(meetings);
-    if (!live.length && !upcoming.length && !past.length) return <div className="workspace-state"><div className="workspace-empty-calendar" aria-hidden="true"><span className="mi">shield_person</span></div><h2>You haven’t hosted a meeting yet</h2><p>Meetings you create or schedule appear here, so you can start them and share the link.</p><Link className="qsvc-action" to="/schedule"><ActionContents><span className="mi" aria-hidden="true">add</span>Schedule a meeting</ActionContents></Link></div>;
     const shownPast = showAllPast ? past : past.slice(0, 8);
     return <div className="workspace-hosted">
-        {live.length > 0 && <section aria-labelledby="hosted-live"><h3 id="hosted-live" className="workspace-group-title"><span className="workspace-live-dot" aria-hidden="true" />Live now</h3>{live.map(m => <Row key={m.id} meeting={m} label="In progress" />)}</section>}
-        <section aria-labelledby="hosted-upcoming"><h3 id="hosted-upcoming" className="workspace-group-title">Upcoming ({upcoming.length})</h3>
-            {upcoming.length ? upcoming.map(m => <Row key={m.id} meeting={m} label="Scheduled" />) : <p className="workspace-group-empty">Nothing scheduled. <Link to="/schedule">Schedule a meeting</Link></p>}
+        <section className="workspace-personal-overview" aria-label="Your meeting activity">
+            <dl>
+                <div><dt>Links created</dt><dd>{summary?.links.toLocaleString() ?? '—'}</dd></div>
+                <div><dt>Meetings scheduled</dt><dd>{summary?.scheduled.toLocaleString() ?? '—'}</dd></div>
+                <div><dt>Meetings marked active</dt><dd>{summary?.active.toLocaleString() ?? '—'}</dd></div>
+            </dl>
+            {summaryUnavailable && <p role="status">Activity totals are unavailable. Your meeting list is still available.</p>}
+            <label>Show <select value={filter} onChange={event => setFilter(event.target.value as typeof filter)}>
+                <option value="all">All meetings</option><option value="upcoming">Upcoming</option>
+                <option value="live">Live now</option><option value="past">Past and instant</option>
+            </select></label>
         </section>
-        {past.length > 0 && <section aria-labelledby="hosted-past"><h3 id="hosted-past" className="workspace-group-title">Past and instant ({past.length})</h3>
-            {shownPast.map(m => <Row key={m.id} meeting={m} label={m.status === 'ended' ? 'Ended' : 'Not started'} />)}
+        {notice && <p role="status">{notice}</p>}
+        {filter === 'live' && !live.length && <p className="workspace-group-empty">You have no live meetings.</p>}
+        {filter === 'past' && !past.length && <p className="workspace-group-empty">You have no past meetings.</p>}
+        {(filter === 'all' || filter === 'live') && live.length > 0 && <section aria-labelledby="hosted-live"><h3 id="hosted-live" className="workspace-group-title"><span className="workspace-live-dot" aria-hidden="true" />Live now</h3>{live.map(m => <Row key={m.id} meeting={m} onCancelled={() => cancelled(m.id)} onExpired={onExpired} label="In progress" />)}</section>}
+        {(filter === 'all' || filter === 'upcoming') && <section aria-labelledby="hosted-upcoming"><h3 id="hosted-upcoming" className="workspace-group-title">Upcoming ({upcoming.length})</h3>
+            {upcoming.length ? upcoming.map(m => <Row key={m.id} meeting={m} onCancelled={() => cancelled(m.id)} onExpired={onExpired} label="Scheduled" />) : <p className="workspace-group-empty">Nothing scheduled. <Link to="/schedule">Schedule a meeting</Link></p>}
+        </section>}
+        {(filter === 'all' || filter === 'past') && past.length > 0 && <section aria-labelledby="hosted-past"><h3 id="hosted-past" className="workspace-group-title">Past and instant ({past.length})</h3>
+            {shownPast.map(m => <Row key={m.id} meeting={m} onCancelled={() => cancelled(m.id)} onExpired={onExpired} label={m.status === 'ended' ? 'Ended' : 'Not started'} />)}
             {past.length > shownPast.length && <button className="workspace-load-more qsvc-action qsvc-action--secondary" onClick={() => setShowAllPast(true)}><ActionContents>Show all {past.length}</ActionContents></button>}
         </section>}
     </div>;
