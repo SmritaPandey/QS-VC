@@ -1,4 +1,4 @@
-import { getToken, clearSession } from './session';
+import { getToken, clearSession, subscribeSession } from './session';
 /**
  * WebSocket + JSON-RPC 2.0 signaling client.
  */
@@ -9,12 +9,14 @@ type RpcCallback = (result: any, error?: any) => void;
 
 export class SignalingClient {
     private ws: WebSocket | null = null;
+    private unsubscribeSession?: () => void;
     private pendingRequests: Map<number, RpcCallback> = new Map();
     private nextId = 1;
     private eventHandlers: Map<string, Set<(params: any) => void>> = new Map();
 
     async connect(): Promise<void> {
         return new Promise((resolve, reject) => {
+            this.unsubscribeSession?.();
             const url = new URL(SIGNALING_URL);
             const token = getToken();
             if (token) url.searchParams.set('token', token);
@@ -44,10 +46,16 @@ export class SignalingClient {
             socket.onclose = (event) => {
                 if (!current()) { reject(new Error('Connection replaced')); return; }
                 this.ws = null;
+                this.unsubscribeSession?.(); this.unsubscribeSession = undefined;
+                reject(new Error(event.code === 4003 ? 'Session expired' : 'Connection closed'));
                 console.log(`[Signaling] Disconnected: ${event.code}`);
                 this.emit('disconnected', { code: event.code });
-                if (event.code === 4003) { clearSession(); this.emit('reconnectFailed', {}); return; }
+                if (event.code === 4003) { clearSession(token); this.emit('reconnectFailed', {}); return; }
             };
+
+            if (token) this.unsubscribeSession = subscribeSession(() => {
+                if (current() && getToken() !== token) socket.close(4003, 'Account changed');
+            });
 
             socket.onerror = (err) => {
                 if (!current()) return;
@@ -141,6 +149,7 @@ export class SignalingClient {
     }
 
     disconnect(): void {
+        this.unsubscribeSession?.(); this.unsubscribeSession = undefined;
         const socket = this.ws;
         this.ws = null;
         // Fail pending requests now instead of leaving callers waiting on a closed socket.

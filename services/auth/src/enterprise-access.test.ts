@@ -1,12 +1,14 @@
+import type { Pool } from 'pg';
 import type { Request, Response } from 'express';
 import { afterEach, expect, it, vi } from 'vitest';
 import { enterpriseRouter } from './enterprise-access';
+import { InvalidSessionError } from './sessions';
 afterEach(() => vi.unstubAllEnvs());
-async function check(user: Record<string, string> | null) {
-    const router = enterpriseRouter(async () => { if (!user) throw Error('invalid'); return user; });
+async function check(user: Record<string, string> | Error, db?: Pick<Pool, 'query'>) {
+    const router = enterpriseRouter(async () => { if (user instanceof Error) throw user; return user; }, db);
     const res = { locals: {}, setHeader: vi.fn(), status: vi.fn().mockReturnThis(), json: vi.fn() };
     const next = vi.fn();
-    await router.stack[0].handle({ headers: { authorization: 'Bearer test' } } as Request, res as unknown as Response, next);
+    await router.stack.find(layer => !layer.route)!.handle({ headers: { authorization: 'Bearer test' } } as Request, res as unknown as Response, next);
     return { res, next };
 }
 it('requires explicit matching tenant and approved user, not merely tenant membership', async () => {
@@ -18,7 +20,12 @@ it('requires explicit matching tenant and approved user, not merely tenant membe
     expect((await check({ sub: 'approved', tenantId: 'org' })).next).toHaveBeenCalledOnce();
 });
 it('fails closed for invalid sessions and unsafe workspace configuration', async () => {
-    expect((await check(null)).next).not.toHaveBeenCalled();
+    const expired = await check(new InvalidSessionError('expired'));
+    expect(expired.next).not.toHaveBeenCalled();
+    expect(expired.res.status).toHaveBeenCalledWith(401);
+    const outage = await check(new Error('database unavailable'));
+    expect(outage.next).not.toHaveBeenCalled();
+    expect(outage.res.status).toHaveBeenCalledWith(503);
     vi.stubEnv('ENTERPRISE_ACCESS_JSON', JSON.stringify([{ tenantId: 'org', userIds: ['approved'], workspaceUrl: 'http://office.example' }]));
     expect((await check({ sub: 'approved', tenantId: 'org' })).next).not.toHaveBeenCalled();
 });
@@ -30,4 +37,27 @@ it('lets platform admins in without a per-user grant, using the admin workspace 
     expect(allowed.next).toHaveBeenCalledOnce();
     expect((allowed.res.locals as { workspaceUrl?: string }).workspaceUrl).toBe('https://intranet.example/');
     expect((await check({ sub: 'someone', tenantId: 'any', role: 'member' })).next).not.toHaveBeenCalled();
+});
+
+it('blocks expired terms even when the user also has a legacy grant', async () => {
+    vi.stubEnv('ENTERPRISE_ACCESS_JSON', JSON.stringify([{ tenantId: 'org', userIds: ['approved'], workspaceUrl: 'https://legacy.example/' }]));
+    const query = vi.fn().mockResolvedValue({ rows: [{ active: false, workspace_url: 'https://office.example/' }] });
+    const result = await check({ sub: 'approved', tenantId: 'org' }, { query });
+    expect(result.res.status).toHaveBeenCalledWith(403);
+    expect(result.next).not.toHaveBeenCalled();
+    query.mockResolvedValue({ rows: [{ active: true, workspace_url: 'https://office.example/', expires_at: '2027-11-04T00:00:00Z' }] });
+    expect((await check({ sub: 'approved', tenantId: 'org' }, { query })).res.locals).toMatchObject({
+        workspaceUrl: 'https://office.example/', expiresAt: '2027-11-04T00:00:00Z',
+    });
+});
+
+it('blocks customer lookup before querying the database for a non-platform admin', async () => {
+    vi.stubEnv('QSVC_ADMIN_EMAILS', 'operator@example.test');
+    const query = vi.fn();
+    const router = enterpriseRouter(async () => ({ email: 'customer@example.test', role: 'admin' }), { query });
+    const res = { setHeader: vi.fn(), sendStatus: vi.fn() };
+    const lookup = router.stack.find(layer => layer.route?.path === '/terms')!.route!.stack[0].handle;
+    await lookup({ headers: { authorization: 'Bearer test' }, query: { email: 'target@example.test' } } as unknown as Request, res as unknown as Response, vi.fn());
+    expect(res.sendStatus).toHaveBeenCalledWith(403);
+    expect(query).not.toHaveBeenCalled();
 });

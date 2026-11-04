@@ -1,8 +1,9 @@
+import { useSession } from '../lib/use-session';
 import ActionContents from '../components/ActionContents';
 import SiteNav from '../components/SiteNav';
 import SignedInWorkspace from '../components/SignedInWorkspace';
 import SiteFooter from '../components/SiteFooter';
-import { getToken, signOut } from '../lib/session';
+import { signOut, refreshSession } from '../lib/session';
 import LoadingMark from '../components/LoadingMark';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -50,7 +51,8 @@ async function createMeetingCode(): Promise<string> {
 }
 
 export default function Landing() {
-    const [signedIn, setSignedIn] = useState(() => Boolean(getToken()));
+    const session = useSession();
+    const signedIn = session.status === 'authenticated' || Boolean(session.profile);
     const [sessionError, setSessionError] = useState('');
     const [signingOut, setSigningOut] = useState(false);
     const [joinCode, setJoinCode] = useState('');
@@ -133,10 +135,10 @@ export default function Landing() {
         navigate(`/meeting/${code}/preview`);
     };
 
-    const handleExpired = useCallback(() => { setSignedIn(false); setSessionError('Your session expired. Sign in to see your meetings.'); }, []);
+    const handleExpired = useCallback(() => { setSessionError('Your session expired. Sign in to see your meetings.'); }, []);
     const handleSignOut = async () => {
         setSigningOut(true); setSessionError('');
-        try { await signOut(); setSignedIn(false); }
+        try { await signOut(); }
         catch (error) { setSessionError(error instanceof Error ? error.message : 'Sign out failed.'); }
         finally { setSigningOut(false); }
     };
@@ -150,6 +152,7 @@ export default function Landing() {
 
             <main className="landing-container" id="main-content">
                 {sessionError && <p role="alert">{sessionError}</p>}
+                {session.status === 'unavailable' && <p role="status">Account unavailable. <button type="button" onClick={() => void refreshSession()}>Try again</button></p>}
                 <p className="demo-notice">Demo environment. Use sample names and content. Sign in as the meeting host to record when cloud storage is configured.</p>
                 <div className="landing-hero">
 

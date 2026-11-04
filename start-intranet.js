@@ -1,15 +1,6 @@
 #!/usr/bin/env node
-/**
- * QS-VC Intranet (Enterprise MCU) Launch Script
- * Starts all local services for enterprise/intranet deployment:
- *   1. Signaling Server (port 4001)
- *   2. MCU Service (port 4002) — video composition, SIP/H.323 gateway
- *   3. Vite Dev Server (port 5173)
- *
- * Network: LAN/MPLS VPN/IPSec — no internet tunnel
- *
- * Usage: node start-intranet.js
- */
+// Local development launcher. Production intranet uses a trusted HTTPS
+// gateway, private services and organisation-managed access.
 const { spawn } = require('child_process');
 const path = require('path');
 const net = require('net');
@@ -17,8 +8,9 @@ const os = require('os');
 
 const ROOT = __dirname;
 const SIGNALING_PORT = 4001;
-const MCU_PORT = 4002;
+const MCU_PORT = 4005;
 const WEB_PORT = 5173;
+const procs = [];
 
 function log(service, msg) {
     const ts = new Date().toLocaleTimeString();
@@ -95,25 +87,43 @@ async function main() {
     console.log('');
     console.log('╔═══════════════════════════════════════════════════════╗');
     console.log('║   QS-VC — Enterprise Intranet Deployment (MCU Mode)  ║');
-    console.log('║   🏢 On-Premise • SIP/H.323 • Quantum-Safe E2EE     ║');
+    console.log('║   Local development launcher                         ║');
     console.log('║   MCU Video Composition + Audio Mixing                ║');
     console.log('╚═══════════════════════════════════════════════════════╝');
     console.log('');
 
-    const procs = [];
+    const tsxPath = path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+    for (const [service, port] of [['sfu', 4000], ['auth', 4002], ['meeting', 4003], ['recording', 4004]]) {
+        const cwd = path.join(ROOT, 'services', service);
+        if (!(await isPortInUse(port))) {
+            procs.push(startService(service, process.execPath, [tsxPath, 'src/index.ts'], cwd, {
+                PORT: String(port),
+                [`${service.toUpperCase()}_PORT`]: String(port),
+            }));
+        }
+        await waitForPort(port);
+        const response = await fetch(`http://localhost:${port}/health`, { signal: AbortSignal.timeout(3000) });
+        if (!response.ok || (await response.json()).service !== `qsvc-${service}`) {
+            throw new Error(`Port ${port} does not serve QS-VC ${service}.`);
+        }
+        if (service === 'auth' || service === 'meeting') {
+            const ready = await fetch(`http://localhost:${port}/ready`, { signal: AbortSignal.timeout(8000) });
+            if (!ready.ok) throw new Error(`QS-VC ${service} cannot reach its database. Check the root .env and PostgreSQL.`);
+        }
+    }
 
-    // ── 1. Start Signaling Service ──
+    // Start signaling after its dependencies are ready.
     const sigInUse = await isPortInUse(SIGNALING_PORT);
     if (sigInUse) {
         log('Signaling', `Already running on port ${SIGNALING_PORT}`);
     } else {
         log('Signaling', 'Starting signaling service...');
         const tsxPath = path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
-        const sigEntry = path.join(ROOT, 'services', 'signaling', 'src', 'index.ts');
-        const sigProc = startService('Signaling', process.execPath, [tsxPath, sigEntry], ROOT, {
-            CORS_ORIGINS: '*',
+        const sigDir = path.join(ROOT, 'services', 'signaling');
+        const sigProc = startService('Signaling', process.execPath, [tsxPath, 'src/index.ts'], sigDir, {
+            PORT: String(SIGNALING_PORT),
             MCU_ENABLED: 'true',
-            MCU_URL: `http://localhost:${MCU_PORT}`,
+            MCU_INTERNAL_URL: `http://localhost:${MCU_PORT}`,
         });
         procs.push(sigProc);
     }
@@ -138,7 +148,7 @@ async function main() {
 
     log('MCU', `Waiting for port ${MCU_PORT}...`);
     await waitForPort(MCU_PORT);
-    log('MCU', '✓ MCU service is ready (GStreamer compositor + SIP/H.323 bridge)');
+    log('MCU', 'MCU HTTP port is listening');
 
     // ── 3. Start Vite Dev Server ──
     const webInUse = await isPortInUse(WEB_PORT);
@@ -165,10 +175,10 @@ async function main() {
     // ── 5. Print Summary ──
     console.log('');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
-    console.log('  🏢 QS-VC ENTERPRISE (Intranet MCU Mode) is RUNNING!');
+    console.log('  🏢 QS-VC local development services are listening');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('');
-    console.log('  📌 ACCESS URLs (share within your intranet):');
+    console.log('  📌 Development URLs (use test data):');
     console.log(`     Local:       http://localhost:${WEB_PORT}`);
     lanIPs.forEach(ip => {
         console.log(`     LAN (${ip.name}): http://${ip.address}:${WEB_PORT}`);
@@ -179,30 +189,6 @@ async function main() {
     console.log(`     MCU:         http://localhost:${MCU_PORT}`);
     console.log(`     MCU Health:  http://localhost:${MCU_PORT}/health`);
     console.log(`     Web UI:      http://localhost:${WEB_PORT}`);
-    console.log('');
-    console.log('  🎬 MCU CAPABILITIES:');
-    console.log('     Layouts:     grid | speaker | presentation | spotlight | filmstrip');
-    console.log('     Recording:   Server-side composite (MP4)');
-    console.log('     SIP Gateway: sip:<meeting-code>@localhost:5060');
-    console.log('     H.323:       localhost:1720');
-    console.log('     RTMP Ingest: rtmp://localhost/live');
-    console.log('');
-    console.log('  📞 SIP/H.323 ENDPOINT SUPPORT:');
-    console.log('     ✓ Polycom HDX/Group/Trio/Studio/G7500');
-    console.log('     ✓ Cisco TelePresence SX/MX/Room Kit/Board');
-    console.log('     ✓ PeopleLink Ultra/Sky/Blaze/Auro');
-    console.log('     ✓ Lifesize Icon/Cloud');
-    console.log('     ✓ Avaya Scopia/B-Series');
-    console.log('     ✓ Huawei TE/CE Series');
-    console.log('');
-    console.log('  🔐 SECURITY:');
-    console.log('     ✓ Quantum-Safe E2EE (Kyber-1024 + Dilithium-5)');
-    console.log('     ✓ NIST FIPS 203/204/205 compliant');
-    console.log('     ✓ AES-256-GCM symmetric encryption');
-    console.log('');
-    console.log('  🌐 AI TRANSLATION:');
-    console.log('     ✓ 50+ languages (all 22 Indian scheduled languages)');
-    console.log('     ✓ Real-time voice translation (STT → Translate → TTS)');
     console.log('');
     console.log('  Press Ctrl+C to stop all services');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -220,6 +206,7 @@ async function main() {
 }
 
 main().catch(err => {
+    procs.forEach(proc => proc.kill());
     console.error('Fatal error:', err);
     process.exit(1);
 });

@@ -16,9 +16,11 @@ async function sfuFetch(path: string, options: RequestInit = {}): Promise<any> {
         const res = await fetch(url, {
             ...options,
             signal: controller.signal,
+            redirect: 'error',
             headers: {
                 'Content-Type': 'application/json',
                 ...options.headers,
+                ...(process.env.SFU_CONTROL_TOKEN ? { Authorization: `Bearer ${process.env.SFU_CONTROL_TOKEN}` } : {}),
             },
         });
 

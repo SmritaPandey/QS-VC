@@ -99,6 +99,7 @@ services:
     ports:
       - "40000-40100:40000-40100/udp"
     environment:
+      - SFU_CONTROL_TOKEN=${SFU_CONTROL_TOKEN:?Set a shared SFU control token}
       - NODE_ENV=production
       - SFU_PORT=4000
       - SFU_ANNOUNCED_IP=${SFU_ANNOUNCED_IP}
@@ -125,6 +126,8 @@ services:
       dockerfile: Dockerfile
     container_name: qsvc-signaling
     environment:
+      - QSVC_ENTERPRISE_TERMS_REQUIRED=${QSVC_ENTERPRISE_TERMS_REQUIRED:-no}
+      - SFU_CONTROL_TOKEN=${SFU_CONTROL_TOKEN:?Set a shared SFU control token}
       - NODE_ENV=production
       - SIGNALING_PORT=4001
       - SFU_INTERNAL_URL=http://sfu:4000
@@ -154,6 +157,7 @@ services:
       dockerfile: services/auth/Dockerfile
     container_name: qsvc-auth
     environment:
+      - QSVC_ENTERPRISE_TERMS_REQUIRED=${QSVC_ENTERPRISE_TERMS_REQUIRED:-no}
       - NODE_ENV=production
       - AUTH_PORT=4002
       - POSTGRES_HOST=postgres

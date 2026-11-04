@@ -128,8 +128,13 @@ export async function handleRpcMessage(
             case 'getCollaborationFile':
             case 'collaborationAction':
                 return { jsonrpc: '2.0', id: id!, result: collaborationRpc(ws, connectionState.roomId!, connectionState.peerId!, method, params) };
-            case 'captionPublish':
+            case 'captionPublish': {
+                const room = roomManager.getRoom(connectionState.roomId!);
+                if (room?.settings.webinar && (!room.ownerUserId || room.ownerUserId !== connectionState.authUser?.sub)) {
+                    throw createError(-32005, 'Only the webinar organiser can publish captions');
+                }
                 return { jsonrpc: '2.0', id: id!, result: publishCaption(ws, connectionState.roomId!, connectionState.peerId!, params) };
+            }
             case 'translationCapabilities':
                 return { jsonrpc: '2.0', id: id!, result: await translationCapabilities(ws, connectionState.roomId!, connectionState.peerId!) };
             case 'translateCaption':
@@ -160,6 +165,7 @@ export async function handleRpcMessage(
                 const policy = await loadMeetingPolicy(meetingCode);
                 const room = roomManager.getOrCreateRoom(meetingCode, policy?.settings);
                 if (policy?.hostId) room.ownerUserId = policy.hostId;
+                const webinarGuest = room.settings.webinar && !connectionState.authUser?.sub;
                 // Platform admins (role from the server-signed session) can enter and run any meeting.
                 const isPlatformAdmin = connectionState.authUser?.role === 'admin';
                 const isOwner = (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub) || isPlatformAdmin;
@@ -190,7 +196,7 @@ export async function handleRpcMessage(
                 }
 
                 // Waiting room: if enabled and not the first peer (host), put in waiting room
-                if (!isOwner && room.settings.waitingRoomEnabled && room.peers.size > 0) {
+                if (!isOwner && (webinarGuest || (room.settings.waitingRoomEnabled && room.peers.size > 0))) {
                     roomManager.addToWaitingRoom(room.id, {
                         id: peerId,
                         displayName,
@@ -241,10 +247,15 @@ export async function handleRpcMessage(
                 const { peerId, roomId } = connectionState;
                 if (!peerId || !roomId) throw createError(-32000, 'Not joined a room');
 
+                const policyRoom = roomManager.getRoom(roomId);
+                if (!policyRoom) throw createError(-32000, 'Room not found');
+                if (policyRoom.settings.webinar && (!policyRoom.ownerUserId || policyRoom.ownerUserId !== connectionState.authUser?.sub)) {
+                    throw createError(-32005, 'Only the webinar organiser can publish media');
+                }
+
                 // Check screen share permission
                 if (appData?.type === 'screen') {
-                    const room = roomManager.getRoom(roomId);
-                    if (room && !room.settings.allowScreenShare) {
+                    if (!policyRoom.settings.allowScreenShare) {
                         throw createError(-32004, 'Screen sharing is disabled by host');
                     }
                 }
@@ -895,6 +906,7 @@ async function joinPeerToRoom(
         roomId,
         role: peerState.role,
         routerRtpCapabilities: routerCaps,
+        canPublish: !room.settings.webinar || (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub),
         settings: { ...room.settings, password: undefined },
         recording: room.recording,
         sendTransport: sfuAvailable ? {

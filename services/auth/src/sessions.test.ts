@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createSession, validateSession, endSession } from './sessions';
+import { createSession, validateSession, requireEnterpriseTerm, endSession } from './sessions';
 
 describe('persistent account sessions', () => {
     it('stores a fresh unpredictable session and rejects inactive accounts', async () => {
@@ -36,4 +36,20 @@ it('classifies database failures as retryable rather than invalid sessions', asy
     const { sessionErrorStatus, InvalidSessionError } = await import('./sessions.js');
     expect(sessionErrorStatus(new Error('database unavailable'))).toBe(503);
     expect(sessionErrorStatus(new InvalidSessionError('revoked'))).toBe(401);
+});
+
+it('requires an active term only in the restricted workspace mode', async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [] });
+    try {
+        vi.stubEnv('QSVC_ENTERPRISE_TERMS_REQUIRED', '');
+        await expect(requireEnterpriseTerm({ query }, 'customer')).resolves.toBeUndefined();
+        expect(query).not.toHaveBeenCalled();
+        vi.stubEnv('QSVC_ENTERPRISE_TERMS_REQUIRED', 'yes');
+        await expect(requireEnterpriseTerm({ query }, 'customer')).rejects.toThrow('missing or expired');
+        expect(query).toHaveBeenCalledWith(expect.stringContaining('expires_at > now()'), ['customer']);
+        query.mockResolvedValue({ rows: [{ '?column?': 1 }] });
+        await expect(requireEnterpriseTerm({ query }, 'customer')).resolves.toBeUndefined();
+    } finally {
+        vi.unstubAllEnvs();
+    }
 });

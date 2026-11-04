@@ -32,6 +32,7 @@ interface AuthPayload {
 
 /** Attach JSON-RPC signaling WebSocket to an existing HTTP server. */
 export function attachSignalingWebSocket(server: http.Server): WebSocketServer {
+    const requireTerm = process.env.QSVC_ENTERPRISE_TERMS_REQUIRED === 'yes';
     const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024 });
 
     wss.on('connection', (ws: WebSocket, req) => {
@@ -42,6 +43,10 @@ export function attachSignalingWebSocket(server: http.Server): WebSocketServer {
             token = (parsedUrl.query.token as string)
                 || req.headers.authorization?.replace('Bearer ', '');
 
+            if (requireTerm && !token) {
+                ws.close(4003, 'Sign in to your organisation workspace');
+                return;
+            }
             if (token) {
                 // Verify before every RPC below, including the initial join.
                 logger.info(`Authenticated WebSocket session requested from ${req.socket.remoteAddress}`);
@@ -62,7 +67,18 @@ export function attachSignalingWebSocket(server: http.Server): WebSocketServer {
         } = { authUser };
 
         (ws as any).isAlive = true;
-        ws.on('pong', () => { (ws as any).isAlive = true; });
+        let nextTermCheck = 0;
+        ws.on('pong', async () => {
+            (ws as any).isAlive = true;
+            if (!requireTerm || !token || Date.now() < nextTermCheck) return;
+            nextTermCheck = Date.now() + 25_000;
+            try {
+                await verifySession(token);
+            } catch (error) {
+                if (error instanceof InvalidAuthentication) ws.close(4003, 'Session expired or invalid');
+                else ws.close(1011, 'Could not verify workspace access');
+            }
+        });
 
         ws.on('message', async (data) => {
             try {

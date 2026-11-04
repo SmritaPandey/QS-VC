@@ -1,21 +1,9 @@
-/**
- * Calendar Integration for QS-VC.
- *
- * Features:
- * - Generate ICS calendar invites
- * - CalDAV server integration
- * - Exchange EWS connector (enterprise)
- * - Google Calendar API integration
- * - Recurrence rules (RRULE)
- * - Timezone-aware scheduling
- * - Meeting reminders
- */
-
+/** Calendar export and compose links for scheduled meetings. */
 export interface CalendarEvent {
     meetingCode: string;
     title: string;
     description?: string;
-    organizer: { name: string; email: string };
+    organizer?: { name: string; email: string };
     attendees: { name: string; email: string; role: 'required' | 'optional' }[];
     startTime: Date;
     endTime: Date;
@@ -59,23 +47,21 @@ export function generateICS(event: CalendarEvent): string {
     if (event.sipDialIn) description += `📱 SIP: ${event.sipDialIn}\n`;
     if (event.pstnDialIn) description += `📞 Dial-in: ${event.pstnDialIn}\n`;
     if (event.conferenceId) description += `🔢 Conference ID: ${event.conferenceId}\n`;
-    description += `\n🔐 Secured with Quantum-Safe Encryption (NIST PQC)\n`;
 
     let ics = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
-        'PRODID:-//QS-VC//Quantum Safe Video Conferencing//EN',
+        'PRODID:-//QS-VC//Video Conferencing//EN',
         'CALSCALE:GREGORIAN',
-        'METHOD:REQUEST',
+        'METHOD:PUBLISH',
         'BEGIN:VEVENT',
         `UID:${uid}`,
         `DTSTAMP:${now}`,
-        `DTSTART;TZID=${event.timezone}:${start}`,
-        `DTEND;TZID=${event.timezone}:${end}`,
+        `DTSTART:${start}`,
+        `DTEND:${end}`,
         `SUMMARY:${escapeICSText(event.title)}`,
         `DESCRIPTION:${escapeICSText(description)}`,
-        `LOCATION:${event.location || 'QS-VC Online Meeting'}`,
-        `ORGANIZER;CN=${event.organizer.name}:mailto:${event.organizer.email}`,
+        `LOCATION:${escapeICSText(event.location || 'QS-VC Online Meeting')}`,
         `URL:${event.meetingUrl}`,
         `STATUS:CONFIRMED`,
         'SEQUENCE:0',
@@ -83,10 +69,15 @@ export function generateICS(event: CalendarEvent): string {
         event.isPrivate ? 'CLASS:PRIVATE' : 'CLASS:PUBLIC',
     ];
 
+    if (event.organizer && /^[^\s:;,]+@[^\s:;,]+$/.test(event.organizer.email)) {
+        ics.push(`ORGANIZER:mailto:${event.organizer.email}`);
+    }
+
     // Attendees
     for (const attendee of event.attendees) {
+        if (!/^[^\s:;,]+@[^\s:;,]+$/.test(attendee.email)) continue;
         const role = attendee.role === 'required' ? 'REQ-PARTICIPANT' : 'OPT-PARTICIPANT';
-        ics.push(`ATTENDEE;ROLE=${role};PARTSTAT=NEEDS-ACTION;CN=${attendee.name}:mailto:${attendee.email}`);
+        ics.push(`ATTENDEE;ROLE=${role};PARTSTAT=NEEDS-ACTION:mailto:${attendee.email}`);
     }
 
     // Recurrence
@@ -137,11 +128,7 @@ export function openGoogleCalendar(event: CalendarEvent): void {
         ctz: event.timezone,
     });
 
-    for (const attendee of event.attendees) {
-        params.append('add', attendee.email);
-    }
-
-    window.open(`https://calendar.google.com/calendar/render?${params.toString()}`, '_blank');
+    window.open(`https://calendar.google.com/calendar/render?${params.toString()}`, '_blank', 'noopener,noreferrer');
 }
 
 /** Open Outlook Web with pre-filled data. */
@@ -156,7 +143,7 @@ export function openOutlookCalendar(event: CalendarEvent): void {
         allday: 'false',
     });
 
-    window.open(`https://outlook.office.com/calendar/0/deeplink/compose?${params.toString()}`, '_blank');
+    window.open(`https://outlook.office.com/calendar/0/deeplink/compose?${params.toString()}`, '_blank', 'noopener,noreferrer');
 }
 
 // ── Helper Functions ─────────────────────────────────
@@ -174,7 +161,7 @@ function escapeICSText(text: string): string {
         .replace(/\\/g, '\\\\')
         .replace(/;/g, '\\;')
         .replace(/,/g, '\\,')
-        .replace(/\n/g, '\\n');
+        .replace(/\r\n|\r|\n/g, '\\n');
 }
 
 function generateRRule(rule: RecurrenceRule): string {

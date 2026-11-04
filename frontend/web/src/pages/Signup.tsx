@@ -4,7 +4,7 @@ import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
 import IdentityOptions from '../components/IdentityOptions';
 import ActionContents from '../components/ActionContents';
-import { AUTH_API, nextPath } from '../lib/session';
+import { AUTH_API, beginSignIn, nextPath } from '../lib/session';
 
 export default function Signup() {
     const navigate = useNavigate();
@@ -15,6 +15,7 @@ export default function Signup() {
         event.preventDefault();
         if (busy) return;
         const fields = new FormData(event.currentTarget);
+        const completeSignIn = beginSignIn();
         setBusy(true); setError('');
         try {
             const response = await fetch(`${AUTH_API}/api/auth/register`, {
@@ -22,8 +23,8 @@ export default function Signup() {
                 body: JSON.stringify({ displayName: fields.get('displayName'), email: fields.get('email'), password: fields.get('password') }),
             });
             const data = await response.json();
-            if (!response.ok || !data.token) throw new Error(data.error || 'Could not create your account. Please try again.');
-            sessionStorage.setItem('token', data.token);
+            if (!response.ok || typeof data.token !== 'string' || !data.token) throw new Error(data.error || 'Could not create your account. Please try again.');
+            if (!completeSignIn(data.token)) return;
             navigate(nextPath(location.search), { replace: true });
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : 'Cannot reach sign up. Please try again.');

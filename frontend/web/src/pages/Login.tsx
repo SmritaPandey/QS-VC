@@ -2,7 +2,7 @@ import IdentityOptions from '../components/IdentityOptions';
 import ActionContents from '../components/ActionContents';
 import { useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { AUTH_API, clearSession, nextPath } from '../lib/session';
+import { AUTH_API, beginSignIn, nextPath } from '../lib/session';
 import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
 
@@ -15,15 +15,16 @@ export default function Login() {
         event.preventDefault();
         if (busy) return;
         const fields = new FormData(event.currentTarget);
-        setBusy(true); setError(''); clearSession();
+        const completeSignIn = beginSignIn();
+        setBusy(true); setError('');
         try {
             const response = await fetch(`${AUTH_API}/api/auth/login`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: fields.get('email'), password: fields.get('password'), tenantSlug: fields.get('tenantSlug') || undefined }),
             });
             const data = await response.json();
-            if (!response.ok || !data.token) throw new Error(data.error || 'Sign in failed. Please try again.');
-            sessionStorage.setItem('token', data.token);
+            if (!response.ok || typeof data.token !== 'string' || !data.token) throw new Error(data.error || 'Sign in failed. Please try again.');
+            if (!completeSignIn(data.token)) return;
             navigate(nextPath(location.search), { replace: true });
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : 'Cannot reach sign in. Please try again.');

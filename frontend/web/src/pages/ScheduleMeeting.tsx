@@ -1,18 +1,19 @@
+import { downloadICS, openGoogleCalendar, openOutlookCalendar, type CalendarEvent } from '../lib/calendar-integration';
+import { useSession } from '../lib/use-session';
 import ThemeSelect from '../components/ThemeSelect';
 import ActionContents from '../components/ActionContents';
-import { clearSession, getToken } from '../lib/session';
+import { clearSession, getToken, refreshSession } from '../lib/session';
 import LoadingMark from '../components/LoadingMark';
 /**
  * Meeting Scheduling Page — Schedule future meetings with invitations.
- * Features: date/time picker, recurrence selector, participant invitations,
+ * Features: date/time picker, participant invitations,
  * meeting settings, and calendar preview.
  */
-import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 const MEETING_API = import.meta.env.VITE_API_URL || import.meta.env.VITE_MEETING_URL || '';
 
-type RecurrenceType = 'none' | 'daily' | 'weekly' | 'biweekly' | 'monthly';
 type MeetingDuration = 15 | 30 | 45 | 60 | 90 | 120;
 
 interface ScheduleFormData {
@@ -21,9 +22,10 @@ interface ScheduleFormData {
     date: string;
     time: string;
     duration: MeetingDuration;
-    recurrence: RecurrenceType;
-    recurrenceEnd: string;
     enableWaitingRoom: boolean;
+    webinar: boolean;
+    repeat: 'none' | 'daily' | 'weekly';
+    repeatCount: number;
     enableE2EE: boolean;
     enableRecording: boolean;
     maxParticipants: number;
@@ -40,22 +42,18 @@ const durationOptions: { value: MeetingDuration; label: string }[] = [
     { value: 120, label: '2 hours' },
 ];
 
-const recurrenceOptions: { value: RecurrenceType; label: string }[] = [
-    { value: 'none', label: 'Does not repeat' },
-    { value: 'daily', label: 'Daily' },
-    { value: 'weekly', label: 'Weekly' },
-    { value: 'biweekly', label: 'Every 2 weeks' },
-    { value: 'monthly', label: 'Monthly' },
-];
-
 const ScheduleMeeting: React.FC = () => {
     const navigate = useNavigate();
+    const { pathname, search } = useLocation();
+    const schedulingWebinar = new URLSearchParams(search).get('type') === 'webinar';
     const [submitting, setSubmitting] = useState(false);
-    const [scheduled, setScheduled] = useState<{ meetingCode: string; meetingUrl: string } | null>(null);
+    const [scheduled, setScheduled] = useState<(CalendarEvent & { occurrences?: { meetingCode: string; scheduledStart: string; scheduledEnd: string }[] }) | null>(null);
     const [inviteInput, setInviteInput] = useState('');
     const [copySuccess, setCopySuccess] = useState(false);
     // Scheduling saves a meeting to an account, so guests are asked to sign in first.
-    const [signedIn, setSignedIn] = useState(() => !!getToken());
+    const session = useSession();
+    const signedIn = session.status === 'authenticated' || Boolean(session.profile);
+    useEffect(() => { setScheduled(null); }, [session.profile?.id]);
 
     // Default to tomorrow at 10:00
     const tomorrow = new Date();
@@ -67,9 +65,10 @@ const ScheduleMeeting: React.FC = () => {
         date: tomorrow.toISOString().split('T')[0],
         time: '10:00',
         duration: 60,
-        recurrence: 'none',
-        recurrenceEnd: '',
         enableWaitingRoom: false,
+        webinar: schedulingWebinar,
+        repeat: 'none',
+        repeatCount: 2,
         enableE2EE: false,
         enableRecording: true,
         maxParticipants: 100,
@@ -95,23 +94,27 @@ const ScheduleMeeting: React.FC = () => {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        if (submitting) return;
+        const token = getToken();
         setSubmitting(true);
 
         const startDateTime = new Date(`${form.date}T${form.time}`);
         const endDateTime = new Date(startDateTime.getTime() + form.duration * 60000);
 
         try {
-            const res = await fetch(`${MEETING_API}/api/meetings`, {
+            const res = await fetch(`${MEETING_API}/api/meetings/schedule`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${getToken()}` },
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({
                     title: form.title || 'Scheduled Meeting',
-                    type: form.recurrence !== 'none' ? 'recurring' : 'scheduled',
+                    type: 'scheduled',
                     scheduledStart: startDateTime.toISOString(),
                     scheduledEnd: endDateTime.toISOString(),
+                    recurrence: form.repeat === 'none' ? undefined : { frequency: form.repeat, count: form.repeatCount },
                     settings: {
                         maxParticipants: form.maxParticipants,
-                        waitingRoom: false,
+                        waitingRoom: form.enableWaitingRoom,
+                        webinar: form.webinar,
                         e2eeRequired: false,
                         recordingAllowed: false,
                         chatEnabled: true,
@@ -120,13 +123,25 @@ const ScheduleMeeting: React.FC = () => {
                 }),
             });
 
-            if (res.status === 401) { clearSession(); setSignedIn(false); return; }
+            if (getToken() !== token) return;
+            if (res.status === 401) { clearSession(token); return; }
             if (!res.ok) throw new Error('Failed to schedule');
             const data = await res.json();
+            if (getToken() !== token) return;
 
+            const meetingCode = data.meetingCode || data.code;
+            if (typeof meetingCode !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(meetingCode)) throw new Error('Invalid meeting code');
             setScheduled({
-                meetingCode: data.meetingCode || data.code || 'SCHEDULED',
-                meetingUrl: `${window.location.origin}/meeting/${data.meetingCode || data.code}/preview`,
+                title: form.title || 'Scheduled Meeting',
+                occurrences: data.occurrences,
+                startTime: startDateTime,
+                endTime: endDateTime,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                attendees: [],
+                reminders: [],
+                isPrivate: true,
+                meetingCode,
+                meetingUrl: `${window.location.origin}/meeting/${meetingCode}/preview`,
             });
         } catch (err) {
             console.error('Schedule error:', err);
@@ -152,8 +167,10 @@ const ScheduleMeeting: React.FC = () => {
     };
 
     // ━━━ SIGN-IN PROMPT (guests) ━━━
+    if (!signedIn && session.status !== 'anonymous') return <div className="schedule-page"><div className="schedule-container"><section className="schedule-signin" role="status"><ThemeSelect /><h1>{session.status === 'checking' ? 'Checking account…' : 'Account unavailable'}</h1>{session.status === 'unavailable' && <button type="button" onClick={() => void refreshSession()}>Try again</button>}<Link to="/app">Open meeting app</Link></section></div></div>;
+
     if (!signedIn) {
-        const next = encodeURIComponent('/schedule');
+        const next = encodeURIComponent(pathname + search);
         return (
             <div className="schedule-page">
                 <div className="schedule-container">
@@ -210,7 +227,28 @@ const ScheduleMeeting: React.FC = () => {
                                 </div>
                             )}
                         </div>
+                        {scheduled.occurrences && scheduled.occurrences.length > 1 && <section aria-label="Series occurrences">
+                            <h2>Series occurrences</h2>
+                            <ul>{scheduled.occurrences.map(occurrence => {
+                                const meetingUrl = `${window.location.origin}/meeting/${encodeURIComponent(occurrence.meetingCode)}/preview`;
+                                const event = {
+                                    ...scheduled, meetingCode: occurrence.meetingCode, meetingUrl,
+                                    startTime: new Date(occurrence.scheduledStart), endTime: new Date(occurrence.scheduledEnd),
+                                };
+                                return <li key={occurrence.meetingCode}>
+                                    <Link to={new URL(meetingUrl).pathname}>{event.startTime.toLocaleString()}</Link>{' '}
+                                    <button type="button" onClick={() => downloadICS(event)}>Download event</button>{' '}
+                                    <button type="button" onClick={() => openGoogleCalendar(event)}>Add to Google Calendar</button>{' '}
+                                    <button type="button" onClick={() => openOutlookCalendar(event)}>Add to Outlook</button>
+                                </li>;
+                            })}</ul>
+                        </section>}
                         <div className="success-actions">
+                            <button type="button" className="qsvc-action qsvc-action--secondary" onClick={() => downloadICS(scheduled)}><ActionContents>Download calendar event</ActionContents></button>
+                            {(!scheduled.occurrences || scheduled.occurrences.length <= 1) && <>
+                                <button type="button" className="qsvc-action qsvc-action--secondary" onClick={() => openGoogleCalendar(scheduled)}>Add to Google Calendar</button>
+                                <button type="button" className="qsvc-action qsvc-action--secondary" onClick={() => openOutlookCalendar(scheduled)}>Add to Outlook</button>
+                            </>}
                             <button className="btn-primary qsvc-action" onClick={copyInvitation}><ActionContents><span className="mi" aria-hidden="true">{copySuccess ? 'check' : 'content_copy'}</span>{copySuccess ? 'Copied' : 'Copy invitation'}</ActionContents></button>
                             <button className="btn-secondary qsvc-action qsvc-action--secondary" onClick={() =>navigate('/')}><ActionContents>
                                 Back to home</ActionContents></button>
@@ -227,7 +265,7 @@ const ScheduleMeeting: React.FC = () => {
             <div className="schedule-container">
                 <header className="schedule-header"><ThemeSelect />
                     <button className="btn-back qsvc-action qsvc-action--secondary" onClick={() =>navigate('/')}><ActionContents><span className="mi" aria-hidden="true">arrow_back</span> Back</ActionContents></button>
-                    <h1>Schedule a meeting.</h1>
+                    <h1>{schedulingWebinar ? 'Schedule a webinar.' : 'Schedule a meeting.'}</h1>
                     <p>Plan a future meeting and invite participants</p>
                 </header>
 
@@ -303,34 +341,6 @@ const ScheduleMeeting: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="form-row">
-                            <div className="form-group">
-                                <label htmlFor="recurrence">Repeat</label>
-                                <select
-                                    id="recurrence"
-                                    value={form.recurrence}
-                                    onChange={e => updateField('recurrence', e.target.value as RecurrenceType)}
-                                    className="form-input"
-                                >
-                                    {recurrenceOptions.map(r => (
-                                        <option key={r.value} value={r.value}>{r.label}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            {form.recurrence !== 'none' && (
-                                <div className="form-group">
-                                    <label htmlFor="recurrenceEnd">Repeat Until</label>
-                                    <input
-                                        id="recurrenceEnd"
-                                        type="date"
-                                        value={form.recurrenceEnd}
-                                        onChange={e => updateField('recurrenceEnd', e.target.value)}
-                                        className="form-input"
-                                        min={form.date}
-                                    />
-                                </div>
-                            )}
-                        </div>
                     </section>
 
                     {/* ── Invitations ── */}
@@ -366,15 +376,28 @@ const ScheduleMeeting: React.FC = () => {
                     {/* ── Settings ── */}
                     <section className="form-section">
                         <h2>Meeting Settings</h2>
+                        <div className="form-group">
+                            <label htmlFor="meeting-repeat">Repeat</label>
+                            <select id="meeting-repeat" className="form-input" value={form.repeat} onChange={event => updateField('repeat', event.target.value as ScheduleFormData['repeat'])}>
+                                <option value="none">Does not repeat</option>
+                                <option value="daily">Daily</option>
+                                <option value="weekly">Weekly</option>
+                            </select>
+                            {form.repeat !== 'none' && <>
+                                <label htmlFor="meeting-repeat-count">Number of meetings</label>
+                                <input id="meeting-repeat-count" className="form-input" type="number" required min={2} max={12} value={form.repeatCount} onChange={event => updateField('repeatCount', event.target.valueAsNumber)} />
+                                <p>Occurrences repeat at the same UTC time.</p>
+                            </>}
+                        </div>
+                        <label className="toggle-label"><input type="checkbox" checked={form.webinar} onChange={event => updateField('webinar', event.target.checked)} />Webinar. Only the organiser can share audio, video, or screen.</label>
                         <div className="settings-grid">
                             <label className="toggle-label">
                                 <input
                                     type="checkbox"
-                                    checked={false}
-                                    disabled
+                                    checked={form.enableWaitingRoom}
                                     onChange={e => updateField('enableWaitingRoom', e.target.checked)}
                                 />
-                                <span className="toggle-text">Waiting room unavailable in demo</span>
+                                <span className="toggle-text">Require host admission</span>
                             </label>
                             <label className="toggle-label">
                                 <input
@@ -434,14 +457,11 @@ const ScheduleMeeting: React.FC = () => {
                                     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
                                 }) : 'Select date'}</span>
                                 <span><span className="mi mi-sm" aria-hidden="true">schedule</span> {form.time} ({form.duration} min)</span>
-                                {form.recurrence !== 'none' && (
-                                    <span><span className="mi mi-sm" aria-hidden="true">event_repeat</span> Repeats {form.recurrence}</span>
-                                )}
                                 {form.invitees.length > 0 && (
                                     <span><span className="mi mi-sm" aria-hidden="true">group</span> {form.invitees.length} invitee{form.invitees.length > 1 ? 's' : ''}</span>
                                 )}
                                 {form.enableE2EE && <span><span className="mi mi-sm" aria-hidden="true">lock</span> E2EE</span>}
-                                {form.enableWaitingRoom && <span>Waiting room unavailable in demo</span>}
+                                {form.enableWaitingRoom && <span>Waiting room enabled</span>}
                             </div>
                         </div>
                     </section>

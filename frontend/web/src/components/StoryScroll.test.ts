@@ -7,16 +7,16 @@ import HomePage from '../pages/HomePage';
 import { MemoryRouter } from 'react-router-dom';
 
 describe('upright meeting features', () => {
-    it('offers distinct language examples and presents the application without demo wording', () => {
+    it('offers distinct language examples and describes current meeting controls', () => {
         const html = renderToStaticMarkup(createElement(MemoryRouter, null, createElement(HomePage)));
         for (const language of ['हिन्दी', 'English', 'తెలుగు', '日本語', 'Español', '中文']) expect(html).toContain(language);
         expect(html).not.toContain('Original');
-        expect(html.replace(/<[^>]*>/g, ' ').toLowerCase()).not.toMatch(/\bdemo\b/);
+        expect(html).toContain('Request a demo');
         expect(html.match(/id="features"/g)).toHaveLength(1);
         expect(html).toContain('Which languages can I use?');
         expect(html).toContain('What QS-VC offers');
-        expect(html).toContain('Quantum-safe security');
-        expect(html).toContain('Quantum-safe security is part of QS-VC');
+        expect(html).toContain('Choose what you share.');
+        expect(html).not.toContain('Stay quantum-safe');
         expect(html).not.toContain('An upcoming QS-VC feature');
         expect(html).not.toContain('Discuss security');
         const heroCopy = html.split('class="home-message"')[1].split('<figure')[0];

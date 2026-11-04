@@ -1,0 +1,10 @@
+{
+  "environment": "staging",
+  "target": "",
+  "approvalReference": "",
+  "startsAt": "",
+  "endsAt": "",
+  "methods": ["burp-passive", "burp-manual"],
+  "maxRequestsPerMinute": 30,
+  "maxConcurrency": 1
+}
