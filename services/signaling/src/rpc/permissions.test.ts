@@ -1,4 +1,4 @@
-vi.mock('../meeting-policy.js', () => ({ loadMeetingPolicy: vi.fn().mockResolvedValue(null) }));
+vi.mock('../meeting-policy.js', () => ({ loadMeetingPolicy: vi.fn().mockResolvedValue(null), reportMeetingStatus: vi.fn().mockResolvedValue(undefined) }));
 import { describe, it, expect, vi } from 'vitest';
 vi.mock('../sfu-client.js', () => ({ sfuClient: {
     getRtpCapabilities: vi.fn().mockResolvedValue({ rtpCapabilities: {} }),
@@ -126,19 +126,109 @@ describe('production meeting permissions', () => {
     });
 });
 
-it('rejects guests before a saved organiser and restores the saved owner role', async () => {
+const sent = (ws: any): any[] => ws.send.mock.calls.map(([raw]: [string]) => JSON.parse(raw));
+const tick = (ms = 300) => new Promise(resolve => setTimeout(resolve, ms));
+
+it('holds guests until the saved host starts the meeting, then knocks them when the waiting room is on', async () => {
     const { loadMeetingPolicy } = await import('../meeting-policy.js');
     vi.mocked(loadMeetingPolicy).mockResolvedValue({hostId:'owner',status:'waiting',settings:{waitingRoomEnabled:true,allowChat:false,allowScreenShare:true,allowRecording:false}});
     const code=`owner-${crypto.randomUUID().slice(0,10)}`;
     const guest=socket(), guestState:any={};
-    expect((await rpc(guest,guestState,'joinRoom',{meetingCode:code,displayName:'Guest'}))?.error?.message).toContain('organiser');
-    const host=socket(), hostState:any={authUser:{sub:'owner'}};
-    const result=await rpc(host,hostState,'joinRoom',{meetingCode:code,displayName:'Owner'});
-    expect(result?.result.role).toBe('host');
-    expect(roomManager.getRoom(hostState.roomId)?.settings.allowChat).toBe(false);
-    expect((await rpc(guest,guestState,'joinRoom',{meetingCode:code,displayName:'Guest'}))?.result.status).toBe('waiting');
+    try {
+        expect((await rpc(guest,guestState,'joinRoom',{meetingCode:code,displayName:'Guest'}))?.result.status).toBe('waitingForHost');
+        expect(roomManager.getRoom(guestState.roomId)?.peers.size).toBe(0);
+        const host=socket(), hostState:any={authUser:{sub:'owner'}};
+        const result=await rpc(host,hostState,'joinRoom',{meetingCode:code,displayName:'Owner'});
+        expect(result?.result.role).toBe('host');
+        expect(roomManager.getRoom(hostState.roomId)?.settings.allowChat).toBe(false);
+        // Nobody is listed as knocking while they are only waiting for the host.
+        await tick();
+        expect(sent(guest).some(m => m.method === 'waitingStatus' && m.params.status === 'knocking')).toBe(true);
+        expect(sent(host).some(m => m.method === 'waitingRoomPeer')).toBe(true);
+        expect((await rpc(host,hostState,'getWaitingRoom'))?.result.waitingPeers).toHaveLength(1);
+        expect((await rpc(host,hostState,'admitPeer',{targetPeerId:guestState.peerId}))?.result.admitted).toBe(true);
+        await handlePeerDisconnect(guestState); await handlePeerDisconnect(hostState);
+    } finally { vi.mocked(loadMeetingPolicy).mockResolvedValue(null); }
+});
+
+it('lets waiting guests straight in when the host arrives and the waiting room is off', async () => {
+    const { loadMeetingPolicy } = await import('../meeting-policy.js');
+    vi.mocked(loadMeetingPolicy).mockResolvedValue({hostId:'owner',status:'waiting',settings:{waitingRoomEnabled:false,allowChat:true,allowScreenShare:true,allowRecording:true}});
+    const code=`auto-${crypto.randomUUID().slice(0,10)}`;
+    const guest=socket(), guestState:any={authUser:{sub:'colleague'}}, host=socket(), hostState:any={authUser:{sub:'owner'}};
+    try {
+        expect((await rpc(guest,guestState,'joinRoom',{meetingCode:code,displayName:'Colleague'}))?.result.status).toBe('waitingForHost');
+        await rpc(host,hostState,'joinRoom',{meetingCode:code,displayName:'Owner'});
+        await tick();
+        const admitted = sent(guest).find(m => m.method === 'admitted');
+        expect(admitted?.params.role).toBe('member');
+        const room = roomManager.getRoom(hostState.roomId)!;
+        expect(room.peers.get(guestState.peerId)?.userId).toBe('colleague');
+        // Host leaves: the call continues, nobody is made host, and the owner gets host back on return.
+        await handlePeerDisconnect(hostState);
+        expect(room.peers.get(guestState.peerId)?.role).toBe('member');
+        expect(room.hostPeerId).toBeNull();
+        expect(sent(guest).some(m => m.method === 'hostLeft')).toBe(true);
+        const back=socket(), backState:any={authUser:{sub:'owner'}};
+        expect((await rpc(back,backState,'joinRoom',{meetingCode:code,displayName:'Owner'}))?.result.role).toBe('host');
+        await handlePeerDisconnect(guestState); await handlePeerDisconnect(backState);
+    } finally { vi.mocked(loadMeetingPolicy).mockResolvedValue(null); }
+});
+
+it('hands the host role to a co-host, then back to the owner when they return', async () => {
+    const { loadMeetingPolicy } = await import('../meeting-policy.js');
+    vi.mocked(loadMeetingPolicy).mockResolvedValue({hostId:'owner',status:'waiting',settings:{waitingRoomEnabled:false,allowChat:true,allowScreenShare:true,allowRecording:true}});
+    const code=`cohost-${crypto.randomUUID().slice(0,10)}`;
+    const host=socket(), hostState:any={authUser:{sub:'owner'}}, co=socket(), coState:any={};
+    try {
+        await rpc(host,hostState,'joinRoom',{meetingCode:code,displayName:'Owner'});
+        await rpc(co,coState,'joinRoom',{meetingCode:code,displayName:'Deputy'});
+        await rpc(host,hostState,'changeRole',{targetPeerId:coState.peerId,newRole:'co-host'});
+        await handlePeerDisconnect(hostState);
+        const room = roomManager.getRoomByCode(code)!;
+        expect(room.peers.get(coState.peerId)?.role).toBe('host');
+        const back=socket(), backState:any={authUser:{sub:'owner'}};
+        expect((await rpc(back,backState,'joinRoom',{meetingCode:code,displayName:'Owner'}))?.result.role).toBe('host');
+        expect(room.peers.get(coState.peerId)?.role).toBe('co-host');
+        expect(room.hostPeerId).toBe(backState.peerId);
+        await handlePeerDisconnect(coState); await handlePeerDisconnect(backState);
+    } finally { vi.mocked(loadMeetingPolicy).mockResolvedValue(null); }
+});
+
+it('enforces host management: mics, cameras, reactions and lowering hands', async () => {
+    const code=`manage-${crypto.randomUUID().slice(0,10)}`;
+    const host=socket(), hostState:any={}, guest=socket(), guestState:any={};
+    await rpc(host,hostState,'joinRoom',{meetingCode:code,displayName:'Host'});
+    await rpc(guest,guestState,'joinRoom',{meetingCode:code,displayName:'Guest'});
+    expect((await rpc(host,hostState,'updateSettings',{settings:{allowMicrophone:false,allowCamera:false,allowReactions:false}}))?.result.updated).toBe(true);
+    expect(sent(guest).filter(m => m.method === 'forceMute').map(m => m.params.kind).sort()).toEqual(['audio','video']);
+    expect((await rpc(guest,guestState,'muteStateChanged',{kind:'audio',muted:false}))?.error?.message).toContain('microphones');
+    expect((await rpc(guest,guestState,'muteStateChanged',{kind:'video',muted:false}))?.error?.message).toContain('cameras');
+    expect((await rpc(guest,guestState,'produce',{kind:'audio',appData:{source:'mic'}}))?.error?.message).toContain('microphones');
+    expect((await rpc(guest,guestState,'reaction',{emoji:'👍'}))?.error?.message).toContain('reactions');
+    expect((await rpc(host,hostState,'muteStateChanged',{kind:'audio',muted:false}))?.result.ok).toBe(true);
+    expect((await rpc(host,hostState,'reaction',{emoji:'👍'}))?.result.sent).toBe(true);
+    await rpc(guest,guestState,'raiseHand',{raised:true});
+    expect((await rpc(guest,guestState,'lowerHand',{}))?.error?.code).toBe(-32005);
+    expect((await rpc(host,hostState,'lowerHand',{}))?.result.lowered).toBe(1);
+    expect(roomManager.getRoom(hostState.roomId)?.peers.get(guestState.peerId)?.handRaised).toBe(false);
+    expect((await rpc(host,hostState,'hostMutePeer',{targetPeerId:guestState.peerId,kind:'screen'}))?.error?.code).toBe(-32602);
+    expect((await rpc(host,hostState,'hostMutePeer',{targetPeerId:guestState.peerId,kind:'video'}))?.result.muted).toBe(true);
+    await rpc(host,hostState,'updateSettings',{settings:{allowMicrophone:true}});
+    expect((await rpc(guest,guestState,'muteStateChanged',{kind:'audio',muted:false}))?.result.ok).toBe(true);
     await handlePeerDisconnect(guestState); await handlePeerDisconnect(hostState);
-    vi.mocked(loadMeetingPolicy).mockResolvedValue(null);
+});
+
+it('turning quick access back on admits everyone asking to join', async () => {
+    const code=`quick-${crypto.randomUUID().slice(0,10)}`;
+    const host=socket(), hostState:any={}, guest=socket(), guestState:any={};
+    await rpc(host,hostState,'joinRoom',{meetingCode:code,displayName:'Host'});
+    await rpc(host,hostState,'updateSettings',{settings:{waitingRoomEnabled:true}});
+    expect((await rpc(guest,guestState,'joinRoom',{meetingCode:code,displayName:'Guest'}))?.result.status).toBe('waiting');
+    await rpc(host,hostState,'updateSettings',{settings:{waitingRoomEnabled:false}});
+    await tick(50);
+    expect(sent(guest).some(m => m.method === 'admitted')).toBe(true);
+    await handlePeerDisconnect(guestState); await handlePeerDisconnect(hostState);
 });
 
 it('requires host admission for webinar guests even when the waiting room is off and denies guest publishing', async () => {

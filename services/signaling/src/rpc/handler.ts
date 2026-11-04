@@ -1,4 +1,4 @@
-import { loadMeetingPolicy } from '../meeting-policy.js';
+import { loadMeetingPolicy, reportMeetingStatus } from '../meeting-policy.js';
 /**
  * JSON-RPC 2.0 Method Handler for QS-VC Signaling.
  *
@@ -19,13 +19,42 @@ function canManagePeer(roomId: string, actorId: string, targetId: string): boole
     return !!actor && !!target && actorId !== targetId && target.role !== 'host' &&
         (actor.role === 'host' || (actor.role === 'co-host' && target.role !== 'co-host'));
 }
+/** Hosts and co-hosts are never limited by the participant permissions below. */
+function isManager(peer?: PeerState): boolean {
+    return peer?.role === 'host' || peer?.role === 'co-host';
+}
+const PERMISSION_MESSAGES = {
+    audio: 'The host has turned off microphones for participants.',
+    video: 'The host has turned off cameras for participants.',
+} as const;
+
+/**
+ * The host has arrived: let in everyone who was waiting for them. With the waiting room on,
+ * they move to "asking to join" and the host decides; otherwise they are admitted (Google Meet behaviour).
+ */
+function releaseAwaitingHost(roomId: string): void {
+    const room = roomManager.getRoom(roomId);
+    if (!room) return;
+    for (const waiting of [...room.waitingRoom.values()]) {
+        if (!waiting.awaitingHost) continue;
+        waiting.awaitingHost = false;
+        if (room.settings.waitingRoomEnabled || room.settings.locked) {
+            if (waiting.ws?.readyState === 1) waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'waitingStatus', params: { status: 'knocking' } }));
+            if (room.hostPeerId) roomManager.sendToPeer(roomId, room.hostPeerId, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
+            for (const peer of room.peers.values()) if (peer.role === 'co-host') roomManager.sendToPeer(roomId, peer.id, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
+        } else {
+            void admitWaitingPeer(roomId, waiting.id).catch(error => logger.warn(`Auto-admit after host joined failed: ${error.message}`));
+        }
+    }
+}
+
 async function admitWaitingPeer(roomId: string, targetId: string) {
     const room = roomManager.getRoom(roomId), waiting = room?.waitingRoom.get(targetId);
     if (!room || !waiting) throw createError(-32000, 'Peer not in waiting room');
     if (admittingPeers.has(targetId)) throw createError(-32000, 'Admission already in progress');
     admittingPeers.add(targetId);
     try {
-        const result = await joinPeerToRoom(waiting.ws, roomId, waiting.id, waiting.displayName, waiting.rtpCapabilities, {}, null,
+        const result = await joinPeerToRoom(waiting.ws, roomId, waiting.id, waiting.displayName, waiting.rtpCapabilities, { authUser: waiting.authUser }, null,
             () => { if (room.waitingRoom.get(targetId) !== waiting) throw createError(-32000, 'Admission cancelled'); });
         room.waitingRoom.delete(targetId);
         if (waiting.ws.readyState === 1) waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'admitted', params: result?.result || {} }));
@@ -51,6 +80,8 @@ const roomSettingsSchema = z.object({
     password: z.string().max(50).nullable().optional(), muteOnEntry: z.boolean().optional(),
     allowScreenShare: z.boolean().optional(), allowChat: z.boolean().optional(),
     allowRecording: z.boolean().optional(),
+    allowMicrophone: z.boolean().optional(), allowCamera: z.boolean().optional(),
+    allowReactions: z.boolean().optional(),
 }).strict();
 
 const joinRoomSchema = z.object({
@@ -169,7 +200,18 @@ export async function handleRpcMessage(
                 // Platform admins (role from the server-signed session) can enter and run any meeting.
                 const isPlatformAdmin = connectionState.authUser?.role === 'admin';
                 const isOwner = (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub) || isPlatformAdmin;
-                if (room.ownerUserId && !room.hostPeerId && !isOwner) throw createError(-32004, 'The meeting organiser must join first.');
+                // Google Meet rule: nobody gets in before the host starts the meeting. They wait, and
+                // are let in (or asked to knock) automatically when the host arrives.
+                if (room.ownerUserId && !room.hostStarted && !isOwner) {
+                    if (room.settings.password && room.settings.password !== password) {
+                        return { jsonrpc: '2.0', id: id!, error: { code: -32001, message: 'Invalid meeting password' } };
+                    }
+                    roomManager.addToWaitingRoom(room.id, { id: peerId, displayName, ws, rtpCapabilities, requestedAt: new Date(), authUser: connectionState.authUser, awaitingHost: true });
+                    connectionState.peerId = peerId;
+                    connectionState.roomId = room.id;
+                    connectionState.displayName = displayName;
+                    return { jsonrpc: '2.0', id: id!, result: { peerId, status: 'waitingForHost', message: 'Waiting for the host to start this meeting' } };
+                }
 
                 // Check meeting password
                 if (!isOwner && room.settings.password && room.settings.password !== password) {
@@ -203,17 +245,16 @@ export async function handleRpcMessage(
                         ws,
                         rtpCapabilities,
                         requestedAt: new Date(),
+                        authUser: connectionState.authUser,
                     });
 
                     connectionState.peerId = peerId;
                     connectionState.roomId = room.id;
                     connectionState.displayName = displayName;
 
-                    // Notify host about new waiting peer
-                    if (room.hostPeerId) {
-                        roomManager.sendToPeer(room.id, room.hostPeerId, 'waitingRoomPeer', {
-                            peerId, displayName,
-                        });
+                    // Notify host and co-hosts about the new request to join
+                    for (const manager of room.peers.values()) {
+                        if (isManager(manager)) roomManager.sendToPeer(room.id, manager.id, 'waitingRoomPeer', { peerId, displayName });
                     }
 
                     return {
@@ -223,7 +264,15 @@ export async function handleRpcMessage(
                 }
 
                 // Direct join (no waiting room or first peer)
-                return await joinPeerToRoom(ws, room.id, peerId, displayName, rtpCapabilities, connectionState, id!);
+                const hostWasPresent = room.hostStarted;
+                const joined = await joinPeerToRoom(ws, room.id, peerId, displayName, rtpCapabilities, connectionState, id!);
+                const me = room.peers.get(peerId);
+                if (me?.role === 'host') {
+                    if (!hostWasPresent && room.ownerUserId) void reportMeetingStatus(room.meetingCode, 'active');
+                    // Let the host's client finish its join before others stream in.
+                    setTimeout(() => releaseAwaitingHost(room.id), 250);
+                }
+                return joined;
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -253,11 +302,13 @@ export async function handleRpcMessage(
                     throw createError(-32005, 'Only the webinar organiser can publish media');
                 }
 
-                // Check screen share permission
-                if (appData?.type === 'screen') {
-                    if (!policyRoom.settings.allowScreenShare) {
-                        throw createError(-32004, 'Screen sharing is disabled by host');
-                    }
+                // Host management: participants need permission to share, talk or show video.
+                const producerPeer = policyRoom.peers.get(peerId);
+                const screen = appData?.type === 'screen' || appData?.source === 'screen';
+                if (!isManager(producerPeer)) {
+                    if (screen && !policyRoom.settings.allowScreenShare) throw createError(-32004, 'Screen sharing is disabled by host');
+                    if (!screen && kind === 'audio' && !policyRoom.settings.allowMicrophone) throw createError(-32004, PERMISSION_MESSAGES.audio);
+                    if (!screen && kind === 'video' && !policyRoom.settings.allowCamera) throw createError(-32004, PERMISSION_MESSAGES.video);
                 }
 
                 const result = await sfuClient.produce(roomId, peerId, transportId, kind, rtpParameters, appData);
@@ -367,6 +418,11 @@ export async function handleRpcMessage(
                 const { emoji } = params;
                 const { peerId, roomId, displayName } = connectionState;
                 if (!peerId || !roomId) throw createError(-32000, 'Not joined a room');
+                const reactionRoom = roomManager.getRoom(roomId);
+                if (reactionRoom && !reactionRoom.settings.allowReactions && !isManager(reactionRoom.peers.get(peerId))) {
+                    throw createError(-32004, 'The host has turned off reactions.');
+                }
+                if (typeof emoji !== 'string' || !emoji || emoji.length > 16) throw createError(-32602, 'Invalid reaction');
 
                 roomManager.broadcast(roomId, 'reaction', {
                     peerId, displayName, emoji,
@@ -387,6 +443,10 @@ export async function handleRpcMessage(
                 // Update peer state
                 const room = roomManager.getRoom(roomId);
                 const peer = room?.peers.get(peerId);
+                if (room && peer && muted === false && !isManager(peer)) {
+                    if (kind === 'audio' && !room.settings.allowMicrophone) throw createError(-32004, PERMISSION_MESSAGES.audio);
+                    if (kind === 'video' && !room.settings.allowCamera) throw createError(-32004, PERMISSION_MESSAGES.video);
+                }
                 if (peer) {
                     if (kind === 'audio') peer.audioMuted = muted;
                     if (kind === 'video') peer.videoOff = muted;
@@ -416,6 +476,24 @@ export async function handleRpcMessage(
                 });
 
                 return { jsonrpc: '2.0', id: id!, result: { ok: true } };
+            }
+
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            // HOST CONTROLS — Lower one raised hand, or all of them
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            case 'lowerHand': {
+                const { peerId, roomId, displayName } = connectionState;
+                const target = typeof params?.targetPeerId === 'string' ? params.targetPeerId : null;
+                const room = roomManager.getRoom(roomId!);
+                if (!room) throw createError(-32000, 'Room not found');
+                if (!roomManager.isHostOrCoHost(roomId!, peerId!)) throw createError(-32005, 'Only host/co-host can lower hands');
+                let lowered = 0;
+                for (const p of room.peers.values()) {
+                    if ((target && p.id !== target) || !p.handRaised) continue;
+                    p.handRaised = false; lowered++;
+                    roomManager.broadcast(roomId!, 'handRaised', { peerId: p.id, displayName: p.displayName, raised: false, by: displayName });
+                }
+                return { jsonrpc: '2.0', id: id!, result: { lowered } };
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -470,7 +548,7 @@ export async function handleRpcMessage(
                     throw createError(-32005, 'Only host/co-host can admit peers');
                 }
 
-                const waitingPeers = roomManager.getWaitingRoom(roomId);
+                const waitingPeers = roomManager.getWaitingRoom(roomId).filter(w => !w.awaitingHost);
                 let admitted = 0;
                 const failed: { peerId: string; reason: string }[] = [];
                 for (const wp of waitingPeers) {
@@ -490,7 +568,7 @@ export async function handleRpcMessage(
                     throw createError(-32005, 'Only host/co-host can view waiting room');
                 }
 
-                const list = roomManager.getWaitingRoom(roomId).map(w => ({
+                const list = roomManager.getWaitingRoom(roomId).filter(w => !w.awaitingHost).map(w => ({
                     peerId: w.id,
                     displayName: w.displayName,
                     requestedAt: w.requestedAt.toISOString(),
@@ -511,8 +589,12 @@ export async function handleRpcMessage(
                 }
 
                 if (!canManagePeer(roomId, peerId, targetPeerId)) throw createError(-32005, 'Cannot manage this participant');
+                if (kind !== undefined && kind !== 'audio' && kind !== 'video') throw createError(-32602, 'kind must be audio or video');
 
-                // Tell the target peer to mute
+                // Tell the target peer to mute (or turn off their camera)
+                const mutedPeer = roomManager.getRoom(roomId)?.peers.get(targetPeerId);
+                if (mutedPeer) { if ((kind || 'audio') === 'audio') mutedPeer.audioMuted = true; else mutedPeer.videoOff = true; }
+                roomManager.broadcast(roomId, 'peerMuteChanged', { peerId: targetPeerId, kind: kind || 'audio', muted: true }, targetPeerId);
                 roomManager.sendToPeer(roomId, targetPeerId, 'forceMute', {
                     kind: kind || 'audio',
                     by: connectionState.displayName,
@@ -604,7 +686,24 @@ export async function handleRpcMessage(
                     throw createError(-32005, 'Only host/co-host can update settings');
                 }
 
-                roomManager.updateSettings(roomId, roomSettingsSchema.parse(settings));
+                const parsedSettings = roomSettingsSchema.safeParse(settings);
+                if (!parsedSettings.success) throw createError(-32602, 'Invalid settings');
+                roomManager.updateSettings(roomId, parsedSettings.data);
+                // Turning a permission off applies right away to everyone who is not a host or co-host.
+                const settingsRoom = roomManager.getRoom(roomId);
+                for (const [key, kind] of [['allowMicrophone', 'audio'], ['allowCamera', 'video']] as const) {
+                    if (parsedSettings.data[key] !== false || !settingsRoom) continue;
+                    for (const p of settingsRoom.peers.values()) {
+                        if (isManager(p)) continue;
+                        roomManager.sendToPeer(roomId, p.id, 'forceMute', { kind, by: connectionState.displayName, reason: 'permission' });
+                    }
+                }
+                if (parsedSettings.data.waitingRoomEnabled === false && settingsRoom) {
+                    // Quick access back on: let in everyone who was asking to join.
+                    for (const w of roomManager.getWaitingRoom(roomId).filter(w => !w.awaitingHost)) {
+                        void admitWaitingPeer(roomId, w.id).catch(() => {});
+                    }
+                }
                 return { jsonrpc: '2.0', id: id!, result: { updated: true } };
             }
 
@@ -641,6 +740,8 @@ export async function handleRpcMessage(
 
                 // Notify all peers
                 roomManager.updateRecording(roomId, null);
+                const endedRoom = roomManager.getRoom(roomId);
+                if (endedRoom?.ownerUserId) void reportMeetingStatus(endedRoom.meetingCode, 'ended');
                 roomManager.broadcast(roomId, 'meetingEnded', {
                     by: connectionState.displayName,
                     reason: 'Host ended the meeting',
@@ -657,6 +758,7 @@ export async function handleRpcMessage(
                     }
                     room.peers.clear();
                     room.hostPeerId = null;
+                    room.hostStarted = false;
                     for (const waiting of room.waitingRoom.values()) {
                         if (waiting.ws?.readyState === 1) {
                             waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'rejected', params: { reason: 'Host ended the meeting' } }));
@@ -712,7 +814,8 @@ export async function handleRpcMessage(
                         meetingCode: room.meetingCode,
                         settings: { ...room.settings, password: undefined },
                         participants: peers,
-                        waitingCount: room.waitingRoom.size,
+                        waitingCount: [...room.waitingRoom.values()].filter(w => !w.awaitingHost).length,
+                        hostPresent: !!room.hostPeerId,
                     },
                 };
             }
@@ -923,6 +1026,8 @@ async function joinPeerToRoom(
         } : null,
         existingPeers,
         sfuAvailable,
+        hostPresent: !!room.hostPeerId,
+        isOwner: !!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub,
     };
 
     if (rpcId !== null) {

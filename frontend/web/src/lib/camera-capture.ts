@@ -43,5 +43,6 @@ export function cameraAccessMessage(error: unknown): string {
     if (name === 'NotAllowedError' || name === 'SecurityError') return 'Camera permission is blocked. Allow camera access in your browser.';
     if (name === 'NotReadableError' || name === 'AbortError') return 'Camera is busy. Close other camera apps or tabs, then try again.';
     if (name === 'NotFoundError' || name === 'OverconstrainedError') return 'Camera not found. Connect a camera or choose another device.';
+    if (name === 'DeviceTimeoutError') return 'Your camera is taking too long to start. Check it is connected, then press Start camera.';
     return 'Could not start the camera. Try again.';
 }

@@ -14,6 +14,8 @@ describe('host tools boundaries', () => {
  });
  it('gives waiting attendees an exit and does not mount media controls', () => {
   const html=renderToStaticMarkup(createElement(WaitingAdmission,{meetingCode:'QS-TEST',onLeave:()=>{}}));
-  expect(html).toContain('Leave waiting room'); expect(html).toContain('camera and microphone are off'); expect(html).not.toContain('<video');
+  expect(html).toContain('Leave waiting room'); expect(html).toContain('camera and microphone stay off'); expect(html).not.toContain('<video');
+  const forHost=renderToStaticMarkup(createElement(WaitingAdmission,{meetingCode:'QS-TEST',onLeave:()=>{},mode:'host'}));
+  expect(forHost).toContain('Waiting for the host'); expect(forHost).toContain('join automatically'); expect(forHost).not.toContain('<video');
  });
 });

@@ -102,13 +102,13 @@ export class SignalingClient {
 
             this.ws.send(JSON.stringify(message));
 
-            // Timeout after 15 seconds (joinRoom needs extra time for SFU probing)
+            // joinRoom verifies the account, loads the meeting and prepares media on the server: allow it longer.
             setTimeout(() => {
                 if (this.pendingRequests.has(id)) {
                     this.pendingRequests.delete(id);
                     reject(new Error(`Request timeout: ${method}`));
                 }
-            }, 15000);
+            }, method === 'joinRoom' ? 30000 : 15000);
         });
     }
 

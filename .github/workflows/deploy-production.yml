@@ -1,0 +1,213 @@
+
+name: QSVC Production Deployment
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qsvc-production-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy QSVC to AWS
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 90
+
+    permissions:
+      contents: read
+      id-token: write
+
+    env:
+      AWS_REGION: ap-south-1
+      RELEASE_SHA: ${{ github.sha }}
+      DEPLOY_BUCKET: ${{ vars.QSVC_DEPLOY_BUCKET }}
+      EC2_INSTANCE_ID: ${{ vars.QSVC_EC2_INSTANCE_ID }}
+
+    steps:
+      - name: Checkout approved source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Validate deployment files
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -f deploy/aws/compose.yml
+          test -f deploy/aws/Dockerfile
+          test -f db/migrate.js
+          test -f db/migrations/006_enterprise_access_terms.sql
+
+          echo "Required deployment files found"
+
+      - name: Check migration filenames
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY'
+          from pathlib import Path
+
+          files = sorted(
+              p.name for p in Path("db/migrations").glob("*.sql")
+          )
+
+          assert files, "No migration files found"
+          assert len(files) == len(set(files))
+
+          for filename in files:
+              print("Migration:", filename)
+          PY
+
+      - name: Configure AWS credentials using OIDC
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+          role-to-assume: ${{ vars.QSVC_DEPLOY_ROLE_ARN }}
+          role-session-name: qsvc-production-deploy
+
+      - name: Verify AWS deployment configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          test -n "$DEPLOY_BUCKET"
+          test -n "$EC2_INSTANCE_ID"
+
+          aws sts get-caller-identity \
+            --query '{Account:Account,Arn:Arn}'
+
+          aws ssm describe-instance-information \
+            --filters "Key=InstanceIds,Values=$EC2_INSTANCE_ID" \
+            --query 'InstanceInformationList[].PingStatus' \
+            --output text \
+            | grep -qx Online
+
+      - name: Package approved source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git archive \
+            --format=tar.gz \
+            --output=/tmp/qsvc-release.tar.gz \
+            "$RELEASE_SHA"
+
+          sha256sum /tmp/qsvc-release.tar.gz \
+            | awk '{print $1}' \
+            > /tmp/qsvc-release.sha256
+
+          echo "Release archive created"
+
+      - name: Upload release to private S3
+        id: upload
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          KEY="qsvc/releases/${RELEASE_SHA}.tar.gz"
+          URI="s3://${DEPLOY_BUCKET}/${KEY}"
+
+          aws s3 cp \
+            /tmp/qsvc-release.tar.gz \
+            "$URI" \
+            --sse AES256
+
+          echo "uri=$URI" >> "$GITHUB_OUTPUT"
+
+      - name: Trigger EC2 deployment through SSM
+        id: ssm
+        shell: bash
+        env:
+          RELEASE_URI: ${{ steps.upload.outputs.uri }}
+        run: |
+          set -euo pipefail
+
+          CHECKSUM="$(cat /tmp/qsvc-release.sha256)"
+
+          # Only controlled commit hashes, checksum and
+          # S3 release URI are passed to the host.
+          COMMAND=$(printf \
+            'sudo /usr/local/sbin/qsvc-deploy-release "%s" "%s" "%s"' \
+            "$RELEASE_URI" "$RELEASE_SHA" "$CHECKSUM")
+
+          jq -n \
+            --arg cmd "$COMMAND" \
+            '{
+              commands: [$cmd],
+              executionTimeout: ["3600"]
+            }' > /tmp/ssm-params.json
+
+          COMMAND_ID=$(
+            aws ssm send-command \
+              --region "$AWS_REGION" \
+              --instance-ids "$EC2_INSTANCE_ID" \
+              --document-name "AWS-RunShellScript" \
+              --parameters file:///tmp/ssm-params.json \
+              --comment "QSVC approved production deployment" \
+              --query 'Command.CommandId' \
+              --output text
+          )
+
+          echo "command_id=$COMMAND_ID" >> "$GITHUB_OUTPUT"
+          echo "SSM command submitted: $COMMAND_ID"
+
+      - name: Wait for deployment result
+        shell: bash
+        env:
+          COMMAND_ID: ${{ steps.ssm.outputs.command_id }}
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 120); do
+            STATUS=$(
+              aws ssm get-command-invocation \
+                --command-id "$COMMAND_ID" \
+                --instance-id "$EC2_INSTANCE_ID" \
+                --query Status \
+                --output text
+            )
+
+            echo "Deployment status: $STATUS"
+
+            case "$STATUS" in
+              Success)
+                echo "Deployment succeeded"
+                exit 0
+                ;;
+              Failed|Cancelled|TimedOut|Cancelling)
+                echo "Deployment failed"
+                exit 1
+                ;;
+              Pending|InProgress|Delayed)
+                sleep 20
+                ;;
+              *)
+                echo "Unknown SSM status: $STATUS"
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "Deployment polling timed out"
+          exit 1
+
+      - name: Deployment summary
+        if: always()
+        shell: bash
+        env:
+          DEPLOY_RESULT: ${{ job.status }}
+        run: |
+          {
+            echo "## QSVC Production Deployment"
+            echo ""
+            echo "- Commit: \`$RELEASE_SHA\`"
+            echo "- Region: \`$AWS_REGION\`"
+            echo "- Result: \`$DEPLOY_RESULT\`"
+          } >> "$GITHUB_STEP_SUMMARY"

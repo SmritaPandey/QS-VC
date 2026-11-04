@@ -187,3 +187,20 @@
   .workspace-date-actions { justify-content:flex-start; }
 }
 @media(prefers-reduced-motion:reduce) { .workspace-meeting-row[data-status=active] .workspace-status::before { animation:none; } }
+
+/* Day view / "Meetings I host" switch (2026-11-04) */
+.workspace-views { display:inline-flex; gap:4px; padding:4px; margin-bottom:20px; border-radius:999px; background:var(--surface-tint,#edf2f5); }
+.workspace-views button { display:inline-flex; align-items:center; gap:6px; min-height:40px !important; padding:6px 16px; border-radius:999px; font-size:14px; font-weight:500; color:var(--text-secondary); }
+.workspace-views button[aria-selected=true] { background:var(--bg-secondary); color:var(--accent-primary); box-shadow:0 1px 3px #102a4322; }
+.workspace-host-badge { align-items:center; gap:4px; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:500; color:var(--accent-primary); border:1px solid color-mix(in srgb,var(--accent-primary) 35%,transparent); }
+.workspace-host-badge .mi { font-size:14px; }
+.workspace-shell .workspace-group-title { display:flex; align-items:center; gap:8px; margin:20px 0 0; font-size:13px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--text-secondary); -webkit-text-fill-color:currentColor; background:none; animation:none; }
+.workspace-hosted section:first-child .workspace-group-title { margin-top:4px; }
+.workspace-shell .workspace-group-empty { font-size:14px; color:var(--text-secondary); padding:12px 0; margin:0; }
+.workspace-live-dot { width:8px; height:8px; border-radius:50%; background:#1f9d6b; animation:workspace-live 1.6s ease-in-out infinite; }
+.workspace-row-day { display:block; font-size:12px; font-weight:400; color:var(--text-secondary); }
+.workspace-hosted button.workspace-row-join { cursor:pointer; }
+@media(prefers-reduced-motion:reduce) { .workspace-live-dot { animation:none; } }
+@media(max-width:560px) { .workspace-views { display:flex; } .workspace-views button { flex:1; justify-content:center; padding-inline:8px; } }
+.workspace-shell .workspace-row-secondary { background:transparent; border:1px solid var(--border-tone,#cbd9e1); color:var(--text-primary); }
+.workspace-shell .workspace-row-secondary:hover { background:var(--surface-tint,#edf5f5); }
