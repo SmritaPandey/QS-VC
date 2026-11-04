@@ -164,6 +164,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const changeTiles = useCallback((value: TilesPerPage) => { setTilesPerPage(value); try { localStorage.setItem('qsvc:tiles', String(value)); } catch { /* convenience only */ } }, []);
     const [pinnedId, setPinnedId] = useState<string | null>(null);
     const [spotlightId, setSpotlightId] = useState<string | null>(null);
+    const [roomDevicesEnabled, setRoomDevicesEnabled] = useState(false);
     const [webinar, setWebinar] = useState(false);
     const [myOnStage, setMyOnStage] = useState(false);
     const [captionsOn, setCaptionsOn] = useState(false);
@@ -353,6 +354,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 setMyRole(joinResult.role || 'member');
                 setRoomRecording(joinResult.recording || null);
                 setRoomSettings(current => ({ ...current, ...joinResult.settings }));
+                setRoomDevicesEnabled(joinResult.polyBridgeEnabled === true && joinResult.sfuAvailable === true);
                 setWebinar(!!joinResult.settings?.webinar);
                 setSpotlightId(joinResult.spotlightPeerId || null);
                 joinedRef.current = true;
@@ -1168,7 +1170,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 <MeetingCollaboration key={meetingCode} open={activitiesOpen} connected={connected} role={myRole} myPeerId={myPeerIdRef.current} onClose={closeActivityPanel} />
                 {effectsOpen && <BackgroundEffects effect={effect} onChange={chooseEffect} preview={effectPreview} cameraOn={!videoOff && !!localStream?.getVideoTracks().some(t => t.readyState === 'live')}
                     status={effectStatus} error={effectError} onStartCamera={handleToggleVideo} onClose={() => setEffectsOpen(false)} />}
-                {hostToolsOpen && manager && <HostMeetingTools role={myRole} myPeerId={myPeerIdRef.current} participants={[{ peerId: myPeerIdRef.current, displayName, role: myRole, audioMuted, videoOff, handRaised }, ...Array.from(peers.values()).map(peer => ({ ...peer, role: peer.role || 'member', videoOff: peer.videoOff ?? !peer.videoTrack }))]} settings={roomSettings} onClose={closeActivityPanel} onEndMeeting={() => setLeaveOpen(true)} />}
+                {hostToolsOpen && manager && <HostMeetingTools roomDevicesEnabled={roomDevicesEnabled && !webinar && Boolean(getToken())} role={myRole} myPeerId={myPeerIdRef.current} participants={[{ peerId: myPeerIdRef.current, displayName, role: myRole, audioMuted, videoOff, handRaised }, ...Array.from(peers.values()).map(peer => ({ ...peer, role: peer.role || 'member', videoOff: peer.videoOff ?? !peer.videoTrack }))]} settings={roomSettings} onClose={closeActivityPanel} onEndMeeting={() => setLeaveOpen(true)} />}
             </div>
 
             {recordingStatus && <div className="meeting-recording-status" role="status">{recordingStatus}

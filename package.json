@@ -34,6 +34,7 @@
     "db:migrate": "node db/migrate.js",
     "internet": "node start-internet.js",
     "intranet": "node start-intranet.js",
+    "intranet:mcu": "node start-intranet.js --mcu",
     "local": "node start-local.js",
     "dev:mcu": "npm -w services/mcu run dev"
   },

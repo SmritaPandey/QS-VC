@@ -2,7 +2,7 @@
   "name": "@qsvc/mcu",
   "version": "1.0.0",
   "private": true,
-  "description": "QS-VC MCU (Multipoint Control Unit) Service — GStreamer-based video composition, SIP/H.323 gateway",
+  "description": "Legacy QS-VC MCU control-only placeholder; enterprise media bridge is in deploy/poly-bridge",
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",

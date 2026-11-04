@@ -14,7 +14,7 @@ export interface RoomHostSettings {
     allowReactions: boolean;
 }
 interface Participant { peerId: string; displayName: string; role: string; audioMuted?: boolean; videoOff?: boolean; handRaised?: boolean }
-interface Props { role: string; myPeerId: string; participants: Participant[]; settings: RoomHostSettings; onClose: () => void; onEndMeeting?: () => void }
+interface Props { roomDevicesEnabled?: boolean; role: string; myPeerId: string; participants: Participant[]; settings: RoomHostSettings; onClose: () => void; onEndMeeting?: () => void }
 
 export function canManagePeer(role: string, ownId: string, peer: Participant): boolean {
     return (role === 'host' || role === 'co-host') && peer.peerId !== ownId && peer.role !== 'host' && (role === 'host' || peer.role !== 'co-host');
@@ -29,7 +29,10 @@ const LET_EVERYONE: Array<[keyof RoomHostSettings, string, string]> = [
     ['allowCamera', 'Turn on their camera', 'videocam'],
 ];
 
-export default function HostMeetingTools({ role, myPeerId, participants, settings, onClose, onEndMeeting }: Props) {
+export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, participants, settings, onClose, onEndMeeting }: Props) {
+    const [roomAlias, setRoomAlias] = useState('');
+    const [bridgeBusy, setBridgeBusy] = useState(false);
+    const [bridgeError, setBridgeError] = useState('');
     const [waiting, setWaiting] = useState<WaitingPeer[]>([]);
     const [busy, setBusy] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -43,6 +46,12 @@ export default function HostMeetingTools({ role, myPeerId, participants, setting
         const version = ++refreshVersion.current;
         try {
             const result = await signaling.request('getWaitingRoom', {});
+            if (roomDevicesEnabled) {
+                const snapshot = await signaling.request('polySnapshot', {}).catch(() => null);
+                if (snapshot) result.waitingPeers = [...(result.waitingPeers || []), ...snapshot.lobby.map((entry: { callId: string; displayName: string }) => ({
+                    peerId: `poly:${entry.callId}`, displayName: entry.displayName,
+                }))];
+            }
             if (current.current && version === refreshVersion.current) { setWaiting(result.waitingPeers || []); setLoading(false); }
         } catch (reason) {
             if (current.current && version === refreshVersion.current) { setError(reason instanceof Error ? reason.message : 'Could not refresh the waiting room.'); setLoading(false); }
@@ -54,9 +63,10 @@ export default function HostMeetingTools({ role, myPeerId, participants, setting
         closeRef.current?.focus();
         void refresh();
         const remove = ['waitingRoomPeer', 'waitingRoomUpdated', 'peerLeft', 'newPeer', 'roleChanged'].map(event => signaling.on(event, () => { void refresh(); }));
-        return () => { current.current = false; refreshVersion.current++; remove.forEach(off => off()); };
+        const timer = roomDevicesEnabled ? window.setInterval(() => void refresh(), 3000) : undefined;
+        return () => { window.clearInterval(timer); current.current = false; refreshVersion.current++; remove.forEach(off => off()); };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isManager]);
+    }, [isManager, roomDevicesEnabled]);
     const run = async (method: string, params: Record<string, unknown> = {}) => {
         if (busy || !isManager) return;
         setBusy(true); setError('');
@@ -89,6 +99,21 @@ export default function HostMeetingTools({ role, myPeerId, participants, setting
             {loading && <p role="status">Checking who is waiting…</p>}
             <WaitingRoom isHost waitingPeers={waiting} busy={busy || loading} onAdmit={targetPeerId => { void run('admitPeer', { targetPeerId }); }} onReject={targetPeerId => { void run('rejectPeer', { targetPeerId }); }} onAdmitAll={() => { void run('admitAll'); }} />
 
+            {roomDevicesEnabled && role === 'host' && <section className="host-tools-settings" aria-labelledby="host-room-devices">
+                <h3 id="host-room-devices">Room devices</h3>
+                {roomAlias ? <p role="status">Bridge started. Use room alias <code>{roomAlias}</code> with your organisation’s gateway. Admit callers from the waiting list.</p>
+                    : <button type="button" disabled={bridgeBusy || settings.locked} onClick={async () => {
+                        setBridgeBusy(true);
+                        setBridgeError('');
+                        try {
+                            const result = await signaling.request('startPolyRoom', {});
+                            if (current.current) setRoomAlias(result.roomAlias);
+                        } catch (error) {
+                            if (current.current) setBridgeError(error instanceof Error ? error.message : 'Could not start the MCU bridge.');
+                        } finally { if (current.current) setBridgeBusy(false); }
+                    }}>{bridgeBusy ? 'Starting bridge…' : 'Enable room devices'}</button>}
+                {bridgeError && <p role="alert">{bridgeError}</p>}
+            </section>}
             <section className="host-tools-settings" aria-labelledby="host-access-title">
                 <h3 id="host-access-title">Meeting access</h3>
                 {toggle('quick', 'Quick access', 'bolt', !settings.waitingRoomEnabled, value => setSetting('waitingRoomEnabled', !value), settings.waitingRoomEnabled ? 'Off: people ask to join and you let them in.' : 'On: people with the link join without asking.')}

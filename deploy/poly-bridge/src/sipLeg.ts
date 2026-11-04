@@ -74,7 +74,7 @@ abstract class Leg {
     const out = [];
     for (const t of this.transports) {
       const [st] = await t.getStats();
-      out.push({ transportId: t.id, bytesSent: st?.bytesSent ?? 0, bytesReceived: st?.bytesReceived ?? 0 });
+      out.push({ transportId: t.id, bytesSent: st?.rtpBytesSent ?? 0, bytesReceived: st?.rtpBytesReceived ?? 0 });
     }
     return out;
   }
