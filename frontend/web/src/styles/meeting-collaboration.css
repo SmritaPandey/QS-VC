@@ -44,3 +44,47 @@
 @media(max-width:420px) { .collaboration-header,.collaboration-content { padding:12px; } .collaboration-tabs { padding:12px; } .collaboration-tabs button { padding:8px; } }
 @media(max-height:480px) and (max-width:1000px) { .meeting-room .meeting-collaboration { top:8px; bottom:calc(84px + env(safe-area-inset-bottom)); } }
 @media(prefers-reduced-motion:reduce) { .meeting-collaboration * { scroll-behavior:auto; animation:none; transition:none; } }
+
+/* ── Activities panel polish (2026-11-04) ─────────────────────────────── */
+.collaboration-header { padding:16px 16px 14px 20px; }
+.collaboration-header h2 { font-size:18px; }
+.meeting-collaboration .collaboration-close { width:40px; min-height:40px; height:40px; padding:0; display:grid; place-items:center; border-radius:50%; border-color:transparent; background:transparent; }
+.meeting-collaboration .collaboration-close:hover { background:#233746; }
+/* Tabs: one quiet segmented row instead of five heavy boxes */
+.collaboration-tabs { gap:4px; padding:10px 16px; scrollbar-width:none; }
+.collaboration-tabs::-webkit-scrollbar { display:none; }
+.meeting-collaboration .collaboration-tabs button { min-height:38px; padding:6px 14px; border:1px solid transparent; border-radius:999px; background:transparent; color:#b5ced6; font-size:14px; font-weight:500; transition:background 150ms ease,color 150ms ease; }
+.meeting-collaboration .collaboration-tabs button:hover { background:#1e3040; color:#edf5fa; }
+.meeting-collaboration .collaboration-tabs button[aria-pressed=true] { background:#16473f; border-color:#43d9c255; color:#a6f2e4; }
+.collaboration-tabs .mi { font-size:18px; }
+.collaboration-content { padding:20px; }
+/* Files: drop zone */
+.collaboration-dropzone { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:6px; padding:28px 20px; border:1.5px dashed #4a6577; border-radius:14px; background:#111e2a; text-align:center; transition:border-color 150ms ease,background 150ms ease; }
+.collaboration-dropzone[data-dragging] { border-color:#75ecd7; background:#14352f; }
+.collaboration-dropzone[data-busy] .collaboration-dropzone-icon { animation:collab-spin 1s linear infinite; }
+.collaboration-dropzone-icon { font-size:34px !important; color:#75ecd7; margin-bottom:4px; }
+.meeting-collaboration .collaboration-dropzone-title { margin:0; font-size:15px; color:#edf5fa; }
+.meeting-collaboration .collaboration-dropzone-meta { margin:0; font-size:13px; color:#91aab8; }
+.meeting-collaboration .collaboration-link { min-height:0; padding:0; border:0; background:none; color:#75ecd7; font-size:inherit; font-weight:500; text-decoration:underline; text-underline-offset:3px; }
+.meeting-collaboration .collaboration-link:hover { color:#a6f2e4; }
+.collaboration-files-head { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin:24px 0 8px; }
+.meeting-collaboration .collaboration-files-head h3 { margin:0; font-size:15px; }
+.collaboration-files-head>span { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#91aab8; }
+.collaboration-files-head .mi { font-size:15px; }
+.collaboration-empty { display:flex; flex-direction:column; align-items:center; padding:28px 16px; border-radius:14px; background:#141f2b; text-align:center; }
+.collaboration-empty>.mi { font-size:32px; color:#5f7b8c; margin-bottom:6px; }
+.meeting-collaboration .collaboration-empty p { margin:0; }
+.meeting-collaboration .collaboration-empty .collaboration-hint { margin-top:4px; font-size:13px; }
+/* Files: list */
+.collaboration-files { margin:0; display:grid; gap:8px; }
+.collaboration-files li { flex-wrap:nowrap; gap:12px; padding:10px 10px 10px 12px; border:1px solid #2e4555; border-radius:12px; background:#141f2b; }
+.collaboration-file-icon { flex:none; display:grid; place-items:center; width:40px; height:40px; border-radius:10px; background:#1f3a44; color:#a6f2e4; font-size:22px !important; }
+.collaboration-files li>div { min-width:0; gap:2px; }
+.collaboration-file-name { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:14px; }
+.meeting-collaboration .collaboration-icon-btn { flex:none; width:40px; min-height:40px; height:40px; padding:0; display:grid; place-items:center; border-radius:50%; border-color:transparent; background:transparent; color:#b5ced6; }
+.meeting-collaboration .collaboration-icon-btn:hover { background:#233746; color:#edf5fa; }
+.meeting-collaboration .collaboration-danger:hover { color:#ffb3c0; }
+@keyframes collab-spin { to { transform:rotate(360deg); } }
+@media(max-width:420px) { .collaboration-content { padding:12px; } .meeting-collaboration .collaboration-tabs button { padding:6px 10px; } }
+@media(prefers-reduced-motion:reduce) { .collaboration-dropzone[data-busy] .collaboration-dropzone-icon { animation:none; } }
+.collaboration-dropzone:not([data-busy]) { cursor:pointer; } .collaboration-dropzone:not([data-busy]):hover { border-color:#6b8a9c; }

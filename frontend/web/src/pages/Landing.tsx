@@ -138,7 +138,10 @@ export default function Landing() {
     const handleExpired = useCallback(() => { setSessionError('Your session expired. Sign in to see your meetings.'); }, []);
     const handleSignOut = async () => {
         setSigningOut(true); setSessionError('');
-        try { await signOut(); }
+        try {
+            await signOut();
+            navigate('/login', { replace: true, state: { notice: 'You’ve signed out. Sign in again or join a meeting as a guest.' } });
+        }
         catch (error) { setSessionError(error instanceof Error ? error.message : 'Sign out failed.'); }
         finally { setSigningOut(false); }
     };

@@ -1,16 +1,22 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
 import IdentityOptions from '../components/IdentityOptions';
 import ActionContents from '../components/ActionContents';
 import { AUTH_API, beginSignIn, nextPath } from '../lib/session';
+import { useSession } from '../lib/use-session';
 
 export default function Signup() {
     const navigate = useNavigate();
     const location = useLocation();
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
+    const session = useSession();
+    // Already signed in (e.g. Back after signing in, or a stale bookmark): go where they were heading.
+    useEffect(() => {
+        if (session.status === 'authenticated' && !busy) navigate(nextPath(location.search), { replace: true });
+    }, [session.status, busy, navigate, location.search]);
     async function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (busy) return;

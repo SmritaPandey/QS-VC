@@ -1,8 +1,9 @@
 import IdentityOptions from '../components/IdentityOptions';
 import ActionContents from '../components/ActionContents';
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AUTH_API, beginSignIn, nextPath } from '../lib/session';
+import { useSession } from '../lib/use-session';
 import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
 
@@ -11,6 +12,12 @@ export default function Login() {
     const location = useLocation();
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
+    const session = useSession();
+    const signedOutNotice = (location.state as { notice?: string } | null)?.notice;
+    // Already signed in (e.g. Back after signing in, or a stale bookmark): go where they were heading.
+    useEffect(() => {
+        if (session.status === 'authenticated' && !busy) navigate(nextPath(location.search), { replace: true });
+    }, [session.status, busy, navigate, location.search]);
     async function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (busy) return;
@@ -44,6 +51,7 @@ export default function Login() {
                 <input id="login-email" name="email" type="email" autoComplete="username" required maxLength={255} className="input-meeting-code" />
                 <label className="field-label" htmlFor="login-password">Password</label>
                 <input id="login-password" name="password" type="password" autoComplete="current-password" required maxLength={128} className="input-meeting-code" />
+                {signedOutNotice && !error && <p role="status" className="public-auth-notice">{signedOutNotice}</p>}
                 {error && <p role="alert">{error}</p>}
                 <button className="public-primary qsvc-action" disabled={busy}><ActionContents><span>{busy ? 'Signing in…' : 'Sign in'}</span></ActionContents></button>
                 <IdentityOptions /><p>Need an account? <Link to={`/signup${location.search}`}>Sign up</Link></p>

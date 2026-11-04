@@ -250,8 +250,8 @@ const ScheduleMeeting: React.FC = () => {
                                 <button type="button" className="qsvc-action qsvc-action--secondary" onClick={() => openOutlookCalendar(scheduled)}>Add to Outlook</button>
                             </>}
                             <button className="btn-primary qsvc-action" onClick={copyInvitation}><ActionContents><span className="mi" aria-hidden="true">{copySuccess ? 'check' : 'content_copy'}</span>{copySuccess ? 'Copied' : 'Copy invitation'}</ActionContents></button>
-                            <button className="btn-secondary qsvc-action qsvc-action--secondary" onClick={() =>navigate('/')}><ActionContents>
-                                Back to home</ActionContents></button>
+                            <button className="btn-secondary qsvc-action qsvc-action--secondary" onClick={() => navigate('/app')}><ActionContents>
+                                Back to meetings</ActionContents></button>
                         </div>
                     </div>
                 </div>
@@ -264,7 +264,7 @@ const ScheduleMeeting: React.FC = () => {
         <div className="schedule-page">
             <div className="schedule-container">
                 <header className="schedule-header"><ThemeSelect />
-                    <button className="btn-back qsvc-action qsvc-action--secondary" onClick={() =>navigate('/')}><ActionContents><span className="mi" aria-hidden="true">arrow_back</span> Back</ActionContents></button>
+                    <button className="btn-back qsvc-action qsvc-action--secondary" onClick={() => navigate('/app')}><ActionContents><span className="mi" aria-hidden="true">arrow_back</span> Back to meetings</ActionContents></button>
                     <h1>{schedulingWebinar ? 'Schedule a webinar.' : 'Schedule a meeting.'}</h1>
                     <p>Plan a future meeting and invite participants</p>
                 </header>

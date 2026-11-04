@@ -176,7 +176,7 @@ const AdminDashboard: React.FC = () => {
                     <button className="btn-back-to-app" onClick={() => navigate('/schedule')}>
                         <span className="mi mi-sm">calendar_today</span> Schedule
                     </button>
-                    <button className="btn-back-to-app" onClick={() => navigate('/')}>
+                    <button className="btn-back-to-app" onClick={() => navigate('/app')}>
                         <span className="mi mi-sm">arrow_back</span> Back to App
                     </button>
                 </div>

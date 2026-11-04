@@ -11,6 +11,9 @@ interface MeetingEndState {
     meetingCode?: string;
     recordingAvailable?: boolean;
     recordingUrl?: string;
+    reason?: string;
+    left?: boolean;
+    canRejoin?: boolean;
 }
 
 export default function MeetingEnd() {
@@ -32,7 +35,8 @@ export default function MeetingEnd() {
                 <div className="meeting-end-icon">
                     <span className="mi" style={{ fontSize: '32px' }}>check</span>
                 </div>
-                <h1>You’ve left the meeting.</h1>
+                <h1>{state.left === false ? 'The meeting has ended.' : 'You’ve left the meeting.'}</h1>
+                {state.reason && <p className="meeting-end-reason" role="status">{state.reason}</p>}
                 <p className="meeting-code">{meetingCode || state.meetingCode || 'Meeting'}</p>
 
                 <div className="meeting-end-stats">
@@ -67,12 +71,12 @@ export default function MeetingEnd() {
                 )}
 
                 <div className="meeting-end-actions">
-                    <button className="btn-new-meeting qsvc-action" onClick={() => navigate('/')}><ActionContents>
+                    {(meetingCode || state.meetingCode) && state.left !== false && state.canRejoin !== false && <button className="btn-rejoin qsvc-action qsvc-action--secondary" onClick={() => navigate(`/meeting/${encodeURIComponent(meetingCode || state.meetingCode || '')}/preview`, { replace: true })}><ActionContents>
+                        <span className="mi mi-sm" aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: '6px' }}>replay</span>
+                        Rejoin</ActionContents></button>}
+                    <button className="btn-new-meeting qsvc-action" onClick={() => navigate('/app', { replace: true })}><ActionContents>
                         <span className="mi mi-sm" aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: '6px' }}>videocam</span>
-                        Back to QS-VC</ActionContents></button>
-                    <button className="btn-rejoin qsvc-action qsvc-action--secondary" onClick={() => navigate('/')}><ActionContents>
-                        <span className="mi mi-sm" aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: '6px' }}>arrow_back</span>
-                        Home</ActionContents></button>
+                        Back to meetings</ActionContents></button>
                 </div>
             </div>
         </div>
