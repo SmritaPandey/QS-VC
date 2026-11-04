@@ -30,6 +30,10 @@ export interface WaitingPeer {
     ws: any;
     rtpCapabilities: any;
     requestedAt: Date;
+    /** Signed-in user (kept so admission preserves the account and its rights). */
+    authUser?: { sub: string; role?: string } | null;
+    /** True while the meeting has not been started by its host (Google Meet "waiting for the host"). */
+    awaitingHost?: boolean;
 }
 
 export interface RoomSettings {
@@ -42,6 +46,10 @@ export interface RoomSettings {
     allowScreenShare: boolean;     // allow screen sharing
     allowChat: boolean;            // allow chat
     allowRecording: boolean;       // allow recording
+    // Host management (Google Meet style): what participants (not hosts/co-hosts) may do.
+    allowMicrophone: boolean;      // participants can turn on their mic
+    allowCamera: boolean;          // participants can turn on their camera
+    allowReactions: boolean;       // participants can send reactions
 }
 
 export interface RoomState {
@@ -53,6 +61,8 @@ export interface RoomState {
     waitingRoom: Map<string, WaitingPeer>;
     settings: RoomSettings;
     recording: { peerId: string; displayName: string } | null;
+    /** Set once the host (or a platform admin) has joined. Until then nobody else gets in. */
+    hostStarted: boolean;
     createdAt: Date;
 }
 
@@ -65,6 +75,9 @@ const DEFAULT_SETTINGS: RoomSettings = {
     allowScreenShare: true,
     allowChat: true,
     allowRecording: true,
+    allowMicrophone: true,
+    allowCamera: true,
+    allowReactions: true,
 };
 
 class RoomManager {
@@ -88,6 +101,7 @@ class RoomManager {
             waitingRoom: new Map(),
             settings: { ...DEFAULT_SETTINGS, ...settings },
             recording: null,
+            hostStarted: false,
             createdAt: new Date(),
         };
 
@@ -131,6 +145,17 @@ class RoomManager {
             peer.role = 'host';
             if (!room.hostPeerId) room.hostPeerId = peer.id;
         }
+        // The owner is back: a co-host who covered while they were away returns to co-host.
+        if (peer.role === 'host' && room.ownerUserId && room.ownerUserId === peer.userId) {
+            for (const other of room.peers.values()) {
+                if (other.role === 'host' && other.userId !== peer.userId && !other.platformAdmin) {
+                    other.role = 'co-host';
+                    this.broadcast(roomId, 'roleChanged', { peerId: other.id, role: 'co-host', displayName: other.displayName });
+                }
+            }
+            room.hostPeerId = peer.id;
+        }
+        if (peer.role === 'host') room.hostStarted = true;
 
         // Apply mute-on-entry
         if (room.settings.muteOnEntry && peer.role !== 'host') {
@@ -196,15 +221,23 @@ class RoomManager {
         room.waitingRoom.delete(peerId);
         if (room.recording?.peerId === peerId) this.updateRecording(roomId, null);
 
-        // Transfer host role if host left
+        // Host left. Owned meetings keep running (like Google Meet) and only a co-host takes over;
+        // nobody else is promoted. Ad-hoc rooms without an owner hand over to the longest-present peer.
         if (room.hostPeerId === peerId && room.peers.size > 0) {
-            const nextHost = room.peers.values().next().value;
+            room.hostPeerId = null;
+            const others = [...room.peers.values()];
+            const nextHost = others.find(p => p.role === 'host')
+                || others.find(p => p.role === 'co-host')
+                || (room.ownerUserId ? undefined : others.find(p => !!p.userId) || others[0]);
             if (nextHost) {
                 nextHost.role = 'host';
                 room.hostPeerId = nextHost.id;
                 logger.info(`Host transferred to ${nextHost.displayName} in ${room.meetingCode}`);
                 this.sendToPeer(roomId, nextHost.id, 'hostTransferred', { newHostId: nextHost.id });
                 this.broadcast(roomId, 'roleChanged', { peerId: nextHost.id, role: 'host' });
+            } else {
+                // The meeting carries on without host controls until the host or a co-host is back.
+                this.broadcast(roomId, 'hostLeft', { hasHost: false });
             }
         }
 
@@ -220,7 +253,14 @@ class RoomManager {
                 }
             }, 60000);
         }
-
+        if (room.peers.size === 0 && room.ownerUserId) {
+            // Everyone in the call left; the next person in must wait for the host again.
+            room.hostStarted = false;
+            for (const waiting of room.waitingRoom.values()) {
+                waiting.awaitingHost = true;
+                if (waiting.ws?.readyState === 1) waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'waitingStatus', params: { status: 'waitingForHost' } }));
+            }
+        }
         return peer;
     }
 

@@ -15,6 +15,19 @@ export default function WaitingRoom({ waitingPeers, onAdmit, onReject, onAdmitAl
     </section>;
 }
 
-export function WaitingAdmission({ meetingCode, onLeave }: { meetingCode: string; onLeave: () => void }) {
-    return <main className="waiting-admission"><div><span className="mi" aria-hidden="true">meeting_room</span><h1>Waiting to be let in</h1><p role="status">The host will let you into {meetingCode} shortly.</p><p>Your camera and microphone are off while you wait.</p><button type="button" onClick={onLeave}>Leave waiting room</button></div></main>;
+export type WaitingMode = 'host' | 'knock';
+
+/** Shown before admission: waiting for the host to start (Google Meet style), or asking to be let in. */
+export function WaitingAdmission({ meetingCode, onLeave, mode = 'knock' }: { meetingCode: string; onLeave: () => void; mode?: WaitingMode }) {
+    const forHost = mode === 'host';
+    return <main className="waiting-admission"><div>
+        <span className="mi waiting-admission-icon" aria-hidden="true">{forHost ? 'hourglass_top' : 'front_hand'}</span>
+        <h1>{forHost ? 'Waiting for the host' : 'Asking to join…'}</h1>
+        <p role="status" aria-live="polite">{forHost
+            ? `The meeting ${meetingCode} hasn’t started yet. You’ll join automatically as soon as the host arrives.`
+            : `Someone in ${meetingCode} will let you in soon.`}</p>
+        <p className="waiting-admission-note">Keep this page open. Your camera and microphone stay off until you’re in.</p>
+        <span className="waiting-admission-dots" aria-hidden="true"><i /><i /><i /></span>
+        <button type="button" onClick={onLeave}>{forHost ? 'Leave' : 'Leave waiting room'}</button>
+    </div></main>;
 }

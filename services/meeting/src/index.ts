@@ -256,6 +256,22 @@ app.get('/api/internal/meetings/:code', async (req, res) => {
     } catch { res.status(503).json({ error: 'Meeting storage unavailable' }); }
 });
 
+// Signaling reports that the host started or ended the meeting (service-to-service only).
+app.post('/api/internal/meetings/:code/status', express.json(), async (req, res) => {
+    try {
+        jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal' });
+    } catch { return res.status(401).json({ error: 'Invalid service authentication' }); }
+    const status = req.body?.status;
+    if (status !== 'active' && status !== 'ended') return res.status(400).json({ error: 'status must be active or ended' });
+    try {
+        const result = await pool.query('SELECT public.qsvc_set_meeting_live_status($1, $2) AS updated', [String(req.params.code).toUpperCase(), status]);
+        res.json({ updated: !!result.rows[0]?.updated });
+    } catch (err: any) {
+        logger.warn('Live status not recorded: ' + err.message);
+        res.status(503).json({ error: 'Meeting storage unavailable' });
+    }
+});
+
 app.get('/api/meetings/code/:code', async (req, res) => {
     try {
         const result = await pool.query(
@@ -299,6 +315,8 @@ app.get('/api/meetings', authMiddleware, async (req, res) => {
         let query = `SELECT * FROM meetings WHERE tenant_id = $1`;
         const params: any[] = [user.tenantId];
         let idx = 2;
+        // ?host=me lists only meetings the signed-in user created (their "Meetings I host" view).
+        if (req.query.host === 'me') { query += ` AND host_id = $${idx++}`; params.push(user.sub); }
 
         if (range) {
             query += ` AND COALESCE(scheduled_start, created_at) >= $${idx++} AND COALESCE(scheduled_start, created_at) < $${idx++}`;
@@ -322,7 +340,12 @@ app.get('/api/meetings', authMiddleware, async (req, res) => {
                 type: m.type,
                 status: m.status,
                 scheduledStart: m.scheduled_start,
+                scheduledEnd: m.scheduled_end,
+                actualStart: m.actual_start,
+                actualEnd: m.actual_end,
                 createdAt: m.created_at,
+                hostId: m.host_id,
+                isHost: m.host_id === user.sub,
             })),
             total: result.rowCount,
         });

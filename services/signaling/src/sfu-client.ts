@@ -6,12 +6,16 @@ import { logger } from './logger.js';
 
 const SFU_BASE = config.sfuUrl;
 
-async function sfuFetch(path: string, options: RequestInit = {}): Promise<any> {
+/** Join-time probes fail fast (signaling-only fallback); media calls get time to finish under load. */
+const PROBE_TIMEOUT_MS = 2500;
+const MEDIA_TIMEOUT_MS = 8000;
+
+async function sfuFetch(path: string, options: RequestInit = {}, timeoutMs = MEDIA_TIMEOUT_MS): Promise<any> {
     const url = `${SFU_BASE}${path}`;
-    // Timeout after 1 second so joinRoom degrades to signaling-only mode quickly
-    // With 3 sequential SFU calls in joinRoom, 1s each = 3s worst case (vs old 9s)
+    // A 1 s limit on every call made produce/consume fail whenever the SFU was briefly busy
+    // (several people joining, a camera starting), which left people without audio/video.
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 1000);
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
         const res = await fetch(url, {
             ...options,
@@ -37,13 +41,13 @@ async function sfuFetch(path: string, options: RequestInit = {}): Promise<any> {
 
 export const sfuClient = {
     getRtpCapabilities: (roomId: string) =>
-        sfuFetch(`/api/rooms/${roomId}/rtp-capabilities`),
+        sfuFetch(`/api/rooms/${roomId}/rtp-capabilities`, {}, PROBE_TIMEOUT_MS),
 
     createTransport: (roomId: string, peerId: string, displayName: string, direction: string) =>
         sfuFetch(`/api/rooms/${roomId}/transports`, {
             method: 'POST',
             body: JSON.stringify({ peerId, displayName, direction }),
-        }),
+        }, PROBE_TIMEOUT_MS),
 
     connectTransport: (roomId: string, transportId: string, peerId: string, dtlsParameters: any) =>
         sfuFetch(`/api/rooms/${roomId}/transports/${transportId}/connect`, {

@@ -89,7 +89,7 @@ services:
     restart: 'no'
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${MIGRATION_DATABASE_URL:-}
+      DATABASE_URL: ${MIGRATION_DATABASE_URL:?Migration URL is required}
       POSTGRES_SSL: verify-full
       POSTGRES_CA_FILE: /opt/qsvc/certs/rds-ca.pem
     command: [node, db/migrate.js]

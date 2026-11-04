@@ -19,7 +19,8 @@ import AIChatBot from '../components/AIChatBot';
 import MeetingCaptions from '../components/MeetingCaptions';
 import MeetingCollaboration from '../components/MeetingCollaboration';
 import HostMeetingTools, { type RoomHostSettings } from '../components/HostMeetingTools';
-import { WaitingAdmission } from '../components/WaitingRoom';
+import { WaitingAdmission, type WaitingMode } from '../components/WaitingRoom';
+import { openMicrophone, startCameraWithFallback, microphoneMessage, deviceLabel } from '../lib/device-access';
 import { initialMeetingLanguage, detectLanguage, setMeetingLanguage, clearSavedLanguage, findLanguage, LANGUAGE_EVENT, type MeetingLanguage } from '../lib/meeting-language';
 
 interface PeerData {
@@ -43,27 +44,76 @@ interface ChatMessage {
 
 type MediaKind = 'audio' | 'video';
 
-/** Open audio independently so a camera-off choice never acquires the camera. */
-async function openLocalMedia(micId: string | undefined, cameraId: string | undefined, camera: CameraCapture, stream: MediaStream, isActive: () => boolean, wantsCamera: () => boolean): Promise<MediaStream> {
-    try {
-        const audio = await navigator.mediaDevices.getUserMedia({ audio: micId ? { deviceId: { ideal: micId } } : true, video: false });
-        if (!isActive()) { audio.getTracks().forEach(track => track.stop()); return stream; }
-        audio.getTracks().forEach(track => stream.addTrack(track));
-    } catch { /* Joining without a microphone is allowed. */ }
-    if (wantsCamera()) {
+/**
+ * Open audio independently so a camera-off choice never acquires the camera.
+ * Each device is time-limited and falls back to the system default, so a stuck or unplugged
+ * external device can never hold up joining. Returns notices to show the person.
+ */
+async function openLocalMedia(micId: string | undefined, cameraId: string | undefined, camera: CameraCapture, stream: MediaStream, isActive: () => boolean, wantsCamera: () => boolean, wantsMic: () => boolean): Promise<{ micNotice?: string; cameraNotice?: string }> {
+    const notices: { micNotice?: string; cameraNotice?: string } = {};
+    const micTask = (async () => {
         try {
-            const track = await camera.start({ width: 1280, height: 720, ...(cameraId ? { deviceId: { ideal: cameraId } } : {}) });
-            if (track) stream.addTrack(track);
-        } catch { /* The camera can be retried explicitly after joining. */ }
-    }
-    return stream;
+            const { stream: audio, fellBack } = await openMicrophone(micId);
+            if (!isActive()) { audio.getTracks().forEach(track => track.stop()); return; }
+            audio.getTracks().forEach(track => stream.addTrack(track));
+            if (fellBack) notices.micNotice = `Your chosen microphone was not available. Using ${deviceLabel(audio.getAudioTracks()[0])}.`;
+        } catch (error) {
+            // Joining without a microphone is allowed; say why only if the person wanted to talk.
+            if (wantsMic()) notices.micNotice = microphoneMessage(error);
+        }
+    })();
+    const cameraTask = (async () => {
+        if (!wantsCamera()) return;
+        try {
+            const { track, fellBack } = await startCameraWithFallback(constraints => camera.start(constraints), cameraId);
+            if (track && isActive()) stream.addTrack(track); else track?.stop();
+            if (track && fellBack) notices.cameraNotice = `Your chosen camera was not available. Using ${deviceLabel(track)}.`;
+        } catch (error) {
+            // The camera can be retried explicitly after joining.
+            notices.cameraNotice = cameraAccessMessage(error);
+        }
+    })();
+    // Mic and camera start together: an external camera warming up no longer delays the microphone.
+    await Promise.all([micTask, cameraTask]);
+    return notices;
 }
 
+/** Errors that mean "you may not join (yet)", as opposed to a network problem worth retrying. */
+const POLICY_ERRORS = /password|locked|full|cancelled|declined|denied|removed|ended|organiser|organizer|webinar|encryption|sign in/i;
+type JoinFailure = { title: string; detail: string };
+
+/**
+ * Keeps people in the meeting through brief network drops (Wi-Fi switch, laptop sleep, server restart):
+ * the meeting session is re-created up to three times before "Connection lost" is shown.
+ */
 export default function MeetingRoom() {
+    const { meetingCode } = useParams<{ meetingCode: string }>();
+    const [attempt, setAttempt] = useState(0);
+    const failures = useRef(0);
+    const carried = useRef<{ audioMuted?: boolean; videoOff?: boolean }>({});
+    const reconnect = useCallback((current: { audioMuted: boolean; videoOff: boolean }) => {
+        if (failures.current >= 3) return false;
+        failures.current++;
+        carried.current = current;
+        window.setTimeout(() => setAttempt(value => value + 1), 1200 * failures.current);
+        return true;
+    }, []);
+    const connectedOk = useCallback(() => { failures.current = 0; }, []);
+    return <MeetingRoomSession key={`${meetingCode}-${attempt}`} reconnecting={attempt > 0} carried={carried.current} onDropped={reconnect} onConnected={connectedOk} />;
+}
+
+interface SessionProps {
+    reconnecting: boolean;
+    carried: { audioMuted?: boolean; videoOff?: boolean };
+    onDropped: (current: { audioMuted: boolean; videoOff: boolean }) => boolean;
+    onConnected: () => void;
+}
+
+function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: SessionProps) {
     const { meetingCode } = useParams<{ meetingCode: string }>();
     const location = useLocation();
     const navigate = useNavigate();
-    const state = (location.state as any) || {};
+    const state = { ...((location.state as any) || {}), ...(reconnecting ? carried : {}) };
 
     const myPeerIdRef = useRef('');
     const [myRole, setMyRole] = useState<string>('member');
@@ -88,8 +138,15 @@ export default function MeetingRoom() {
     const [participantsOpen, setParticipantsOpen] = useState(false);
     const [activitiesOpen, setActivitiesOpen] = useState(false);
     const [hostToolsOpen, setHostToolsOpen] = useState(false);
-    const [waitingAdmission, setWaitingAdmission] = useState(false);
-    const [roomSettings, setRoomSettings] = useState<RoomHostSettings>({ locked: false, waitingRoomEnabled: false, muteOnEntry: false, allowScreenShare: true, allowChat: true });
+    const [waitingAdmission, setWaitingAdmission] = useState<WaitingMode | null>(null);
+    const [roomSettings, setRoomSettings] = useState<RoomHostSettings>({ locked: false, waitingRoomEnabled: false, muteOnEntry: false, allowScreenShare: true, allowChat: true, allowMicrophone: true, allowCamera: true, allowReactions: true });
+    const [joinFailure, setJoinFailure] = useState<JoinFailure | null>(null);
+    const [restoring, setRestoring] = useState(reconnecting);
+    const [knocks, setKnocks] = useState<Array<{ peerId: string; displayName: string }>>([]);
+    const [leaveOpen, setLeaveOpen] = useState(false);
+    const myRoleRef = useRef('member');
+    myRoleRef.current = myRole;
+    const isManagerNow = () => myRoleRef.current === 'host' || myRoleRef.current === 'co-host';
     const roomSettingsRef = useRef(roomSettings);
     roomSettingsRef.current = roomSettings;
     const [viewMode, setViewMode] = useState<'gallery' | 'focus' | 'sidebar' | 'filmstrip'>('gallery');
@@ -131,6 +188,7 @@ export default function MeetingRoom() {
     const busyRef = useRef<{ screen?: boolean; record?: boolean; camera?: boolean; mic?: boolean }>({});
     const noticeTimer = useRef<number>();
     const peersRef = useRef<Map<string, PeerData>>(new Map());
+    const handRaisedRef = useRef(false);
     const videoAreaRef = useRef<HTMLDivElement>(null);
     const compositeRef = useRef<MeetingComposite | null>(null);
     useEffect(() => { peersRef.current = peers; }, [peers]);
@@ -177,7 +235,16 @@ export default function MeetingRoom() {
         media.setPaused(kind, kind === 'video' ? muted && !sharingRef.current : muted);
         if (kind === 'audio') { audioMutedRef.current = muted; setAudioMuted(muted); }
         else { videoOffRef.current = muted; setVideoOff(muted); }
-        if (announce && joinedRef.current) signaling.request('muteStateChanged', { kind, muted }).catch(() => { });
+        if (announce && joinedRef.current) signaling.request('muteStateChanged', { kind, muted }).catch((error: Error) => {
+            // The host turned this permission off: go back to muted and say why.
+            if (!muted && /host has turned off/i.test(error?.message || '')) {
+                stream?.getTracks().filter((t) => t.kind === kind).forEach((t) => { t.enabled = false; });
+                media.setPaused(kind, kind === 'video' ? !sharingRef.current : true);
+                if (kind === 'audio') { audioMutedRef.current = true; setAudioMuted(true); }
+                else { videoOffRef.current = true; setVideoOff(true); cameraCapture.current.stop(); }
+                setNotice(error.message);
+            }
+        });
     }, []);
 
     const stopLocalMedia = useCallback(() => {
@@ -204,15 +271,27 @@ export default function MeetingRoom() {
         initializingRef.current = true;
         const alive = () => mounted && sessionActive.current;
         let settleAdmission: ((outcome: { result?: any; error?: string; cancelled?: boolean }) => void) | undefined;
-        const unsubscribe: Array<() => void> = [signaling.on('disconnected', () => {
-            settleAdmission?.({ cancelled: true });
-            if (!alive()) return;
-            setWaitingAdmission(false);
-            joinedRef.current = false;
-            if (recordingRef.current) void finishRecordingRef.current();
+        const dropped = () => {
+            const current = { audioMuted: audioMutedRef.current, videoOff: videoOffRef.current };
             stopLocalMedia(); media.close(); signaling.disconnect();
             setConnected(false); setLocalStream(null); setVideoOff(true); setAudioMuted(true);
-            setConnectionLost(true);
+            if (onDropped(current)) setRestoring(true); else { setRestoring(false); setConnectionLost(true); }
+        };
+        const unsubscribe: Array<() => void> = [signaling.on('disconnected', ({ code }: { code?: number }) => {
+            settleAdmission?.({ cancelled: true });
+            if (!alive()) return;
+            const wasWaiting = !joinedRef.current;
+            setWaitingAdmission(null);
+            joinedRef.current = false;
+            if (recordingRef.current) void finishRecordingRef.current();
+            // Ended, removed or signed out: never reconnect automatically.
+            if (code === 4000 || code === 4001 || code === 4003 || (wasWaiting && code === 1000)) {
+                stopLocalMedia(); media.close(); signaling.disconnect();
+                setConnected(false); setLocalStream(null); setVideoOff(true); setAudioMuted(true);
+                setConnectionLost(true);
+                return;
+            }
+            dropped();
         })];
         async function init() {
             try {
@@ -223,19 +302,21 @@ export default function MeetingRoom() {
                 const admission = new Promise<{ result?: any; error?: string; cancelled?: boolean }>(resolve => { settleAdmission = resolve; });
                 const stopAdmitted = signaling.on('admitted', result => settleAdmission?.({ result }));
                 const stopRejected = signaling.on('rejected', ({ reason }) => settleAdmission?.({ error: reason || 'The host declined your entry.' }));
-                unsubscribe.push(stopAdmitted, stopRejected);
+                const stopWaitingStatus = signaling.on('waitingStatus', ({ status }) => { if (alive()) setWaitingAdmission(status === 'waitingForHost' ? 'host' : 'knock'); });
+                unsubscribe.push(stopAdmitted, stopRejected, stopWaitingStatus);
                 let joinResult = await signaling.request('joinRoom', {
                     meetingCode, displayName,
                 });
-                if (joinResult.status === 'waiting') {
-                    if (alive()) setWaitingAdmission(true);
+                if (joinResult.status === 'waiting' || joinResult.status === 'waitingForHost') {
+                    if (alive()) { setRestoring(false); setWaitingAdmission(joinResult.status === 'waitingForHost' ? 'host' : 'knock'); }
                     const outcome = await admission;
                     if (!alive() || outcome.cancelled) return;
-                    setWaitingAdmission(false);
+                    setWaitingAdmission(null);
                     if (outcome.error) throw new Error(outcome.error);
                     joinResult = outcome.result;
+                    playSound('notice');
                 }
-                stopAdmitted(); stopRejected(); settleAdmission = undefined;
+                stopAdmitted(); stopRejected(); stopWaitingStatus(); settleAdmission = undefined;
                 if (!alive()) return;
                 myPeerIdRef.current = joinResult.peerId;
                 canPublishRef.current = joinResult.canPublish !== false;
@@ -259,9 +340,23 @@ export default function MeetingRoom() {
                         roomSettingsRef.current = { ...roomSettingsRef.current, ...settings };
                         if (settings.allowScreenShare === false && sharingRef.current) { void stopScreenShare(); showNotice('Screen sharing was disabled by the host.'); }
                     }),
-                    signaling.on('roleChanged', ({ peerId, role }) => { if (peerId === myPeerIdRef.current) { setMyRole(role); if (role !== 'host' && role !== 'co-host') setHostToolsOpen(false); } else patchPeer(peerId, { role }); }),
+                    signaling.on('roleChanged', ({ peerId, role }) => {
+                        if (peerId === myPeerIdRef.current) {
+                            const before = myRoleRef.current;
+                            setMyRole(role);
+                            if (role !== 'host' && role !== 'co-host') { setHostToolsOpen(false); setKnocks([]); }
+                            if (role !== before) showNotice(role === 'host' ? 'You are now the host.' : role === 'co-host' ? 'You are now a co-host. You can admit people and manage the meeting.' : 'You are no longer a co-host.');
+                        } else patchPeer(peerId, { role });
+                    }),
+                    signaling.on('hostLeft', () => showNotice('The host left. The meeting continues; host controls return when the host or a co-host is back.')),
+                    signaling.on('waitingRoomPeer', ({ peerId, displayName: name }: any) => {
+                        if (!isManagerNow()) return;
+                        playSound('notice');
+                        setKnocks(current => current.some(k => k.peerId === peerId) ? current : [...current, { peerId, displayName: name || 'Guest' }]);
+                    }),
                     signaling.on('newPeer', ({ peerId, displayName: name, role }: any) => patchPeer(peerId, { displayName: name, role })),
-                    signaling.on('peerLeft', ({ peerId }: any) => setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; })),
+                    signaling.on('peerLeft', ({ peerId }: any) => { setKnocks(current => current.filter(k => k.peerId !== peerId)); setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; }); }),
+                    signaling.on('newPeer', ({ peerId }: any) => setKnocks(current => current.filter(k => k.peerId !== peerId))),
                     signaling.on('peerKicked', ({ peerId }: any) => setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; })),
                     signaling.on('newProducer', async ({ peerId, producerId }: any) => {
                         try { await media.consume(peerId, producerId); } catch (err) { console.error('Failed to consume:', err); }
@@ -270,13 +365,18 @@ export default function MeetingRoom() {
                         if (kind === 'audio') patchPeer(peerId, { audioMuted: !!muted });
                         if (kind === 'video') patchPeer(peerId, { videoOff: !!muted });
                     }),
-                    signaling.on('handRaised', ({ peerId, raised }: any) => {
-                        if (peerId === myPeerIdRef.current) return;
+                    signaling.on('handRaised', ({ peerId, raised, by }: any) => {
+                        if (peerId === myPeerIdRef.current) {
+                            if (!raised && handRaisedRef.current) { handRaisedRef.current = false; setHandRaised(false); if (by) showNotice(`${by} lowered your hand.`); }
+                            return;
+                        }
                         patchPeer(peerId, { handRaised: !!raised });
                     }),
-                    signaling.on('forceMute', ({ kind, by }: any) => {
+                    signaling.on('forceMute', ({ kind, by, reason }: any) => {
                         const k: MediaKind = kind === 'video' ? 'video' : 'audio';
+                        const wasOn = k === 'audio' ? !audioMutedRef.current : !videoOffRef.current;
                         applyMute(k, true);
+                        if (reason === 'permission') { showNotice(`The host turned off ${k === 'audio' ? 'microphones' : 'cameras'} for participants.`); if (wasOn) playSound('notice'); return; }
                         playSound('notice');
                         showNotice(`${by || 'The host'} turned off your ${k === 'audio' ? 'microphone' : 'camera'}.`);
                     }),
@@ -296,15 +396,22 @@ export default function MeetingRoom() {
                 }
 
                 // Capture starts only after admission, never while waiting for a host.
-                if (canPublishRef.current) await openLocalMedia(state.micId, state.cameraId, cameraCapture.current, stream, alive, () => alive() && !videoOffRef.current);
+                const manager = joinResult.role === 'host' || joinResult.role === 'co-host';
+                if (!manager && joinResult.settings?.allowMicrophone === false && !audioMutedRef.current) { audioMutedRef.current = true; setAudioMuted(true); showNotice('The host has turned off microphones for participants.'); }
+                if (!manager && joinResult.settings?.allowCamera === false) videoOffRef.current = true;
+                const opened = canPublishRef.current
+                    ? await openLocalMedia(state.micId, state.cameraId, cameraCapture.current, stream, alive, () => alive() && !videoOffRef.current, () => !audioMutedRef.current)
+                    : {};
                 if (!alive()) { stream.getTracks().forEach(track => track.stop()); return; }
                 const hasMic = stream.getAudioTracks().some(track => track.readyState === 'live');
                 const hasCam = stream.getVideoTracks().some(track => track.readyState === 'live');
                 setLocalStream(stream);
-                if (!hasMic) { audioMutedRef.current = true; setAudioMuted(true); showNotice(canPublishRef.current ? 'No microphone available. You can still listen and chat.' : 'You are watching this webinar. Only the organiser can share media.'); }
+                if (opened.cameraNotice) setCameraNotice(opened.cameraNotice);
+                if (!hasMic) { audioMutedRef.current = true; setAudioMuted(true); showNotice(!canPublishRef.current ? 'You are watching this webinar. Only the organiser can share media.' : opened.micNotice || 'No microphone available. You can still listen and chat.'); }
+                else if (opened.micNotice) showNotice(opened.micNotice);
                 if (!hasCam) videoOffRef.current = true;
                 setVideoOff(videoOffRef.current);
-                stream.getAudioTracks().forEach(track => { track.enabled = !audioMutedRef.current; track.addEventListener('ended', () => { if (alive()) applyMute('audio', true); }); });
+                stream.getAudioTracks().forEach(track => { track.enabled = !audioMutedRef.current; watchMicrophone(track); });
                 stream.getVideoTracks().forEach(track => { track.enabled = !videoOffRef.current; watchCamera(track); });
 
                 // SFU-based media relay — only if SFU is available
@@ -349,13 +456,22 @@ export default function MeetingRoom() {
                 signaling.request('muteStateChanged', { kind: 'audio', muted: audioMutedRef.current }).catch(() => { });
                 signaling.request('muteStateChanged', { kind: 'video', muted: videoOffRef.current }).catch(() => { });
                 setConnected(true);
+                setRestoring(false);
+                onConnected();
+                if (reconnecting) showNotice('You are back in the meeting.');
             } catch (err) {
                 console.error('Failed to join meeting:', err);
                 if (alive()) {
-                    setWaitingAdmission(false);
-                    showNotice(err instanceof Error ? err.message : 'Could not join the meeting.');
-                    stopLocalMedia(); media.close(); signaling.disconnect();
-                    setLocalStream(null); setVideoOff(true); setAudioMuted(true); setConnectionLost(true);
+                    setWaitingAdmission(null);
+                    const message = err instanceof Error ? err.message : 'Could not join the meeting.';
+                    if (POLICY_ERRORS.test(message)) {
+                        stopLocalMedia(); media.close(); signaling.disconnect();
+                        setLocalStream(null); setVideoOff(true); setAudioMuted(true); setRestoring(false);
+                        setJoinFailure({ title: /declined|denied/i.test(message) ? 'You were not let in' : 'You can’t join this meeting right now', detail: message });
+                    } else {
+                        // Network or server hiccup: try again automatically before giving up.
+                        dropped();
+                    }
                 }
             } finally {
                 if (alive()) initializingRef.current = false;
@@ -378,9 +494,36 @@ export default function MeetingRoom() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [meetingCode]);
 
+    /** An external mic unplugged or a headset switched off: move to the default mic instead of going silent. */
+    const watchMicrophone = useCallback((track: MediaStreamTrack) => {
+        track.addEventListener('ended', async () => {
+            if (!sessionActive.current || !localStreamRef.current?.getAudioTracks().includes(track)) return;
+            const wasOn = !audioMutedRef.current;
+            const revision = sessionRevision.current;
+            try {
+                const { stream: replacement } = await openMicrophone(undefined, 6000);
+                const next = replacement.getAudioTracks()[0];
+                const current = localStreamRef.current;
+                if (!next || !current || !sessionActive.current || revision !== sessionRevision.current) { replacement.getTracks().forEach(t => t.stop()); return; }
+                current.removeTrack(track);
+                current.addTrack(next);
+                next.enabled = wasOn;
+                watchMicrophone(next);
+                if (media.canSend) { if (media.hasProducer('audio')) await media.replaceTrack('audio', next); else await media.produce(next, { source: 'mic' }); }
+                media.setPaused('audio', !wasOn);
+                setLocalStream(new MediaStream(current.getTracks()));
+                showNotice(`Your microphone was disconnected. Switched to ${deviceLabel(next)}.`);
+            } catch {
+                if (sessionActive.current) { applyMute('audio', true); showNotice('Your microphone was disconnected. Connect one and press the mic button.'); }
+            }
+        }, { once: true });
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [applyMute, showNotice]);
+
     const handleToggleAudio = useCallback(async () => {
         if (!canPublishRef.current) { showNotice('Only the webinar organiser can share media.'); return; }
         if (!sessionActive.current) return;
+        if (audioMutedRef.current && !roomSettingsRef.current.allowMicrophone && !isManagerNow()) { showNotice('The host has turned off microphones for participants. Raise your hand to ask to speak.'); return; }
         const current = localStreamRef.current ?? new MediaStream();
         const live = current.getAudioTracks().some(track => track.readyState === 'live');
         if (live) { applyMute('audio', !audioMutedRef.current); return; }
@@ -390,15 +533,13 @@ export default function MeetingRoom() {
         const revision = sessionRevision.current;
         let acquired: MediaStream | null = null;
         try {
-            acquired = await navigator.mediaDevices.getUserMedia({ audio: state.micId ? { deviceId: { ideal: state.micId } } : true, video: false });
+            acquired = (await openMicrophone(state.micId)).stream;
             if (!sessionActive.current || revision !== sessionRevision.current) { acquired.getTracks().forEach(t => t.stop()); return; }
             const track = acquired.getAudioTracks()[0];
             current.getAudioTracks().forEach(old => { old.stop(); current.removeTrack(old); });
             current.addTrack(track);
             localStreamRef.current = current;
-            track.addEventListener('ended', () => {
-                if (sessionActive.current && localStreamRef.current?.getAudioTracks().includes(track)) applyMute('audio', true);
-            }, { once: true });
+            watchMicrophone(track);
             if (media.canSend) {
                 if (media.hasProducer('audio')) await media.replaceTrack('audio', track);
                 else await media.produce(track, { source: 'mic' });
@@ -406,13 +547,13 @@ export default function MeetingRoom() {
             if (!sessionActive.current || revision !== sessionRevision.current) { track.stop(); return; }
             setLocalStream(new MediaStream(current.getTracks()));
             applyMute('audio', false);
-        } catch {
+        } catch (error) {
             acquired?.getTracks().forEach(t => t.stop());
             if (!sessionActive.current || revision !== sessionRevision.current) return;
             applyMute('audio', true);
-            showNotice('Microphone unavailable. Check browser permission and try again.');
+            showNotice(microphoneMessage(error));
         } finally { busyRef.current.mic = false; }
-    }, [applyMute, state.micId, showNotice]);
+    }, [applyMute, state.micId, showNotice, watchMicrophone]);
 
     useEffect(() => {
         window.clearTimeout(mutedSpeechTimer.current);
@@ -445,13 +586,15 @@ export default function MeetingRoom() {
         if (!canPublishRef.current) { showNotice('Only the webinar organiser can share media.'); return; }
         if (!sessionActive.current || document.hidden) return;
         if (!videoOffRef.current) { applyMute('video', true); setCameraNotice(''); return; }
+        if (!roomSettingsRef.current.allowCamera && !isManagerNow()) { showNotice('The host has turned off cameras for participants.'); return; }
         if (initializingRef.current) { showNotice('Preparing your camera. Try again once the meeting connects.'); return; }
         if (busyRef.current.camera) return;
         busyRef.current.camera = true;
         const revision = sessionRevision.current;
         try {
-            const track = await cameraCapture.current.start({ width: 1280, height: 720, ...(state.cameraId ? { deviceId: { ideal: state.cameraId } } : {}) });
+            const { track, fellBack } = await startCameraWithFallback(constraints => cameraCapture.current.start(constraints), state.cameraId);
             if (!track || !sessionActive.current || revision !== sessionRevision.current) { track?.stop(); return; }
+            if (fellBack) showNotice(`Your chosen camera was not available. Using ${deviceLabel(track)}.`);
             const current = localStreamRef.current ?? new MediaStream();
             current.getVideoTracks().forEach(old => { old.stop(); current.removeTrack(old); });
             current.addTrack(track);
@@ -654,7 +797,6 @@ export default function MeetingRoom() {
         return () => window.removeEventListener('beforeunload', warn);
     }, []);
 
-    const handRaisedRef = useRef(false);
     const handleRaiseHand = useCallback(() => {
         const next = !handRaisedRef.current;
         handRaisedRef.current = next;
@@ -663,9 +805,11 @@ export default function MeetingRoom() {
         signaling.request('raiseHand', { raised: next }).catch(() => { });
     }, []);
     const handleSendReaction = useCallback((emoji: string) => {
+        if (!roomSettingsRef.current.allowReactions && !isManagerNow()) { showNotice('The host has turned off reactions.'); return; }
         pushReaction(emoji, displayName, true);
         signaling.request('reaction', { emoji }).catch(() => { });
-    }, [displayName]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [displayName, showNotice]);
     const expireReaction = useCallback((id: string) => setReactions((prev) => prev.filter((r) => r.id !== id)), []);
     const closeReactions = useCallback(() => setReactionsOpen(false), []);
     const closeLanguage = useCallback(() => {
@@ -731,10 +875,33 @@ export default function MeetingRoom() {
             : `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
     };
 
+    const answerKnock = useCallback((peerId: string, admit: boolean) => {
+        setKnocks(current => current.filter(k => k.peerId !== peerId));
+        signaling.request(admit ? 'admitPeer' : 'rejectPeer', { targetPeerId: peerId }).catch((error: Error) => showNotice(error?.message || 'That request could not be answered.'));
+    }, [showNotice]);
+    const endForEveryone = useCallback(async () => {
+        setLeaveOpen(false);
+        try { await signaling.request('endMeeting', {}); } catch (error) { showNotice(error instanceof Error ? error.message : 'The meeting could not be ended.'); return; }
+        void handleLeave();
+    }, [handleLeave, showNotice]);
+    const requestLeave = useCallback(() => {
+        if (myRole === 'host' && connected && peers.size > 0) { setLeaveOpen(true); return; }
+        void handleLeave();
+    }, [myRole, connected, peers.size, handleLeave]);
+
     const sidePanelOpen = chatOpen || participantsOpen || activitiesOpen || hostToolsOpen;
     const manager = myRole === 'host' || myRole === 'co-host';
     const closeActivityPanel = () => { setActivitiesOpen(false); setHostToolsOpen(false); document.querySelector<HTMLButtonElement>('[aria-label="More controls"]')?.focus(); };
-    if (waitingAdmission) return <WaitingAdmission meetingCode={meetingCode || ''} onLeave={handleLeave} />;
+    if (waitingAdmission) return <WaitingAdmission mode={waitingAdmission} meetingCode={meetingCode || ''} onLeave={handleLeave} />;
+    if (joinFailure) return <main className="waiting-admission meeting-join-failure"><div>
+        <span className="mi" aria-hidden="true">block</span>
+        <h1>{joinFailure.title}</h1>
+        <p role="alert">{joinFailure.detail}</p>
+        <div className="waiting-admission-actions">
+            <button type="button" onClick={() => navigate(`/meeting/${meetingCode}/preview`, { replace: true })}>Try again</button>
+            <button type="button" className="btn-text" onClick={() => navigate('/app')}>Back to meetings</button>
+        </div>
+    </div></main>;
 
     return (
         <div className="meeting-room">
@@ -758,8 +925,17 @@ export default function MeetingRoom() {
             </div>
 
             <div className="meeting-notices">
-            {connectionLost && <div className="meeting-notice" role="alert">Connection lost. Your camera and microphone are off.
+            {restoring && !connectionLost && <div className="meeting-notice" role="status"><span className="mi mi-sm meeting-spin" aria-hidden="true">progress_activity</span> Reconnecting… Hold on, we’re getting you back into the meeting.</div>}
+            {connectionLost && <div className="meeting-notice" role="alert">Connection lost. Check your internet connection, then rejoin.
                 <button className="btn-outline" onClick={() => navigate(`/meeting/${meetingCode}/preview`, { replace: true })}>Rejoin meeting</button>
+            </div>}
+            {knocks.length > 0 && (myRole === 'host' || myRole === 'co-host') && <div className="meeting-knock" role="alert">
+                <span className="mi" aria-hidden="true">person_add</span>
+                <p>{knocks.length === 1 ? <><strong>{knocks[0].displayName}</strong> wants to join</> : <><strong>{knocks.length} people</strong> want to join</>}</p>
+                {knocks.length === 1 ? <>
+                    <button type="button" className="btn-text" onClick={() => answerKnock(knocks[0].peerId, false)}>Deny</button>
+                    <button type="button" className="btn-outline" onClick={() => answerKnock(knocks[0].peerId, true)}>Admit</button>
+                </> : <button type="button" className="btn-outline" onClick={() => { setHostToolsOpen(true); setActivitiesOpen(false); setChatOpen(false); setParticipantsOpen(false); }}>View all</button>}
             </div>}
             {(cameraNotice || notice) && <div className="meeting-notice" role="status">
                 {cameraNotice || notice}
@@ -785,7 +961,7 @@ export default function MeetingRoom() {
                     <ParticipantsPanel peers={peers} displayName={displayName} myRole={myRole} audioMuted={audioMuted} videoOff={videoOff} handRaised={handRaised} onClose={() => setParticipantsOpen(false)} />
                 )}
                 <MeetingCollaboration key={meetingCode} open={activitiesOpen} connected={connected} role={myRole} myPeerId={myPeerIdRef.current} onClose={closeActivityPanel} />
-                {hostToolsOpen && manager && <HostMeetingTools role={myRole} myPeerId={myPeerIdRef.current} participants={[{ peerId: myPeerIdRef.current, displayName, role: myRole, audioMuted }, ...Array.from(peers.values()).map(peer => ({ ...peer, role: peer.role || 'member' }))]} settings={roomSettings} onClose={closeActivityPanel} />}
+                {hostToolsOpen && manager && <HostMeetingTools role={myRole} myPeerId={myPeerIdRef.current} participants={[{ peerId: myPeerIdRef.current, displayName, role: myRole, audioMuted, videoOff, handRaised }, ...Array.from(peers.values()).map(peer => ({ ...peer, role: peer.role || 'member', videoOff: peer.videoOff ?? !peer.videoTrack }))]} settings={roomSettings} onClose={closeActivityPanel} onEndMeeting={() => setLeaveOpen(true)} />}
             </div>
 
             {recordingStatus && <div className="meeting-recording-status" role="status">{recordingStatus}
@@ -807,8 +983,19 @@ export default function MeetingRoom() {
                 onToggleScreen={handleScreenShare} onToggleRecording={handleToggleRecording}
                 onToggleChat={() => { if (!roomSettings.allowChat && !manager) { showNotice('Chat is disabled by the host.'); return; } setChatOpen(!chatOpen); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }}
                 onToggleParticipants={() => { setParticipantsOpen(!participantsOpen); setChatOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }}
-                onRaiseHand={handleRaiseHand} onLeave={handleLeave}
+                onRaiseHand={handleRaiseHand} onLeave={requestLeave}
             />
+            {leaveOpen && <div className="meeting-dialog-backdrop" onClick={() => setLeaveOpen(false)}>
+                <div className="meeting-dialog" role="dialog" aria-modal="true" aria-labelledby="leave-title" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') setLeaveOpen(false); }}>
+                    <h2 id="leave-title">Leave the meeting?</h2>
+                    <p>You can leave and let the meeting continue, or end it for everyone.</p>
+                    <div className="meeting-dialog-actions">
+                        <button type="button" className="btn-text" autoFocus onClick={() => setLeaveOpen(false)}>Cancel</button>
+                        <button type="button" className="btn-outline" onClick={() => { setLeaveOpen(false); void handleLeave(); }}>Just leave</button>
+                        <button type="button" className="meeting-danger" onClick={() => { void endForEveryone(); }}>End for everyone</button>
+                    </div>
+                </div>
+            </div>}
 
         </div>
     );

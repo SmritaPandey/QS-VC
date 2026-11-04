@@ -9,11 +9,13 @@ it('never falls back to guest ownership on service failure', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok:false,status:503 }));
     await expect(loadMeetingPolicy('QS-TEST')).rejects.toThrow('could not be verified');
 });
-it('allows missing records as instant guest rooms but rejects ended meetings', async () => {
+it('allows missing records as instant guest rooms, lets hosts restart ended meetings, rejects cancelled ones', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok:false,status:404 }));
     expect(await loadMeetingPolicy('QS-TEST')).toBeNull();
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok:true,json:async()=>({hostId:'owner',status:'ended',settings:{}}) }));
-    await expect(loadMeetingPolicy('QS-TEST')).rejects.toThrow('ended');
+    expect((await loadMeetingPolicy('QS-TEST'))?.hostId).toBe('owner');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok:true,json:async()=>({hostId:'owner',status:'cancelled',settings:{}}) }));
+    await expect(loadMeetingPolicy('QS-TEST')).rejects.toThrow('cancelled');
 });
 it('maps the stored meeting-service setting names to live controls', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok:true,json:async()=>({hostId:'owner',status:'waiting',settings:{waitingRoom:true,chatEnabled:false,screenShareEnabled:false}})}));
