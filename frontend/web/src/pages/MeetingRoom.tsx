@@ -380,8 +380,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         playSound('notice');
                         showNotice(`${by || 'The host'} turned off your ${k === 'audio' ? 'microphone' : 'camera'}.`);
                     }),
-                    signaling.on('kicked', async ({ reason }: any) => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/', { state: { notice: reason || 'You were removed from the meeting.' } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
-                    signaling.on('meetingEnded', async ({ reason }: any) => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/', { state: { notice: reason || 'The meeting has ended.' } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
+                    signaling.on('kicked', async ({ reason }: any) => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/meeting-end', { replace: true, state: { meetingCode, reason: reason || 'You were removed from the meeting.', left: true, canRejoin: false } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
+                    signaling.on('meetingEnded', async ({ reason }: any) => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/meeting-end', { replace: true, state: { meetingCode, reason: reason || 'The meeting has ended.', left: false } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
                     signaling.on('chatMessage', (msg: ChatMessage) => { setChatMessages((prev) => [...prev, msg]); }),
                     signaling.on('reaction', ({ peerId, displayName: name, emoji }: any) => {
                         // The server echoes reactions to the sender too; ours is already on screen.
@@ -840,8 +840,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         media.close();
         signaling.request('leaveRoom', {}).catch(() => { });
         signaling.disconnect();
-        navigate('/');
-    }, [finishRecording, navigate, stopLocalMedia, showNotice]);
+        // Replace the meeting entry so browser Back does not drop people straight back into the call.
+        if (connected) navigate('/meeting-end', { replace: true, state: { meetingCode, duration, participantCount: peersRef.current.size + 1, chatMessageCount: chatMessages.length, left: true } });
+        else navigate('/app', { replace: true });
+    }, [finishRecording, navigate, stopLocalMedia, showNotice, meetingCode, connected, duration, chatMessages.length]);
     const handleSendChat = useCallback((content: string) => { if (!roomSettings.allowChat && myRole !== 'host' && myRole !== 'co-host') { showNotice('Chat is disabled by the host.'); return; } signaling.request('chatMessage', { content, type: 'text' }).catch(() => { showNotice('Your message could not be sent.'); }); }, [roomSettings.allowChat, myRole, showNotice]);
     const closeChat = useCallback(() => {
         setChatOpen(false);

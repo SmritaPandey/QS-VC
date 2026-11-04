@@ -267,3 +267,5 @@ html { scroll-behavior:smooth; }
 .home-demo > .qsvc-action { flex-shrink:0; }
 .home-demo .qsvc-action__inner { white-space:nowrap; }
 @media(max-width:767px) { .home-demo { flex-direction:column; align-items:flex-start; gap:24px; padding-block:32px; } }
+.public-auth-form .public-auth-notice { padding:10px 12px; border-radius:10px; background:var(--surface-tint,#e6f4f1); color:var(--text-primary); font-size:14px; }
+.meeting-end-reason { margin:-4px 0 16px; color:var(--text-secondary); }
