@@ -88,3 +88,4 @@
 @media(max-width:420px) { .collaboration-content { padding:12px; } .meeting-collaboration .collaboration-tabs button { padding:6px 10px; } }
 @media(prefers-reduced-motion:reduce) { .collaboration-dropzone[data-busy] .collaboration-dropzone-icon { animation:none; } }
 .collaboration-dropzone:not([data-busy]) { cursor:pointer; } .collaboration-dropzone:not([data-busy]):hover { border-color:#6b8a9c; }
+.collaboration-poll-visibility { display:flex; align-items:center; gap:6px; margin:-4px 0 10px; color:#91aab8; font-size:13px !important; } .collaboration-poll-visibility .mi { font-size:16px; }

@@ -1,0 +1,5 @@
+MediaPipe Selfie Segmentation (@mediapipe/selfie_segmentation 0.1.1675465747)
+Copyright Google LLC. Licensed under the Apache License, Version 2.0.
+https://www.apache.org/licenses/LICENSE-2.0
+
+Self-hosted so background effects work on the intranet without internet access.

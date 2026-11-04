@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { signaling } from '../lib/signaling';
 import { media, ConsumerInfo } from '../lib/media';
@@ -9,7 +9,14 @@ import { getToken } from '../lib/session';
 import '../styles/recordings.css';
 import { playSound } from '../lib/sounds';
 import { createMeetingComposite, type MeetingComposite } from '../lib/meeting-recorder';
-import VideoGrid from '../components/VideoGrid';
+import VideoGrid, { RemoteAudio, type ViewMode, type TilesPerPage } from '../components/VideoGrid';
+import BackgroundEffects from '../components/BackgroundEffects';
+import ReportProblem from '../components/ReportProblem';
+import { hasCaptionConsent } from '../components/MeetingCaptions';
+import { useSpeaking } from '../lib/speaking';
+import { BackgroundProcessor, savedEffect, saveEffect, effectLabel, type BackgroundEffect } from '../lib/virtual-background';
+import { SpeechToTextEngine } from '../lib/speech-to-text';
+import '../styles/meeting-stage.css';
 import BrandLogo from '../components/BrandLogo';
 import ControlBar from '../components/ControlBar';
 import MeetingChat from '../components/MeetingChat';
@@ -32,6 +39,8 @@ interface PeerData {
     audioMuted?: boolean;
     videoOff?: boolean;
     handRaised?: boolean;
+    presenting?: boolean;
+    onStage?: boolean;
 }
 
 interface ChatMessage {
@@ -149,7 +158,24 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const isManagerNow = () => myRoleRef.current === 'host' || myRoleRef.current === 'co-host';
     const roomSettingsRef = useRef(roomSettings);
     roomSettingsRef.current = roomSettings;
-    const [viewMode, setViewMode] = useState<'gallery' | 'focus' | 'sidebar' | 'filmstrip'>('gallery');
+    const [viewMode, setViewMode] = useState<ViewMode>(() => { try { const v = localStorage.getItem('qsvc:view'); return v === 'tiled' || v === 'spotlight' || v === 'sidebar' ? v : 'auto'; } catch { return 'auto'; } });
+    const [tilesPerPage, setTilesPerPage] = useState<TilesPerPage>(() => { try { const v = Number(localStorage.getItem('qsvc:tiles')); return [4, 9, 16, 25, 49].includes(v) ? v as TilesPerPage : 'auto'; } catch { return 'auto'; } });
+    const changeView = useCallback((view: ViewMode) => { setViewMode(view); try { localStorage.setItem('qsvc:view', view); } catch { /* convenience only */ } }, []);
+    const changeTiles = useCallback((value: TilesPerPage) => { setTilesPerPage(value); try { localStorage.setItem('qsvc:tiles', String(value)); } catch { /* convenience only */ } }, []);
+    const [pinnedId, setPinnedId] = useState<string | null>(null);
+    const [spotlightId, setSpotlightId] = useState<string | null>(null);
+    const [webinar, setWebinar] = useState(false);
+    const [myOnStage, setMyOnStage] = useState(false);
+    const [captionsOn, setCaptionsOn] = useState(false);
+    const [shareSpeech, setShareSpeech] = useState(false);
+    const [reportOpen, setReportOpen] = useState(false);
+    const [effectsOpen, setEffectsOpen] = useState(false);
+    const [effect, setEffect] = useState<BackgroundEffect>(savedEffect);
+    const [effectStatus, setEffectStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+    const [effectError, setEffectError] = useState('');
+    const [processedTrack, setProcessedTrack] = useState<MediaStreamTrack | null>(null);
+    const [isFullscreen, setIsFullscreen] = useState(false);
+    const roomRef = useRef<HTMLDivElement>(null);
     const [connected, setConnected] = useState(false);
     const [pageVisible, setPageVisible] = useState(!document.hidden);
     const [mutedSpeechNotice, setMutedSpeechNotice] = useState(false);
@@ -189,6 +215,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const noticeTimer = useRef<number>();
     const peersRef = useRef<Map<string, PeerData>>(new Map());
     const handRaisedRef = useRef(false);
+    const stopScreenShareRef = useRef<() => Promise<void>>(async () => {});
+    const processedTrackRef = useRef<MediaStreamTrack | null>(null);
+    const processorRef = useRef<BackgroundProcessor | null>(null);
+    const processorSourceRef = useRef<string>('');
     const videoAreaRef = useRef<HTMLDivElement>(null);
     const compositeRef = useRef<MeetingComposite | null>(null);
     useEffect(() => { peersRef.current = peers; }, [peers]);
@@ -323,6 +353,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 setMyRole(joinResult.role || 'member');
                 setRoomRecording(joinResult.recording || null);
                 setRoomSettings(current => ({ ...current, ...joinResult.settings }));
+                setWebinar(!!joinResult.settings?.webinar);
+                setSpotlightId(joinResult.spotlightPeerId || null);
                 joinedRef.current = true;
                 if (joinResult.settings?.muteOnEntry && joinResult.role !== 'host' && !audioMutedRef.current) {
                     applyMute('audio', true, false);
@@ -347,6 +379,20 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                             if (role !== 'host' && role !== 'co-host') { setHostToolsOpen(false); setKnocks([]); }
                             if (role !== before) showNotice(role === 'host' ? 'You are now the host.' : role === 'co-host' ? 'You are now a co-host. You can admit people and manage the meeting.' : 'You are no longer a co-host.');
                         } else patchPeer(peerId, { role });
+                    }),
+                    signaling.on('spotlightChanged', ({ peerId, by }: any) => {
+                        setSpotlightId(peerId || null);
+                        if (peerId && peerId === myPeerIdRef.current) showNotice(`${by || 'The host'} put you in the spotlight. Everyone sees you large.`);
+                    }),
+                    signaling.on('presenterChanged', ({ peerId, presenting }: any) => { if (peerId !== myPeerIdRef.current) patchPeer(peerId, { presenting: !!presenting }); }),
+                    signaling.on('stopPresenting', ({ by }: any) => { if (sharingRef.current) { void stopScreenShareRef.current(); showNotice(`${by || 'The host'} stopped your presentation.`); } }),
+                    signaling.on('stageChanged', ({ peerId, onStage, canPublish, by }: any) => {
+                        if (peerId !== myPeerIdRef.current) { patchPeer(peerId, { onStage: !!onStage }); return; }
+                        setMyOnStage(!!onStage);
+                        canPublishRef.current = canPublish !== false;
+                        playSound('notice');
+                        if (onStage) showNotice(`${by || 'The host'} invited you on stage. Turn on your mic and camera when you’re ready.`);
+                        else { if (sharingRef.current) void stopScreenShareRef.current(); showNotice('You’re back in the audience. Your mic and camera are off.'); }
                     }),
                     signaling.on('hostLeft', () => showNotice('The host left. The meeting continues; host controls return when the host or a co-host is back.')),
                     signaling.on('waitingRoomPeer', ({ peerId, displayName: name }: any) => {
@@ -392,7 +438,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
                 // People already in the room, with their mic / camera / hand state.
                 for (const p of joinResult.existingPeers || []) {
-                    patchPeer(p.peerId, { displayName: p.displayName, role: p.role, audioMuted: !!p.audioMuted, videoOff: !!p.videoOff, handRaised: !!p.handRaised });
+                    patchPeer(p.peerId, { displayName: p.displayName, role: p.role, audioMuted: !!p.audioMuted, videoOff: !!p.videoOff, handRaised: !!p.handRaised, presenting: !!p.screenSharing, onStage: !!p.onStage });
                 }
 
                 // Capture starts only after admission, never while waiting for a host.
@@ -666,13 +712,15 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         screenStreamRef.current = null;
         setScreenStream(null);
         setScreenSharing(false);
-        const camTrack = localStreamRef.current?.getVideoTracks()[0];
+        const camTrack = processedTrackRef.current?.readyState === 'live' ? processedTrackRef.current : localStreamRef.current?.getVideoTracks()[0];
         if (camTrack?.readyState === 'live') await media.replaceTrack('video', camTrack).catch(() => { });
         if (!sessionActive.current || revision !== sessionRevision.current) return;
         // Back to the camera: respect camera-off again.
         media.setPaused('video', videoOffRef.current);
-        if (joinedRef.current) signaling.request('muteStateChanged', { kind: 'screen', muted: false }).catch(() => { });
+        if (joinedRef.current) signaling.request('muteStateChanged', { kind: 'screen', muted: false, presenting: false }).catch(() => { });
     }, []);
+
+    stopScreenShareRef.current = stopScreenShare;
 
     const startScreenShare = useCallback(async () => {
         if (!roomSettingsRef.current.allowScreenShare) { showNotice('Screen sharing is disabled by the host.'); return; }
@@ -695,7 +743,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             }
             if (!sessionActive.current || revision !== sessionRevision.current || !sharingRef.current || !roomSettingsRef.current.allowScreenShare || screenTrack.readyState !== 'live') { display.getTracks().forEach(t => t.stop()); return; }
             media.setPaused('video', false); // the screen is sent even if the camera is off
-            if (joinedRef.current) signaling.request('muteStateChanged', { kind: 'screen', muted: true }).catch(() => { });
+            if (joinedRef.current) signaling.request('muteStateChanged', { kind: 'screen', muted: true, presenting: true }).catch(() => { });
         } catch (err) {
             if (!sessionActive.current || revision !== sessionRevision.current) return;
             if (sharingRef.current) await stopScreenShare();
@@ -891,7 +939,103 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         void handleLeave();
     }, [myRole, connected, peers.size, handleLeave]);
 
-    const sidePanelOpen = chatOpen || participantsOpen || activitiesOpen || hostToolsOpen;
+    // ── Background effects: process the live camera track and send the processed one. ──
+    const effectKey = JSON.stringify({ ...effect, src: effect.kind === 'image' ? effect.src?.length : undefined });
+    useEffect(() => {
+        const raw = localStream?.getVideoTracks().find(track => track.readyState === 'live');
+        const sendTrack = (track: MediaStreamTrack) => { if (!sharingRef.current && media.canSend && media.hasProducer('video')) void media.replaceTrack('video', track).catch(() => {}); };
+        if (effect.kind === 'none' || videoOff || !raw) {
+            processorRef.current?.stop(); processorSourceRef.current = '';
+            processedTrackRef.current = null; setProcessedTrack(null); setEffectStatus('idle');
+            if (raw && !videoOff) sendTrack(raw);
+            return;
+        }
+        const processor = processorRef.current ??= new BackgroundProcessor();
+        if (processorSourceRef.current === raw.id && processedTrackRef.current?.readyState === 'live') { void processor.setEffect(effect); return; }
+        let cancelled = false;
+        setEffectStatus('loading'); setEffectError('');
+        processorSourceRef.current = raw.id;
+        processor.stop();
+        processor.start(raw, effect).then(track => {
+            if (cancelled || raw.readyState !== 'live') { return; }
+            processedTrackRef.current = track; setProcessedTrack(track); setEffectStatus('ready');
+            sendTrack(track);
+        }).catch((reason: Error) => {
+            if (cancelled) return;
+            processorSourceRef.current = ''; processedTrackRef.current = null; setProcessedTrack(null);
+            setEffectStatus('error'); setEffectError(`${reason?.message || 'Background effects failed to start.'} Your normal camera is being shown.`);
+            sendTrack(raw);
+        });
+        return () => { cancelled = true; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [localStream, videoOff, effectKey]);
+    useEffect(() => () => { processorRef.current?.dispose(); processorRef.current = null; }, []);
+    const chooseEffect = useCallback((next: BackgroundEffect) => { setEffect(next); saveEffect(next); }, []);
+    const displayedLocalStream = useMemo(() => {
+        if (screenSharing) return screenStream;
+        if (!processedTrack || !localStream) return localStream;
+        return new MediaStream([processedTrack, ...localStream.getAudioTracks()]);
+    }, [screenSharing, screenStream, processedTrack, localStream]);
+
+    const effectPreview = useMemo(() => processedTrack ? new MediaStream([processedTrack]) : localStream, [processedTrack, localStream]);
+
+    // ── Captions (CC button) ──
+    const toggleCaptions = useCallback(() => {
+        if (captionsOn) { setCaptionsOn(false); setShareSpeech(false); stopSpeechRecognition.current(); return; }
+        setCaptionsOn(true);
+        const supported = SpeechToTextEngine.isSupported();
+        if (!canPublishRef.current) { showNotice('Captions are on. You’ll see what the speakers say.'); return; }
+        if (supported && hasCaptionConsent()) { setShareSpeech(true); showNotice('Captions are on, including your own speech.'); }
+        else if (supported) { setLanguageOpen(true); setReactionsOpen(false); showNotice('Captions are on. To let others read what you say, turn on “Share my speech as captions”.'); }
+        else showNotice('Captions are on. This browser can’t caption your own speech, but you’ll see what others say.');
+    }, [captionsOn, showNotice]);
+
+    // ── Full screen ──
+    useEffect(() => {
+        const sync = () => setIsFullscreen(!!document.fullscreenElement && document.fullscreenElement === roomRef.current);
+        document.addEventListener('fullscreenchange', sync);
+        return () => document.removeEventListener('fullscreenchange', sync);
+    }, []);
+    const toggleFullscreen = useCallback(() => {
+        if (!document.fullscreenEnabled) { showNotice('Full screen isn’t available in this browser.'); return; }
+        if (document.fullscreenElement) void document.exitFullscreen();
+        else void roomRef.current?.requestFullscreen().catch(() => showNotice('Full screen was blocked by your browser.'));
+    }, [showNotice]);
+
+    // ── Spotlight & stage (host/co-host) ──
+    const setSpotlightFor = useCallback((peerId: string | null) => {
+        signaling.request('setSpotlight', { targetPeerId: peerId }).catch((error: Error) => showNotice(error?.message || 'Spotlight could not be changed.'));
+    }, [showNotice]);
+    const setStageFor = useCallback((peerId: string, onStage: boolean) => {
+        signaling.request('setStage', { targetPeerId: peerId, onStage }).catch((error: Error) => showNotice(error?.message || 'The stage could not be changed.'));
+    }, [showNotice]);
+
+    // ── Who is speaking (grid highlight, People panel, active speaker on page 1) ──
+    const speakingTracks = useMemo(() => [
+        { id: myPeerIdRef.current || 'self', track: localStream?.getAudioTracks()[0], muted: audioMuted },
+        ...Array.from(peers.values()).map(p => ({ id: p.peerId, track: p.audioTrack, muted: !!p.audioMuted })),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    ], [localStream, audioMuted, peers, connected]);
+    const { speaking, activeSpeaker } = useSpeaking(speakingTracks);
+
+    // ── Report a problem ──
+    const collectDiagnostics = useCallback(async () => {
+        const devices = await navigator.mediaDevices?.enumerateDevices?.().catch(() => []) || [];
+        const settings = (track?: MediaStreamTrack) => track ? { label: track.label, state: track.readyState, enabled: track.enabled, muted: track.muted, ...track.getSettings?.(), deviceId: undefined, groupId: undefined } : null;
+        const connection = (navigator as any).connection;
+        return {
+            time: new Date().toISOString(), userAgent: navigator.userAgent, language: navigator.language,
+            screen: `${window.screen.width}x${window.screen.height}@${window.devicePixelRatio}`, online: navigator.onLine,
+            network: connection ? { type: connection.effectiveType, downlink: connection.downlink, rtt: connection.rtt } : undefined,
+            meeting: { connected, reconnecting: restoring, role: myRole, participants: peers.size + 1, webinar, mediaRelay: media.canSend, sharing: screenSharing, captions: captionsOn, effect: effectLabel(effect), effectStatus },
+            microphone: settings(localStreamRef.current?.getAudioTracks()[0]), camera: settings(localStreamRef.current?.getVideoTracks()[0]),
+            devices: devices.slice(0, 20).map(d => ({ kind: d.kind, label: d.label || '(hidden until permission)' })),
+            lastNotice: notice || cameraNotice || undefined,
+        };
+    }, [connected, restoring, myRole, peers.size, webinar, screenSharing, captionsOn, effect, effectStatus, notice, cameraNotice]);
+
+    const closePanels = () => { setChatOpen(false); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); };
+    const sidePanelOpen = chatOpen || participantsOpen || activitiesOpen || hostToolsOpen || effectsOpen;
     const manager = myRole === 'host' || myRole === 'co-host';
     const closeActivityPanel = () => { setActivitiesOpen(false); setHostToolsOpen(false); document.querySelector<HTMLButtonElement>('[aria-label="More controls"]')?.focus(); };
     if (waitingAdmission) return <WaitingAdmission mode={waitingAdmission} meetingCode={meetingCode || ''} onLeave={handleLeave} />;
@@ -906,7 +1050,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     </div></main>;
 
     return (
-        <div className="meeting-room">
+        <div className="meeting-room" ref={roomRef} data-fullscreen={isFullscreen || undefined}>
             <div className="meeting-top-bar">
                 <div className="top-bar-left">
                     <BrandLogo meeting iconOnly />
@@ -919,7 +1063,15 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 <div className="top-bar-center">
                     <span className="meeting-timer">{formatDuration(duration)}</span>
                     {roomRecording && <span className="recording-indicator" role="status"><span className="mi mi-sm" aria-hidden="true">fiber_manual_record</span> {roomRecording.displayName} is recording</span>}
-                    {screenSharing && <span className="sharing-indicator"><span className="mi mi-sm">screen_share</span> Sharing</span>}
+                    {(() => {
+                        const presenters = [...(screenSharing ? ['You'] : []), ...Array.from(peers.values()).filter(p => p.presenting).map(p => p.displayName)];
+                        return presenters.length > 0 && <span className="qs-topchip" role="status"><span className="mi" aria-hidden="true">present_to_all</span>{presenters.length === 1 ? (presenters[0] === 'You' ? 'You are presenting' : `${presenters[0]} is presenting`) : `${presenters.join(', ')} are presenting`}</span>;
+                    })()}
+                    {spotlightId && <span className="qs-topchip qs-topchip--spot"><span className="mi" aria-hidden="true">star</span>Spotlight: {spotlightId === myPeerIdRef.current ? 'You' : peers.get(spotlightId)?.displayName || 'participant'}{manager && <button type="button" onClick={() => setSpotlightFor(null)}>Remove</button>}</span>}
+                    {webinar && (() => {
+                        const audience = (manager || myOnStage ? 0 : 1) + Array.from(peers.values()).filter(p => p.role !== 'host' && p.role !== 'co-host' && !p.onStage).length;
+                        return <span className="qs-topchip qs-topchip--spot" title="Webinar"><span className="mi" aria-hidden="true">podium</span>{!manager && !myOnStage ? 'You’re in the audience' : myOnStage && !manager ? 'You’re on stage' : 'Webinar'}{audience > 0 ? ` · ${audience} watching` : ''}</span>;
+                    })()}
                 </div>
                 <div className="top-bar-right">
                     <span className="participant-count"><span className="mi mi-sm">group</span> {peers.size + 1}</span>
@@ -952,17 +1104,24 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             </div>
             <div className="meeting-content">
                 <div ref={videoAreaRef} className={`video-area ${sidePanelOpen ? 'with-panel' : ''}`}>
-                    <VideoGrid remoteVolume={translatedSpeaking ? 0.2 : 1} localStream={screenSharing ? screenStream : localStream} peers={peers} displayName={displayName} videoOff={screenSharing ? false : videoOff} audioMuted={audioMuted} handRaised={handRaised} sharing={screenSharing} viewMode={viewMode} />
+                    <VideoGrid localStream={displayedLocalStream} myPeerId={myPeerIdRef.current} myRole={myRole} myOnStage={myOnStage} peers={peers} displayName={displayName} videoOff={screenSharing ? false : videoOff} audioMuted={audioMuted} handRaised={handRaised} sharing={screenSharing}
+                        viewMode={viewMode} tilesPerPage={tilesPerPage} webinar={webinar} speaking={speaking} activeSpeaker={activeSpeaker} spotlightId={spotlightId} pinnedId={pinnedId}
+                        canManage={manager} onPin={setPinnedId} onSpotlight={setSpotlightFor} onToggleStage={setStageFor} />
+                    <RemoteAudio peers={peers} volume={translatedSpeaking ? 0.2 : 1} />
                     <ReactionsOverlay reactions={reactions} pickerOpen={reactionsOpen} onSendReaction={handleSendReaction} onClosePicker={closeReactions} onExpire={expireReaction} />
-                    <MeetingCaptions translatedSpeaking={translatedSpeaking} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking} />
+                    <MeetingCaptions translatedSpeaking={translatedSpeaking} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
+                        showCaptions={captionsOn} onShowCaptionsChange={setCaptionsOn} shareSpeech={shareSpeech} onShareSpeechChange={setShareSpeech} />
                 </div>
 
                 {chatOpen && <MeetingChat messages={chatMessages} onSend={handleSendChat} onClose={closeChat} />}
 
                 {participantsOpen && (
-                    <ParticipantsPanel peers={peers} displayName={displayName} myRole={myRole} audioMuted={audioMuted} videoOff={videoOff} handRaised={handRaised} onClose={() => setParticipantsOpen(false)} />
+                    <ParticipantsPanel peers={peers} displayName={displayName} myPeerId={myPeerIdRef.current || 'self'} myRole={myRole} myOnStage={myOnStage} audioMuted={audioMuted} videoOff={videoOff} handRaised={handRaised} presenting={screenSharing}
+                        speaking={speaking} webinar={webinar} spotlightId={spotlightId} canManage={manager} onSpotlight={setSpotlightFor} onToggleStage={setStageFor} onClose={() => setParticipantsOpen(false)} />
                 )}
                 <MeetingCollaboration key={meetingCode} open={activitiesOpen} connected={connected} role={myRole} myPeerId={myPeerIdRef.current} onClose={closeActivityPanel} />
+                {effectsOpen && <BackgroundEffects effect={effect} onChange={chooseEffect} preview={effectPreview} cameraOn={!videoOff && !!localStream?.getVideoTracks().some(t => t.readyState === 'live')}
+                    status={effectStatus} error={effectError} onStartCamera={handleToggleVideo} onClose={() => setEffectsOpen(false)} />}
                 {hostToolsOpen && manager && <HostMeetingTools role={myRole} myPeerId={myPeerIdRef.current} participants={[{ peerId: myPeerIdRef.current, displayName, role: myRole, audioMuted, videoOff, handRaised }, ...Array.from(peers.values()).map(peer => ({ ...peer, role: peer.role || 'member', videoOff: peer.videoOff ?? !peer.videoTrack }))]} settings={roomSettings} onClose={closeActivityPanel} onEndMeeting={() => setLeaveOpen(true)} />}
             </div>
 
@@ -972,9 +1131,13 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             <ControlBar
                 assistant={<AIChatBot onOpen={() => { setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen} />}
                 activitiesOpen={activitiesOpen} hostToolsOpen={hostToolsOpen}
-                onToggleActivities={() => { setActivitiesOpen(value => !value); setHostToolsOpen(false); setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); }}
+                onToggleActivities={() => { setActivitiesOpen(value => !value); setHostToolsOpen(false); setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); setEffectsOpen(false); }}
                 onToggleHostTools={manager ? () => { setHostToolsOpen(value => !value); setActivitiesOpen(false); setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); } : undefined}
-                viewMode={viewMode} onChangeView={setViewMode} activitySignal={mutedSpeechPulse} keepSideVisible={mutedSpeechNotice}
+                viewMode={viewMode} onChangeView={changeView} tilesPerPage={tilesPerPage} onChangeTilesPerPage={changeTiles} activitySignal={mutedSpeechPulse} keepSideVisible={mutedSpeechNotice}
+                captionsOn={captionsOn} onToggleCaptions={toggleCaptions}
+                fullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen}
+                effectsOn={effect.kind !== 'none'} onOpenEffects={() => { closePanels(); setEffectsOpen(true); setLanguageOpen(false); setReactionsOpen(false); }}
+                onReportProblem={() => setReportOpen(true)}
                 audioMuted={audioMuted} videoOff={videoOff} screenSharing={screenSharing}
                 isRecording={isRecording} canRecord={myRole === 'host' && !!getToken()} chatOpen={chatOpen} participantsOpen={participantsOpen}
                 handRaised={handRaised} reactionsOpen={reactionsOpen}
@@ -983,10 +1146,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 onToggleLanguage={() => { setLanguageOpen((open) => !open); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }}
                 onToggleAudio={handleToggleAudio} onToggleVideo={handleToggleVideo}
                 onToggleScreen={handleScreenShare} onToggleRecording={handleToggleRecording}
-                onToggleChat={() => { if (!roomSettings.allowChat && !manager) { showNotice('Chat is disabled by the host.'); return; } setChatOpen(!chatOpen); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }}
-                onToggleParticipants={() => { setParticipantsOpen(!participantsOpen); setChatOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }}
+                onToggleChat={() => { if (!roomSettings.allowChat && !manager) { showNotice('Chat is disabled by the host.'); return; } setChatOpen(!chatOpen); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); }}
+                onToggleParticipants={() => { setParticipantsOpen(!participantsOpen); setChatOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); }}
                 onRaiseHand={handleRaiseHand} onLeave={requestLeave}
             />
+            {reportOpen && <ReportProblem meetingCode={meetingCode || ''} displayName={displayName} diagnostics={collectDiagnostics} onClose={() => setReportOpen(false)} />}
             {leaveOpen && <div className="meeting-dialog-backdrop" onClick={() => setLeaveOpen(false)}>
                 <div className="meeting-dialog" role="dialog" aria-modal="true" aria-labelledby="leave-title" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') setLeaveOpen(false); }}>
                     <h2 id="leave-title">Leave the meeting?</h2>

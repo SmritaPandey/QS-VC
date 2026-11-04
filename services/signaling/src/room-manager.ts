@@ -63,6 +63,10 @@ export interface RoomState {
     recording: { peerId: string; displayName: string } | null;
     /** Set once the host (or a platform admin) has joined. Until then nobody else gets in. */
     hostStarted: boolean;
+    /** Host-chosen participant shown large for everyone ("Spotlight for everyone"). */
+    spotlightPeerId: string | null;
+    /** Webinar attendees the host invited on stage: they may turn on mic, camera and share. */
+    stage: Set<string>;
     createdAt: Date;
 }
 
@@ -102,6 +106,8 @@ class RoomManager {
             settings: { ...DEFAULT_SETTINGS, ...settings },
             recording: null,
             hostStarted: false,
+            spotlightPeerId: null,
+            stage: new Set(),
             createdAt: new Date(),
         };
 
@@ -220,6 +226,11 @@ class RoomManager {
         room.peers.delete(peerId);
         room.waitingRoom.delete(peerId);
         if (room.recording?.peerId === peerId) this.updateRecording(roomId, null);
+        room.stage.delete(peerId);
+        if (room.spotlightPeerId === peerId) {
+            room.spotlightPeerId = null;
+            this.broadcast(roomId, 'spotlightChanged', { peerId: null });
+        }
 
         // Host left. Owned meetings keep running (like Google Meet) and only a co-host takes over;
         // nobody else is promoted. Ad-hoc rooms without an owner hand over to the longest-present peer.

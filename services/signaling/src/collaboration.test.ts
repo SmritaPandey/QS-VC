@@ -7,4 +7,19 @@ describe('room collaboration',()=>{
  it('prevents lost notes and unauthorised stroke deletion',()=>{const {rpc}=setup();rpc('member','collaborationAction',{type:'notes:update',text:'Agreed',version:0});expect(()=>rpc('host','collaborationAction',{type:'notes:update',text:'Stale',version:0})).toThrow('Notes changed');const state=rpc('host','collaborationAction',{type:'stroke:add',points:[{x:0,y:0},{x:1,y:1}],color:'#006d77',width:3});expect(()=>rpc('member','collaborationAction',{type:'stroke:undo',id:state.strokes[0].id})).toThrow('Host');expect(()=>rpc('member','collaborationAction',{type:'stroke:add',points:[{x:2,y:0},{x:0,y:1}],color:'#006d77',width:3})).toThrow();});
  it('keeps attachment bytes out of snapshots and rejects unsafe/oversized files',()=>{const {rpc}=setup();const state=rpc('member','collaborationAction',{type:'file:add',name:'notes.txt',mime:'text/plain',data:Buffer.from('Hello').toString('base64')});expect(state.files[0].data).toBeUndefined();expect(rpc('host','getCollaborationFile',{id:state.files[0].id}).data).toBe(Buffer.from('Hello').toString('base64'));expect(()=>rpc('member','collaborationAction',{type:'file:add',name:'fake.png',mime:'image/png',data:Buffer.from('not png').toString('base64')})).toThrow('format');expect(()=>rpc('member','collaborationAction',{type:'file:add',name:'x.txt',mime:'text/plain',data:Buffer.from('<script>alert(1)</script>').toString('base64')})).toThrow('format');expect(()=>rpc('member','collaborationAction',{type:'file:add',name:'big.txt',mime:'text/plain',data:Buffer.alloc(32769,65).toString('base64')})).toThrow();});
  it('deduplicates question votes and separates rooms',()=>{const {rpc}=setup();let state=rpc('member','collaborationAction',{type:'question:ask',text:'When?'});const id=state.questions[0].id;rpc('member','collaborationAction',{type:'question:vote',id});state=rpc('member','collaborationAction',{type:'question:vote',id});expect(state.questions[0].voters).toEqual(['member']);expect(()=>rpc('member','collaborationAction',{type:'question:answer',id,answer:'Now'})).toThrow('Host');expect(setup().rpc('host','getCollaborationState').questions).toEqual([]);});
+ it('hides poll results from participants until allowed, and never broadcasts them',()=>{
+  const {rpc,b}=setup();
+  let state=rpc('host','collaborationAction',{type:'poll:create',question:'Budget?',options:['A','B'],results:'afterClose'});const id=state.polls[0].id;
+  rpc('host','collaborationAction',{type:'poll:vote',id,option:0});
+  let mine=rpc('member','collaborationAction',{type:'poll:vote',id,option:1});
+  expect(mine.polls[0].resultsHidden).toBe(true);expect(mine.polls[0].votes).toEqual({member:1});expect(mine.polls[0].total).toBe(2);
+  const pushed=b.send.mock.calls.map((call:any[])=>JSON.parse(call[0])).filter((m:any)=>m.method==='collaborationUpdated').pop();
+  expect(pushed.params.polls[0].votes).not.toHaveProperty('host');
+  expect(rpc('host','getCollaborationState').polls[0].votes).toEqual({host:0,member:1});
+  rpc('host','collaborationAction',{type:'poll:close',id});
+  expect(rpc('member','getCollaborationState').polls[0].resultsHidden).toBe(false);
+  state=rpc('host','collaborationAction',{type:'poll:create',question:'Private?',options:['Yes','No'],results:'hosts'});
+  const hidden=state.polls[1].id;rpc('host','collaborationAction',{type:'poll:close',id:hidden});
+  expect(rpc('member','getCollaborationState').polls[1].resultsHidden).toBe(true);
+ });
 });

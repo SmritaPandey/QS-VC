@@ -1,270 +1,182 @@
 /**
- * Virtual background processor using MediaPipe SelfieSegmentation.
- * Applies blur, replacement image, or custom image to the video background
- * while preserving the foreground person.
+ * Camera background effects: blur or replace the background behind the person on camera.
  *
- * Falls back to a basic canvas-blur approach if MediaPipe is unavailable.
+ * Uses MediaPipe Selfie Segmentation, self-hosted under /mediapipe/ so it also works on an
+ * intranet with no internet access. Everything runs on this device; frames never leave it
+ * except as the normal (processed) camera video.
  */
 
-export type BackgroundMode = 'none' | 'blur' | 'image' | 'color';
+export type BackgroundEffect =
+    | { kind: 'none' }
+    | { kind: 'blur'; strength: 'light' | 'strong' }
+    | { kind: 'image'; id: string; src?: string };
 
-export interface VirtualBackgroundConfig {
-    mode: BackgroundMode;
-    blurAmount?: number;        // blur radius in px (default: 12)
-    imageSrc?: string;          // URL of the replacement background image
-    color?: string;             // solid background color (e.g. '#0a0a2e')
-    edgeBlur?: number;          // feathering of the segmentation mask (default: 4)
+export const BACKGROUND_PRESETS: Array<{ id: string; label: string; stops: string[]; dots?: boolean }> = [
+    { id: 'teal', label: 'Calm teal', stops: ['#0b3b3f', '#11706f', '#7fd6c5'] },
+    { id: 'dawn', label: 'Dawn', stops: ['#3a1c5c', '#b4456b', '#f2a65a'] },
+    { id: 'night', label: 'Night sky', stops: ['#050b1a', '#13254a', '#2b4f8a'], dots: true },
+    { id: 'studio', label: 'Studio grey', stops: ['#2c3238', '#4b545c', '#8a949c'] },
+    { id: 'brand', label: 'QS-VC', stops: ['#233c86', '#5141be', '#006d77'] },
+];
+
+const ASSET_BASE = '/mediapipe/selfie_segmentation/';
+const EFFECT_KEY = 'qsvc:background-effect';
+
+export function savedEffect(): BackgroundEffect {
+    try {
+        const raw = localStorage.getItem(EFFECT_KEY);
+        const value = raw ? JSON.parse(raw) : null;
+        if (value?.kind === 'blur' && (value.strength === 'light' || value.strength === 'strong')) return value;
+        if (value?.kind === 'image' && typeof value.id === 'string') return value;
+    } catch { /* per-device preference only */ }
+    return { kind: 'none' };
+}
+export function saveEffect(effect: BackgroundEffect) {
+    try {
+        // Uploaded pictures can be large; remember them only if small.
+        if (effect.kind === 'image' && effect.src && effect.src.length > 1_500_000) localStorage.setItem(EFFECT_KEY, JSON.stringify({ kind: 'none' }));
+        else localStorage.setItem(EFFECT_KEY, JSON.stringify(effect));
+    } catch { /* storage may be unavailable */ }
+}
+export const effectLabel = (e: BackgroundEffect) => e.kind === 'none' ? 'No effect' : e.kind === 'blur' ? (e.strength === 'light' ? 'Slight blur' : 'Blur') : BACKGROUND_PRESETS.find(p => p.id === e.id)?.label || 'Your picture';
+
+type Segmenter = { setOptions(o: object): void; onResults(cb: (r: { segmentationMask: CanvasImageSource }) => void): void; initialize(): Promise<void>; send(i: { image: CanvasImageSource }): Promise<void>; close(): Promise<void> };
+let loader: Promise<new (config: { locateFile: (f: string) => string }) => Segmenter> | null = null;
+
+function loadMediaPipe() {
+    loader ??= new Promise((resolve, reject) => {
+        const existing = (window as any).SelfieSegmentation;
+        if (existing) { resolve(existing); return; }
+        const script = document.createElement('script');
+        script.src = `${ASSET_BASE}selfie_segmentation.js`;
+        script.async = true;
+        script.onload = () => (window as any).SelfieSegmentation ? resolve((window as any).SelfieSegmentation) : reject(new Error('Background effects failed to load.'));
+        script.onerror = () => { loader = null; reject(new Error('Background effects could not be downloaded.')); };
+        document.head.append(script);
+    });
+    return loader;
 }
 
-export class VirtualBackgroundProcessor {
-    private canvas: HTMLCanvasElement;
-    private ctx: CanvasRenderingContext2D;
-    private videoElement: HTMLVideoElement;
-    private animationId: number | null = null;
-    private active: boolean = false;
-    private processedStream: MediaStream | null = null;
-    private config: VirtualBackgroundConfig;
+export function drawPreset(ctx: CanvasRenderingContext2D, id: string, width: number, height: number) {
+    const preset = BACKGROUND_PRESETS.find(p => p.id === id) ?? BACKGROUND_PRESETS[0];
+    const gradient = ctx.createLinearGradient(0, 0, width, height);
+    preset.stops.forEach((stop, index) => gradient.addColorStop(index / (preset.stops.length - 1), stop));
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+    // Soft light shapes give depth without distracting.
+    const glow = ctx.createRadialGradient(width * 0.75, height * 0.2, 0, width * 0.75, height * 0.2, width * 0.6);
+    glow.addColorStop(0, 'rgba(255,255,255,0.18)'); glow.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = glow; ctx.fillRect(0, 0, width, height);
+    if (preset.dots) {
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        for (let i = 0; i < 90; i++) { const x = (Math.sin(i * 12.9898) * 43758.5453 % 1 + 1) % 1, y = (Math.sin(i * 78.233) * 12345.678 % 1 + 1) % 1; ctx.fillRect(x * width, y * height * 0.8, 1.6, 1.6); }
+    }
+}
 
-    // Segmentation
-    private selfieSegmentation: any = null;
-    private segmentationReady: boolean = false;
-    private latestMask: ImageBitmap | ImageData | null = null;
+/**
+ * Turns a camera track into a processed track with the chosen effect.
+ * Call start() once, setEffect() to change, stop() when the camera stops.
+ */
+export class BackgroundProcessor {
+    private segmenter: Segmenter | null = null;
+    private video = document.createElement('video');
+    private canvas = document.createElement('canvas');
+    private ctx = this.canvas.getContext('2d')!;
+    private small = document.createElement('canvas');
+    private smallCtx = this.small.getContext('2d')!;
+    private backdrop = document.createElement('canvas');
+    private effect: BackgroundEffect = { kind: 'none' };
+    private running = false;
+    private timer = 0;
+    private output: MediaStreamTrack | null = null;
 
-    // Background image
-    private bgImage: HTMLImageElement | null = null;
-
-    constructor(config?: Partial<VirtualBackgroundConfig>) {
-        this.config = {
-            mode: config?.mode || 'blur',
-            blurAmount: config?.blurAmount ?? 12,
-            edgeBlur: config?.edgeBlur ?? 4,
-            imageSrc: config?.imageSrc,
-            color: config?.color ?? '#0a0a2e',
-        };
-        this.canvas = document.createElement('canvas');
-        this.ctx = this.canvas.getContext('2d')!;
-        this.videoElement = document.createElement('video');
-        this.videoElement.playsInline = true;
-        this.videoElement.muted = true;
+    async start(source: MediaStreamTrack, effect: BackgroundEffect): Promise<MediaStreamTrack> {
+        const Selfie = await loadMediaPipe();
+        if (!this.segmenter) {
+            const segmenter = new Selfie({ locateFile: file => `${ASSET_BASE}${file}` });
+            segmenter.setOptions({ modelSelection: 1, selfieMode: false });
+            segmenter.onResults(results => this.render(results.segmentationMask));
+            await segmenter.initialize();
+            this.segmenter = segmenter;
+        }
+        const { width = 1280, height = 720 } = source.getSettings();
+        this.canvas.width = width; this.canvas.height = height;
+        this.backdrop.width = width; this.backdrop.height = height;
+        this.video.muted = true; this.video.playsInline = true;
+        this.video.srcObject = new MediaStream([source]);
+        await this.video.play();
+        await this.setEffect(effect);
+        this.running = true;
+        this.loop();
+        this.output = this.canvas.captureStream(24).getVideoTracks()[0];
+        source.addEventListener('ended', () => this.stop(), { once: true });
+        return this.output;
     }
 
-    /** Start processing a source video stream and return the processed stream. */
-    async start(sourceStream: MediaStream): Promise<MediaStream> {
-        const videoTrack = sourceStream.getVideoTracks()[0];
-        if (!videoTrack) throw new Error('No video track in source stream');
-
-        const settings = videoTrack.getSettings();
-        this.canvas.width = settings.width || 640;
-        this.canvas.height = settings.height || 480;
-
-        this.videoElement.srcObject = sourceStream;
-        await this.videoElement.play();
-
-        // Try MediaPipe SelfieSegmentation
-        await this.initSegmentation();
-
-        // If a background image is specified, preload it
-        if (this.config.imageSrc) {
-            this.bgImage = await this.loadImage(this.config.imageSrc);
-        }
-
-        this.active = true;
-        this.processFrame();
-
-        // Capture the canvas as a MediaStream
-        this.processedStream = this.canvas.captureStream(30);
-
-        // Copy audio tracks from source
-        for (const audioTrack of sourceStream.getAudioTracks()) {
-            this.processedStream.addTrack(audioTrack);
-        }
-
-        return this.processedStream;
-    }
-
-    /** Initialize MediaPipe SelfieSegmentation via CDN. */
-    private async initSegmentation(): Promise<void> {
-        try {
-            // @ts-ignore — dynamically loaded from CDN
-            const { SelfieSegmentation } = await import(
-                /* @vite-ignore */
-                'https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/selfie_segmentation.js'
-            ).catch(() => (window as any));
-
-            if (typeof SelfieSegmentation === 'function') {
-                this.selfieSegmentation = new SelfieSegmentation({
-                    locateFile: (file: string) =>
-                        `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation/${file}`,
-                });
-                this.selfieSegmentation.setOptions({ modelSelection: 1, selfieMode: true });
-                this.selfieSegmentation.onResults((results: any) => {
-                    if (results.segmentationMask) {
-                        this.latestMask = results.segmentationMask;
-                    }
-                });
-                // Warm-up
-                await this.selfieSegmentation.initialize();
-                this.segmentationReady = true;
-                console.info('✅ MediaPipe SelfieSegmentation initialized');
-            } else {
-                throw new Error('SelfieSegmentation not found');
-            }
-        } catch (err) {
-            console.warn('⚠️ MediaPipe not available, falling back to canvas blur:', err);
-            this.segmentationReady = false;
-        }
-    }
-
-    /** Process a single frame. */
-    private processFrame(): void {
-        if (!this.active) return;
-
-        if (this.segmentationReady && this.selfieSegmentation) {
-            // Send frame to MediaPipe
-            this.selfieSegmentation.send({ image: this.videoElement }).then(() => {
-                this.renderWithMask();
-                this.animationId = requestAnimationFrame(() => this.processFrame());
-            }).catch(() => {
-                this.renderFallback();
-                this.animationId = requestAnimationFrame(() => this.processFrame());
-            });
+    async setEffect(effect: BackgroundEffect) {
+        this.effect = effect;
+        if (effect.kind !== 'image') return;
+        const { width, height } = this.backdrop;
+        const ctx = this.backdrop.getContext('2d')!;
+        if (effect.src) {
+            const img = new Image();
+            img.src = effect.src;
+            await img.decode().catch(() => {});
+            // Cover-fit the picture once; each frame just copies it.
+            const scale = Math.max(width / img.naturalWidth, height / img.naturalHeight) || 1;
+            const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
+            ctx.drawImage(img, (width - w) / 2, (height - h) / 2, w, h);
         } else {
-            this.renderFallback();
-            this.animationId = requestAnimationFrame(() => this.processFrame());
+            drawPreset(ctx, effect.id, width, height);
         }
     }
 
-    /** Render frame with segmentation mask (foreground/background separation). */
-    private renderWithMask(): void {
+    private loop = () => {
+        if (!this.running || !this.segmenter) return;
+        const next = () => { this.timer = window.setTimeout(this.loop, 1000 / 24); };
+        if (this.video.readyState < 2) { next(); return; }
+        this.segmenter.send({ image: this.video }).then(next, next);
+    };
+
+    private render(mask: CanvasImageSource) {
         const { width, height } = this.canvas;
         const ctx = this.ctx;
-
-        if (!this.latestMask) {
-            this.renderFallback();
-            return;
-        }
-
-        // Draw the segmentation mask
         ctx.save();
         ctx.clearRect(0, 0, width, height);
-
-        // Draw the mask to a temporary canvas for compositing
-        ctx.drawImage(this.latestMask as any, 0, 0, width, height);
-
-        // Use the mask as a clip for the foreground
+        if (this.effect.kind === 'none') { ctx.drawImage(this.video, 0, 0, width, height); ctx.restore(); return; }
+        // Person: mask, then the camera frame inside it.
+        ctx.drawImage(mask, 0, 0, width, height);
         ctx.globalCompositeOperation = 'source-in';
-        ctx.drawImage(this.videoElement, 0, 0, width, height);
-
-        // Draw background behind the person
+        ctx.drawImage(this.video, 0, 0, width, height);
+        // Background behind the person.
         ctx.globalCompositeOperation = 'destination-over';
-
-        switch (this.config.mode) {
-            case 'blur':
-                ctx.filter = `blur(${this.config.blurAmount}px)`;
-                ctx.drawImage(this.videoElement, 0, 0, width, height);
-                ctx.filter = 'none';
-                break;
-
-            case 'image':
-                if (this.bgImage) {
-                    ctx.drawImage(this.bgImage, 0, 0, width, height);
-                }
-                break;
-
-            case 'color':
-                ctx.fillStyle = this.config.color || '#0a0a2e';
-                ctx.fillRect(0, 0, width, height);
-                break;
-
-            default:
-                ctx.drawImage(this.videoElement, 0, 0, width, height);
+        if (this.effect.kind === 'blur') {
+            // Downscale-then-upscale blur works in every browser (canvas filter is not universal).
+            const factor = this.effect.strength === 'light' ? 0.12 : 0.05;
+            this.small.width = Math.max(8, Math.round(width * factor));
+            this.small.height = Math.max(8, Math.round(height * factor));
+            this.smallCtx.imageSmoothingEnabled = true;
+            this.smallCtx.drawImage(this.video, 0, 0, this.small.width, this.small.height);
+            ctx.imageSmoothingEnabled = true;
+            ctx.imageSmoothingQuality = 'high';
+            ctx.drawImage(this.small, 0, 0, width, height);
+        } else {
+            ctx.drawImage(this.backdrop, 0, 0, width, height);
         }
-
-        ctx.globalCompositeOperation = 'source-over';
         ctx.restore();
     }
 
-    /** Fallback rendering using center-weighted radial gradient (no ML). */
-    private renderFallback(): void {
-        const { width, height } = this.canvas;
-        const ctx = this.ctx;
-
-        // Draw with blur
-        ctx.filter = `blur(${this.config.blurAmount}px)`;
-        ctx.drawImage(this.videoElement, 0, 0, width, height);
-        ctx.filter = 'none';
-
-        // Draw the center portion unblurred (approximate person region)
-        const centerW = width * 0.6;
-        const centerH = height * 0.85;
-
-        ctx.globalCompositeOperation = 'destination-out';
-        const gradient = ctx.createRadialGradient(
-            width / 2, height / 2, Math.min(centerW, centerH) * 0.3,
-            width / 2, height / 2, Math.min(centerW, centerH) * 0.6
-        );
-        gradient.addColorStop(0, 'rgba(0,0,0,1)');
-        gradient.addColorStop(1, 'rgba(0,0,0,0)');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, width, height);
-        ctx.globalCompositeOperation = 'destination-over';
-
-        ctx.drawImage(this.videoElement, 0, 0, width, height);
-        ctx.globalCompositeOperation = 'source-over';
+    stop() {
+        this.running = false;
+        window.clearTimeout(this.timer);
+        this.output?.stop();
+        this.output = null;
+        this.video.srcObject = null;
     }
 
-    /** Load an image URL and return an HTMLImageElement. */
-    private loadImage(src: string): Promise<HTMLImageElement> {
-        return new Promise((resolve, reject) => {
-            const img = new Image();
-            img.crossOrigin = 'anonymous';
-            img.onload = () => resolve(img);
-            img.onerror = reject;
-            img.src = src;
-        });
-    }
-
-    /** Stop processing and clean up. */
-    stop(): void {
-        this.active = false;
-        if (this.animationId) {
-            cancelAnimationFrame(this.animationId);
-            this.animationId = null;
-        }
-        this.videoElement.srcObject = null;
-        if (this.selfieSegmentation) {
-            this.selfieSegmentation.close?.();
-            this.selfieSegmentation = null;
-        }
-        this.latestMask = null;
-        this.processedStream = null;
-    }
-
-    /** Update background configuration on-the-fly. */
-    setConfig(config: Partial<VirtualBackgroundConfig>): void {
-        Object.assign(this.config, config);
-        if (config.imageSrc && config.imageSrc !== this.bgImage?.src) {
-            this.loadImage(config.imageSrc).then(img => { this.bgImage = img; });
-        }
-    }
-
-    /** Set blur intensity. */
-    setBlurAmount(amount: number): void {
-        this.config.blurAmount = amount;
-    }
-
-    /** Check if processor is active. */
-    isActive(): boolean {
-        return this.active;
-    }
-
-    /** Get the processed stream. */
-    getStream(): MediaStream | null {
-        return this.processedStream;
-    }
-
-    /** Check if ML segmentation is available. */
-    hasMLSegmentation(): boolean {
-        return this.segmentationReady;
+    dispose() {
+        this.stop();
+        void this.segmenter?.close().catch(() => {});
+        this.segmenter = null;
     }
 }

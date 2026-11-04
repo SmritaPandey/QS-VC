@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { haptic } from '../lib/haptics';
+import type { TilesPerPage, ViewMode } from './VideoGrid';
 
 interface Props {
     assistant?: ReactNode;
@@ -30,10 +31,20 @@ interface Props {
     onRaiseHand: () => void;
     onToggleReactions?: () => void;
     onToggleLanguage?: () => void;
+    /** CC: show meeting captions (and share mine, once agreed) */
+    captionsOn?: boolean;
+    onToggleCaptions?: () => void;
+    fullscreen?: boolean;
+    onToggleFullscreen?: () => void;
+    effectsOn?: boolean;
+    onOpenEffects?: () => void;
+    onReportProblem?: () => void;
+    tilesPerPage?: TilesPerPage;
+    onChangeTilesPerPage?: (value: TilesPerPage) => void;
     activitySignal?: number;
     keepSideVisible?: boolean;
-    viewMode: 'gallery' | 'focus' | 'sidebar' | 'filmstrip';
-    onChangeView: (view: 'gallery' | 'focus' | 'sidebar' | 'filmstrip') => void;
+    viewMode: ViewMode;
+    onChangeView: (view: ViewMode) => void;
     onLeave: () => void;
 }
 
@@ -55,7 +66,8 @@ interface ToggleProps {
 }
 
 const FLASH_MS = 900;
-const VIEWS = [['gallery', 'grid_view', 'Gallery'], ['focus', 'person', 'Focus on me'], ['sidebar', 'view_sidebar', 'Sidebar'], ['filmstrip', 'view_carousel', 'Filmstrip']] as const;
+const VIEWS = [['auto', 'auto_awesome_mosaic', 'Auto'], ['tiled', 'grid_view', 'Tiled'], ['spotlight', 'crop_landscape', 'Spotlight'], ['sidebar', 'view_sidebar', 'Sidebar']] as const;
+const TILE_OPTIONS: TilesPerPage[] = ['auto', 4, 9, 16, 25, 49];
 
 function ToggleControl({ on, label, title, iconOn, iconOff, stateClass = '', offTone = 'neutral', onToggle, controls, badge }: ToggleProps) {
     // On click, a small switch briefly replaces the icon, slides to the new state, then fades away.
@@ -101,6 +113,8 @@ export default function ControlBar({
     chatOpen, participantsOpen, handRaised, reactionsOpen = false, languageOpen = false, languageLabel, languageCode,
     onToggleAudio, onToggleVideo, onToggleScreen,
     onToggleChat, onToggleParticipants, onRaiseHand, onToggleReactions, onToggleLanguage,
+    captionsOn = false, onToggleCaptions, fullscreen = false, onToggleFullscreen, effectsOn = false, onOpenEffects, onReportProblem,
+    tilesPerPage = 'auto', onChangeTilesPerPage,
     onLeave, viewMode, onChangeView, activitySignal = 0, keepSideVisible = false,
 }: Props) {
     const [moreOpen, setMoreOpen] = useState(false);
@@ -153,9 +167,9 @@ export default function ControlBar({
                     iconOn="mic" iconOff="mic_off" offTone="danger" stateClass={audioMuted ? 'active-muted' : ''} onToggle={onToggleAudio} />
                 <ToggleControl on={!videoOff} label="Camera" title={videoOff ? 'Start video' : 'Stop video'}
                     iconOn="videocam" iconOff="videocam_off" offTone="danger" stateClass={videoOff ? 'active-muted' : ''} onToggle={onToggleVideo} />
-                {onToggleLanguage && (
-                    <ToggleControl on={languageOpen} label={languageLabel || 'Language'} title={`Language, captions & audio${languageLabel ? `: ${languageLabel}` : ''}`}
-                        iconOn="translate" iconOff="translate" stateClass={`ctrl-language ${languageOpen ? 'active' : ''}`} onToggle={() => { setMoreOpen(false); onToggleLanguage(); }} controls="meeting-language-settings" badge={languageCode} />
+                {onToggleCaptions && (
+                    <ToggleControl on={captionsOn} label="Captions" title={captionsOn ? 'Turn off captions' : `Turn on captions${languageLabel ? ` (${languageLabel})` : ''}`}
+                        iconOn="closed_caption" iconOff="closed_caption_disabled" stateClass={captionsOn ? 'active' : ''} onToggle={() => { setMoreOpen(false); onToggleCaptions(); }} badge={captionsOn ? languageCode : undefined} />
                 )}
             </div>
 
@@ -184,13 +198,21 @@ export default function ControlBar({
                         {onToggleActivities && <button type="button" aria-expanded={activitiesOpen} aria-controls="meeting-activities" onClick={() => { setMoreOpen(false); onToggleActivities(); }}><span className="mi" aria-hidden="true">dashboard</span>Activities</button>}
                         {onToggleHostTools && <button type="button" aria-expanded={hostToolsOpen} aria-controls="meeting-host-tools" onClick={() => { setMoreOpen(false); onToggleHostTools(); }}><span className="mi" aria-hidden="true">admin_panel_settings</span>Host controls</button>}
                         {canRecord && <button type="button" aria-pressed={isRecording} onClick={() => { setMoreOpen(false); onToggleRecording(); }}><span className="mi" aria-hidden="true">{isRecording ? 'stop_circle' : 'fiber_manual_record'}</span>{isRecording ? 'Stop recording' : 'Record meeting'}</button>}
-                        <h3>View</h3>
-                        <div className="meeting-view-options" role="group" aria-label="Meeting view">
+                        {onOpenEffects && <button type="button" aria-pressed={effectsOn} onClick={() => { setMoreOpen(false); onOpenEffects(); }}><span className="mi" aria-hidden="true">background_replace</span>Backgrounds and effects</button>}
+                        {onToggleFullscreen && <button type="button" aria-pressed={fullscreen} onClick={() => { setMoreOpen(false); onToggleFullscreen(); }}><span className="mi" aria-hidden="true">{fullscreen ? 'fullscreen_exit' : 'fullscreen'}</span>{fullscreen ? 'Exit full screen' : 'Full screen'}</button>}
+                        {onToggleLanguage && <button type="button" aria-expanded={languageOpen} aria-controls="meeting-language-settings" onClick={() => { setMoreOpen(false); onToggleLanguage(); }}><span className="mi" aria-hidden="true">translate</span>Captions and language settings</button>}
+                        {onReportProblem && <button type="button" onClick={() => { setMoreOpen(false); onReportProblem(); }}><span className="mi" aria-hidden="true">feedback</span>Report a problem</button>}
+                        <h3>Layout</h3>
+                        <div className="meeting-view-options" role="group" aria-label="Meeting layout">
                             {VIEWS.map(([view, icon, label]) => <button type="button" key={view} aria-pressed={viewMode === view} onClick={() => onChangeView(view)}><span className="mi" aria-hidden="true">{icon}</span>{label}</button>)}
                         </div>
+                        {onChangeTilesPerPage && <label className="meeting-tiles-option"><span>Tiles per page</span>
+                            <select value={String(tilesPerPage)} onChange={event => onChangeTilesPerPage(event.target.value === 'auto' ? 'auto' : Number(event.target.value) as TilesPerPage)}>
+                                {TILE_OPTIONS.map(option => <option key={String(option)} value={String(option)}>{option === 'auto' ? 'Auto (fits your screen)' : `Up to ${option}`}</option>)}
+                            </select></label>}
                         <p className="meeting-more-hint">Muted-mic reminders analyse sound locally. Nothing is saved or sent.</p>
                         <div className="meeting-more-mobile-actions">
-                            {onToggleLanguage && <button type="button" onClick={() => { setMoreOpen(false); onToggleLanguage(); }}><span className="mi" aria-hidden="true">translate</span>Language and captions</button>}
+                            {onToggleCaptions && <button type="button" aria-pressed={captionsOn} onClick={() => { setMoreOpen(false); onToggleCaptions(); }}><span className="mi" aria-hidden="true">closed_caption</span>{captionsOn ? 'Turn off captions' : 'Turn on captions'}</button>}
                             <button type="button" onClick={() => { setMoreOpen(false); onToggleScreen(); }}><span className="mi" aria-hidden="true">screen_share</span>{screenSharing ? 'Stop presenting' : 'Present screen'}</button>
                             {onToggleReactions && <button type="button" onClick={() => { setMoreOpen(false); onToggleReactions(); }}><span className="mi" aria-hidden="true">add_reaction</span>Reactions</button>}
                             <button type="button" onClick={() => { setMoreOpen(false); onToggleParticipants(); }}><span className="mi" aria-hidden="true">group</span>Participants</button>
