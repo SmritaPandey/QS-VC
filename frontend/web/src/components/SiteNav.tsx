@@ -1,3 +1,5 @@
+import { useSession } from '../lib/use-session';
+import { refreshSession } from '../lib/session';
 import ThemeSelect from './ThemeSelect';
 import ActionContents from './ActionContents';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
@@ -17,6 +19,7 @@ const quickLinks = [
 ];
 
 export default function SiteNav({ accountAction }: { accountAction?: ReactNode }) {
+    const session = useSession();
     const [formVisible, setFormVisible] = useState(false);
     const [open, setOpen] = useState(false);
     const [scrolled, setScrolled] = useState(false);
@@ -71,7 +74,7 @@ export default function SiteNav({ accountAction }: { accountAction?: ReactNode }
                     <Link to="/intranet" aria-current={pathname === '/intranet' ? 'page' : undefined} onClick={() => setOpen(false)}>Intranet</Link>
                     <Link to="/contact" aria-current={pathname === '/contact' ? 'page' : undefined} onClick={() => setOpen(false)}>Contact us</Link>
                     <Link className="public-mobile-app" to="/app" onClick={() => setOpen(false)}>Open meeting app <span className="mi" aria-hidden="true">arrow_forward</span></Link>
-                    {accountAction || <Link to="/login" aria-current={pathname === '/login' ? 'page' : undefined} onClick={() => setOpen(false)}>Sign in</Link>}
+                    {session.status === 'checking' ? <span role="status">Checking account…</span> : session.status === 'unavailable' ? <button type="button" onClick={() => void refreshSession()}>Retry account</button> : session.status === 'authenticated' ? <Link to="/app" onClick={() => setOpen(false)}>Your meetings</Link> : accountAction || <Link to="/login" aria-current={pathname === '/login' ? 'page' : undefined} onClick={() => setOpen(false)}>Sign in</Link>}
                 </div>
                 <ThemeSelect />
                 <Link className="public-primary public-nav-cta qsvc-action" to="/app"><ActionContents>Open meeting app</ActionContents></Link>

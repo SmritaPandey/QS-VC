@@ -1,12 +1,16 @@
 import { z } from 'zod';
+import { translateText } from './translation.js';
 import { roomManager } from './room-manager.js';
 
 const language = z.string().regex(/^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/);
-const publishSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/), text: z.string().trim().min(1).max(2000), language, isFinal: z.literal(true) });
+const publishSchema = z.object({ id: z.string().regex(/^[A-Za-z0-9_-]{1,80}$/), text: z.string().trim().min(1).max(2000), language, isFinal: z.literal(true), allowGoogleTranslation: z.boolean().optional() });
 const translateSchema = z.object({ id: z.string().min(1).max(130), target: language });
 const languageSchema = z.array(z.object({ code: language, name: z.string().min(1).max(100), targets: z.array(language).max(250).optional() })).min(1).max(250);
 type Caption = { id: string; peerId: string; displayName: string; text: string; language: string; isFinal: true; timestamp: number };
-type RoomCaptions = { captions: Map<string, Caption>; translations: Map<string, string>; pending: Map<string, Promise<string>>; active: number; updated: number };
+type StoredCaption = Caption & { allowGoogleTranslation: boolean };
+const googleLanguages: z.infer<typeof languageSchema> = [{ code: 'en', name: 'English' }, { code: 'hi', name: 'Hindi' }, { code: 'ja', name: 'Japanese' }];
+const googleEnabled = () => process.env.CAPTION_TRANSLATION_PROVIDER === 'google';
+type RoomCaptions = { captions: Map<string, StoredCaption>; translations: Map<string, string>; pending: Map<string, Promise<string>>; active: number; updated: number };
 const rooms = new Map<string, RoomCaptions>();
 const limits = new WeakMap<object, { published: number; translated: number; active: boolean; minute: number; count: number; capabilities: number }>();
 let activeRequests = 0;
@@ -81,14 +85,19 @@ export function publishCaption(ws: object, roomId: string, peerId: string, param
     const rate = quota(ws);
     if (Date.now() - rate.published < 500) throw new Error('Caption rate limit reached');
     rate.published = Date.now();
-    const caption: Caption = { ...parsed.data, id, peerId, displayName: peer.displayName, timestamp: Date.now() };
-    state.captions.set(id, caption);
+    const { allowGoogleTranslation, ...textFields } = parsed.data;
+    const caption: Caption = { ...textFields, id, peerId, displayName: peer.displayName, timestamp: Date.now() };
+    state.captions.set(id, { ...caption, allowGoogleTranslation: allowGoogleTranslation === true });
     if (state.captions.size > 100) state.captions.delete(state.captions.keys().next().value!);
     roomManager.broadcast(roomId, 'captionReceived', caption);
     return { accepted: true, id };
 }
 export async function translationCapabilities(ws: object, roomId: string, peerId: string) {
     member(ws, roomId, peerId);
+    if (googleEnabled()) {
+        const configured = Boolean(process.env.GOOGLE_TRANSLATE_API_KEY?.trim());
+        return { configured, languages: configured ? googleLanguages : [], processing: 'google-cloud' as const };
+    }
     const url = configuredUrl();
     if (url && !(capabilityCache?.url === url && capabilityCache.expires > Date.now())) {
         const rate = quota(ws);
@@ -104,7 +113,9 @@ export async function translateCaption(ws: object, roomId: string, peerId: strin
     const state = roomState(roomId);
     const caption = state.captions.get(parsed.data.id);
     if (!caption) throw new Error('Final caption not found in this room');
-    const url = configuredUrl();
+    const google = googleEnabled();
+    if (google && !caption.allowGoogleTranslation) throw new Error('The speaker has not enabled Google Cloud translation');
+    const url = google ? 'google-cloud' : configuredUrl();
     if (!url) throw new Error('Translation unavailable: no configured server');
     const rate = quota(ws);
     if (Date.now() - rate.minute >= 60_000) { rate.minute = Date.now(); rate.count = 0; }
@@ -118,13 +129,14 @@ export async function translateCaption(ws: object, roomId: string, peerId: strin
         let pending = state.pending.get(key);
         if (!pending) {
             pending = (async () => {
-                const languages = await supportedLanguages(url);
+                const languages = google ? googleLanguages : await supportedLanguages(url);
                 member(ws, roomId, peerId);
                 const normalize = (code: string) => languages.find(item => item.code === code) || languages.find(item => item.code === code.split('-')[0]);
                 const source = normalize(caption.language);
                 const target = normalize(parsed.data.target);
                 if (!source || !target || (source.code !== target.code && source.targets && !source.targets.includes(target.code))) throw new Error('Language pair unavailable on configured server');
                 if (source.code === target.code) return caption.text;
+                if (google) return (await translateText(caption.text, source.code, target.code)).translatedText;
                 const result = await providerJson(`${url}/translate`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ q: caption.text, source: source.code, target: target.code, format: 'text', ...(process.env.LIBRETRANSLATE_API_KEY ? { api_key: process.env.LIBRETRANSLATE_API_KEY } : {}) }),

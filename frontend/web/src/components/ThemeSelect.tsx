@@ -11,6 +11,8 @@ declare global {
     }
 }
 
+const fallbackTheme = { getPreference: (): Preference => 'system', setPreference: (_value: Preference) => {}, subscribe: (_listener: () => void) => () => {} };
+
 const OPTIONS: { value: Preference; label: string; icon: string }[] = [
     { value: 'system', label: 'System', icon: 'computer' },
     { value: 'light', label: 'Light', icon: 'light_mode' },
@@ -28,8 +30,8 @@ type Spread = keyof typeof SPREADS;
 /** Icon-only appearance switch: the current choice is the trigger; the other two disperse out of it as separate buttons. */
 export default function ThemeSelect() {
     const menuId = useId();
-    const theme = window.qsvcTheme;
-    const preference = useSyncExternalStore(theme.subscribe, theme.getPreference);
+    const theme = typeof window === 'undefined' ? fallbackTheme : window.qsvcTheme || fallbackTheme;
+    const preference = useSyncExternalStore(theme.subscribe, theme.getPreference, fallbackTheme.getPreference);
     const [open, setOpen] = useState(false);
     const [closing, setClosing] = useState(false);
     const [spread, setSpread] = useState<Spread>('center');

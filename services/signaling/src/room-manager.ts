@@ -33,6 +33,7 @@ export interface WaitingPeer {
 }
 
 export interface RoomSettings {
+    webinar?: boolean;
     maxParticipants: number;       // default 25
     waitingRoomEnabled: boolean;   // default false
     locked: boolean;               // no new joins

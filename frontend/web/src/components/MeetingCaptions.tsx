@@ -22,6 +22,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     const [voiceEnabled, setVoiceEnabled] = useState(false);
     const [voices, setVoices] = useState<string[]>([]);
     const [capabilities, setCapabilities] = useState<Capabilities>({ configured: false, languages: [] });
+    const [allowGoogleTranslation, setAllowGoogleTranslation] = useState(false);
     const [capabilityError, setCapabilityError] = useState('');
     const [status, setStatus] = useState('');
     const [captions, setCaptions] = useState<CaptionEntry[]>([]);
@@ -56,7 +57,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
             language: speakingLanguage, interimResults: false,
             onCaption: (caption) => {
                 if (!active || !caption.isFinal) return;
-                signaling.request('captionPublish', { id: caption.id, text: caption.text, language: speakingLanguage, isFinal: true })
+                signaling.request('captionPublish', { id: caption.id, text: caption.text, language: speakingLanguage, isFinal: true, allowGoogleTranslation: capabilities.processing === 'google-cloud' && allowGoogleTranslation })
                     .catch(() => { if (active) setStatus('Could not share that caption. Speech is not being saved.'); });
             },
             onError: (message) => { if (active) { setStatus(message); setShareSpeech(false); } },
@@ -66,10 +67,10 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
         stopRecognition.current = stop;
         engine.start();
         return () => { stop(); if (stopRecognition.current === stop) stopRecognition.current = () => {}; };
-    }, [connected, shareSpeech, audioMuted, speakingLanguage, displayName, stopRecognition, translatedSpeaking]);
+    }, [connected, shareSpeech, audioMuted, speakingLanguage, displayName, stopRecognition, translatedSpeaking, capabilities.processing, allowGoogleTranslation]);
 
     useEffect(() => {
-        if (!connected) { setShareSpeech(false); setVoiceEnabled(false); setCaptions([]); }
+        if (!connected) { setShareSpeech(false); setVoiceEnabled(false); setAllowGoogleTranslation(false); setCaptions([]); }
     }, [connected]);
 
     useEffect(() => {
@@ -136,6 +137,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
             <button type="button" className="btn-text" onClick={onUseDetectedLanguage}>Use browser or region suggestion</button>
             <p>Browser speech recognition may send audio to your browser’s provider. It uses the browser’s microphone, which may differ from your selected meeting device. Only enable it if you agree. Captions are shared with this meeting and aren’t saved by QS-VC.</p>
             <label className="caption-toggle"><input type="checkbox" checked={shareSpeech} disabled={!connected || !recognitionSupported} onChange={event => { if (!event.target.checked) stopRecognition.current(); setShareSpeech(event.target.checked); setStatus(''); }} />Share my speech as captions</label>
+            {capabilities.processing === 'google-cloud' && capabilities.configured && <label className="caption-toggle"><input type="checkbox" checked={allowGoogleTranslation} onChange={event => setAllowGoogleTranslation(event.target.checked)} />Allow Google Cloud to translate my shared caption text</label>}
             <p className="caption-settings-note">{!recognitionSupported ? 'Speech recognition is unavailable in this browser. You can still receive captions.' : audioMuted && shareSpeech ? 'Recognition is paused while your microphone is muted.' : translatedSpeaking && shareSpeech ? 'Recognition is paused while translated audio plays.' : `Speaking: ${name(speakingLanguage, speakingLanguage)}. Recognition support depends on your browser.`}</p>
             <label className="caption-toggle"><input type="checkbox" checked={showCaptions} onChange={event => setShowCaptions(event.target.checked)} />Show meeting captions</label>
             <label htmlFor="caption-output-language">Caption language</label>

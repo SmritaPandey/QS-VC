@@ -1,3 +1,5 @@
+import { insertSchedule, scheduleOccurrences } from './schedule-occurrences.js';
+import { meetingAuth, type AuthPayload } from './auth.js';
 import jwt from 'jsonwebtoken';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -33,9 +35,11 @@ const createMeetingBody = z.object({
     type: z.enum(['instant', 'scheduled', 'recurring']).default('instant'),
     scheduledStart: z.string().datetime().optional(),
     scheduledEnd: z.string().datetime().optional(),
+    recurrence: z.object({ frequency: z.enum(['daily', 'weekly']), count: z.number().int().min(2).max(12) }).optional(),
     settings: z.object({
         maxParticipants: z.number().int().min(2).max(500).default(100),
         waitingRoom: z.boolean().default(false),
+        webinar: z.boolean().default(false),
         e2eeRequired: z.boolean().default(false),
         recordingAllowed: z.boolean().default(true),
         chatEnabled: z.boolean().default(true),
@@ -119,27 +123,7 @@ rawPool.on('error', () => logger.warn('Database connection lost; the pool will r
 // AUTH MIDDLEWARE
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-interface AuthPayload { sub: string; tenantId: string; role: string; displayName: string; }
-
-async function authMiddleware(req: express.Request, res: express.Response, next: express.NextFunction) {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
-        return res.status(401).json({ error: 'No token provided' });
-    }
-    try {
-        const response = await fetch(`${AUTH_URL}/api/auth/verify`, {
-            headers: { Authorization: authHeader, 'x-qsvc-service-token': jwt.sign({}, process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-auth-verify', issuer: 'qsvc-internal', expiresIn: 30 }) }, signal: AbortSignal.timeout(5000),
-        });
-        if (!response.ok) throw new Error('Invalid session');
-        const verified = await response.json() as { valid: boolean; payload: AuthPayload };
-        if (!verified.valid || !verified.payload?.sub) throw new Error('Invalid session');
-        const payload = verified.payload;
-        (req as any).user = payload;
-        pool.runWithTenant(payload.tenantId, next);
-    } catch {
-        return res.status(401).json({ error: 'Invalid token' });
-    }
-}
+const authMiddleware = meetingAuth(AUTH_URL, (tenantId, next) => pool.runWithTenant(tenantId, next));
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MEETING CODE GENERATOR
@@ -235,26 +219,22 @@ app.post('/api/meetings', authMiddleware, validateBody(createMeetingBody), async
 app.post('/api/meetings/schedule', authMiddleware, validateBody(createMeetingBody), async (req, res) => {
     try {
         const user = (req as any).user as AuthPayload;
-        const { title, scheduledStart, scheduledEnd, settings } = req.body;
+        const { title, scheduledStart, scheduledEnd, settings, recurrence }: z.infer<typeof createMeetingBody> = req.body;
+        const times = scheduledStart && scheduleOccurrences(scheduledStart, scheduledEnd, recurrence);
+        if (!times) return res.status(400).json({ error: 'Provide a meeting start and an end after the start.' });
 
-        const meetingCode = generateMeetingCode();
-        const id = uuidv4();
+        const seriesId = recurrence ? uuidv4() : undefined;
+        const occurrences = times.map(time => ({ ...time, id: uuidv4(), meetingCode: generateMeetingCode() }));
+        await insertSchedule(pool, user.tenantId, title || 'Scheduled Meeting', user.sub,
+            recurrence ? 'recurring' : 'scheduled', { ...settings, seriesId }, occurrences);
 
-        await pool.query(
-            `INSERT INTO meetings (id, tenant_id, meeting_code, title, host_id, type, status, scheduled_start, scheduled_end, settings)
-       VALUES ($1, $2, $3, $4, $5, 'scheduled', 'waiting', $6, $7, $8)`,
-            [id, user.tenantId, meetingCode, title || 'Scheduled Meeting', user.sub,
-                scheduledStart, scheduledEnd || null, JSON.stringify(settings || {})]
-        );
-
-        logger.info(`Scheduled meeting: ${meetingCode} at ${scheduledStart}`);
+        const first = occurrences[0];
         res.status(201).json({
-            id,
-            meetingCode,
+            ...first,
             title: title || 'Scheduled Meeting',
-            scheduledStart,
-            scheduledEnd,
-            joinUrl: `${process.env.WEB_URL || 'https://qs-vc.vercel.app'}/meeting/${meetingCode}`,
+            joinUrl: `${process.env.WEB_URL || 'https://qs-vc.vercel.app'}/meeting/${first.meetingCode}`,
+            seriesId,
+            occurrences,
         });
     } catch (err: any) {
         logger.error(err, 'Failed to schedule meeting');

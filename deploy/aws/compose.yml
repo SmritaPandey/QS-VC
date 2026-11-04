@@ -34,6 +34,7 @@ services:
       dockerfile: deploy/aws/Dockerfile
       target: build
     environment:
+      QSVC_ENTERPRISE_TERMS_REQUIRED: ${QSVC_ENTERPRISE_TERMS_REQUIRED:-no}
       <<: *runtime
       DATABASE_URL: ${AUTH_DATABASE_URL:?Set the restricted auth database URL}
       ENTERPRISE_ACCESS_JSON: '${ENTERPRISE_ACCESS_JSON:-[]}'
@@ -59,11 +60,21 @@ services:
       retries: 3
   signaling:
     <<: *app
-    environment: *runtime
+    environment:
+      QSVC_ENTERPRISE_TERMS_REQUIRED: ${QSVC_ENTERPRISE_TERMS_REQUIRED:-no}
+      <<: *runtime
+      SFU_CONTROL_TOKEN: ${SFU_CONTROL_TOKEN:?Set a shared SFU control token}
+      CAPTION_TRANSLATION_PROVIDER: ${CAPTION_TRANSLATION_PROVIDER:-libretranslate}
+      GOOGLE_TRANSLATE_API_KEY: ${GOOGLE_TRANSLATE_API_KEY:-}
+      LIBRETRANSLATE_URL: ${LIBRETRANSLATE_URL:-}
+      LIBRETRANSLATE_API_KEY: ${LIBRETRANSLATE_API_KEY:-}
     command: [node, services/signaling/dist/index.js]
   sfu:
     <<: *app
-    environment: *runtime
+    environment:
+      <<: *runtime
+      SFU_CONTROL_TOKEN: ${SFU_CONTROL_TOKEN:?Set a shared SFU control token}
+      SFU_CONTROL_HOST: 127.0.0.1
     command: [node, services/sfu/dist/index.js]
   recording:
     <<: *app

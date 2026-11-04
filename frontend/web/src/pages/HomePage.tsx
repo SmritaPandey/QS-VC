@@ -61,7 +61,7 @@ export default function HomePage() {
                 <section className="home-overview-layout public-container" aria-labelledby="public-home-title">
                     <div className="home-message">
                         <h1 id="public-home-title">One room.<br /><span>Your language.</span></h1>
-                        <p className="public-lead">Meet QS-VC. Speak your language. Share your ideas. Stay quantum-safe.</p>
+                        <p className="public-lead">Meet QS-VC. Speak your language. Share your ideas.</p>
                         <Link className="qsvc-action" to="/app"><ActionContents>Open meeting app</ActionContents></Link>
                         <form className="public-join" onSubmit={join}>
                             <label htmlFor="home-meeting-code">Have an invitation?</label>
@@ -109,7 +109,7 @@ export default function HomePage() {
                 <Link className="qsvc-action" to="/pricing"><ActionContents>Explore plans</ActionContents></Link>
             </section>
             <section className="home-security public-container home-arrival" aria-labelledby="home-security-title">
-                <div className="home-security-copy"><h2 id="home-security-title">Quantum-safe security</h2><p>Quantum-safe security is part of QS-VC’s design for the long-term privacy of sensitive conversations.</p><p>Check your devices before joining. Control your camera and microphone throughout.</p></div>
+                <div className="home-security-copy"><h2 id="home-security-title">Choose what you share.</h2><p>Check your devices before joining. Control your camera and microphone throughout.</p></div>
                 <div className="home-security-visual" aria-hidden="true"><div className="home-security-portrait"><Portrait person={1} label="Arjun" /><span>Arjun</span></div><div className="home-security-choices"><div><span className="mi">videocam</span><span>Camera</span><span>Your choice</span></div><div><span className="mi">mic</span><span>Microphone</span><span>Your choice</span></div><div><span className="mi">translate</span><span>Language</span><span>Your preference</span></div></div></div>
             </section>
             <section className="public-rollout public-container home-arrival" aria-labelledby="rollout-title"><div><h2 id="rollout-title">Plan for your team.</h2><p>Choose online or organisation-hosted meetings. Review private-network access and security requirements with us.</p></div><Link className="qsvc-action qsvc-action--secondary" to="/pricing"><ActionContents>Review the options</ActionContents></Link></section>

@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
 import ActionContents from '../components/ActionContents';
 import MeetingScene from '../components/MeetingScene';
 import DownloadFeedback, { type DownloadState } from '../components/DownloadFeedback';
-import { AUTH_API, getToken } from '../lib/session';
+import { AUTH_API, clearSession, getToken, refreshSession } from '../lib/session';
+import { useSession } from '../lib/use-session';
 import { intranetUrl } from '../lib/intranet-url';
 import '../styles/service-pages.css';
 
@@ -16,9 +17,16 @@ const steps = [
     { title: 'Work together', text: 'Meet with video, chat and screen sharing. Use available whiteboard, polls, Q&A and notes. Language features depend on your organisation’s configuration.' },
 ];
 export default function IntranetPage() {
-    const [access, setAccess] = useState<{ workspaceUrl: string; windowsAvailable: boolean } | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState('');
+    const session = useSession();
+    const token = session.profile ? getToken() : '';
+    const [result, setResult] = useState<{ token: string; access?: { workspaceUrl: string; windowsAvailable: boolean }; error?: string }>();
+    const [attempt, setAttempt] = useState(0);
+    const current = token && result?.token === token ? result : undefined;
+    const access = session.status === 'unavailable' ? undefined : current?.access;
+    const loading = !current && (session.status === 'checking' || session.status === 'authenticated');
+    const error = session.status === 'unavailable' ? 'We couldn’t check your account. Try again.' : current?.error;
+    const downloadRequest = useRef<AbortController | null>(null);
+    const downloadOwner = useRef('');
     const [step, setStep] = useState(0);
     const [downloadState, setDownloadState] = useState<DownloadState>({ phase: 'idle' });
     const downloading = downloadState.phase === 'working';
@@ -31,30 +39,54 @@ export default function IntranetPage() {
         return () => { window.clearTimeout(timer); window.removeEventListener('keydown', onKey); };
     }, [downloadState.phase]);
     useEffect(() => {
+        setDownloadState({ phase: 'idle' });
+        return () => {
+            downloadRequest.current?.abort();
+            downloadRequest.current = null;
+        };
+    }, [token]);
+    useEffect(() => {
+        if (!token || session.status !== 'authenticated') return;
         const controller = new AbortController();
-        const token = getToken();
-        if (!token) { setLoading(false); return; }
-        fetch(`${AUTH_API}/api/auth/enterprise`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
-            .then(async response => {
-                if (response.status === 401 || response.status === 403) return;
-                if (!response.ok) throw new Error('We could not verify your access. Please retry or contact your administrator.');
-                const data = await response.json();
-                const url = intranetUrl(data.workspaceUrl);
-                if (!url) throw new Error('Your workspace address needs administrator attention.');
-                setAccess({ workspaceUrl: url, windowsAvailable: data.windowsAvailable === true });
-            }).catch(reason => { if (!controller.signal.aborted) setError(reason.message); })
-            .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+        const currentRequest = () => !controller.signal.aborted && getToken() === token;
+        setResult(undefined);
+        fetch(`${AUTH_API}/api/auth/enterprise`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]),
+        }).then(async response => {
+            if (!currentRequest()) return;
+            if (response.status === 401) { clearSession(token); return; }
+            if (response.status === 403) { setResult({ token }); return; }
+            if (!response.ok) throw new Error('Access check failed');
+            const data = await response.json();
+            const url = intranetUrl(data.workspaceUrl);
+            if (!currentRequest()) return;
+            setResult(url
+                ? { token, access: { workspaceUrl: url, windowsAvailable: data.windowsAvailable === true } }
+                : { token, error: 'Ask your administrator to check the workspace address.' });
+        }).catch(() => {
+            if (currentRequest()) setResult({ token, error: 'We couldn’t check your intranet access. Try again.' });
+        });
         return () => controller.abort();
-    }, []);
+    }, [token, attempt, session.status]);
     async function download() {
-        if (downloading) return;
-        setError('');
+        if (session.status !== 'authenticated' || !token || !access?.windowsAvailable || downloadRequest.current) return;
+        const controller = new AbortController();
+        downloadRequest.current = controller;
+        downloadOwner.current = token;
+        const isCurrent = () => !controller.signal.aborted && getToken() === token;
         setDownloadState({ phase: 'working', received: 0, total: null });
         try {
-            const response = await fetch(`${AUTH_API}/api/auth/enterprise/windows`, { headers: { Authorization: `Bearer ${getToken()}` } });
-            if (response.status === 401) throw new Error('Your session expired. Sign in again to download.');
-            if (response.status === 403) throw new Error('Your account is no longer approved for enterprise access. Contact your administrator.');
-            if (!response.ok) throw new Error('The installer is not available right now. Please retry or contact your administrator.');
+            const response = await fetch(`${AUTH_API}/api/auth/enterprise/windows`, {
+                headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
+            });
+            if (!isCurrent()) return;
+            if (response.status === 401) { clearSession(token); return; }
+            if (response.status === 403) {
+                setResult({ token });
+                throw new Error('Your account no longer has intranet access. Contact your administrator.');
+            }
+            if (!response.ok) throw new Error('The installer is unavailable. Try again or contact your administrator.');
             const total = Number(response.headers.get('Content-Length')) || null;
             // Stream the body so the message can show real progress.
             const chunks: Uint8Array[] = [];
@@ -63,6 +95,7 @@ export default function IntranetPage() {
             if (reader) {
                 for (;;) {
                     const { done, value } = await reader.read();
+                    if (!isCurrent()) { await reader.cancel(); return; }
                     if (done) break;
                     chunks.push(value); received += value.byteLength;
                     setDownloadState({ phase: 'working', received, total });
@@ -74,20 +107,25 @@ export default function IntranetPage() {
             if (!received || (total && received !== total)) throw new Error('The download was incomplete. Check your connection and retry.');
             const blob = new Blob(chunks as BlobPart[], { type: 'application/vnd.microsoft.portable-executable' });
             const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+            if (!isCurrent()) return;
             const checksum = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('');
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a'); link.href = url; link.download = 'QS-VC-Windows-Setup.exe'; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
             setDownloadState({ phase: 'done', checksum, size: received });
         } catch (reason) {
-            setDownloadState({ phase: 'error', message: reason instanceof Error ? reason.message : 'Download failed. Please retry.' });
+            if (isCurrent()) setDownloadState({ phase: 'error', message: reason instanceof Error ? reason.message : 'Download failed. Please retry.' });
+        } finally {
+            if (downloadRequest.current === controller) downloadRequest.current = null;
         }
     }
     return <div className="public-site"><SiteNav /><main className="public-container service-page intranet-page" id="main-content">
         <header className="public-page-intro"><h1>{access ? 'Your enterprise workspace.' : 'Meet inside your organisation.'}</h1><p>{access ? 'Choose how you connect to your approved workspace.' : 'Explore the intranet experience before your organisation gets access.'}</p></header>
-        {loading ? <p role="status">Checking enterprise access…</p> : access ? <div className="intranet-layout">
+        {loading ? <p role="status">Checking enterprise access…</p> : error ? <section className="service-card"><p role="alert">{error}</p><button className="qsvc-action" type="button" onClick={() => {
+            if (session.status === 'unavailable') void refreshSession();
+            else { setResult(undefined); setAttempt(value => value + 1); }
+        }}><ActionContents>Try again</ActionContents></button></section> : access ? <div className="intranet-layout">
             <section className="service-card"><span className="enterprise-access-badge">Approved enterprise access</span><h2>Open in your browser</h2><p>Connect to your office network or approved VPN, then sign in to your organisation’s workspace.</p><p className="enterprise-address">{access.workspaceUrl}</p><a className="qsvc-action" href={access.workspaceUrl} rel="noreferrer"><ActionContents>Open workspace</ActionContents></a></section>
-            <section className="service-card"><h2>QS-VC for Windows</h2><p>Access the same organisation workspace from the Windows desktop client. Your office network or VPN is still required.</p><button className="qsvc-action intranet-download" type="button" aria-busy={downloading} disabled={!access.windowsAvailable || downloading} onClick={download}><ActionContents><span className="mi" aria-hidden="true">download</span>{downloading ? 'Downloading…' : 'Download for Windows'}</ActionContents></button>{!access.windowsAvailable && <p role="status">Your Windows installer has not been released yet.</p>}<p>After installation, use the organisation address above. A download does not grant additional meeting permissions.</p></section>
-        </div> : <><div className="intranet-layout"><section className="service-card"><span className="enterprise-access-badge">Guided demo · No live connection</span><h2>See what to expect</h2><MeetingScene /><p>This preview uses sample participants. It does not start your camera, microphone or a meeting.</p></section><section className="service-card"><div className="intranet-guide-tabs" aria-label="Guide steps">{steps.map((item, index) => <button type="button" key={item.title} aria-pressed={step === index} onClick={() => setStep(index)}>{index + 1}<span className="sr-only"> {item.title}</span></button>)}</div><div aria-live="polite"><h2>{steps[step].title}</h2><p>{steps[step].text}</p></div><div className="intranet-guide-controls"><button type="button" disabled={step === 0} onClick={() => setStep(value => value - 1)}>Back</button><button type="button" disabled={step === steps.length - 1} onClick={() => setStep(value => value + 1)}>Next</button></div><p>Local access can work without internet only when your organisation has installed all required services locally. Remote access needs a working VPN and office internet connection.</p><Link className="qsvc-action" to="/contact?interest=Intranet"><ActionContents>Request access</ActionContents></Link><p><Link to="/login">Already approved? Sign in</Link>, then return to Intranet.</p></section></div></>}
-        {error && <p role="alert">{error}</p>}
-    </main><SiteFooter /><DownloadFeedback state={downloadState} onDismiss={() => setDownloadState({ phase: 'idle' })} /></div>;
+            <section className="service-card"><h2>QS-VC for Windows</h2><p>Access the same organisation workspace from the Windows desktop client. Your office network or VPN is still required.</p><button className="qsvc-action intranet-download" type="button" aria-busy={downloading} disabled={!access.windowsAvailable || downloading || session.status !== 'authenticated'} onClick={download}><ActionContents><span className="mi" aria-hidden="true">download</span>{downloading ? 'Downloading…' : 'Download for Windows'}</ActionContents></button>{!access.windowsAvailable && <p role="status">Your Windows installer has not been released yet.</p>}<p>After installation, use the organisation address above. A download does not grant additional meeting permissions.</p></section>
+        </div> : <><div className="intranet-layout"><section className="service-card"><span className="enterprise-access-badge">Guided demo · No live connection</span><h2>See what to expect</h2><MeetingScene /><p>This preview uses sample participants. It does not start your camera, microphone or a meeting.</p></section><section className="service-card"><div className="intranet-guide-tabs" aria-label="Guide steps">{steps.map((item, index) => <button type="button" key={item.title} aria-pressed={step === index} onClick={() => setStep(index)}>{index + 1}<span className="sr-only"> {item.title}</span></button>)}</div><div aria-live="polite"><h2>{steps[step].title}</h2><p>{steps[step].text}</p></div><div className="intranet-guide-controls"><button type="button" disabled={step === 0} onClick={() => setStep(value => value - 1)}>Back</button><button type="button" disabled={step === steps.length - 1} onClick={() => setStep(value => value + 1)}>Next</button></div><p>Local access can work without internet only when your organisation has installed all required services locally. Remote access needs a working VPN and office internet connection.</p><Link className="qsvc-action" to="/contact?interest=Intranet"><ActionContents>Request access</ActionContents></Link>{session.status === 'anonymous' ? <p><Link to="/login?next=%2Fintranet">Sign in to check access</Link></p> : <p>Your account does not have intranet access. Ask your administrator to approve it.</p>}</section></div></>}
+    </main><SiteFooter /><DownloadFeedback state={token && downloadOwner.current === token ? downloadState : { phase: 'idle' }} onDismiss={() => setDownloadState({ phase: 'idle' })} /></div>;
 }

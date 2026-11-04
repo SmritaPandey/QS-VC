@@ -146,3 +146,26 @@ describe('room caption and configured translation owners', () => {
     });
 
 });
+
+it('translates Hindi captions to Japanese only with speaker permission', async () => {
+    vi.stubEnv('CAPTION_TRANSLATION_PROVIDER', 'google');
+    vi.stubEnv('GOOGLE_TRANSLATE_API_KEY', 'test-key');
+    const request = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({ data: { translations: [{ translatedText: 'こんにちは' }] } }),
+    });
+    vi.stubGlobal('fetch', request);
+    const speaker = participant();
+    const listener = participant(speaker.roomId);
+    const otherSpeaker = participant(speaker.roomId);
+    const hindi = { ...final, text: 'नमस्ते', language: 'hi-IN' };
+    const denied = publishCaption(otherSpeaker.ws, speaker.roomId, otherSpeaker.id, hindi);
+    await expect(translateCaption(listener.ws, speaker.roomId, listener.id, { id: denied.id, target: 'ja' })).rejects.toThrow('speaker has not enabled');
+    expect(request).not.toHaveBeenCalled();
+
+    const allowed = publishCaption(speaker.ws, speaker.roomId, speaker.id, { ...hindi, allowGoogleTranslation: true });
+    await expect(translateCaption(listener.ws, speaker.roomId, listener.id, { id: allowed.id, target: 'ja' })).resolves.toMatchObject({ translatedText: 'こんにちは' });
+    expect(request).toHaveBeenCalledWith('https://translation.googleapis.com/language/translate/v2', expect.objectContaining({
+        body: JSON.stringify({ q: 'नमस्ते', source: 'hi', target: 'ja', format: 'text' }),
+    }));
+});

@@ -1,6 +1,6 @@
 /** Official Cloud Translation Basic v2; credentials and requests stay on the server. */
 const ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
-const LANGUAGES: Record<string, string> = { en: 'en', 'en-US': 'en', 'en-GB': 'en', hi: 'hi', 'hi-IN': 'hi' };
+const LANGUAGES: Record<string, string> = { en: 'en', 'en-US': 'en', 'en-GB': 'en', hi: 'hi', 'hi-IN': 'hi', ja: 'ja', 'ja-JP': 'ja' };
 
 export function translationLanguage(code: string): string {
     const language = Object.hasOwn(LANGUAGES, code) ? LANGUAGES[code] : undefined;

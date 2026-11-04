@@ -1,3 +1,5 @@
+import { authorizedControlRequest } from './control-auth.js';
+import { coalesceRoomCreation } from './room-creation.js';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { z } from 'zod';
@@ -42,8 +44,24 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     credentials: true,
 }));
+const controlToken = process.env.SFU_CONTROL_TOKEN;
+if (process.env.NODE_ENV === 'production' && !controlToken) {
+    throw new Error('SFU_CONTROL_TOKEN is required in production');
+}
+app.use('/api', (req, res, next) => {
+    if (controlToken && !authorizedControlRequest(req.headers.authorization, controlToken)) {
+        return res.status(401).json({ error: 'Unauthorized SFU control request' });
+    }
+    next();
+});
+app.use('/api', rateLimit({
+    windowMs: 60_000,
+    max: controlToken ? 1200 : 200,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Too many SFU control requests' },
+}));
 app.use(express.json());
-app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests, please try again later' } }));
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ROOM REGISTRY + CASCADE
@@ -53,23 +71,21 @@ const workerManager = new WorkerManager();
 const rooms: Map<string, Room> = new Map();
 const cascadeManager = new CascadeManager(`sfu-${process.pid}`);
 
-/**
- * Get or create a Room by ID.
- */
-async function getOrCreateRoom(roomId: string): Promise<Room> {
-    let room = rooms.get(roomId);
-    if (room && !room.isClosed()) return room;
-
+const createRoom = coalesceRoomCreation(async roomId => {
     const router = await workerManager.createRouter();
-    room = new Room(roomId, router);
+    const room = new Room(roomId, router);
     rooms.set(roomId, room);
 
     room.on('close', () => {
-        rooms.delete(roomId);
+        if (rooms.get(roomId) === room) rooms.delete(roomId);
         logger.info(`Room ${roomId} removed from registry`);
     });
-
     return room;
+});
+
+async function getOrCreateRoom(roomId: string): Promise<Room> {
+    const room = rooms.get(roomId);
+    return room && !room.isClosed() ? room : createRoom(roomId);
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -279,7 +295,7 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 async function start(): Promise<void> {
     await workerManager.init();
 
-    app.listen(config.port, () => {
+    app.listen(config.port, process.env.SFU_CONTROL_HOST || '0.0.0.0', () => {
         logger.info(`🚀 QS-VC SFU running on port ${config.port}`);
         logger.info(`   Workers: ${config.numWorkers}`);
         logger.info(`   RTC ports: ${config.worker.rtcMinPort}-${config.worker.rtcMaxPort}`);

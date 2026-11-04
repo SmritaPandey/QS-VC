@@ -62,7 +62,7 @@ export interface MCUConfig {
 }
 
 const DEFAULT_MCU_CONFIG: MCUConfig = {
-    port: parseInt(process.env.MCU_PORT || '4002'),
+    port: parseInt(process.env.MCU_PORT || '4005'),
     maxRooms: 100,
     maxParticipantsPerRoom: 500,
     defaultLayout: 'speaker',

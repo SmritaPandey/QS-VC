@@ -1,3 +1,4 @@
+import { profileHandler } from './profile.js';
 import { registerBody } from './registration';
 import { enterpriseRouter } from './enterprise-access.js';
 import express, { Request, Response, NextFunction } from 'express';
@@ -12,7 +13,7 @@ import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import pino from 'pino';
-import { createSession, validateSession, endSession, sessionErrorStatus } from './sessions.js';
+import { createSession, validateSession, requireEnterpriseTerm, endSession, sessionErrorStatus } from './sessions.js';
 import { contactRouter, contactRequestError } from './contact.js';
 import { effectiveRole, isPlatformAdmin } from './platform-admins.js';
 
@@ -82,7 +83,7 @@ const allowedOrigins = corsOriginsEnv === '*'
     ])];
 app.use(cors({
     origin: allowedOrigins,
-    methods: ['GET', 'POST', 'PATCH', 'DELETE'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     credentials: true,
 }));
 app.use(express.json());
@@ -176,7 +177,7 @@ async function verifyToken(token: string) {
 // ROUTES
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-app.use('/api/auth/enterprise', enterpriseRouter(verifyToken));
+app.use('/api/auth/enterprise', enterpriseRouter(verifyToken, pool));
 
 // Health check
 app.get('/health', (_req, res) => {
@@ -185,7 +186,7 @@ app.get('/health', (_req, res) => {
 
 app.get('/ready', async (_req, res) => {
     try {
-        await pool.query('SELECT 1');
+        await pool.query('SELECT 1 FROM enterprise_access_terms LIMIT 0');
         res.json({ status: 'ready' });
     } catch {
         res.status(503).json({ status: 'unavailable', dependency: 'database' });
@@ -194,6 +195,9 @@ app.get('/ready', async (_req, res) => {
 
 // Register
 app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
+    if (process.env.QSVC_ENTERPRISE_TERMS_REQUIRED === 'yes') {
+        return res.status(403).json({ error: 'Your organisation provisions accounts for this workspace.' });
+    }
     try {
         const { password, displayName, tenantSlug } = req.body;
         const email = String(req.body.email).trim().toLowerCase();
@@ -271,6 +275,13 @@ app.post('/api/auth/login', validateBody(loginBody), async (req, res) => {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
 
+        try {
+            await requireEnterpriseTerm(pool, user.id);
+        } catch (error) {
+            if (sessionErrorStatus(error) === 401) return res.status(403).json({ error: 'Your enterprise access term is missing or expired.' });
+            throw error;
+        }
+
         // Listed platform admins are promoted on sign-in, so existing accounts get full access too.
         const role = effectiveRole(user.email, user.role);
         if (role !== user.role) {
@@ -340,39 +351,7 @@ app.post('/api/auth/logout', async (req, res) => {
 });
 
 // Get current user profile
-app.get('/api/auth/me', async (req, res) => {
-    try {
-        const authHeader = req.headers.authorization;
-        if (!authHeader?.startsWith('Bearer ')) {
-            return res.status(401).json({ error: 'No token provided' });
-        }
-
-        const payload = await verifyToken(authHeader.slice(7));
-        const result = await pool.query(
-            `SELECT id, tenant_id, email, display_name, role, avatar_url, preferences, created_at
-       FROM users WHERE id = $1`,
-            [payload.sub]
-        );
-
-        if (result.rows.length === 0) {
-            return res.status(404).json({ error: 'User not found' });
-        }
-
-        const user = result.rows[0];
-        res.json({
-            id: user.id,
-            email: user.email,
-            displayName: user.display_name,
-            role: user.role,
-            avatarUrl: user.avatar_url,
-            preferences: Object.fromEntries(Object.entries(user.preferences || {}).filter(([key]) => key !== '_authSessionId')),
-            tenantId: user.tenant_id,
-            createdAt: user.created_at,
-        });
-    } catch (err: any) {
-        res.status(401).json({ error: 'Invalid token' });
-    }
-});
+app.get('/api/auth/me', profileHandler(verifyToken, pool));
 
 // Update profile
 app.patch('/api/auth/me', validateBody(updateProfileBody), async (req, res) => {

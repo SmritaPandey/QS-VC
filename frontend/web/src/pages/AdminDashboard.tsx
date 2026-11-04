@@ -1,10 +1,12 @@
 import ThemeSelect from '../components/ThemeSelect';
-import { getToken } from '../lib/session';
+import { AUTH_API, clearSession, getToken } from '../lib/session';
+import { useSession } from '../lib/use-session';
+import EnterpriseAccessTerms from '../components/EnterpriseAccessTerms';
 /**
  * Admin Dashboard — Real-time monitoring, user management, and analytics.
  */
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 interface DashboardStats {
     activeMeetings: number;
@@ -201,6 +203,7 @@ const AdminDashboard: React.FC = () => {
             </nav>
 
             <main className="admin-content">
+                {activeTab === 'users' && <EnterpriseAccessTerms />}
                 {/* ━━━ OVERVIEW TAB ━━━ */}
                 {activeTab === 'overview' && (
                     <div className="admin-overview">
@@ -597,4 +600,37 @@ const AdminDashboard: React.FC = () => {
     );
 };
 
-export default AdminDashboard;
+function VerifiedAdminDashboard({ token }: { token: string }) {
+    const [access, setAccess] = useState<'checking' | 'allowed' | 'denied' | 'unavailable'>('checking');
+    const [attempt, setAttempt] = useState(0);
+    useEffect(() => {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000);
+        let active = true;
+        fetch(`${AUTH_API}/api/auth/enterprise/terms`, {
+            headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
+        }).then(response => {
+            if (!active || getToken() !== token) return;
+            if (response.status === 401) clearSession(token);
+            setAccess(response.status === 204 ? 'allowed' : response.status === 403 ? 'denied' : 'unavailable');
+        }).catch(() => { if (active) setAccess('unavailable'); }).finally(() => clearTimeout(timeout));
+        return () => { active = false; clearTimeout(timeout); controller.abort(); };
+    }, [token, attempt]);
+    if (access === 'allowed') return <AdminDashboard />;
+    return <main className="admin-dashboard">
+        <p role="status">{access === 'checking' ? 'Checking administrator access…' : access === 'denied' ? 'Platform administrator access is required.' : 'Could not verify administrator access.'}</p>
+        {access === 'unavailable' && <button type="button" onClick={() => { setAccess('checking'); setAttempt(value => value + 1); }}>Try again</button>}
+        <Link to="/app">Back to meetings</Link>
+    </main>;
+}
+
+export default function AdminPage() {
+    const session = useSession();
+    const token = session.status === 'authenticated' ? getToken() : '';
+    if (token) return <VerifiedAdminDashboard key={token} token={token} />;
+    return <main className="admin-dashboard">
+        {session.status === 'anonymous'
+            ? <Link to="/login?next=%2Fadmin">Sign in to the admin console</Link>
+            : <p role="status">{session.status === 'unavailable' ? 'The account service is unavailable.' : 'Checking account…'}</p>}
+    </main>;
+}

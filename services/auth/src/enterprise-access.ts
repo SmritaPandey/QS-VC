@@ -1,19 +1,86 @@
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { stat } from 'node:fs/promises';
 import path from 'node:path';
+import { z } from 'zod';
+import type { Pool } from 'pg';
+import { isPlatformAdmin } from './platform-admins.js';
+import { sessionErrorStatus } from './sessions.js';
 
 // Server-managed explicit user IDs prevent self-registration into an approved tenant
 // from granting download access. Never accept entitlement from browser parameters.
-export function enterpriseRouter(verify: (token: string) => Promise<Record<string, any>>) {
+const termBody = z.object({
+    workspaceUrl: z.string().max(2048).url().refine(value => {
+        const url = URL.canParse(value) ? new URL(value) : null;
+        return !!url && url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash;
+    }),
+    expiresAt: z.string().datetime({ offset: true }),
+});
+
+export function enterpriseRouter(verify: (token: string) => Promise<Record<string, any>>, db?: Pick<Pool, 'query'>) {
     const router = Router();
+    const withAdmin = (handle: (req: Request, res: Response, adminId: string) => Promise<unknown>) =>
+        async (req: Request, res: Response) => {
+            res.setHeader('Cache-Control', 'no-store');
+            const header = req.headers.authorization;
+            if (!header?.startsWith('Bearer ')) return res.sendStatus(401);
+            try {
+                const admin = await verify(header.slice(7));
+                if (typeof admin.email !== 'string' || !isPlatformAdmin(admin.email)) return res.sendStatus(403);
+                return await handle(req, res, admin.sub);
+            } catch (error) {
+                return res.sendStatus(sessionErrorStatus(error));
+            }
+        };
+    if (db) router.get('/terms', withAdmin(async (req, res) => {
+        if (req.query.email === undefined) return res.sendStatus(204);
+        const email = z.string().trim().email().max(255).safeParse(req.query.email);
+        if (!email.success) return res.sendStatus(400);
+        const { rows } = await db.query(
+            `SELECT u.id, u.email, u.display_name, t.workspace_url, t.expires_at
+             FROM users u LEFT JOIN enterprise_access_terms t ON t.user_id = u.id
+             WHERE lower(u.email) = lower($1) AND u.is_active
+               AND EXISTS (SELECT 1 FROM tenants WHERE id = u.tenant_id AND is_active)
+             LIMIT 2`,
+            [email.data],
+        );
+        if (!rows.length) return res.sendStatus(404);
+        if (rows.length !== 1) return res.sendStatus(409);
+        return res.json(rows[0]);
+    }));
+    if (db) router.put('/terms/:userId', withAdmin(async (req, res, adminId) => {
+        const term = termBody.safeParse(req.body);
+        const id = z.string().uuid().safeParse(req.params.userId);
+        if (!term.success || !id.success || Date.parse(term.data.expiresAt) <= Date.now()) {
+            return res.status(400).json({ error: 'Provide a user ID, an HTTPS workspace and a future expiry with a time zone.' });
+        }
+        const result = await db.query(
+            `INSERT INTO enterprise_access_terms (user_id, workspace_url, expires_at, approved_by)
+             SELECT id, $2, $3, $4 FROM users WHERE id = $1 AND is_active
+               AND EXISTS (SELECT 1 FROM tenants WHERE id = users.tenant_id AND is_active)
+             ON CONFLICT (user_id) DO UPDATE SET workspace_url = EXCLUDED.workspace_url,
+             expires_at = EXCLUDED.expires_at, approved_by = EXCLUDED.approved_by, updated_at = now()
+             RETURNING user_id, workspace_url, expires_at`,
+            [id.data, term.data.workspaceUrl, term.data.expiresAt, adminId],
+        );
+        if (!result.rows.length) return res.sendStatus(404);
+        return res.json(result.rows[0]);
+    }));
     router.use(async (req, res, next) => {
         res.setHeader('Cache-Control', 'no-store');
         try {
             const header = req.headers.authorization;
             if (!header?.startsWith('Bearer ')) { res.status(401).json({ error: 'Sign in to check enterprise access.' }); return; }
             const user = await verify(header.slice(7));
+            const term = db && (await db.query(
+                'SELECT workspace_url, expires_at, expires_at > now() AS active FROM enterprise_access_terms WHERE user_id = $1',
+                [user.sub],
+            )).rows[0];
+            if (term && !term.active) {
+                return res.status(403).json({ error: 'Your enterprise access term has expired.' });
+            }
+            if (term) res.locals.expiresAt = term.expires_at;
             const grants = JSON.parse(process.env.ENTERPRISE_ACCESS_JSON || '[]');
-            let grant = Array.isArray(grants) ? grants.find(g => g.tenantId === user.tenantId && Array.isArray(g.userIds) && g.userIds.includes(user.sub)) : undefined;
+            let grant = term ? { workspaceUrl: term.workspace_url } : Array.isArray(grants) ? grants.find(g => g.tenantId === user.tenantId && Array.isArray(g.userIds) && g.userIds.includes(user.sub)) : undefined;
             // Platform admins (role from the server-signed session) may use the intranet without a
             // per-user grant. They get QSVC_ADMIN_WORKSPACE_URL, or the first configured workspace.
             if (!grant && user.role === 'admin') {
@@ -25,14 +92,19 @@ export function enterpriseRouter(verify: (token: string) => Promise<Record<strin
             if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) throw new Error('Invalid workspace configuration');
             res.locals.workspaceUrl = url.href;
             next();
-        } catch { res.status(503).json({ error: 'Enterprise access could not be verified. Contact your administrator.' }); }
+        } catch (error) {
+            const status = sessionErrorStatus(error);
+            res.status(status).json({ error: status === 401
+                ? 'Sign in to check enterprise access.'
+                : 'Enterprise access could not be verified. Try again.' });
+        }
     });
     async function installer() {
         const file = process.env.ENTERPRISE_WINDOWS_INSTALLER;
         if (!file || !path.isAbsolute(file) || !file.toLowerCase().endsWith('.exe')) return null;
         try { return (await stat(file)).isFile() ? file : null; } catch { return null; }
     }
-    router.get('/', async (_req, res) => res.json({ workspaceUrl: res.locals.workspaceUrl, windowsAvailable: !!(await installer()) }));
+    router.get('/', async (_req, res) => res.json({ workspaceUrl: res.locals.workspaceUrl, windowsAvailable: !!(await installer()), expiresAt: res.locals.expiresAt }));
     router.get('/windows', async (_req, res) => {
         const file = await installer();
         if (!file) { res.status(503).json({ error: 'The Windows installer is not available yet.' }); return; }

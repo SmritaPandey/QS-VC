@@ -140,3 +140,24 @@ it('rejects guests before a saved organiser and restores the saved owner role', 
     await handlePeerDisconnect(guestState); await handlePeerDisconnect(hostState);
     vi.mocked(loadMeetingPolicy).mockResolvedValue(null);
 });
+
+it('requires host admission for webinar guests even when the waiting room is off and denies guest publishing', async () => {
+    const { loadMeetingPolicy } = await import('../meeting-policy.js');
+    vi.mocked(loadMeetingPolicy).mockResolvedValue({ hostId: 'organiser', status: 'waiting', settings: {
+        webinar: true, waitingRoomEnabled: false, allowChat: true, allowScreenShare: true, allowRecording: false,
+    } });
+    const code = `webinar-${crypto.randomUUID().slice(0, 10)}`;
+    const host = socket(), attendee = socket(), hostState: any = { authUser: { sub: 'organiser' } }, attendeeState: any = {};
+    try {
+        expect((await rpc(host, hostState, 'joinRoom', { meetingCode: code, displayName: 'Organiser' }))?.result.canPublish).toBe(true);
+        expect((await rpc(attendee, attendeeState, 'joinRoom', { meetingCode: code, displayName: 'Attendee' }))?.result.status).toBe('waiting');
+        expect((await rpc(host, hostState, 'admitPeer', { targetPeerId: attendeeState.peerId }))?.result.admitted).toBe(true);
+        expect(attendee.send.mock.calls.map(([raw]) => JSON.parse(raw)).find(message => message.method === 'admitted')?.params.canPublish).toBe(false);
+        expect((await rpc(attendee, attendeeState, 'produce', { kind: 'audio' }))?.error?.message).toContain('Only the webinar organiser');
+        expect((await rpc(attendee, attendeeState, 'captionPublish', {}))?.error?.message).toContain('Only the webinar organiser');
+    } finally {
+        await handlePeerDisconnect(attendeeState);
+        await handlePeerDisconnect(hostState);
+        vi.mocked(loadMeetingPolicy).mockResolvedValue(null);
+    }
+});

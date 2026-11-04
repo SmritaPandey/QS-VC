@@ -2,7 +2,7 @@ import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 const policySchema = z.object({ hostId: z.string().nullable(), status: z.string(), settings: z.object({
     maxParticipants: z.number().int().min(1).max(1000).optional(), waitingRoomEnabled: z.boolean().optional(), locked: z.boolean().optional(), password: z.string().nullable().optional(), muteOnEntry: z.boolean().optional(), allowScreenShare: z.boolean().optional(), allowChat: z.boolean().optional(), allowRecording: z.boolean().optional(),
-    waitingRoom: z.boolean().optional(), chatEnabled: z.boolean().optional(), screenShareEnabled: z.boolean().optional(), recording_allowed: z.boolean().optional(), e2eeRequired: z.boolean().optional(),
+    webinar: z.boolean().optional(), waitingRoom: z.boolean().optional(), chatEnabled: z.boolean().optional(), screenShareEnabled: z.boolean().optional(), recording_allowed: z.boolean().optional(), e2eeRequired: z.boolean().optional(),
 }) });
 export async function loadMeetingPolicy(code: string) {
     const base = process.env.MEETING_INTERNAL_URL || 'http://localhost:4003';

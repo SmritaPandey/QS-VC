@@ -71,6 +71,7 @@ export default function MeetingRoom() {
     const [peers, setPeers] = useState<Map<string, PeerData>>(new Map());
     const [localStream, setLocalStream] = useState<MediaStream | null>(null);
     // Mic / camera: the pre-join choice is the starting state; every later change goes through applyMute().
+    const canPublishRef = useRef(false);
     const [audioMuted, setAudioMuted] = useState<boolean>(!!state.audioMuted);
     const [videoOff, setVideoOff] = useState(true);
     const [cameraNotice, setCameraNotice] = useState('');
@@ -237,6 +238,7 @@ export default function MeetingRoom() {
                 stopAdmitted(); stopRejected(); settleAdmission = undefined;
                 if (!alive()) return;
                 myPeerIdRef.current = joinResult.peerId;
+                canPublishRef.current = joinResult.canPublish !== false;
                 setMyRole(joinResult.role || 'member');
                 setRoomRecording(joinResult.recording || null);
                 setRoomSettings(current => ({ ...current, ...joinResult.settings }));
@@ -294,12 +296,12 @@ export default function MeetingRoom() {
                 }
 
                 // Capture starts only after admission, never while waiting for a host.
-                await openLocalMedia(state.micId, state.cameraId, cameraCapture.current, stream, alive, () => alive() && !videoOffRef.current);
+                if (canPublishRef.current) await openLocalMedia(state.micId, state.cameraId, cameraCapture.current, stream, alive, () => alive() && !videoOffRef.current);
                 if (!alive()) { stream.getTracks().forEach(track => track.stop()); return; }
                 const hasMic = stream.getAudioTracks().some(track => track.readyState === 'live');
                 const hasCam = stream.getVideoTracks().some(track => track.readyState === 'live');
                 setLocalStream(stream);
-                if (!hasMic) { audioMutedRef.current = true; setAudioMuted(true); showNotice('No microphone available. You can still listen and chat.'); }
+                if (!hasMic) { audioMutedRef.current = true; setAudioMuted(true); showNotice(canPublishRef.current ? 'No microphone available. You can still listen and chat.' : 'You are watching this webinar. Only the organiser can share media.'); }
                 if (!hasCam) videoOffRef.current = true;
                 setVideoOff(videoOffRef.current);
                 stream.getAudioTracks().forEach(track => { track.enabled = !audioMutedRef.current; track.addEventListener('ended', () => { if (alive()) applyMute('audio', true); }); });
@@ -377,6 +379,7 @@ export default function MeetingRoom() {
     }, [meetingCode]);
 
     const handleToggleAudio = useCallback(async () => {
+        if (!canPublishRef.current) { showNotice('Only the webinar organiser can share media.'); return; }
         if (!sessionActive.current) return;
         const current = localStreamRef.current ?? new MediaStream();
         const live = current.getAudioTracks().some(track => track.readyState === 'live');
@@ -439,6 +442,7 @@ export default function MeetingRoom() {
     }, [applyMute]);
 
     const handleToggleVideo = useCallback(async () => {
+        if (!canPublishRef.current) { showNotice('Only the webinar organiser can share media.'); return; }
         if (!sessionActive.current || document.hidden) return;
         if (!videoOffRef.current) { applyMute('video', true); setCameraNotice(''); return; }
         if (initializingRef.current) { showNotice('Preparing your camera. Try again once the meeting connects.'); return; }
@@ -560,6 +564,7 @@ export default function MeetingRoom() {
     }, [stopScreenShare, showNotice]);
 
     const handleScreenShare = useCallback(() => {
+        if (!canPublishRef.current) { showNotice('Only the webinar organiser can share media.'); return; }
         if (!sharingRef.current && !roomSettings.allowScreenShare) { showNotice('Screen sharing is disabled by the host.'); return; }
         if (sharingRef.current) stopScreenShare(); else startScreenShare();
     }, [startScreenShare, stopScreenShare, roomSettings.allowScreenShare, showNotice]);

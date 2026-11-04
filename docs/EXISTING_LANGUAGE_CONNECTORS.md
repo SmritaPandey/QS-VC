@@ -82,3 +82,20 @@ A reverse “बैठक कल है।” sample produced awkward “Meeting
 language support is not a quality guarantee. No microphone speech or physical
 spoken-output quality pass is claimed. Browser capture showed device voices for
 English/Hindi; actual heard audio remains unverified.
+
+## Optional Google Cloud captions
+
+Set `CAPTION_TRANSLATION_PROVIDER=google` and `GOOGLE_TRANSLATE_API_KEY`
+in the signaling service environment, then restart signaling. The AWS Compose
+profile passes both settings through. Restrict the key to Cloud Translation and
+configure provider quotas before enabling it. English, Hindi and Japanese are
+the initial supported languages. LibreTranslate remains the default provider.
+
+Speakers enable speech sharing and separately allow Google Cloud to process
+their shared caption text. The room server checks that permission before
+sending a stored caption. The choice applies to new captions. Listeners can
+select Japanese captions, translated audio, or both. Audio uses a matching
+browser or OS voice if available. Speech input still uses browser recognition.
+A live provider key and two-device tests are required to verify this path with
+actual speech. For disconnected installations, use the local provider and verify
+that speech recognition and voices work offline on the supported devices.

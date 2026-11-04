@@ -48,7 +48,8 @@
 | **Signaling** | 4001 | WebSocket signaling server (JSON-RPC 2.0) |
 | **Auth** | 4002 | JWT authentication, user management, RBAC |
 | **Meeting** | 4003 | Meeting CRUD, scheduling, participant tracking |
-| **Recording** | 4004 | Recording lifecycle, MinIO storage integration |
+| **Recording** | 4004 | Authorized recording lifecycle and configured S3 storage |
+| **MCU** | 4005 | Optional development control scaffold |
 | **Web** | 5173 | React frontend (Vite dev server) |
 
 ## Prerequisites
@@ -65,6 +66,13 @@
 ```bash
 docker compose up -d postgres redis minio coturn
 ```
+
+For Node services running on the host, set `POSTGRES_PORT=5434` in the root
+`.env`. This is the port published by the development Compose file. Containers
+reach PostgreSQL at `postgres:5432`. Use the same host database configuration for
+migrations and the dev services. An allowlisted admin email needs an active
+account and password in that database.
+
 
 ### 2. Install dependencies
 
@@ -83,6 +91,8 @@ npm run db:migrate
 ```bash
 npm run dev
 ```
+
+Verify database access at http://localhost:4002/ready before signing in.
 
 This starts all 5 backend services and the web frontend concurrently.
 
