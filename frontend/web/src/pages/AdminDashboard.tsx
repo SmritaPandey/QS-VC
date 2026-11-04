@@ -462,10 +462,26 @@ function VerifiedAdminDashboard({ token }: { token: string }) {
         return () => { active = false; clearTimeout(timeout); controller.abort(); };
     }, [token, attempt]);
     if (access === 'allowed') return <AdminDashboard />;
-    return <main className="admin-dashboard">
-        <p role="status">{access === 'checking' ? 'Checking administrator access…' : access === 'denied' ? 'Platform administrator access is required.' : 'Could not verify administrator access.'}</p>
-        {access === 'unavailable' && <button type="button" onClick={() => { setAccess('checking'); setAttempt(value => value + 1); }}>Try again</button>}
-        <Link to="/app">Back to meetings</Link>
+    const title = access === 'checking'
+        ? 'Checking administrator access'
+        : access === 'denied'
+            ? 'Administrator access is required'
+            : 'We couldn’t verify administrator access';
+    const message = access === 'checking'
+        ? 'Please wait while we confirm this account.'
+        : access === 'denied'
+            ? 'This account does not have platform administrator access. Go to Intranet to check whether workspace access is enabled for your account.'
+            : 'Your sign-in is still active, but the admin access check did not complete. Try again or open the Intranet page for workspace and app downloads.';
+    return <main className="admin-dashboard admin-access-page">
+        <section className="admin-access-panel" aria-labelledby="admin-access-title">
+            <h1 id="admin-access-title">{title}</h1>
+            <p role="status" aria-live="polite">{message}</p>
+            <div className="admin-access-actions">
+                <Link className="btn-primary" to="/intranet">Open Intranet</Link>
+                {access === 'unavailable' && <button className="btn-secondary" type="button" onClick={() => { setAccess('checking'); setAttempt(value => value + 1); }}>Try again</button>}
+                <Link className="admin-access-back" to="/app">Back to meetings</Link>
+            </div>
+        </section>
     </main>;
 }
 
@@ -473,9 +489,17 @@ export default function AdminPage() {
     const session = useSession();
     const token = session.status === 'authenticated' ? getToken() : '';
     if (token) return <VerifiedAdminDashboard key={token} token={token} />;
-    return <main className="admin-dashboard">
-        {session.status === 'anonymous'
-            ? <Link to="/login?next=%2Fadmin">Sign in to the admin console</Link>
-            : <p role="status">{session.status === 'unavailable' ? 'The account service is unavailable.' : 'Checking account…'}</p>}
+    return <main className="admin-dashboard admin-access-page">
+        <section className="admin-access-panel" aria-labelledby="admin-access-title">
+            <h1 id="admin-access-title">{session.status === 'anonymous' ? 'Sign in to QS-VC' : 'Checking your account'}</h1>
+            {session.status !== 'anonymous' && <p role="status" aria-live="polite">{session.status === 'unavailable' ? 'The account service is unavailable. Your saved session has not been removed.' : 'Please wait while we check your sign-in.'}</p>}
+            {session.status === 'anonymous' && <p>Sign in with a platform administrator account to open the admin dashboard.</p>}
+            <div className="admin-access-actions">
+                {session.status === 'anonymous'
+                    ? <Link className="btn-primary" to="/login?next=%2Fadmin">Sign in</Link>
+                    : <Link className="btn-primary" to="/intranet">Open Intranet</Link>}
+                <Link className="admin-access-back" to="/app">Back to meetings</Link>
+            </div>
+        </section>
     </main>;
 }

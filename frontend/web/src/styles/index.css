@@ -1781,6 +1781,53 @@ label {
   grid-template-columns:200px minmax(0,1fr);
   grid-template-rows:auto 1fr;
 }
+.admin-dashboard.admin-access-page {
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  grid-template-rows:1fr;
+  place-items:center;
+  padding:clamp(24px,5vw,72px);
+}
+.admin-access-panel {
+  display:grid;
+  gap:16px;
+  width:min(100%,640px);
+  padding:clamp(24px,4vw,40px);
+  border:1px solid var(--border-subtle);
+  border-radius:var(--radius-lg);
+  background:var(--bg-secondary);
+  box-shadow:var(--shadow-md);
+}
+.admin-access-panel h1 {
+  max-width:18ch;
+  font-size:clamp(28px,4vw,40px);
+  font-weight:500;
+  letter-spacing:-.025em;
+}
+.admin-access-panel p {
+  max-width:58ch;
+  color:var(--text-secondary);
+}
+.admin-access-actions {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:12px;
+  margin-top:8px;
+}
+.admin-access-actions>.btn-primary,
+.admin-access-actions>.btn-secondary {
+  width:auto;
+  min-height:48px;
+}
+.admin-access-back {
+  display:inline-flex;
+  align-items:center;
+  min-height:44px;
+  padding:8px 10px;
+  color:var(--text-secondary);
+  text-underline-offset:4px;
+}
 .admin-header {
   grid-column:1/-1;
   display:flex;
