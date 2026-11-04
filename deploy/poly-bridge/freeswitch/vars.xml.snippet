@@ -1,0 +1,7 @@
+<!-- Merge into /etc/freeswitch/vars.xml -->
+<!-- Poly legacy endpoints: G.722 / G.711 audio, H.264 (Baseline+High) / H.263 video.
+     Browser side arrives from the bridge as OPUS + VP8; FreeSWITCH transcodes. -->
+<X-PRE-PROCESS cmd="set" data="global_codec_prefs=OPUS,G722,PCMU,PCMA,H264,VP8,H263"/>
+<X-PRE-PROCESS cmd="set" data="outbound_codec_prefs=G722,PCMU,PCMA,H264,H263"/>
+<X-PRE-PROCESS cmd="set" data="qsvc_bridge_ip=10.0.0.10"/>   <!-- host running the QSVC SFU + bridge -->
+<X-PRE-PROCESS cmd="set" data="qsvc_poly_tls_port=5061"/>

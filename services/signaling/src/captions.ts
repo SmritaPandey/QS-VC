@@ -12,7 +12,7 @@ const googleLanguages: z.infer<typeof languageSchema> = [{ code: 'en', name: 'En
 const googleEnabled = () => process.env.CAPTION_TRANSLATION_PROVIDER === 'google';
 type RoomCaptions = { captions: Map<string, StoredCaption>; translations: Map<string, string>; pending: Map<string, Promise<string>>; active: number; updated: number };
 const rooms = new Map<string, RoomCaptions>();
-const limits = new WeakMap<object, { published: number; translated: number; active: boolean; minute: number; count: number; capabilities: number }>();
+const limits = new WeakMap<object, { published: number; translated: number; active: Set<string>; minute: number; count: number; capabilities: number }>();
 let activeRequests = 0;
 let capabilityCache: { url: string; expires: number; languages: z.infer<typeof languageSchema> } | undefined;
 let capabilityPending: { url: string; promise: Promise<z.infer<typeof languageSchema>> } | undefined;
@@ -24,7 +24,7 @@ function member(ws: object, roomId: string, peerId: string) {
 }
 function quota(ws: object) {
     let state = limits.get(ws);
-    if (!state) { state = { published: -Infinity, translated: -Infinity, active: false, minute: Date.now(), count: 0, capabilities: -Infinity }; limits.set(ws, state); }
+    if (!state) { state = { published: -Infinity, translated: -Infinity, active: new Set<string>(), minute: Date.now(), count: 0, capabilities: -Infinity }; limits.set(ws, state); }
     return state;
 }
 function roomState(roomId: string) {
@@ -122,8 +122,8 @@ export async function translateCaption(ws: object, roomId: string, peerId: strin
     const key = `${url}:${caption.id}:${parsed.data.target}`;
     const cached = state.translations.get(key);
     if (cached) return { translatedText: cached, sourceLanguage: caption.language, targetLanguage: parsed.data.target };
-    if (rate.active || rate.count >= 30 || state.active >= 4 || activeRequests >= 16) throw new Error('Translation rate limit reached');
-    rate.active = true; rate.translated = Date.now(); rate.count++;
+    if (rate.active.has(key) || rate.active.size >= 2 || rate.count >= 30 || state.active >= 4 || activeRequests >= 16) throw new Error('Translation rate limit reached');
+    rate.active.add(key); rate.translated = Date.now(); rate.count++;
     state.active++; activeRequests++;
     try {
         let pending = state.pending.get(key);
@@ -153,7 +153,7 @@ export async function translateCaption(ws: object, roomId: string, peerId: strin
         if (state.translations.size > 200) state.translations.delete(state.translations.keys().next().value!);
         return { translatedText, sourceLanguage: caption.language, targetLanguage: parsed.data.target };
     } finally {
-        state.pending.delete(key); rate.active = false; state.active--; activeRequests--;
+        state.pending.delete(key); rate.active.delete(key); state.active--; activeRequests--;
     }
 }
 export function clearEmptyRoomCaptions(roomId: string) {

@@ -1,3 +1,4 @@
+import { assertJwtSecret } from '../../../shared/jwt-secret.cjs';
 import { insertSchedule, scheduleOccurrences } from './schedule-occurrences.js';
 import { meetingAuth, type AuthPayload } from './auth.js';
 import jwt from 'jsonwebtoken';
@@ -17,6 +18,7 @@ import { attachSignalingIfAvailable } from './signaling-bridge.js';
 import { disableDemoPersistence } from './demo-storage-policy.js';
 
 dotenv.config({ path: '../../.env' });
+assertJwtSecret();
 
 const logger = pino({
     transport: process.env.NODE_ENV === 'development'
@@ -384,6 +386,40 @@ app.get('/api/meetings', authMiddleware, async (req, res) => {
     }
 });
 
+// Update one scheduled occurrence. Serialize changes with the meeting status.
+const editScheduleBody = z.discriminatedUnion('action', [
+    z.object({ action: z.literal('cancel') }),
+    z.object({ action: z.literal('reschedule'), start: z.iso.datetime({ offset: true }), end: z.iso.datetime({ offset: true }) }),
+]);
+
+app.patch('/api/meetings/:id/schedule', authMiddleware, validateBody(editScheduleBody), async (req, res) => {
+    const id = z.string().uuid().safeParse(req.params.id);
+    if (!id.success) return res.status(400).json({ error: 'Invalid meeting ID' });
+    const edit = req.body as z.infer<typeof editScheduleBody>;
+    const user = (req as any).user as AuthPayload;
+    const rescheduling = edit.action === 'reschedule';
+    if (rescheduling && (Date.parse(edit.start) <= Date.now() || Date.parse(edit.end) <= Date.parse(edit.start))) {
+        return res.status(400).json({ error: 'Choose a future start and a later end' });
+    }
+    try {
+        const result = await pool.query(
+            `UPDATE meetings SET status = $1, updated_at = NOW(),
+                scheduled_start = COALESCE($2::timestamptz, scheduled_start),
+                scheduled_end = COALESCE($3::timestamptz, scheduled_end)
+             WHERE id = $4 AND tenant_id = $5 AND host_id = $6
+                 AND scheduled_start IS NOT NULL AND status = 'waiting'
+             RETURNING id, status, scheduled_start AS "scheduledStart", scheduled_end AS "scheduledEnd"`,
+            [rescheduling ? 'waiting' : 'cancelled', rescheduling ? edit.start : null,
+                rescheduling ? edit.end : null, id.data, user.tenantId, user.sub],
+        );
+        if (!result.rows.length) return res.status(404).json({ error: 'Editable scheduled meeting not found' });
+        res.json(result.rows[0]);
+    } catch (error) {
+        logger.error(error, 'Failed to edit scheduled meeting');
+        res.status(500).json({ error: 'Failed to edit scheduled meeting' });
+    }
+});
+
 // Update meeting status (start/end)
 app.patch('/api/meetings/:id/status', authMiddleware, validateBody(updateMeetingStatusBody), async (req, res) => {
     try {
@@ -392,7 +428,7 @@ app.patch('/api/meetings/:id/status', authMiddleware, validateBody(updateMeeting
         const timestamp = status === 'active' ? ', actual_start = NOW()' : status === 'ended' ? ', actual_end = NOW()' : '';
         const result = await pool.query(
             `UPDATE meetings SET status = $1, updated_at = NOW()${timestamp}
-             WHERE id = $2 AND tenant_id = $3 AND (host_id = $4 OR $5) RETURNING id`,
+             WHERE id = $2 AND tenant_id = $3 AND (host_id = $4 OR $5) AND status <> 'cancelled' RETURNING id`,
             // Platform admins can start or end any meeting in their tenant.
             [status, req.params.id, user.tenantId, user.sub, user.role === 'admin']
         );

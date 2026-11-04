@@ -1,5 +1,7 @@
+import { assertJwtSecret } from '../../../shared/jwt-secret.cjs';
 import dotenv from 'dotenv';
 dotenv.config({ path: '../../.env' });
+assertJwtSecret();
 
 export const config = {
     port: parseInt(process.env.PORT || process.env.SIGNALING_PORT || '4001', 10),

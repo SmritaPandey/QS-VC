@@ -1,0 +1,28 @@
+{
+  "name": "@qsvc/poly-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Media bridge between the QSVC mediasoup SFU and an on-prem FreeSWITCH MCU for Poly SIP/H.323 endpoints",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p . --noEmit"
+  },
+  "dependencies": {
+    "drachtio-srf": "^4.5.35",
+    "express": "^4.19.2",
+    "modesl": "^1.2.1",
+    "sdp-transform": "^2.14.2"
+  },
+  "peerDependencies": {
+    "mediasoup": "^3.14.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.12.7",
+    "@types/sdp-transform": "^2.4.9",
+    "mediasoup": "^3.14.0",
+    "typescript": "^5.4.5"
+  }
+}

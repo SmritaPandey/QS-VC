@@ -1,0 +1,24 @@
+<!-- Merge into conference.conf.xml <profiles> -->
+<profile name="qsvc">
+  <param name="rate" value="48000"/>
+  <param name="interval" value="20"/>
+  <param name="energy-level" value="100"/>
+  <param name="comfort-noise" value="false"/>
+  <param name="video-mode" value="mux"/>
+  <param name="video-layout-name" value="group:grid"/>
+  <param name="video-canvas-size" value="1920x1080"/>
+  <param name="video-canvas-bgcolor" value="#1F1F1F"/>
+  <param name="video-fps" value="30"/>
+  <param name="video-codec-bandwidth" value="2mb"/>
+  <param name="video-no-video-avatar" value="none"/>
+  <param name="video-mute-banner" value="{font_scale=4}Camera off"/>
+  <!-- Keyframes for legacy decoders after layout changes -->
+  <param name="video-auto-floor-msec" value="1000"/>
+  <param name="conference-flags" value="video-floor-only-on-talk|livearray-sync|json-events"/>
+  <param name="member-flags" value="dist-dtmf"/>
+  <param name="caller-id-name" value="QSVC"/>
+  <param name="muted-sound" value="silence"/>
+  <param name="unmuted-sound" value="silence"/>
+  <param name="enter-sound" value="silence"/>
+  <param name="exit-sound" value="silence"/>
+</profile>

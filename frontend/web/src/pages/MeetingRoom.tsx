@@ -488,6 +488,52 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                                 try { await media.consume(existingPeer.peerId, producer.id); } catch (err) { console.error('Failed to consume:', err); }
                             }
                         }
+                        if (joinResult.polyBridgeEnabled) {
+                            let stopped = false;
+                            let timer: ReturnType<typeof setTimeout>;
+                            let knownPeers = new Set<string>();
+                            const consumed = new Set<string>();
+                            const syncPolyRoom = async () => {
+                                try {
+                                    const snapshot = await signaling.request('polySnapshot', {});
+                                    if (stopped || !alive()) return;
+                                    const currentPeers = new Set<string>();
+                                    for (const member of snapshot.roster) {
+                                        const id = `poly:${member.callId}`;
+                                        currentPeers.add(id);
+                                        patchPeer(id, { displayName: member.displayName, role: 'member', audioMuted: member.muted });
+                                    }
+                                    for (const producer of snapshot.producers) {
+                                        currentPeers.add(producer.peerId);
+                                        patchPeer(producer.peerId, { displayName: producer.displayName, role: 'member' });
+                                        if (consumed.has(producer.producerId)) continue;
+                                        try {
+                                            await media.consume(producer.peerId, producer.producerId);
+                                            consumed.add(producer.producerId);
+                                        } catch { /* Retry on the next snapshot if the producer still exists. */ }
+                                        if (stopped || !alive()) return;
+                                    }
+                                    const currentProducers = new Set(snapshot.producers.map((producer: { producerId: string }) => producer.producerId));
+                                    for (const id of consumed) if (!currentProducers.has(id)) consumed.delete(id);
+                                    const previousPeers = knownPeers;
+                                    setPeers(previous => {
+                                        const next = new Map(previous);
+                                        for (const id of previousPeers) if (!currentPeers.has(id)) next.delete(id);
+                                        return next;
+                                    });
+                                    knownPeers = currentPeers;
+                                    setKnocks(current => [
+                                        ...current.filter(knock => !knock.peerId.startsWith('poly:')),
+                                        ...snapshot.lobby.map((entry: { callId: string; displayName: string }) => ({
+                                            peerId: `poly:${entry.callId}`, displayName: entry.displayName,
+                                        })),
+                                    ]);
+                                } catch { /* Keep the previous snapshot through temporary outages. */ }
+                                finally { if (!stopped && alive()) timer = setTimeout(syncPolyRoom, 2000); }
+                            };
+                            unsubscribe.push(() => { stopped = true; clearTimeout(timer); });
+                            void syncPolyRoom();
+                        }
                     } catch (mediaErr) {
                         if (!alive()) return;
                         media.close();

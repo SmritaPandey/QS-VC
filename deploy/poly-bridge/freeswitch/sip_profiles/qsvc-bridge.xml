@@ -1,0 +1,19 @@
+<!-- Private profile ONLY for the QSVC bridge legs (SFU <-> MCU). Trusted by ACL, no auth. -->
+<profile name="qsvc-bridge">
+  <settings>
+    <param name="context" value="qsvc-bridge"/>
+    <param name="dialplan" value="XML"/>
+    <param name="sip-ip" value="$${local_ip_v4}"/>
+    <param name="rtp-ip" value="$${local_ip_v4}"/>
+    <param name="sip-port" value="5090"/>
+    <param name="apply-inbound-acl" value="qsvc-bridge"/>
+    <param name="auth-calls" value="false"/>
+    <param name="inbound-codec-prefs" value="OPUS,VP8,H264"/>
+    <param name="inbound-codec-negotiation" value="greedy"/>
+    <param name="rtp-timer-name" value="soft"/>
+    <param name="disable-transcoding" value="false"/>
+    <param name="rtcp-audio-interval-msec" value="5000"/>
+    <param name="rtcp-video-interval-msec" value="5000"/>
+    <!-- SDES-SRTP is negotiated per call (a=crypto in the bridge offer). -->
+  </settings>
+</profile>

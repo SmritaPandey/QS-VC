@@ -123,7 +123,7 @@ async function main() {
         const sigProc = startService('Signaling', process.execPath, [tsxPath, 'src/index.ts'], sigDir, {
             PORT: String(SIGNALING_PORT),
             MCU_ENABLED: 'true',
-            MCU_INTERNAL_URL: `http://localhost:${MCU_PORT}`,
+            MCU_INTERNAL_URL: `http://127.0.0.1:${MCU_PORT}`,
         });
         procs.push(sigProc);
     }
@@ -137,7 +137,7 @@ async function main() {
     if (mcuInUse) {
         log('MCU', `Already running on port ${MCU_PORT}`);
     } else {
-        log('MCU', 'Starting MCU service (video composition + SIP/H.323 gateway)...');
+        log('MCU', 'Starting local MCU control service (SIP/H.323 media gateway unavailable)...');
         const tsxPath = path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
         const mcuEntry = path.join(ROOT, 'services', 'mcu', 'src', 'index.ts');
         const mcuProc = startService('MCU', process.execPath, [tsxPath, mcuEntry], ROOT, {
@@ -159,7 +159,7 @@ async function main() {
         const vitePath = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
         const viteProc = startService('Vite', process.execPath, [vitePath, '--host', '0.0.0.0'], path.join(ROOT, 'frontend', 'web'), {
             VITE_MCU_ENABLED: 'true',
-            VITE_MCU_URL: `http://localhost:${MCU_PORT}`,
+            VITE_MCU_URL: `http://127.0.0.1:${MCU_PORT}`,
             VITE_DEPLOYMENT_MODE: 'intranet',
         });
         procs.push(viteProc);
@@ -186,8 +186,8 @@ async function main() {
     console.log('');
     console.log('  📡 SERVICES:');
     console.log(`     Signaling:   http://localhost:${SIGNALING_PORT}`);
-    console.log(`     MCU:         http://localhost:${MCU_PORT}`);
-    console.log(`     MCU Health:  http://localhost:${MCU_PORT}/health`);
+    console.log(`     MCU:         http://127.0.0.1:${MCU_PORT}`);
+    console.log(`     MCU Health:  http://127.0.0.1:${MCU_PORT}/health`);
     console.log(`     Web UI:      http://localhost:${WEB_PORT}`);
     console.log('');
     console.log('  Press Ctrl+C to stop all services');

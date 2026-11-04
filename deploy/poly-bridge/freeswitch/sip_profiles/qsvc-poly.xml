@@ -1,0 +1,21 @@
+<!-- Profile Poly SIP endpoints register to / dial into. TLS + SRTP capable. -->
+<profile name="qsvc-poly">
+  <settings>
+    <param name="context" value="qsvc-rooms"/>
+    <param name="dialplan" value="XML"/>
+    <param name="sip-ip" value="$${local_ip_v4}"/>
+    <param name="rtp-ip" value="$${local_ip_v4}"/>
+    <param name="sip-port" value="5060"/>
+    <param name="tls" value="true"/>
+    <param name="tls-sip-port" value="$${qsvc_poly_tls_port}"/>
+    <param name="tls-cert-dir" value="/etc/freeswitch/tls"/>
+    <param name="tls-version" value="tlsv1.2"/>
+    <param name="auth-calls" value="true"/>
+    <param name="apply-inbound-acl" value="poly-endpoints"/>  <!-- endpoints in this ACL may call without auth -->
+    <param name="inbound-codec-prefs" value="G722,PCMU,PCMA,H264,H263"/>
+    <param name="inbound-codec-negotiation" value="generous"/>
+    <param name="rtp-timer-name" value="soft"/>
+    <param name="rtcp-video-interval-msec" value="5000"/>
+    <param name="manage-presence" value="false"/>
+  </settings>
+</profile>
