@@ -2,7 +2,7 @@ import { useId } from 'react';
 import '../styles/meeting-brand.css';
 
 /** Vector recreation of the supplied circular Q/play mark. */
-export default function BrandLogo({ meeting = false, iconOnly = false }: { meeting?: boolean; iconOnly?: boolean }) {
+export default function BrandLogo({ meeting = false, iconOnly = false, name = 'QS-VC' }: { meeting?: boolean; iconOnly?: boolean; name?: string }) {
     const id = useId();
     return <span className={`qsvc-logo${meeting ? ' qsvc-logo--meeting' : ''}`}>
         <svg className="qsvc-logo-symbol" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
@@ -14,6 +14,6 @@ export default function BrandLogo({ meeting = false, iconOnly = false }: { meeti
             <path className="qsvc-logo-play" d="M23 21 Q22 20 22 23 L22 42 Q22 44 24 43 L44 34 Q47 32.5 44 31 Z" fill={`url(#${id}-play)`}/>
             <path className="qsvc-logo-tail" d="M44 47 Q42 45 41 48 L49 61 Q50 63 52 61 L61 55 Q63 54 60 52 L46 46 Z" fill={`url(#${id}-ring)`} stroke="white" strokeWidth="1.5"/>
         </svg>
-        <span className={iconOnly ? 'sr-only' : 'qsvc-logo-name'}>QS-VC</span>
+        <span className={iconOnly ? 'sr-only' : 'qsvc-logo-name'}>{name}</span>
     </span>;
 }

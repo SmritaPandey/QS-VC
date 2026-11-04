@@ -2,7 +2,7 @@
 'use strict';
 const api = window.qsvcDesktop;
 const root = document.getElementById('root');
-const state = { workspace: '', host: '', user: null, version: '', theme: 'system', keepSignedIn: false, view: 'home', scheduled: null };
+const state = { workspace: '', host: '', user: null, version: '', theme: 'system', keepSignedIn: false, view: 'home', scheduled: null, entitlements: { plan: 'guest', status: 'paid_active', trialEndsAt: null, features: [] }, featureMinimumPlans: {}, upgradePrompt: null };
 
 // ── tiny DOM helper (text only, never HTML strings) ──
 function h(tag, props, ...children) {
@@ -46,7 +46,59 @@ const initials = name => String(name || '?').replace(/\(.*?\)/g, '').trim().spli
 // ── screens ──
 function render() {
     document.documentElement.dataset.theme = state.theme;
-    root.replaceChildren(!state.workspace ? setupScreen() : !state.user ? signInScreen() : shell());
+    const screen = !state.workspace ? setupScreen() : !state.user ? signInScreen() : shell();
+    root.replaceChildren(state.upgradePrompt
+        ? h('div', {}, h('div', { class: 'app-surface', inert: true }, screen), upgradeModal())
+        : screen);
+}
+
+function planName(plan) { return plan === 'starter_trial' ? 'Starter trial' : String(plan || 'guest').replace(/^./, letter => letter.toUpperCase()); }
+function planBadge() {
+    const plan = state.entitlements.plan;
+    if (!plan || plan === 'guest') return null;
+    const silver = plan === 'starter' || plan === 'starter_trial';
+    const tone = silver ? 'silver' : plan === 'pro' ? 'gold' : 'violet';
+    const crown = h('span', { class: `plan-crown ${tone}`, 'aria-label': `${planName(plan)} plan`, title: `${planName(plan)} plan` }, icon('workspace_premium'));
+    let trial = null;
+    if (plan === 'starter_trial' && state.entitlements.trialEndsAt) {
+        const days = Math.max(0, Math.ceil((new Date(state.entitlements.trialEndsAt).getTime() - Date.now()) / 86400000));
+        trial = h('small', { text: `${days} ${days === 1 ? 'day' : 'days'} left in trial` });
+    }
+    return h('div', { class: 'plan-status' }, crown, h('div', {}, h('b', { text: planName(plan) }), trial));
+}
+
+function upgradeModal() {
+    const requirement = typeof state.upgradePrompt === 'string' ? { requiredPlan: state.featureMinimumPlans[state.upgradePrompt] || 'starter' } : state.upgradePrompt;
+    const requiredPlan = requirement?.requiredPlan || 'starter';
+    const expired = state.entitlements.status === 'trial_expired';
+    const pending = state.entitlements.status === 'enterprise_pending';
+    const rejected = state.entitlements.status === 'enterprise_rejected';
+    const close = () => { state.upgradePrompt = null; state.view = 'home'; render(); };
+    const dialog = h('section', { class: 'upgrade-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'upgrade-title', 'aria-describedby': 'upgrade-copy', tabindex: '-1', onkeydown: event => {
+        if (event.key === 'Escape' && !expired) { event.preventDefault(); close(); }
+        if (event.key === 'Tab') {
+            const items = [...event.currentTarget.querySelectorAll('button:not([disabled])')];
+            if (!items.length) return;
+            if (event.shiftKey && document.activeElement === items[0]) { event.preventDefault(); items.at(-1).focus(); }
+            else if (!event.shiftKey && document.activeElement === items.at(-1)) { event.preventDefault(); items[0].focus(); }
+        }
+    } },
+        !expired && h('button', { class: 'upgrade-close', type: 'button', 'aria-label': 'Close plan prompt', onclick: close }, '×'),
+        h('span', { class: 'upgrade-icon mi', 'aria-hidden': 'true', text: expired ? 'hourglass_disabled' : 'lock' }),
+        h('h2', { id: 'upgrade-title', text: expired ? 'Your Starter trial has ended' : pending ? 'Enterprise access pending' : rejected ? 'Enterprise access not approved' : `Available on ${planName(requiredPlan)}` }),
+        h('p', { id: 'upgrade-copy', text: expired ? 'Choose a plan to keep using your meetings workspace.' : pending ? 'Your Enterprise request is waiting for administrator approval.' : rejected ? 'Contact your organisation administrator to discuss Enterprise access.' : `Choose a plan to use ${requirement?.featureLabel || 'this feature'}.` }),
+        pending || rejected
+            ? h('button', { class: 'upgrade-secondary', type: 'button', onclick: close }, 'Back to meetings')
+            : expired
+                ? h('div', { class: 'upgrade-plans' },
+                    ...['starter', 'pro'].map(plan => h('button', { class: `upgrade-plan ${plan === 'pro' ? 'upgrade-plan-pro' : ''}`, type: 'button', onclick: () => void api.openPlans(plan) },
+                        h('b', {}, plan === 'pro' && icon('workspace_premium'), planName(plan)), h('span', { text: plan === 'pro' ? 'Advanced capabilities' : 'Core tools for your team' }), h('strong', { text: 'View plan' }))))
+                : h('div', { class: 'upgrade-actions' },
+                    h('button', { class: 'btn', type: 'button', onclick: () => void api.openPlans(requiredPlan) }, `View ${planName(requiredPlan)} plan`),
+                    h('button', { class: 'upgrade-secondary', type: 'button', onclick: close }, 'Maybe later')));
+    const backdrop = h('div', { class: 'upgrade-backdrop', role: 'presentation', onmousedown: event => { if (!expired && event.target === event.currentTarget) close(); } }, dialog);
+    setTimeout(() => dialog.focus(), 0);
+    return backdrop;
 }
 
 function brandPanel(title, text) {
@@ -119,11 +171,17 @@ function signInScreen() {
 }
 
 function shell() {
-    const nav = (view, label, name) => h('button', { class: 'nav', 'aria-current': state.view === view ? 'page' : false, onclick: () => { state.view = view; state.scheduled = null; render(); } }, icon(name), label);
+    const scheduleLocked = !state.entitlements.features.includes('meeting_scheduling');
+    const nav = (view, label, name) => h('button', { class: 'nav', 'aria-current': state.view === view ? 'page' : false, onclick: () => {
+        state.view = view; state.scheduled = null;
+        if (view === 'schedule' && scheduleLocked) state.upgradePrompt = 'meeting_scheduling';
+        render();
+    } }, icon(name), label, view === 'schedule' && scheduleLocked ? h('span', { class: 'nav-lock mi', 'aria-label': 'Plan required' }, 'lock') : null);
     const views = { home: homeView, meetings: meetingsView, schedule: scheduleView, settings: settingsView };
     return h('div', { class: 'shell' },
         h('aside', { class: 'sidebar' },
             h('div', { class: 'brand' }, logo(), 'QS-VC'),
+            planBadge(),
             nav('home', 'Home', 'home'), nav('meetings', 'Meetings', 'calendar_month'), nav('schedule', 'Schedule', 'event'), nav('settings', 'Settings', 'settings'),
             h('div', { class: 'sidebar-foot' },
                 h('div', { class: 'org', title: state.workspace }, h('span', { class: 'dot' }), h('span', { text: state.host })),
@@ -282,9 +340,19 @@ async function changeOrganisation() {
 
 async function refresh() {
     Object.assign(state, await api.state());
+    if (state.user && state.entitlements.status === 'trial_expired') state.upgradePrompt = { requiredPlan: 'starter', trialEnded: true };
+    else if (state.entitlements.status !== 'trial_expired' && state.upgradePrompt?.trialEnded) state.upgradePrompt = null;
     render();
 }
 
-api.onEvent(event => { if (event === 'session-expired') { state.user = null; toast('Your session ended. Sign in again.', 'error'); render(); } });
+api.onEvent((event, payload) => {
+    if (event === 'session-expired') { state.user = null; toast('Your session ended. Sign in again.', 'error'); render(); }
+    if (event === 'upgrade-required' && state.user && state.entitlements.status !== 'trial_expired') {
+        state.upgradePrompt = { requiredPlan: payload?.requiredPlan || 'starter' };
+        render();
+    }
+});
+window.addEventListener('online', () => void refresh());
+window.addEventListener('focus', () => { if (state.user) void refresh(); });
 const notice = new URLSearchParams(location.search).get('notice');
 refresh().then(() => { if (notice) toast(notice); });

@@ -9,6 +9,8 @@ import BrandLogo from './BrandLogo';
 import PublicHelp from './PublicHelp';
 import CookieBanner from './CookieBanner';
 import useScrollReveal from '../lib/scroll-reveal';
+import { CrownBadge, TrialChip } from './PlanAccess';
+import { useEntitlements } from '../lib/entitlements';
 
 const quickLinks = [
     { to: '/#features', label: 'Meetings', icon: 'videocam' },
@@ -18,8 +20,9 @@ const quickLinks = [
     { to: '/app', label: 'Open meeting app', icon: 'arrow_outward' },
 ];
 
-export default function SiteNav({ accountAction }: { accountAction?: ReactNode }) {
+export default function SiteNav({ accountAction, brandName = 'QS-VC' }: { accountAction?: ReactNode; brandName?: string }) {
     const session = useSession();
+    const entitlements = useEntitlements();
     const [formVisible, setFormVisible] = useState(false);
     const [open, setOpen] = useState(false);
     const [scrolled, setScrolled] = useState(false);
@@ -66,7 +69,7 @@ export default function SiteNav({ accountAction }: { accountAction?: ReactNode }
         <header ref={headerRef} className="public-header" id="nav-top">
             <a className="public-skip" href="#main-content">Skip to content</a>
             <nav className="public-nav" aria-label="Main navigation">
-                <Link className="public-brand" to="/" aria-label="QS-VC home"><BrandLogo /></Link>
+                <Link className="public-brand" to="/" aria-label={`${brandName} home`}><BrandLogo name={brandName} /></Link>
                 <button className="public-menu-toggle" type="button" aria-label={open ? 'Close navigation' : 'Open navigation'} aria-expanded={open} aria-controls="public-nav-links" onClick={() => setOpen(value => !value)}><span className="mi" aria-hidden="true">{open ? 'close' : 'menu'}</span></button>
                 <div className="public-nav-links" id="public-nav-links" data-open={open} onKeyDown={event => { if (event.key === 'Escape') { setOpen(false); document.querySelector<HTMLButtonElement>('.public-menu-toggle')?.focus(); } }}>
                     <a href="/#features" onClick={() => setOpen(false)}>Meetings</a>
@@ -74,7 +77,7 @@ export default function SiteNav({ accountAction }: { accountAction?: ReactNode }
                     <Link to="/intranet" aria-current={pathname === '/intranet' ? 'page' : undefined} onClick={() => setOpen(false)}>Intranet</Link>
                     <Link to="/contact" aria-current={pathname === '/contact' ? 'page' : undefined} onClick={() => setOpen(false)}>Contact us</Link>
                     <Link className="public-mobile-app" to="/app" onClick={() => setOpen(false)}>Open meeting app <span className="mi" aria-hidden="true">arrow_forward</span></Link>
-                    {session.status === 'checking' ? <span role="status">Checking account…</span> : session.status === 'unavailable' ? <button type="button" onClick={() => void refreshSession()}>Retry account</button> : session.status === 'authenticated' ? <Link to="/app" onClick={() => setOpen(false)}>Your meetings</Link> : accountAction || <Link to="/login" aria-current={pathname === '/login' ? 'page' : undefined} onClick={() => setOpen(false)}>Sign in</Link>}
+                    {session.status === 'checking' ? <span role="status">Checking account…</span> : session.status === 'unavailable' ? <button type="button" onClick={() => void refreshSession()}>Retry account</button> : session.status === 'authenticated' ? <><TrialChip /><CrownBadge plan={entitlements.plan} /><Link to="/app" onClick={() => setOpen(false)}>Your meetings</Link></> : accountAction || <Link to="/login" aria-current={pathname === '/login' ? 'page' : undefined} onClick={() => setOpen(false)}>Sign in</Link>}
                 </div>
                 <ThemeSelect />
                 <Link className="public-primary public-nav-cta qsvc-action" to="/app"><ActionContents>Open meeting app</ActionContents></Link>

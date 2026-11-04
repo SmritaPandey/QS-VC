@@ -12,13 +12,15 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell, session, desktopCapturer, dialog, net, nativeTheme, safeStorage, clipboard } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
+import { FEATURE_MIN_PLAN } from '../../../shared/entitlements.cjs';
 
 const PROTOCOL = 'qsvc';
 const MEETING_CODE = /^[A-Z0-9]{2,8}(-[A-Z0-9]{2,8}){1,4}$/;
 const APP_PAGE = path.join(__dirname, '..', 'static', 'app.html');
 
 type Theme = 'system' | 'light' | 'dark';
-interface Config { workspaceUrl?: string; theme?: Theme; keepSignedIn?: boolean; activationReportedWorkspaces?: string[] }
+interface EntitlementSnapshot { plan: string; status: string; trialEndsAt: string | null; features: string[] }
+interface Config { workspaceUrl?: string; theme?: Theme; keepSignedIn?: boolean; activationReportedWorkspaces?: string[]; entitlementsCache?: { workspaceOrigin: string; accountId: string; fetchedAt: string; value: EntitlementSnapshot } }
 interface User { id: string; email: string; displayName: string; role: string; tenantId?: string }
 
 let mainWindow: BrowserWindow | null = null;
@@ -91,6 +93,9 @@ async function api(route: string, init: { method?: string; body?: unknown; auth?
         const error = response.ok ? undefined
             : response.status === 429 ? 'Too many attempts. Wait a few minutes and try again.'
             : (data && typeof data.error === 'string' ? data.error : `The server answered ${response.status}.`);
+        if (response.status === 403 && data?.code === 'UPGRADE_REQUIRED' && typeof data.requiredPlan === 'string') {
+            notifyRenderer('upgrade-required', { requiredPlan: data.requiredPlan });
+        }
         return { ok: response.ok, status: response.status, data, error };
     } catch {
         return { ok: false, status: 0, data: null, error: 'Cannot reach your organisation. Check the office network or VPN.' };
@@ -246,8 +251,25 @@ function setupIPC() {
             if (!me.ok && me.status !== 0) clearSession();
         }
         if (user) void reportDesktopActivation();
+        let entitlements: EntitlementSnapshot = { plan: 'guest', status: 'paid_active', trialEndsAt: null, features: [] };
+        if (workspace && user && token) {
+            const result = await api('api/auth/me/entitlements');
+            if (result.ok && ['guest', 'starter_trial', 'starter', 'pro', 'enterprise'].includes(result.data?.plan)
+                && Array.isArray(result.data?.features)) {
+                entitlements = {
+                    plan: result.data.plan,
+                    status: String(result.data.status || 'paid_active'),
+                    trialEndsAt: typeof result.data.trialEndsAt === 'string' ? result.data.trialEndsAt : null,
+                    features: result.data.features.filter((feature: unknown): feature is string => typeof feature === 'string'),
+                };
+                writeConfig({ entitlementsCache: { workspaceOrigin: workspace.origin, accountId: user.id, fetchedAt: new Date().toISOString(), value: entitlements } });
+            } else {
+                const cached = readConfig().entitlementsCache;
+                if (cached?.workspaceOrigin === workspace.origin && cached.accountId === user.id) entitlements = cached.value;
+            }
+        }
         const config = readConfig();
-        return { workspace: workspace?.href || '', host: workspace?.host || '', user, version: app.getVersion(), theme: config.theme || 'system', keepSignedIn: !!config.keepSignedIn, platform: process.platform };
+        return { workspace: workspace?.href || '', host: workspace?.host || '', user, entitlements, featureMinimumPlans: FEATURE_MIN_PLAN, version: app.getVersion(), theme: config.theme || 'system', keepSignedIn: !!config.keepSignedIn, platform: process.platform };
     });
 
     appHandler('workspace:set', async (value: unknown) => {
@@ -325,6 +347,15 @@ function setupIPC() {
     });
 
     appHandler('settings:keep', (value: unknown) => { writeConfig({ keepSignedIn: value === true }); saveSession(); return { ok: true }; });
+
+    appHandler('plans:open', (requestedPlan: unknown) => {
+        if (!workspace) return { ok: false, error: 'Connect to your organisation first.' };
+        const plan = ['starter', 'pro', 'enterprise'].includes(String(requestedPlan)) ? String(requestedPlan) : '';
+        const plans = new URL(`/pricing${plan ? `#plan-${plan}` : ''}`, workspace.origin);
+        if (plans.protocol !== 'https:' && !( !app.isPackaged && plans.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(plans.hostname))) return { ok: false, error: 'The plans page is unavailable.' };
+        void shell.openExternal(plans.href);
+        return { ok: true };
+    });
 
     appHandler('app:notify', (title: unknown, body: unknown) => { new Notification({ title: String(title).slice(0, 80), body: String(body).slice(0, 200) }).show(); });
 

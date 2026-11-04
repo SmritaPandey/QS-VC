@@ -16,6 +16,8 @@ import MeetingEnd from './pages/MeetingEnd';
 import RecordingPlayback from './pages/RecordingPlayback';
 import AdminDashboard from './pages/AdminDashboard';
 import ScheduleMeeting from './pages/ScheduleMeeting';
+import { EntitlementsProvider } from './lib/entitlements';
+import { Gate, TrialEndedPrompt, UpgradePromptListener } from './components/PlanAccess';
 
 export default function App() {
     useEffect(() => {
@@ -34,6 +36,7 @@ export default function App() {
     return (
         <div className="app-theme">
             <BrowserRouter>
+            <EntitlementsProvider>
             <Routes>
                 {/* Commercial website */}
                 <Route path="/" element={<HomePage />} />
@@ -49,7 +52,7 @@ export default function App() {
                 {/* Application (meeting launcher) */}
                 <Route path="/login" element={<Login />} /><Route path="/signup" element={<Signup />} />
                 <Route path="/app" element={<Landing />} />
-                <Route path="/schedule" element={<ScheduleMeeting />} />
+                <Route path="/schedule" element={<Gate feature="meeting_scheduling"><ScheduleMeeting /></Gate>} />
                 <Route path="/meeting/:meetingCode/preview" element={<PreMeeting />} />
                 <Route path="/meeting/:meetingCode" element={<MeetingRoom />} />
                 <Route path="/meeting-end" element={<MeetingEnd />} />
@@ -57,6 +60,9 @@ export default function App() {
                 <Route path="/recordings/shared/:shareToken" element={<RecordingPlayback />} />
                 <Route path="/admin" element={<AdminDashboard />} />
             </Routes>
+            <TrialEndedPrompt />
+            <UpgradePromptListener />
+            </EntitlementsProvider>
             </BrowserRouter>
         </div>
     );

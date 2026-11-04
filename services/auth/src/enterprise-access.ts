@@ -20,8 +20,34 @@ const activationBody = z.object({
     architecture: z.enum(['x64', 'arm64']),
     appVersion: z.string().trim().min(1).max(40).regex(/^[A-Za-z0-9.+-]+$/),
 });
+const approvalBody = z.object({ status: z.enum(['enterprise_approved', 'enterprise_rejected']) });
 
-export function enterpriseRouter(verify: (token: string) => Promise<Record<string, any>>, db?: Pick<Pool, 'query'>) {
+async function sendApprovalEmail(email: string, status: 'enterprise_approved' | 'enterprise_rejected') {
+    const apiKey = process.env.QSVC_EMAIL_API_KEY;
+    const from = process.env.QSVC_EMAIL_FROM;
+    if (!apiKey || !from) return false;
+    const approved = status === 'enterprise_approved';
+    const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            from,
+            to: [email],
+            subject: approved ? 'Your QS-VC Enterprise access is approved' : 'Your QS-VC Enterprise request update',
+            text: approved
+                ? 'Your QS-VC Enterprise access has been approved. Sign in to continue.'
+                : 'Your QS-VC Enterprise access request was not approved. Contact your organisation administrator for details.',
+        }),
+        signal: AbortSignal.timeout(8000),
+    });
+    return response.ok;
+}
+
+export function enterpriseRouter(
+    verify: (token: string) => Promise<Record<string, any>>,
+    db?: Pick<Pool, 'query'>,
+    notify: typeof sendApprovalEmail = sendApprovalEmail,
+) {
     const router = Router();
     const withAdmin = (handle: (req: Request, res: Response, adminId: string) => Promise<unknown>) =>
         async (req: Request, res: Response) => {
@@ -70,6 +96,64 @@ export function enterpriseRouter(verify: (token: string) => Promise<Record<strin
         if (!result.rows.length) return res.sendStatus(404);
         return res.json(result.rows[0]);
     }));
+    if (db) {
+        const withApprovalAdmin = (handle: (req: Request, res: Response, adminId: string, tenantId: string) => Promise<unknown>) =>
+            async (req: Request, res: Response) => {
+                res.setHeader('Cache-Control', 'no-store');
+                const header = req.headers.authorization;
+                if (!header?.startsWith('Bearer ')) return res.sendStatus(401);
+                try {
+                    const admin = await verify(header.slice(7));
+                    if (admin.role !== 'admin' || typeof admin.sub !== 'string' || typeof admin.tenantId !== 'string') return res.sendStatus(403);
+                    return await handle(req, res, admin.sub, admin.tenantId);
+                } catch (error) { return res.sendStatus(sessionErrorStatus(error)); }
+            };
+        router.post('/approval-request', async (req, res) => {
+            res.setHeader('Cache-Control', 'no-store');
+            const header = req.headers.authorization;
+            if (!header?.startsWith('Bearer ')) return res.sendStatus(401);
+            try {
+                const user = await verify(header.slice(7));
+                const { rows } = await db.query(
+                    `UPDATE users SET subscription_plan = 'enterprise', enterprise_status = 'enterprise_pending',
+                                      enterprise_reviewed_by = NULL, enterprise_reviewed_at = NULL, updated_at = NOW()
+                     WHERE id = $1 AND tenant_id = $2 AND is_active
+                       AND EXISTS (SELECT 1 FROM tenants t WHERE t.id = users.tenant_id AND t.is_active)
+                       AND enterprise_status IS DISTINCT FROM 'enterprise_approved'
+                     RETURNING enterprise_status AS status`,
+                    [user.sub, user.tenantId],
+                );
+                if (!rows.length) return res.status(409).json({ error: 'Approved Enterprise access cannot be requested again.' });
+                return res.status(202).json(rows[0]);
+            } catch (error) { return res.status(sessionErrorStatus(error)).json({ error: 'Enterprise request could not be submitted.' }); }
+        });
+        router.get('/approval-requests', withApprovalAdmin(async (_req, res, _adminId, tenantId) => {
+            const { rows } = await db.query(
+                `SELECT id AS "userId", email, display_name AS "displayName", created_at AS "requestedAt"
+                 FROM users WHERE tenant_id = $1 AND subscription_plan = 'enterprise' AND enterprise_status = 'enterprise_pending'
+                 ORDER BY created_at ASC`,
+                [tenantId],
+            );
+            return res.json({ requests: rows });
+        }));
+        router.patch('/approval-requests/:userId', withApprovalAdmin(async (req, res, adminId, tenantId) => {
+            const id = z.string().uuid().safeParse(req.params.userId);
+            const decision = approvalBody.safeParse(req.body);
+            if (!id.success || !decision.success) return res.status(400).json({ error: 'Provide a valid user ID and approval decision.' });
+            const { rows } = await db.query(
+                `UPDATE users SET enterprise_status = $2, enterprise_reviewed_by = $3,
+                                  enterprise_reviewed_at = NOW(), updated_at = NOW()
+                 WHERE id = $1 AND subscription_plan = 'enterprise' AND enterprise_status = 'enterprise_pending'
+                   AND tenant_id = $4
+                 RETURNING email, enterprise_status AS status`,
+                [id.data, decision.data.status, adminId, tenantId],
+            );
+            if (!rows.length) return res.status(409).json({ error: 'Enterprise request is no longer pending.' });
+            let notificationSent = false;
+            try { notificationSent = await notify(rows[0].email, decision.data.status); } catch { /* Access decisions persist even if email is unavailable. */ }
+            return res.json({ status: rows[0].status, notificationSent });
+        }));
+    }
     router.use(async (req, res, next) => {
         res.setHeader('Cache-Control', 'no-store');
         try {
