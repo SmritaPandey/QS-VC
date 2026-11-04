@@ -83,7 +83,7 @@ export default function EnterpriseAccessTerms() {
     }
 
     return <section className="admin-section" aria-labelledby="enterprise-terms-title">
-        <h2 id="enterprise-terms-title">Enterprise access terms</h2>
+        <h2 id="enterprise-terms-title">Quantum-Premise access terms</h2>
         <form onSubmit={findCustomer}>
             <label htmlFor="enterprise-customer-email">Customer email</label>{' '}
             <input id="enterprise-customer-email" name="email" type="email" required maxLength={255} />{' '}

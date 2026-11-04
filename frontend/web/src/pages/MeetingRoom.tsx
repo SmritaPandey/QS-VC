@@ -6,6 +6,7 @@ import { CameraCapture, watchCameraVisibility, watchCameraTrack, cameraAccessMes
 import { watchMutedSpeech } from '../lib/muted-speech';
 import { recordingManager, recordingRequest } from '../lib/recording';
 import { getToken } from '../lib/session';
+import { useEntitlements } from '../lib/entitlements';
 import '../styles/recordings.css';
 import { playSound } from '../lib/sounds';
 import { createMeetingComposite, type MeetingComposite } from '../lib/meeting-recorder';
@@ -122,7 +123,13 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const { meetingCode } = useParams<{ meetingCode: string }>();
     const location = useLocation();
     const navigate = useNavigate();
+    const entitlements = useEntitlements();
     const state = { ...((location.state as any) || {}), ...(reconnecting ? carried : {}) };
+    const [clockNow, setClockNow] = useState(() => new Date());
+    useEffect(() => {
+        const timer = window.setInterval(() => setClockNow(new Date()), 15_000);
+        return () => window.clearInterval(timer);
+    }, []);
 
     const myPeerIdRef = useRef('');
     const [myRole, setMyRole] = useState<string>('member');
@@ -854,6 +861,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     const handleToggleRecording = useCallback(async () => {
         if (recordingRef.current) { await finishRecording(); return; }
+        if (entitlements.loading) { showNotice('Checking your plan…'); return; }
+        if (!entitlements.features.includes('cloud_recording')) {
+            window.dispatchEvent(new CustomEvent('qsvc:upgrade-required', { detail: { requiredPlan: entitlements.featureMinimumPlans.cloud_recording || 'pro' } }));
+            return;
+        }
         if (busyRef.current.record || pendingRecording.current) { showNotice('Finish saving the previous recording first.'); return; }
         if (myRole !== 'host' || !getToken()) { showNotice('Sign in as the meeting host to record.'); return; }
         if (!connected || !meetingCode) return;
@@ -883,7 +895,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             void signaling.request('setRecordingState', { recording: false }).catch(() => {});
             showNotice(reason instanceof Error ? reason.message : 'Recording could not start.');
         } finally { busyRef.current.record = false; }
-    }, [finishRecording, meetingCode, myRole, connected, showNotice]);
+    }, [finishRecording, meetingCode, myRole, connected, showNotice, entitlements.loading, entitlements.features]);
 
     useEffect(() => {
         const warn = (event: BeforeUnloadEvent) => {
@@ -972,6 +984,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             ? `${h}:${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`
             : `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
     };
+    const localTime = new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(clockNow);
+    const localDate = new Intl.DateTimeFormat(undefined, { weekday: 'short', day: 'numeric', month: 'short' }).format(clockNow);
+    const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local time';
+    const timeZoneLabel = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(clockNow).find(part => part.type === 'timeZoneName')?.value || timeZone;
 
     const answerKnock = useCallback((peerId: string, admit: boolean) => {
         setKnocks(current => current.filter(k => k.peerId !== peerId));
@@ -1107,6 +1123,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         <span className="mi mi-sm share-copy-icon">{linkCopied ? 'check' : 'content_copy'}</span>
                         {linkCopied && <span className="copied-tooltip">Link copied!</span>}
                     </button>
+                    <div className="meeting-local-clock" title={`Your local time · ${timeZone}`} aria-label={`Your local time is ${localTime}, ${localDate}, ${timeZone}`}>
+                        <time dateTime={clockNow.toISOString()}>{localTime}</time>
+                        <span className="meeting-local-clock-meta"><span>{localDate}</span><span className="meeting-local-clock-zone">{timeZoneLabel}</span></span>
+                    </div>
                 </div>
                 <div className="top-bar-center">
                     <span className="meeting-timer">{formatDuration(duration)}</span>
@@ -1187,7 +1207,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 effectsOn={effect.kind !== 'none'} onOpenEffects={() => { closePanels(); setEffectsOpen(true); setLanguageOpen(false); setReactionsOpen(false); }}
                 onReportProblem={() => setReportOpen(true)}
                 audioMuted={audioMuted} videoOff={videoOff} screenSharing={screenSharing}
-                isRecording={isRecording} canRecord={myRole === 'host' && !!getToken()} chatOpen={chatOpen} participantsOpen={participantsOpen}
+                isRecording={isRecording} canRecord={myRole === 'host' && !!getToken()} recordingLocked={!entitlements.loading && !entitlements.features.includes('cloud_recording')} chatOpen={chatOpen} participantsOpen={participantsOpen}
                 handRaised={handRaised} reactionsOpen={reactionsOpen}
                 onToggleReactions={() => { setReactionsOpen((open) => !open); setLanguageOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }}
                 languageOpen={languageOpen} languageLabel={findLanguage(speechLanguage.code)?.name} languageCode={speechLanguage.code.split('-')[0].toUpperCase()}

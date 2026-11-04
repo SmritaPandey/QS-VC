@@ -60,7 +60,17 @@
 .qs-topchip--spot .mi { color:#75ecd7; }
 .qs-topchip button { margin-left:4px; padding:2px 8px; border-radius:999px; border:1px solid #43d9c255; background:transparent; color:#a6f2e4; font:inherit; font-size:12px; cursor:pointer; }
 
+/* A quiet local clock sits beside the room code, separate from meeting duration. */
+.meeting-room .meeting-local-clock { display:flex; flex-direction:column; justify-content:center; gap:2px; min-width:116px; padding:6px 10px; border:1px solid #2d4556; border-radius:12px; background:linear-gradient(145deg,#172938,#111f2c); color:#edf5fa; }
+.meeting-local-clock time { font-size:16px; font-weight:600; line-height:1.15; letter-spacing:.01em; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.meeting-local-clock-meta { display:flex; align-items:center; gap:7px; color:#9fb6c4; font-size:10px; line-height:1.2; white-space:nowrap; }
+.meeting-local-clock-zone { color:#75ecd7; font-weight:600; }
+.ctrl-plan-lock { margin-left:auto; color:#f0ce79; font-size:16px; }
+
 @media (max-width:767px) {
+  .meeting-room .meeting-local-clock { min-width:0; padding:5px 8px; }
+  .meeting-room .meeting-local-clock time { font-size:13px; }
+  .meeting-room .meeting-local-clock-meta { gap:5px; font-size:9px; }
   .qs-stage-layout.qs-strip-side { grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr) auto; }
   .qs-strip-bottom .qs-strip, .qs-strip-side .qs-strip { grid-auto-flow:column; grid-auto-rows:auto; grid-auto-columns:minmax(0, calc((100% - 30px) / var(--strip-count, 3))); height:96px; }
   .qs-topchip { max-width:150px; }

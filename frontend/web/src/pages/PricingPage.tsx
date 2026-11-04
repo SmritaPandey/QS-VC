@@ -63,6 +63,7 @@ export const plans = [
     },
     {
         name: 'Enterprise',
+        displayName: 'Quantum-Premise',
         price: 'Custom',
         period: 'tailored pricing',
         desc: 'For large organizations, banks, government.',
@@ -107,8 +108,8 @@ export default function PricingPage() {
             </header>
             <p className="public-pricing-notice">Proposed pricing. Rates and inclusions are proposed and require confirmation before purchase.</p>
                     <div className="pricing-grid">
-                        {plans.map(plan => <article className={`pricing-card ${plan.highlight ? 'pricing-card-highlight' : ''}`} key={plan.name}>
-                            <div className="pricing-card-header"><h2>{plan.name}{plan.name === 'Pro' && <span className="pricing-crown" aria-label="Pro premium plan"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 6 5 4 4-7 4 7 5-4-2 12H5L3 6Z" fill="currentColor"/><path d="M6 21h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></span>}{plan.name === 'Enterprise' && <span className="pricing-corporate" aria-hidden="true"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 21V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v17M15 9h4a1 1 0 0 1 1 1v11M2 21h20M8 7h3M8 11h3M8 15h3M9 21v-3M17 13h1M17 17h1"/></svg></span>}</h2><p className="pricing-desc">{plan.desc}</p></div>
+                        {plans.map(plan => <article id={`plan-${plan.name.toLowerCase()}`} className={`pricing-card ${plan.highlight ? 'pricing-card-highlight' : ''}`} key={plan.name}>
+                            <div className="pricing-card-header"><h2>{'displayName' in plan ? plan.displayName : plan.name}{plan.name === 'Pro' && <span className="pricing-crown" aria-label="Pro premium plan"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m3 6 5 4 4-7 4 7 5-4-2 12H5L3 6Z" fill="currentColor"/><path d="M6 21h12" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg></span>}{plan.name === 'Enterprise' && <span className="pricing-corporate" aria-hidden="true"><svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 21V4a1 1 0 0 1 1-1h9a1 1 0 0 1 1 1v17M15 9h4a1 1 0 0 1 1 1v11M2 21h20M8 7h3M8 11h3M8 15h3M9 21v-3M17 13h1M17 17h1"/></svg></span>}</h2><p className="pricing-desc">{plan.desc}</p></div>
                             <div className="pricing-price"><span className="pricing-amount">{plan.price}</span><span className="pricing-period">{plan.period}</span></div>
                             <p className="pricing-sample-label">Proposed inclusions</p>
                             <ul className="pricing-features">{plan.features.map(feature => <li className={feature.included ? '' : 'pricing-feature-disabled'} key={feature.text}><span className="mi mi-sm" aria-hidden="true">{feature.included ? 'check' : 'remove'}</span><span>{feature.text}{!feature.included && <span className="sr-only">, not included in this proposal</span>}</span></li>)}</ul>

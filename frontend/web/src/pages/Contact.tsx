@@ -7,7 +7,10 @@ import { AUTH_API } from '../lib/session';
 
 export default function Contact({ demo = false }: { demo?: boolean }) {
     const [params] = useSearchParams();
-    const interest = ['Free', 'Starter', 'Pro', 'Enterprise'].includes(params.get('interest') || '') ? params.get('interest')! : '';
+    const requestedPlan = params.get('interest') || '';
+    const interest = ['Free', 'Starter', 'Pro', 'Enterprise', 'Quantum-Premise'].includes(requestedPlan)
+        ? requestedPlan === 'Enterprise' ? 'Quantum-Premise' : requestedPlan
+        : '';
     const [busy, setBusy] = useState(false);
     const sending = useRef(false);
     const [error, setError] = useState('');
@@ -36,12 +39,12 @@ export default function Contact({ demo = false }: { demo?: boolean }) {
     }
     return <div className="public-site public-contact"><SiteNav />
         <main id="main-content" className="public-container public-auth-layout">
-            <div className="public-auth-copy"><h1>{demo ? 'Request a demo' : 'Contact us'}</h1><p>{demo ? 'Request a walkthrough built around your team’s needs.' : 'Ask about QS-VC, plans or a deployment for your team.'}</p><p>{demo ? 'Explore meetings, languages and enterprise access. We’ll arrange a time that suits your team.' : 'Share your requirements here without opening an email app.'}</p><Link className="public-text-link qsvc-action qsvc-action--secondary" to="/pricing"><ActionContents>Explore the plans</ActionContents></Link>
+            <div className="public-auth-copy"><h1>{demo ? 'Request a demo' : 'Contact us'}</h1><p>{demo ? 'Request a walkthrough built around your team’s needs.' : 'Ask about QS-VC, plans or a deployment for your team.'}</p><p>{demo ? 'Explore meetings, languages and Quantum-Premise access. We’ll arrange a time that suits your team.' : 'Share your requirements here without opening an email app.'}</p><Link className="public-text-link qsvc-action qsvc-action--secondary" to="/pricing"><ActionContents>Explore the plans</ActionContents></Link>
                 {!demo && <Link className="qsvc-action public-demo-link" to="/request-demo"><ActionContents>Request a demo</ActionContents></Link>}
                 <dl className="public-contact-details">
                     <div><span className="mi" aria-hidden="true">mail</span><div><dt>Email</dt><dd><a href="mailto:contact@neurq.ai">contact@neurq.ai</a></dd></div></div>
                     <div><span className="mi" aria-hidden="true">location_on</span><div><dt>Headquarters</dt><dd>India</dd></div></div>
-                    <div><span className="mi" aria-hidden="true">call</span><div><dt>Enterprise Support</dt><dd>Available for customers</dd></div></div>
+                    <div><span className="mi" aria-hidden="true">call</span><div><dt>Quantum-Premise Support</dt><dd>Available for customers</dd></div></div>
                 </dl>
             </div>
             {receipt ? <section className="public-contact-success" role="status"><span className="mi" aria-hidden="true">check_circle</span><h2>{demo ? 'Demo request received' : 'Enquiry received'}</h2><p>{demo ? 'Our team will contact you to confirm a time. Your session is not booked yet.' : 'Keep this reference for your enquiry.'}</p><p className="public-receipt">{receipt}</p><Link className="public-primary qsvc-action" to="/app"><ActionContents>Open meeting app</ActionContents></Link></section> : <form className="public-auth-form" onSubmit={submit} aria-busy={busy} aria-label={demo ? "Request a QS-VC demo" : "Contact QS-VC"}>

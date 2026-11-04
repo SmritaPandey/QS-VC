@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld('qsvcDesktop', {
     copyInvite: (code: string) => call('invite:copy', code),
     setTheme: (theme: string) => call('settings:theme', theme),
     setKeepSignedIn: (keep: boolean) => call('settings:keep', keep),
+    openPlans: (plan?: string) => call('plans:open', plan),
     notify: (title: string, body: string) => call('app:notify', title, body),
     onEvent: (callback: (event: string, payload?: unknown) => void) => {
         ipcRenderer.on('app:event', (_event, name: string, payload: unknown) => callback(name, payload));

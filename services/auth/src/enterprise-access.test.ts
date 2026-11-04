@@ -70,6 +70,25 @@ it('reports only the Windows and Mac installers that are actually staged', async
     }
 });
 
+it.each([
+    ['/macos/arm64', 'ENTERPRISE_MACOS_ARM64_INSTALLER', 'arm64.zip', 'QS-VC-macOS-arm64.zip'],
+    ['/macos/x64', 'ENTERPRISE_MACOS_X64_INSTALLER', 'intel.zip', 'QS-VC-macOS-x64.zip'],
+] as const)('sends %s as a named ZIP archive', async (routePath, envName, archiveName, downloadName) => {
+    const folder = mkdtempSync(path.join(tmpdir(), 'qsvc-macos-zip-'));
+    try {
+        const archive = path.join(folder, archiveName);
+        writeFileSync(archive, 'test-zip-artifact');
+        vi.stubEnv(envName, archive);
+        const router = enterpriseRouter(async () => ({}));
+        const route = router.stack.find(layer => layer.route?.path === routePath)!.route!;
+        const res = { download: vi.fn((_file: string, _name: string, done: (error?: Error) => void) => done()) };
+        await route.stack[0].handle({} as Request, res as unknown as Response, vi.fn());
+        expect(res.download).toHaveBeenCalledWith(archive, downloadName, expect.any(Function));
+    } finally {
+        rmSync(folder, { recursive: true, force: true });
+    }
+});
+
 it('registers explicit Windows and both Mac ZIP routes plus the legacy route', () => {
     const router = enterpriseRouter(async () => ({}));
     const paths = router.stack.filter(layer => layer.route).map(layer => layer.route?.path);
@@ -114,6 +133,47 @@ it('blocks customer lookup before querying the database for a non-platform admin
     const res = { setHeader: vi.fn(), sendStatus: vi.fn() };
     const lookup = router.stack.find(layer => layer.route?.path === '/terms')!.route!.stack[0].handle;
     await lookup({ headers: { authorization: 'Bearer test' }, query: { email: 'target@example.test' } } as unknown as Request, res as unknown as Response, vi.fn());
+    expect(res.sendStatus).toHaveBeenCalledWith(403);
+    expect(query).not.toHaveBeenCalled();
+});
+
+it('lets a signed-in user submit an Enterprise request into pending state', async () => {
+    const query = vi.fn().mockResolvedValue({ rows: [{ status: 'enterprise_pending' }] });
+    const router = enterpriseRouter(async () => ({ sub: 'requester', tenantId: 'tenant-id' }), { query });
+    const route = router.stack.find(layer => layer.route?.path === '/approval-request')!.route!;
+    const res = { setHeader: vi.fn(), status: vi.fn().mockReturnThis(), json: vi.fn(), sendStatus: vi.fn() };
+    await route.stack[0].handle({ headers: { authorization: 'Bearer test' } } as Request, res as unknown as Response, vi.fn());
+    expect(query).toHaveBeenCalledWith(expect.stringContaining("enterprise_status = 'enterprise_pending'"), ['requester', 'tenant-id']);
+    expect(res.status).toHaveBeenCalledWith(202);
+    expect(res.json).toHaveBeenCalledWith({ status: 'enterprise_pending' });
+});
+
+it('restricts the approval queue to admins and emails the user after an approval decision', async () => {
+    const userId = '00000000-0000-4000-8000-000000000001';
+    const query = vi.fn()
+        .mockResolvedValueOnce({ rows: [{ userId, email: 'person@example.test', displayName: 'Person', requestedAt: '2026-11-04T00:00:00Z' }] })
+        .mockResolvedValueOnce({ rows: [{ email: 'person@example.test', status: 'enterprise_approved' }] });
+    const notify = vi.fn().mockResolvedValue(true);
+    const router = enterpriseRouter(async () => ({ sub: 'admin-id', role: 'admin', tenantId: 'tenant-id' }), { query }, notify);
+    const queue = router.stack.find(layer => layer.route?.path === '/approval-requests')!.route!;
+    const decision = router.stack.find(layer => layer.route?.path === '/approval-requests/:userId')!.route!;
+    const res = { setHeader: vi.fn(), status: vi.fn().mockReturnThis(), json: vi.fn(), sendStatus: vi.fn() };
+
+    await queue.stack[0].handle({ headers: { authorization: 'Bearer test' } } as Request, res as unknown as Response, vi.fn());
+    expect(res.json).toHaveBeenCalledWith({ requests: expect.arrayContaining([expect.objectContaining({ userId, email: 'person@example.test' })]) });
+    expect(query).toHaveBeenNthCalledWith(1, expect.stringContaining('tenant_id = $1'), ['tenant-id']);
+    await decision.stack[0].handle({ headers: { authorization: 'Bearer test' }, params: { userId }, body: { status: 'enterprise_approved' } } as unknown as Request, res as unknown as Response, vi.fn());
+    expect(query).toHaveBeenLastCalledWith(expect.stringContaining("enterprise_status = 'enterprise_pending'"), [userId, 'enterprise_approved', 'admin-id', 'tenant-id']);
+    expect(notify).toHaveBeenCalledWith('person@example.test', 'enterprise_approved');
+    expect(res.json).toHaveBeenLastCalledWith({ status: 'enterprise_approved', notificationSent: true });
+});
+
+it('rejects non-admins from the Enterprise approval queue without reading it', async () => {
+    const query = vi.fn();
+    const router = enterpriseRouter(async () => ({ sub: 'member-id', role: 'member', tenantId: 'tenant-id' }), { query });
+    const route = router.stack.find(layer => layer.route?.path === '/approval-requests')!.route!;
+    const res = { setHeader: vi.fn(), status: vi.fn().mockReturnThis(), json: vi.fn(), sendStatus: vi.fn() };
+    await route.stack[0].handle({ headers: { authorization: 'Bearer test' } } as Request, res as unknown as Response, vi.fn());
     expect(res.sendStatus).toHaveBeenCalledWith(403);
     expect(query).not.toHaveBeenCalled();
 });

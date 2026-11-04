@@ -6,6 +6,7 @@ import type { RecordingStorage, StoredObject } from './storage.js';
 const video = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(12)]);
 const objects = new Map<string, StoredObject>();
 let unavailable = false;
+let recordingAllowed = true;
 const storage: RecordingStorage = {
     async put(key, body, type, ifAbsent) { if (unavailable) throw Error('S3 unavailable'); if (ifAbsent && objects.has(key)) throw { $metadata: { httpStatusCode: 412 } }; objects.set(key, { body, type, size: body.length, modified: new Date() }); },
     async get(key) { return objects.get(key) || null; },
@@ -29,6 +30,7 @@ describe('private cloud recordings', () => {
         ({ server, base } = await listen(createRecordingApp({
             storage, maxUploadBytes: 1024,
             authenticate: async authorization => authorization === 'Bearer expired' ? null : { sub: authorization === 'Bearer other' ? 'other' : 'host', tenantId: 'tenant' },
+            authorizeFeature: async () => recordingAllowed ? 'allow' : 'deny',
             meeting: async code => code === 'MISSING' ? null : { hostId: 'host', status: code === 'ENDED' ? 'ended' : code === 'CANCELLED' ? 'cancelled' : 'active', settings: code === 'NO-RECORD' ? { recording_allowed: false } : {} },
         })));
     });
@@ -48,6 +50,15 @@ describe('private cloud recordings', () => {
         expect((await request('/MISSING', 'POST', video)).status).toBe(404);
         expect((await request('/NO-RECORD', 'POST', video)).status).toBe(403);
         expect(objects.size).toBe(0);
+    });
+    it('rejects direct guest and Starter recording API calls with the Pro requirement', async () => {
+        recordingAllowed = false;
+        try {
+            const response = await request('/DEMO', 'POST', video);
+            expect(response.status).toBe(403);
+            expect(await response.json()).toEqual({ code: 'UPGRADE_REQUIRED', requiredPlan: 'pro' });
+            expect(objects.size).toBe(0);
+        } finally { recordingAllowed = true; }
     });
     it('rejects malformed media, unsupported MIME and over-limit uploads', async () => {
         expect((await request('/DEMO', 'POST', video, 'host', 'application/json')).status).toBe(415);
@@ -128,6 +139,7 @@ describe('configuration and auth verification', () => {
         let verified = 0;
         vi.stubGlobal('fetch', async (input: string | URL | Request, init?: RequestInit) => {
             const url = String(input);
+            if (url.includes('/api/auth/me/entitlements')) return Response.json({ features: ['cloud_recording'] });
             if (url.includes('/api/auth/verify')) {
                 verified++;
                 return Response.json({ valid: true, payload: { sub: 'host', tenantId: 'tenant' } });

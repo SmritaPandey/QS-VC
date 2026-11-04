@@ -13,6 +13,7 @@ interface Props {
     screenSharing: boolean;
     isRecording: boolean;
     canRecord?: boolean;
+    recordingLocked?: boolean;
     chatOpen: boolean;
     participantsOpen: boolean;
     handRaised: boolean;
@@ -107,7 +108,7 @@ function ToggleControl({ on, label, title, iconOn, iconOff, stateClass = '', off
 }
 
 export default function ControlBar({
-    assistant, isRecording, canRecord = false, onToggleRecording,
+    assistant, isRecording, canRecord = false, recordingLocked = false, onToggleRecording,
     activitiesOpen = false, hostToolsOpen = false, onToggleActivities, onToggleHostTools,
     audioMuted, videoOff, screenSharing,
     chatOpen, participantsOpen, handRaised, reactionsOpen = false, languageOpen = false, languageLabel, languageCode,
@@ -197,7 +198,7 @@ export default function ControlBar({
                     {moreOpen && <div id="meeting-more-controls" className="meeting-more-panel" role="group" aria-label="Extra meeting controls">
                         {onToggleActivities && <button type="button" aria-expanded={activitiesOpen} aria-controls="meeting-activities" onClick={() => { setMoreOpen(false); onToggleActivities(); }}><span className="mi" aria-hidden="true">dashboard</span>Activities</button>}
                         {onToggleHostTools && <button type="button" aria-expanded={hostToolsOpen} aria-controls="meeting-host-tools" onClick={() => { setMoreOpen(false); onToggleHostTools(); }}><span className="mi" aria-hidden="true">admin_panel_settings</span>Host controls</button>}
-                        {canRecord && <button type="button" aria-pressed={isRecording} onClick={() => { setMoreOpen(false); onToggleRecording(); }}><span className="mi" aria-hidden="true">{isRecording ? 'stop_circle' : 'fiber_manual_record'}</span>{isRecording ? 'Stop recording' : 'Record meeting'}</button>}
+                        {canRecord && <button type="button" aria-pressed={isRecording} aria-label={recordingLocked && !isRecording ? 'Record meeting. Available on Pro.' : undefined} title={recordingLocked && !isRecording ? 'Available on Pro' : undefined} onClick={() => { setMoreOpen(false); onToggleRecording(); }}><span className="mi" aria-hidden="true">{isRecording ? 'stop_circle' : 'fiber_manual_record'}</span>{isRecording ? 'Stop recording' : 'Record meeting'}{recordingLocked && !isRecording && <span className="mi ctrl-plan-lock" aria-hidden="true">lock</span>}</button>}
                         {onOpenEffects && <button type="button" aria-pressed={effectsOn} onClick={() => { setMoreOpen(false); onOpenEffects(); }}><span className="mi" aria-hidden="true">background_replace</span>Backgrounds and effects</button>}
                         {onToggleFullscreen && <button type="button" aria-pressed={fullscreen} onClick={() => { setMoreOpen(false); onToggleFullscreen(); }}><span className="mi" aria-hidden="true">{fullscreen ? 'fullscreen_exit' : 'fullscreen'}</span>{fullscreen ? 'Exit full screen' : 'Full screen'}</button>}
                         {onToggleLanguage && <button type="button" aria-expanded={languageOpen} aria-controls="meeting-language-settings" onClick={() => { setMoreOpen(false); onToggleLanguage(); }}><span className="mi" aria-hidden="true">translate</span>Captions and language settings</button>}

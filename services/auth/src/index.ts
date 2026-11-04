@@ -18,6 +18,7 @@ import pino from 'pino';
 import { createSession, validateSession, requireEnterpriseTerm, endSession, sessionErrorStatus } from './sessions.js';
 import { contactRouter, contactRequestError } from './contact.js';
 import { effectiveRole, isPlatformAdmin } from './platform-admins.js';
+import { FEATURE_MIN_PLAN, getEntitlements } from '../../../shared/entitlements.cjs';
 
 dotenv.config({ path: '../../.env' });
 assertJwtSecret();
@@ -243,6 +244,12 @@ app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
         );
 
         const sessionId = await createSession(pool, userId);
+        await pool.query(
+            `UPDATE users SET subscription_plan = 'starter_trial', trial_started_at = NOW(),
+                              trial_ends_at = NOW() + INTERVAL '7 days', updated_at = NOW()
+             WHERE id = $1 AND subscription_plan IS NULL AND trial_started_at IS NULL`,
+            [userId],
+        );
         const token = generateToken({ id: userId, email, tenantId, role, displayName }, sessionId);
 
         logger.info(`User registered: ${email} [tenant:${tenantId}]`);
@@ -278,6 +285,15 @@ app.post('/api/auth/login', validateBody(loginBody), async (req, res) => {
         if (!validPassword) {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
+
+        // Existing free-account guests receive one trial on their first sign-in after this rollout.
+        await pool.query(
+            `UPDATE users SET subscription_plan = 'starter_trial', trial_started_at = NOW(),
+                              trial_ends_at = NOW() + INTERVAL '7 days', updated_at = NOW()
+             WHERE id = $1 AND subscription_plan IS NULL AND trial_started_at IS NULL
+               AND tenant_id IN (SELECT id FROM tenants WHERE plan = 'free')`,
+            [user.id],
+        );
 
         try {
             await requireEnterpriseTerm(pool, user.id);
@@ -356,6 +372,34 @@ app.post('/api/auth/logout', async (req, res) => {
 
 // Get current user profile
 app.get('/api/auth/me', profileHandler(verifyToken, pool));
+
+app.get('/api/auth/me/entitlements', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const authorization = req.get('authorization');
+    if (!authorization?.startsWith('Bearer ')) {
+        return res.json({ plan: 'guest', status: 'paid_active', trialEndsAt: null, features: [], featureMinimumPlans: FEATURE_MIN_PLAN });
+    }
+    try {
+        const user = await verifyToken(authorization.slice(7));
+        const result = await pool.query(
+            `SELECT u.subscription_plan, u.trial_ends_at, u.enterprise_status, t.plan AS tenant_plan
+             FROM users u JOIN tenants t ON t.id = u.tenant_id
+             WHERE u.id = $1 AND u.tenant_id = $2 AND u.is_active AND t.is_active`,
+            [user.sub, user.tenantId],
+        );
+        if (!result.rows.length) return res.status(404).json({ error: 'Account not found' });
+        const row = result.rows[0];
+        let now = new Date();
+        if (process.env.NODE_ENV === 'development' && process.env.QSVC_TRIAL_NOW) {
+            const fakeNow = new Date(process.env.QSVC_TRIAL_NOW);
+            if (!Number.isNaN(fakeNow.getTime())) now = fakeNow;
+        }
+        res.json(getEntitlements(row, now));
+    } catch (error) {
+        const status = sessionErrorStatus(error);
+        res.status(status).json({ error: status === 401 ? 'Invalid session' : 'Entitlements unavailable' });
+    }
+});
 
 // Administrative plan information is scoped to the verified caller's tenant.
 app.get('/api/auth/admin/plan', async (req, res) => {

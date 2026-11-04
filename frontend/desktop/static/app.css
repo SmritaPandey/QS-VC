@@ -183,3 +183,30 @@ label.field > span { display:block; margin-bottom:6px; font-size:13px; font-weig
 .done-actions { margin-top:8px; flex-wrap:wrap; }
 .form-card { max-width:640px; }
 .setting.spaced { margin-top:18px; }
+.plan-status { display:flex; align-items:center; gap:10px; margin:0 6px 10px; padding:10px; border:1px solid var(--line); border-radius:12px; background:var(--card-2); }
+.plan-status > div { min-width:0; }
+.plan-status b,.plan-status small { display:block; }
+.plan-status small { color:var(--muted); font-size:12px; }
+.plan-crown { display:grid; place-items:center; width:30px; height:30px; flex:none; border-radius:50%; }
+.plan-crown .mi { font-size:18px; }
+.plan-crown.silver { color:#526276; background:#e9edf2; }
+.plan-crown.gold { color:#8b5a00; background:#fff0c2; }
+.plan-crown.violet { color:#5e3b91; background:#eee4ff; }
+.nav-lock { margin-left:auto; color:var(--faint); font-size:18px; }
+.app-surface { min-height:100vh; filter:blur(5px); pointer-events:none; user-select:none; }
+.upgrade-backdrop { position:fixed; z-index:1000; inset:0; display:grid; place-items:center; padding:24px; background:#09192766; -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); }
+.upgrade-dialog { position:relative; width:min(100%,560px); max-height:90vh; overflow:auto; padding:34px; border:1px solid var(--line-strong); border-radius:22px; background:var(--card); color:var(--ink); box-shadow:0 24px 90px #06152188; outline:none; }
+.upgrade-dialog h2 { margin:16px 40px 8px 0; font-size:clamp(25px,4vw,34px); line-height:1.15; letter-spacing:-.025em; }
+.upgrade-dialog > p { margin:0 0 26px; color:var(--muted); }
+.upgrade-icon { display:grid; place-items:center; width:48px; height:48px; border-radius:15px; background:var(--accent-soft); color:var(--accent); font-size:24px; }
+.upgrade-close { position:absolute; top:20px; right:20px; display:grid; place-items:center; width:38px; height:38px; border:0; border-radius:50%; background:transparent; color:var(--muted); font-size:28px; cursor:pointer; }
+.upgrade-close:hover { background:var(--card-2); color:var(--ink); }
+.upgrade-actions { display:flex; flex-wrap:wrap; align-items:center; gap:14px; }
+.upgrade-secondary { min-height:42px; padding:0 14px; border:0; border-radius:10px; background:transparent; color:var(--muted); text-decoration:underline; cursor:pointer; font-weight:500; }
+.upgrade-plans { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+.upgrade-plan { display:grid; justify-items:start; gap:8px; min-height:145px; padding:18px; border:1px solid var(--line-strong); border-radius:16px; background:var(--card-2); color:var(--ink); text-align:left; cursor:pointer; }
+.upgrade-plan:hover,.upgrade-plan-pro { border-color:var(--accent); }
+.upgrade-plan span { color:var(--muted); font-size:13px; }
+.upgrade-plan strong { margin-top:auto; color:var(--accent); }
+@media(max-width:620px) { .upgrade-dialog { padding:28px 22px; } .upgrade-plans { grid-template-columns:1fr; } }
+@media(prefers-reduced-motion:reduce) { .upgrade-backdrop { scroll-behavior:auto; } }

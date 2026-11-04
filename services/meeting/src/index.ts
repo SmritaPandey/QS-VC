@@ -1,6 +1,6 @@
 import { assertJwtSecret } from '../../../shared/jwt-secret.cjs';
 import { insertSchedule, scheduleOccurrences } from './schedule-occurrences.js';
-import { meetingAuth, type AuthPayload } from './auth.js';
+import { meetingAuth, requireFeature, type AuthPayload } from './auth.js';
 import jwt from 'jsonwebtoken';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
@@ -126,6 +126,7 @@ rawPool.on('error', () => logger.warn('Database connection lost; the pool will r
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const authMiddleware = meetingAuth(AUTH_URL, (tenantId, next) => pool.runWithTenant(tenantId, next));
+const scheduleFeature = requireFeature(AUTH_URL, 'meeting_scheduling');
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MEETING CODE GENERATOR
@@ -218,7 +219,7 @@ app.post('/api/meetings', authMiddleware, validateBody(createMeetingBody), async
 });
 
 // Schedule meeting
-app.post('/api/meetings/schedule', authMiddleware, validateBody(createMeetingBody), async (req, res) => {
+app.post('/api/meetings/schedule', scheduleFeature, authMiddleware, validateBody(createMeetingBody), async (req, res) => {
     try {
         const user = (req as any).user as AuthPayload;
         const { title, scheduledStart, scheduledEnd, settings, recurrence }: z.infer<typeof createMeetingBody> = req.body;
@@ -446,7 +447,7 @@ const editScheduleBody = z.discriminatedUnion('action', [
     z.object({ action: z.literal('reschedule'), start: z.iso.datetime({ offset: true }), end: z.iso.datetime({ offset: true }) }),
 ]);
 
-app.patch('/api/meetings/:id/schedule', authMiddleware, validateBody(editScheduleBody), async (req, res) => {
+app.patch('/api/meetings/:id/schedule', scheduleFeature, authMiddleware, validateBody(editScheduleBody), async (req, res) => {
     const id = z.string().uuid().safeParse(req.params.id);
     if (!id.success) return res.status(400).json({ error: 'Invalid meeting ID' });
     const edit = req.body as z.infer<typeof editScheduleBody>;

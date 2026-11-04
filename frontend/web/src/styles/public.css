@@ -269,3 +269,34 @@ html { scroll-behavior:smooth; }
 @media(max-width:767px) { .home-demo { flex-direction:column; align-items:flex-start; gap:24px; padding-block:32px; } }
 .public-auth-form .public-auth-notice { padding:10px 12px; border-radius:10px; background:var(--surface-tint,#e6f4f1); color:var(--text-primary); font-size:14px; }
 .meeting-end-reason { margin:-4px 0 16px; color:var(--text-secondary); }
+
+/* Reusable upgrade states shared by the web app and embedded desktop web surface. */
+.trial-chip { display:inline-flex; align-items:center; min-height:30px; padding:5px 10px; border:1px solid var(--border-tone,#d5e0e5); border-radius:999px; color:var(--text-secondary); background:var(--bg-secondary); font-size:12px; white-space:nowrap; }
+.plan-crown { display:inline-grid; place-items:center; width:28px; height:28px; border-radius:50%; flex:none; }
+.plan-crown .mi { font-size:19px; }
+.plan-crown--silver { color:#526276; background:#e9edf2; }
+.plan-crown--gold { color:#8b5a00; background:#fff0c2; }
+.plan-crown--violet { color:#5e3b91; background:#eee4ff; }
+.upgrade-backdrop { position:fixed; z-index:1000; inset:0; display:grid; place-items:center; padding:20px; background:rgba(9,25,39,.38); -webkit-backdrop-filter:blur(12px); backdrop-filter:blur(12px); }
+.upgrade-dialog { position:relative; width:min(100%,520px); max-height:min(90vh,760px); overflow:auto; padding:36px; border:1px solid var(--border-tone,#d5e0e5); border-radius:22px; background:var(--bg-secondary,#fff); color:var(--text-primary); box-shadow:0 24px 90px #06152155; }
+.upgrade-dialog h2 { margin:12px 38px 10px 0; font-size:clamp(26px,5vw,34px); }
+.upgrade-dialog>p { color:var(--text-secondary); line-height:1.55; }
+.upgrade-icon { display:grid; place-items:center; width:44px; height:44px; border-radius:14px; background:var(--surface-tint,#e8f5f2); color:var(--accent-primary); font-size:23px; }
+.upgrade-close { position:absolute; top:14px; right:14px; width:42px; height:42px; border:0; border-radius:50%; background:transparent; color:var(--text-secondary); font-size:28px; }
+.upgrade-actions { display:grid; justify-items:start; gap:14px; margin-top:24px; }
+.upgrade-actions a,.upgrade-compare { color:var(--text-secondary); text-decoration:underline!important; text-underline-offset:3px; }
+.upgrade-later { min-height:44px; padding:8px 0; border:0; background:transparent; color:var(--text-secondary); }
+.upgrade-plans { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin-top:24px; }
+.upgrade-plan { display:flex; flex-direction:column; align-items:flex-start; gap:10px; min-width:0; min-height:150px; padding:18px; border:1px solid var(--border-tone,#d5e0e5); border-radius:16px; background:var(--bg-secondary,#fff); }
+.upgrade-plan strong { font-size:20px; }
+.upgrade-plan span:not(.plan-crown) { color:var(--text-secondary); font-size:14px; line-height:1.4; }
+.upgrade-plan b { margin-top:auto; color:var(--accent-primary); font-size:14px; }
+.upgrade-plan--pro { border-color:#d4b65f; background:linear-gradient(155deg,#fff9e8,var(--bg-secondary,#fff) 62%); }
+.upgrade-plans .upgrade-compare { grid-column:1/-1; justify-self:start; }
+.feature-lock { position:fixed; z-index:100; top:12px; left:12px; display:inline-flex; align-items:center; gap:8px; min-height:44px; border:1px solid var(--border-tone,#d5e0e5); border-radius:12px; padding:9px 14px; background:var(--bg-secondary,#fff); color:var(--text-primary); }
+.feature-lock .mi { color:var(--text-secondary); font-size:18px; }
+.feature-preview { margin-top:12px; }
+.plan-gate-shell { min-height:100dvh; background:var(--bg-primary,#0b1723); }
+.plan-gate-preview { min-height:100dvh; filter:blur(5px); pointer-events:none; user-select:none; }
+@media(max-width:520px) { .upgrade-dialog { padding:28px 22px; } .upgrade-plans { grid-template-columns:1fr; } .upgrade-plans .upgrade-compare { grid-column:auto; } }
+@media(prefers-reduced-motion:reduce) { .upgrade-dialog,.upgrade-backdrop { scroll-behavior:auto; } }

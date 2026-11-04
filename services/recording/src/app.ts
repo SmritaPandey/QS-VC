@@ -3,6 +3,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createS3Storage, type RecordingStorage } from './storage.js';
+import { FEATURE_MIN_PLAN } from '../../../shared/entitlements.cjs';
 
 export const MAX_RECORDING_BYTES = 80 * 1024 * 1024;
 interface Identity { sub: string; tenantId: string }
@@ -10,6 +11,7 @@ interface Meeting { hostId: string | null; status: string; settings?: { allowRec
 interface Options {
     storage?: RecordingStorage;
     authenticate?: (authorization: string) => Promise<Identity | null>;
+    authorizeFeature?: (authorization: string | undefined, feature: string) => Promise<'allow' | 'deny' | 'unauthorized'>;
     meeting?: (code: string) => Promise<Meeting | null>;
     maxUploadBytes?: number;
 }
@@ -39,11 +41,24 @@ async function loadMeeting(code: string): Promise<Meeting | null> {
     return value;
 }
 
+async function authorizeFeature(authorization: string | undefined, feature: string): Promise<'allow' | 'deny' | 'unauthorized'> {
+    const base = process.env.AUTH_INTERNAL_URL || 'http://localhost:4002';
+    const response = await fetch(`${base}/api/auth/me/entitlements`, {
+        headers: authorization ? { Authorization: authorization } : {},
+        signal: AbortSignal.timeout(5000),
+    });
+    if (response.status === 401) return 'unauthorized';
+    if (!response.ok) throw new Error('Entitlements unavailable');
+    const entitlements = await response.json() as { features?: unknown };
+    return Array.isArray(entitlements.features) && entitlements.features.includes(feature) ? 'allow' : 'deny';
+}
+
 export function createRecordingApp(options: Options = {}) {
     const app = express();
     const bucket = process.env.RECORDING_BUCKET;
     const storage = options.storage || (bucket ? createS3Storage(bucket) : undefined);
     const verify = options.authenticate || authenticate;
+    const authorize = options.authorizeFeature || authorizeFeature;
     const meeting = options.meeting || loadMeeting;
     const maxBytes = options.maxUploadBytes || MAX_RECORDING_BYTES;
     let uploads = 0;
@@ -63,6 +78,13 @@ export function createRecordingApp(options: Options = {}) {
         return user;
     };
     const owner = async (req: Request, res: Response) => {
+        const authorization = req.headers.authorization;
+        const access = await authorize(typeof authorization === 'string' ? authorization : undefined, 'cloud_recording');
+        if (access === 'unauthorized') { res.status(401).json({ error: 'Your session expired. Sign in again.' }); return null; }
+        if (access === 'deny') {
+            res.status(403).json({ code: 'UPGRADE_REQUIRED', requiredPlan: FEATURE_MIN_PLAN.cloud_recording });
+            return null;
+        }
         const user = await identity(req, res);
         if (!user) return null;
         const code = String(req.params.meetingCode);

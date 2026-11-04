@@ -194,7 +194,7 @@ export default function AdminAnalytics({ onManageAccess }: { onManageAccess?: ()
                     <div><dt>Active organisations</dt><dd><Counter value={data.totals.activeOrganisations} /></dd></div>
                     <div><dt>Active user accounts</dt><dd><Counter value={data.totals.activeUsers} /></dd></div>
                     <div><dt>Meeting records created</dt><dd><Counter value={data.totals.meetingsCreated} /></dd></div>
-                    <div><dt>Active enterprise access seats</dt><dd><Counter value={data.totals.activeEnterpriseAccessSeats} /></dd></div>
+                    <div><dt>Active Quantum-Premise access seats</dt><dd><Counter value={data.totals.activeEnterpriseAccessSeats} /></dd></div>
                     <div><dt>Desktop app activations</dt><dd><Counter value={data.totals.desktopAppActivations} /></dd></div>
                 </dl>
                 <div className="admin-analytics-panels">
@@ -230,7 +230,7 @@ export default function AdminAnalytics({ onManageAccess }: { onManageAccess?: ()
                             <span className="admin-analytics-dot" aria-hidden="true" style={{ backgroundColor: colors[index % colors.length] }} />
                             <span>{item.plan}</span><strong>{format(item.organisations)}</strong><small>{format(item.activeOrganisations)} active</small>
                         </li>)}</ul> : <p>No plans are assigned.</p>}
-                        <p>Enterprise access: {format(data.totals.activeEnterpriseAccessSeats)} active of {format(data.totals.enterpriseAccessSeats)} dated user seats.</p>
+                        <p>Quantum-Premise access: {format(data.totals.activeEnterpriseAccessSeats)} active of {format(data.totals.enterpriseAccessSeats)} dated user seats.</p>
                         <div className="admin-analytics-links"><Link to="/pricing">View plan catalogue</Link>
                             {onManageAccess && <button type="button" onClick={onManageAccess}>Manage access terms</button>}</div>
                     </section>
