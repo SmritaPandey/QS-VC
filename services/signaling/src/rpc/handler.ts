@@ -855,6 +855,21 @@ export async function handleRpcMessage(
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             // GET ROOM INFO (for participants)
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            case 'startPolyRoom': {
+                const { roomId, peerId } = connectionState;
+                const room = roomId && roomManager.getRoom(roomId);
+                if (process.env.POLY_BRIDGE_ENABLED !== 'true' || !room || !peerId ||
+                    room.hostPeerId !== peerId || !connectionState.authUser?.sub || room.settings.webinar || room.settings.locked) {
+                    throw createError(-32005, 'Only the signed-in host of an unlocked meeting can enable room devices.');
+                }
+                try {
+                    await sfuClient.startPolyRoom(room.id);
+                    return { jsonrpc: '2.0', id: id!, result: { roomAlias: room.id } };
+                } catch {
+                    throw createError(-32000, 'The MCU bridge could not start. Ask your intranet administrator to check FreeSWITCH and drachtio.');
+                }
+            }
+
             case 'polySnapshot': {
                 const { roomId, peerId } = connectionState;
                 if (process.env.POLY_BRIDGE_ENABLED !== 'true' || !roomId || !peerId || !roomManager.getRoom(roomId)?.peers.has(peerId)) {

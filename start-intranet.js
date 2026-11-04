@@ -5,10 +5,11 @@ const { spawn } = require('child_process');
 const path = require('path');
 const net = require('net');
 const os = require('os');
+const fs = require('node:fs');
 
 const ROOT = __dirname;
 const SIGNALING_PORT = 4001;
-const MCU_PORT = 4005;
+
 const WEB_PORT = 5173;
 const procs = [];
 
@@ -51,6 +52,16 @@ function isPortInUse(port) {
     });
 }
 
+function canConnect(host, port, timeoutMs = 1500) {
+    return new Promise((resolve) => {
+        const socket = net.createConnection({ host, port });
+        const finish = (reachable) => { socket.destroy(); resolve(reachable); };
+        socket.setTimeout(timeoutMs, () => finish(false));
+        socket.once('connect', () => finish(true));
+        socket.once('error', () => finish(false));
+    });
+}
+
 function waitForPort(port, timeout = 30000) {
     return new Promise((resolve, reject) => {
         const start = Date.now();
@@ -84,13 +95,33 @@ function getLanIPs() {
 }
 
 async function main() {
-    console.log('');
-    console.log('╔═══════════════════════════════════════════════════════╗');
-    console.log('║   QS-VC — Enterprise Intranet Deployment (MCU Mode)  ║');
-    console.log('║   Local development launcher                         ║');
-    console.log('║   MCU Video Composition + Audio Mixing                ║');
-    console.log('╚═══════════════════════════════════════════════════════╝');
-    console.log('');
+    require('dotenv').config({ path: path.join(ROOT, '.env') });
+    // MCU_ENABLED is retained as an alias for existing intranet .env files.
+    // Both switches activate the real SFU-mounted Poly/FreeSWITCH bridge;
+    // the memory-only services/mcu control stub is never used for media.
+    const mcuEnabled = process.argv.includes('--mcu') || process.env.POLY_BRIDGE_ENABLED === 'true' || process.env.MCU_ENABLED === 'true';
+    const bridgeModule = path.resolve(ROOT, process.env.POLY_BRIDGE_MODULE || 'deploy/poly-bridge/dist/index.js');
+    if (mcuEnabled) {
+        if (!fs.existsSync(bridgeModule)) throw new Error('Build deploy/poly-bridge before enabling the intranet MCU.');
+        if (!process.env.SFU_CONTROL_TOKEN || process.env.SFU_CONTROL_TOKEN !== process.env.BRIDGE_API_TOKEN) {
+            throw new Error('Set matching private SFU_CONTROL_TOKEN and BRIDGE_API_TOKEN values.');
+        }
+        for (const [key, defaultValue] of [['FS_ESL_PASSWORD', 'ClueCon'], ['DRACHTIO_SECRET', 'cymru']]) {
+            if (!process.env[key]?.trim() || process.env[key] === defaultValue || process.env[key] === 'change-me') throw new Error(`Configure a private ${key} before enabling the intranet MCU.`);
+        }
+        for (const [name, host, port] of [
+            ['FreeSWITCH ESL', process.env.FS_ESL_HOST || '127.0.0.1', Number(process.env.FS_ESL_PORT || 8021)],
+            ['drachtio control', process.env.DRACHTIO_HOST || '127.0.0.1', Number(process.env.DRACHTIO_PORT || 9022)],
+        ]) {
+            if (!await canConnect(host, port)) throw new Error(`${name} is unreachable at ${host}:${port}. Start/configure the enterprise media services before enabling MCU mode.`);
+        }
+        if (await isPortInUse(4000) || await isPortInUse(SIGNALING_PORT)) {
+            throw new Error('Stop the existing SFU and signaling processes before starting the MCU-enabled profile.');
+        }
+    }
+    log('Intranet', mcuEnabled
+        ? 'Poly/FreeSWITCH bridge mounted. Verify media for each call; service startup does not prove interoperability.'
+        : 'Browser meeting mode. Room-device bridge disabled. Set MCU_ENABLED=true after configuring its dependencies to enable it.');
 
     const tsxPath = path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
     for (const [service, port] of [['sfu', 4000], ['auth', 4002], ['meeting', 4003], ['recording', 4004]]) {
@@ -98,6 +129,7 @@ async function main() {
         if (!(await isPortInUse(port))) {
             procs.push(startService(service, process.execPath, [tsxPath, 'src/index.ts'], cwd, {
                 PORT: String(port),
+                ...(service === 'sfu' ? { SFU_CONTROL_HOST: '127.0.0.1', POLY_BRIDGE_MODULE: mcuEnabled ? bridgeModule : '' } : {}),
                 [`${service.toUpperCase()}_PORT`]: String(port),
             }));
         }
@@ -122,8 +154,8 @@ async function main() {
         const sigDir = path.join(ROOT, 'services', 'signaling');
         const sigProc = startService('Signaling', process.execPath, [tsxPath, 'src/index.ts'], sigDir, {
             PORT: String(SIGNALING_PORT),
-            MCU_ENABLED: 'true',
-            MCU_INTERNAL_URL: `http://127.0.0.1:${MCU_PORT}`,
+            POLY_BRIDGE_ENABLED: String(mcuEnabled),
+            MCU_ENABLED: String(mcuEnabled),
         });
         procs.push(sigProc);
     }
@@ -131,24 +163,6 @@ async function main() {
     log('Signaling', `Waiting for port ${SIGNALING_PORT}...`);
     await waitForPort(SIGNALING_PORT);
     log('Signaling', '✓ Signaling service is ready');
-
-    // ── 2. Start MCU Service ──
-    const mcuInUse = await isPortInUse(MCU_PORT);
-    if (mcuInUse) {
-        log('MCU', `Already running on port ${MCU_PORT}`);
-    } else {
-        log('MCU', 'Starting local MCU control service (SIP/H.323 media gateway unavailable)...');
-        const tsxPath = path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
-        const mcuEntry = path.join(ROOT, 'services', 'mcu', 'src', 'index.ts');
-        const mcuProc = startService('MCU', process.execPath, [tsxPath, mcuEntry], ROOT, {
-            MCU_PORT: String(MCU_PORT),
-        });
-        procs.push(mcuProc);
-    }
-
-    log('MCU', `Waiting for port ${MCU_PORT}...`);
-    await waitForPort(MCU_PORT);
-    log('MCU', 'MCU HTTP port is listening');
 
     // ── 3. Start Vite Dev Server ──
     const webInUse = await isPortInUse(WEB_PORT);
@@ -158,8 +172,6 @@ async function main() {
         log('Vite', 'Starting Vite dev server...');
         const vitePath = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
         const viteProc = startService('Vite', process.execPath, [vitePath, '--host', '0.0.0.0'], path.join(ROOT, 'frontend', 'web'), {
-            VITE_MCU_ENABLED: 'true',
-            VITE_MCU_URL: `http://127.0.0.1:${MCU_PORT}`,
             VITE_DEPLOYMENT_MODE: 'intranet',
         });
         procs.push(viteProc);
@@ -186,8 +198,6 @@ async function main() {
     console.log('');
     console.log('  📡 SERVICES:');
     console.log(`     Signaling:   http://localhost:${SIGNALING_PORT}`);
-    console.log(`     MCU:         http://127.0.0.1:${MCU_PORT}`);
-    console.log(`     MCU Health:  http://127.0.0.1:${MCU_PORT}/health`);
     console.log(`     Web UI:      http://localhost:${WEB_PORT}`);
     console.log('');
     console.log('  Press Ctrl+C to stop all services');

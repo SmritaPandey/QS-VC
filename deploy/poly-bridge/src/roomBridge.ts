@@ -120,11 +120,21 @@ export class RoomBridge {
     const a = await sample();
     await new Promise((r) => setTimeout(r, 2000));
     const b = await sample();
-    const flowing = (x: any[], y: any[], dir: "bytesSent" | "bytesReceived") => x.length > 0 && x.every((s, i) => (y[i]?.[dir] ?? 0) > s[dir]);
-    const uplinkOk = Object.fromEntries(Object.keys(b.uplinks).map((id) => [id, flowing(a.uplinks[id] ?? [], b.uplinks[id], "bytesSent")]));
-    const downlinkOk = flowing(a.downlink, b.downlink, "bytesReceived");
+    type Sample = Awaited<ReturnType<DownlinkLeg["mediaStats"]>>;
+    const deltas = (before: Sample, after: Sample, direction: "bytesSent" | "bytesReceived") =>
+      after.map(item => {
+        const previous = before.find(sample => sample.transportId === item.transportId);
+        return { transportId: item.transportId, rtpBytes: previous ? item[direction] - previous[direction] : 0 };
+      });
+    const uplinkDeltas = Object.fromEntries(Object.entries(b.uplinks).map(([id, stats]) =>
+      [id, deltas(a.uplinks[id] ?? [], stats, "bytesSent")]));
+    const downlinkDeltas = deltas(a.downlink, b.downlink, "bytesReceived");
+    const flowing = (samples: { rtpBytes: number }[]) => samples.length > 0 && samples.every(sample => sample.rtpBytes > 0);
+    const uplinkOk = Object.fromEntries(Object.entries(uplinkDeltas).map(([id, samples]) => [id, flowing(samples)]));
+    const downlinkOk = flowing(downlinkDeltas);
     return {
       room: this.room,
+      rtpDeltas: { downlink: downlinkDeltas, uplinks: uplinkDeltas },
       ok: downlinkOk && Object.keys(uplinkOk).length > 0 && Object.values(uplinkOk).every(Boolean) && this.polyMembers.size > 0,
       polyToBrowserMediaFlowing: downlinkOk,
       browserToPolyMediaFlowing: uplinkOk,

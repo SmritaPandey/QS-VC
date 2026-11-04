@@ -40,6 +40,8 @@ async function sfuFetch(path: string, options: RequestInit = {}, timeoutMs = MED
 }
 
 export const sfuClient = {
+    startPolyRoom: (roomId: string) =>
+        sfuFetch(`/api/poly/rooms/${encodeURIComponent(roomId)}/start`, { method: 'POST' }, 15000),
     polySnapshot: (roomId: string) => sfuFetch(`/api/poly/rooms/${encodeURIComponent(roomId)}/snapshot`, {}, PROBE_TIMEOUT_MS),
     polyLobbyAction: (roomId: string, callId: string, action: 'admit' | 'deny') =>
         sfuFetch(`/api/poly/rooms/${encodeURIComponent(roomId)}/lobby/${encodeURIComponent(callId)}/${action}`, { method: 'POST' }),

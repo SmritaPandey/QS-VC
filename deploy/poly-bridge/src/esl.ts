@@ -78,7 +78,7 @@ export class FreeSwitch extends EventEmitter {
 
   // ---- host controls (all act on media, not just status) ----
   admit(uuid: string, room: string) {
-    return this.api(`uuid_transfer ${uuid} qsvc-join-${room} XML qsvc-rooms`);
+    return this.api(`uuid_transfer ${uuid} qsvc-join-${room} XML qsvc-admitted`);
   }
   deny(uuid: string) {
     return this.api(`uuid_kill ${uuid} CALL_REJECTED`);
@@ -111,7 +111,7 @@ export class FreeSwitch extends EventEmitter {
       "absolute_codec_string='G722,PCMU,PCMA,H264'",
     ].join(",");
     const dest = protocol === "h323" ? `h323/${target}` : `sofia/qsvc-poly/${target}`;
-    return this.api(`originate {${vars}}${dest} qsvc-join-${room} XML qsvc-rooms`);
+    return this.api(`originate {${vars}}${dest} qsvc-join-${room} XML qsvc-admitted`);
   }
   listRoom(room: string) {
     return this.api(`conference ${room} json_list`);

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # AT-01 evidence collector. Run during the call with all three endpoints connected.
-# Usage: ROOM=demo BRIDGE=http://10.0.0.10:4000/poly TOKEN=... ./verify-at01.sh
+# Usage: ROOM=demo BRIDGE=http://10.0.0.10:4000/api/poly TOKEN=... ./verify-at01.sh
 set -euo pipefail
-ROOM=${ROOM:?}; BRIDGE=${BRIDGE:?}; TOKEN=${TOKEN:-}
+ROOM=${ROOM:?}; BRIDGE=${BRIDGE:?}; TOKEN=${TOKEN:?}
 OUT=at01-$(date +%Y%m%d-%H%M%S); mkdir -p "$OUT"
 
 echo "== MCU members (expect: 1 H.323, 1 SIP Poly, uplink per browser, 1 downlink)"
@@ -10,7 +10,8 @@ fs_cli -x "conference $ROOM json_list" | tee "$OUT/mcu.json" | python3 -c '
 import json,sys
 for c in json.load(sys.stdin):
   for m in c["members"]:
-    print(f"  {m[\"id\"]:>4} {m[\"caller_id_name\"][:28]:28} talking={m[\"flags\"].get(\"talking\")} video={m[\"flags\"].get(\"has_video\")}")'
+    flags = m.get("flags", {})
+    print("  {:>4} {:28} talking={} video={}".format(m["id"], m.get("caller_id_name", "")[:28], flags.get("talking"), flags.get("has_video")))'
 
 echo "== Per-channel codecs + SRTP"
 for u in $(fs_cli -x "conference $ROOM list" | cut -d';' -f3); do

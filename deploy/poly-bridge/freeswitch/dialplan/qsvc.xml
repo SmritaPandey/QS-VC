@@ -20,7 +20,7 @@
   </context>
 
   <!-- 2) Poly endpoints (SIP on qsvc-poly profile, H.323 via mod_h323). -->
-  <context name="qsvc-rooms">
+  <context name="qsvc-admitted">
 
     <!-- After host admits: ESL uuid_transfer -> qsvc-join-<room> -->
     <extension name="qsvc_join">
@@ -32,6 +32,9 @@
       </condition>
     </extension>
 
+  </context>
+
+  <context name="qsvc-rooms">
     <!-- Branch-to-branch: room ids prefixed with another site's code are trunked there. -->
     <extension name="qsvc_branch_trunk">
       <condition field="destination_number" expression="^(br\d{2})-([\w-]+)$">

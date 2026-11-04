@@ -1,16 +1,11 @@
 /**
  * MCU (Multipoint Control Unit) Service for QS-VC Enterprise/Intranet.
  *
- * Architecture: GStreamer-based video composition + transcoding service
+ * LEGACY CONTROL-ONLY PLACEHOLDER. This package has no media engine. Enterprise
+ * media integration is provided by deploy/poly-bridge connected to FreeSWITCH.
  *
- * Features:
- * - Video composition (grid, speaker, presentation layouts)
- * - Audio mixing (multipoint audio bridge)
- * - Transcoding (H.264/H.265/VP9/AV1 → any codec)
- * - SIP/H.323 ingress (Polycom, Cisco, Tandberg room systems)
- * - Server-side composite recording
- * - Single stream output per participant (bandwidth efficient for MPLS VPN)
- * - Simulcast layer selection per participant
+ * The in-memory state below is retained for compatibility only. It must not
+ * report or imply that any audio/video media operation succeeded.
  *
  * Deployment: On-premise (air-gapped) or hybrid
  * Network: MPLS VPN / IPSec VPN / Private WAN
@@ -72,13 +67,13 @@ const DEFAULT_MCU_CONFIG: MCUConfig = {
     outputAudioBitrate: 128,
     outputVideoCodec: 'h264',
     outputAudioCodec: 'opus',
-    recordingEnabled: true,
+    recordingEnabled: false,
     recordingPath: './recordings',
-    sipEnabled: true,
+    sipEnabled: false,
     sipPort: 5060,
-    h323Enabled: true,
+    h323Enabled: false,
     h323Port: 1720,
-    rtmpEnabled: true,
+    rtmpEnabled: false,
 };
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -152,15 +147,11 @@ class MCUPipeline {
                 presenterId: null,
             },
             createdAt: new Date(),
-            sipDialInNumber: this.config.sipEnabled ? `+91-${Date.now() % 10000000000}` : undefined,
-            sipConferenceId: uuidv4().slice(0, 8),
         };
 
         this.rooms.set(room.id, room);
         console.log(`[MCU] Room created: ${meetingCode} (${room.id})`);
 
-        // Auto-start GStreamer composition pipeline
-        this.startComposition(room.id);
         return room;
     }
 
@@ -214,7 +205,6 @@ class MCUPipeline {
         this.recalculateLayout(room);
 
         if (room.participants.size === 0) {
-            this.stopComposition(roomId);
             setTimeout(() => {
                 const r = this.rooms.get(roomId);
                 if (r && r.participants.size === 0) {
@@ -243,17 +233,6 @@ class MCUPipeline {
             p.isActiveSpeaker = id === peerId;
         }
         room.compositionState.activeSpeakerId = peerId;
-    }
-
-    /** Start/stop recording. */
-    startRecording(roomId: string): string {
-        const room = this.rooms.get(roomId);
-        if (!room) throw new Error('Room not found');
-
-        room.recording = true;
-        room.recordingPath = `${this.config.recordingPath}/${room.meetingCode}_${Date.now()}.mp4`;
-        console.log(`[MCU] Recording started: ${room.recordingPath}`);
-        return room.recordingPath;
     }
 
     stopRecording(roomId: string): string | null {
@@ -291,18 +270,6 @@ class MCUPipeline {
         participants.forEach((p, i) => {
             p.position = { row: Math.floor(i / cols), col: i % cols };
         });
-    }
-
-    private startComposition(roomId: string): void {
-        console.log(`[MCU] GStreamer composition pipeline started for room ${roomId}`);
-        // In production: spawn GStreamer pipeline:
-        // gst-launch-1.0 compositor name=comp ! videoconvert ! x264enc ! mux.video_0
-        //   audiomixer name=amix ! opusenc ! mux.audio_0
-        //   matroskamux name=mux ! filesink location=output.mkv
-    }
-
-    private stopComposition(roomId: string): void {
-        console.log(`[MCU] GStreamer composition pipeline stopped for room ${roomId}`);
     }
 
     /** Get room status. */
@@ -378,43 +345,15 @@ app.get('/health', (_req, res) => {
         status: 'ok',
         service: 'qsvc-mcu',
         rooms: mcuPipeline.getRoomCount(),
-        capabilities: {
-            videoCodecs: ['h264', 'h265', 'vp8', 'vp9', 'av1'],
-            audioCodecs: ['opus', 'pcma', 'pcmu', 'g722', 'aac'],
-            maxParticipants: DEFAULT_MCU_CONFIG.maxParticipantsPerRoom,
-            layouts: ['grid', 'speaker', 'presentation', 'spotlight', 'filmstrip'],
-            sipEnabled: DEFAULT_MCU_CONFIG.sipEnabled,
-            h323Enabled: DEFAULT_MCU_CONFIG.h323Enabled,
-            rtmpEnabled: DEFAULT_MCU_CONFIG.rtmpEnabled,
-            recordingEnabled: DEFAULT_MCU_CONFIG.recordingEnabled,
-        },
+        mediaReady: false,
+        mode: 'control-only',
+        capabilities: { sipEnabled: false, h323Enabled: false, rtmpEnabled: false, recordingEnabled: false },
     });
 });
 
 // Join MCU room
 app.post('/api/mcu/rooms/join', (req, res) => {
-    const parsed = joinMCURoomSchema.safeParse(req.body);
-    if (!parsed.success) {
-        return res.status(400).json({ error: 'Validation failed', details: parsed.error.issues });
-    }
-
-    try {
-        const { meetingCode, peerId, displayName, connectionType } = parsed.data;
-        const room = mcuPipeline.getOrCreateRoom(meetingCode);
-        const participant = mcuPipeline.addParticipant(room.id, peerId, displayName, connectionType);
-
-        res.json({
-            roomId: room.id,
-            participantId: participant.id,
-            layout: room.layout,
-            compositionUrl: `/api/mcu/rooms/${room.id}/stream`,
-            sipDialIn: room.sipDialInNumber,
-            sipConferenceId: room.sipConferenceId,
-            compositionState: room.compositionState,
-        });
-    } catch (err: any) {
-        res.status(500).json({ error: err.message });
-    }
+    res.status(503).json({ error: 'This legacy service has no media engine. Use the configured SFU and optional Poly bridge.' });
 });
 
 // Get MCU room info
@@ -426,50 +365,27 @@ app.get('/api/mcu/rooms/:roomId', (req, res) => {
 
 // Set layout
 app.post('/api/mcu/rooms/:roomId/layout', (req, res) => {
-    const parsed = layoutSchema.safeParse(req.body);
-    if (!parsed.success) {
-        return res.status(400).json({ error: 'Validation failed' });
-    }
-    try {
-        mcuPipeline.setLayout(req.params.roomId, parsed.data.layout);
-        res.json({ layout: parsed.data.layout });
-    } catch (err: any) {
-        res.status(500).json({ error: err.message });
-    }
+    res.status(503).json({ error: 'Media composition is unavailable in this legacy service.' });
 });
 
 // Set active speaker
 app.post('/api/mcu/rooms/:roomId/active-speaker', (req, res) => {
-    const { peerId } = req.body;
-    mcuPipeline.setActiveSpeaker(req.params.roomId, peerId);
-    res.json({ activeSpeaker: peerId });
+    res.status(503).json({ error: 'Active-speaker media routing is unavailable in this legacy service.' });
 });
 
 // Start recording
-app.post('/api/mcu/rooms/:roomId/recording/start', (req, res) => {
-    try {
-        const path = mcuPipeline.startRecording(req.params.roomId);
-        res.json({ recording: true, path });
-    } catch (err: any) {
-        res.status(500).json({ error: err.message });
-    }
+app.post('/api/mcu/rooms/:roomId/recording/start', (_req, res) => {
+    res.status(503).json({ error: 'MCU media recording is unavailable' });
 });
 
 // Stop recording
 app.post('/api/mcu/rooms/:roomId/recording/stop', (req, res) => {
-    const path = mcuPipeline.stopRecording(req.params.roomId);
-    res.json({ recording: false, path });
+    res.status(503).json({ error: 'MCU media recording is unavailable' });
 });
 
 // Start live stream
 app.post('/api/mcu/rooms/:roomId/stream', (req, res) => {
-    const { rtmpUrl } = req.body;
-    try {
-        mcuPipeline.startLiveStream(req.params.roomId, rtmpUrl);
-        res.json({ streaming: true, rtmpUrl });
-    } catch (err: any) {
-        res.status(500).json({ error: err.message });
-    }
+    res.status(503).json({ error: 'RTMP streaming is unavailable in this legacy service.' });
 });
 
 // Remove participant

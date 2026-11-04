@@ -6,6 +6,7 @@ vi.mock('../sfu-client.js', () => ({ sfuClient: {
     removePeer: vi.fn().mockResolvedValue({}),
     polySnapshot: vi.fn().mockResolvedValue({ producers: [{ producerId: 'composite' }], roster: [{ callId: 'member' }], lobby: [{ callId: 'waiting' }] }),
     polyLobbyAction: vi.fn().mockResolvedValue({}),
+    startPolyRoom: vi.fn().mockResolvedValue({}),
 } }));
 import { handleRpcMessage, handlePeerDisconnect } from './handler.js';
 import { roomManager } from '../room-manager.js';
@@ -319,6 +320,27 @@ it('scopes Poly snapshots and admission to the joined room and hides lobby data 
         expect((await rpc(guest, guestState, 'admitPeer', { targetPeerId: 'poly:waiting' }))?.error?.code).toBe(-32005);
         expect((await rpc(host, hostState, 'admitPeer', { targetPeerId: 'poly:waiting' }))?.result.admitted).toBe(true);
         expect(sfuClient.polyLobbyAction).toHaveBeenLastCalledWith(hostState.roomId, 'waiting', 'admit');
+    } finally {
+        await handlePeerDisconnect(guestState);
+        await handlePeerDisconnect(hostState);
+        vi.unstubAllEnvs();
+    }
+});
+
+it('lets only the signed-in meeting host enable the room-device bridge', async () => {
+    const { sfuClient } = await import('../sfu-client.js');
+    vi.stubEnv('POLY_BRIDGE_ENABLED', 'true');
+    const host = socket(), guest = socket();
+    const hostState: any = { authUser: { sub: 'owner' } }, guestState: any = {};
+    const meetingCode = `mcu-${crypto.randomUUID().slice(0, 10)}`;
+    try {
+        await rpc(host, hostState, 'joinRoom', { meetingCode, displayName: 'Host' });
+        await rpc(guest, guestState, 'joinRoom', { meetingCode, displayName: 'Guest' });
+        expect((await rpc(guest, guestState, 'startPolyRoom'))?.error?.code).toBe(-32005);
+        expect((await rpc(host, hostState, 'startPolyRoom'))?.result).toEqual({ roomAlias: hostState.roomId });
+        expect(sfuClient.startPolyRoom).toHaveBeenLastCalledWith(hostState.roomId);
+        vi.mocked(sfuClient.startPolyRoom).mockRejectedValueOnce(new Error('internal endpoint'));
+        expect((await rpc(host, hostState, 'startPolyRoom'))?.error?.message).toContain('could not start');
     } finally {
         await handlePeerDisconnect(guestState);
         await handlePeerDisconnect(hostState);

@@ -160,3 +160,23 @@ Use an SFU URL reachable from the collector. Save the three participants,
 negotiated codecs, encryption and human media observations in the tracker.
 Bridge counters establish traffic on the SFU–MCU legs only. They do not
 establish that a physical endpoint rendered media.
+
+### Intranet launcher
+
+Build the bridge first. In the root environment set `POLY_BRIDGE_ENABLED=true`
+(or legacy `MCU_ENABLED=true`), matching private `SFU_CONTROL_TOKEN` and
+`BRIDGE_API_TOKEN` values, and the
+FreeSWITCH and drachtio connection settings listed in this package’s
+`.env.example`. Use an RTP address reachable by the FreeSWITCH host. The
+`npm run intranet:mcu` command selects this required profile explicitly; it
+fails fast when the bridge is not built, secrets are weak/missing, or the
+configured FreeSWITCH/drachtio ports cannot be reached.
+Run `node start-intranet.js` after stopping any existing SFU and signaling
+instances on the development ports. The launcher mounts the built bridge in
+the SFU and enables the signaling relay. It does not provision FreeSWITCH,
+drachtio, or the H.323 gateway.
+
+In an unlocked regular meeting, the signed-in host can open Host controls
+and select **Enable room devices**. Dial the room alias using the approved
+gateway route. Keep the `qsvc-admitted` dialplan context internal to ESL
+transfers. External SIP and H.323 ingress must use the lobby context.

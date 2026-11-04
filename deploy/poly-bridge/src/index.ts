@@ -62,7 +62,7 @@ export function createPolyBridge(sfu: SfuAdapter) {
       rooms.set(req.params.room, rb);
       try { await rb.start(); } catch (e) { rooms.delete(req.params.room); await rb.stop(); throw e; }
     }
-    res.json({ started: true, dialIn: { sip: `sip:${req.params.room}@<mcu-host>`, h323: `<mcu-ip>##${req.params.room}` } });
+    res.json({ started: true, room: req.params.room });
   }));
   async function stopRoom(roomId: string) {
     const bridge = rooms.get(roomId);
