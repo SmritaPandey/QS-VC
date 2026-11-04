@@ -19,7 +19,7 @@ const steps = [
 export default function IntranetPage() {
     const session = useSession();
     const token = session.profile ? getToken() : '';
-    const [result, setResult] = useState<{ token: string; access?: { workspaceUrl: string; windowsAvailable: boolean }; error?: string }>();
+    const [result, setResult] = useState<{ token: string; access?: { workspaceUrl: string; windowsAvailable: boolean; onlineDemo: boolean }; error?: string }>();
     const [attempt, setAttempt] = useState(0);
     const current = token && result?.token === token ? result : undefined;
     const access = session.status === 'unavailable' ? undefined : current?.access;
@@ -59,10 +59,11 @@ export default function IntranetPage() {
             if (response.status === 403) { setResult({ token }); return; }
             if (!response.ok) throw new Error('Access check failed');
             const data = await response.json();
-            const url = intranetUrl(data.workspaceUrl, window.location.origin);
+            const onlineDemo = data.workspaceMode === 'online-demo' && session.profile?.role === 'admin';
+            const url = intranetUrl(data.workspaceUrl, window.location.origin, onlineDemo);
             if (!currentRequest()) return;
             setResult(url
-                ? { token, access: { workspaceUrl: url, windowsAvailable: data.windowsAvailable === true } }
+                ? { token, access: { workspaceUrl: url, windowsAvailable: data.windowsAvailable === true, onlineDemo } }
                 : { token, error: 'The configured address does not point to a separate HTTPS workspace. Ask your administrator to update it.' });
         }).catch(() => {
             if (currentRequest()) setResult({ token, error: 'We couldn’t check your intranet access. Try again.' });
@@ -119,13 +120,13 @@ export default function IntranetPage() {
         }
     }
     return <div className="public-site"><SiteNav /><main className="public-container service-page intranet-page" id="main-content">
-        <header className="public-page-intro"><h1>{access ? 'Your enterprise workspace.' : 'Meet inside your organisation.'}</h1><p>{access ? 'Choose how you connect to your approved workspace.' : 'Explore the intranet experience before your organisation gets access.'}</p></header>
+        <header className="public-page-intro"><h1>{access?.onlineDemo ? 'Your online test workspace.' : access ? 'Your enterprise workspace.' : 'Meet inside your organisation.'}</h1><p>{access?.onlineDemo ? 'Open the shared QS-VC app to try your admin experience online.' : access ? 'Choose how you connect to your approved workspace.' : 'Explore the intranet experience before your organisation gets access.'}</p></header>
         {loading ? <p role="status">Checking enterprise access…</p> : error ? <section className="service-card"><p role="alert">{error}</p><button className="qsvc-action" type="button" onClick={() => {
             if (session.status === 'unavailable') void refreshSession();
             else { setResult(undefined); setAttempt(value => value + 1); }
         }}><ActionContents>Try again</ActionContents></button></section> : access ? <div className="intranet-layout">
-            <section className="service-card"><span className="enterprise-access-badge">Approved enterprise access</span><h2>Open in your browser</h2><p>Connect to your office network or approved VPN, then sign in to your organisation’s workspace.</p><p className="enterprise-address">{access.workspaceUrl}</p><a className="qsvc-action" href={access.workspaceUrl} rel="noreferrer"><ActionContents>Open workspace</ActionContents></a></section>
-            <section className="service-card"><h2>QS-VC for Windows</h2><p>Access the same organisation workspace from the Windows desktop client. Your office network or VPN is still required.</p><button className="qsvc-action intranet-download" type="button" aria-busy={downloading} disabled={!access.windowsAvailable || downloading || session.status !== 'authenticated'} onClick={download}><ActionContents><span className="mi" aria-hidden="true">download</span>{downloading ? 'Downloading…' : 'Download for Windows'}</ActionContents></button>{!access.windowsAvailable && <p role="status">Your Windows installer has not been released yet.</p>}<p>After installation, use the organisation address above. A download does not grant additional meeting permissions.</p></section>
+            <section className="service-card"><span className="enterprise-access-badge">{access.onlineDemo ? 'Admin · Online test workspace' : 'Approved enterprise access'}</span><h2>Open in your browser</h2><p>{access.onlineDemo ? 'This opens the shared QS-VC online app for testing. It is not an isolated organisation deployment.' : 'Connect to your office network or approved VPN, then sign in to your organisation’s workspace.'}</p><p className="enterprise-address">{access.workspaceUrl}</p><a className="qsvc-action" href={access.workspaceUrl} rel="noreferrer"><ActionContents>Open workspace</ActionContents></a></section>
+            <section className="service-card"><h2>QS-VC for Windows</h2><p>{access.onlineDemo ? 'Download the Windows app and use the same online test workspace.' : 'Access the same organisation workspace from the Windows desktop client. Your office network or VPN is still required.'}</p><button className="qsvc-action intranet-download" type="button" aria-busy={downloading} disabled={!access.windowsAvailable || downloading || session.status !== 'authenticated'} onClick={download}><ActionContents><span className="mi" aria-hidden="true">download</span>{downloading ? 'Downloading…' : 'Download for Windows'}</ActionContents></button>{!access.windowsAvailable && <p role="status">Your Windows installer has not been released yet.</p>}<p>{access.onlineDemo ? 'For an isolated enterprise workspace, use the address supplied by your organisation.' : 'After installation, use the organisation address above.'} A download does not grant additional meeting permissions.</p></section>
         </div> : <><div className="intranet-layout"><section className="service-card"><span className="enterprise-access-badge">Guided demo · No live connection</span><h2>See what to expect</h2><MeetingScene /><p>This preview uses sample participants. It does not start your camera, microphone or a meeting.</p></section><section className="service-card"><div className="intranet-guide-tabs" aria-label="Guide steps">{steps.map((item, index) => <button type="button" key={item.title} aria-pressed={step === index} onClick={() => setStep(index)}>{index + 1}<span className="sr-only"> {item.title}</span></button>)}</div><div aria-live="polite"><h2>{steps[step].title}</h2><p>{steps[step].text}</p></div><div className="intranet-guide-controls"><button type="button" disabled={step === 0} onClick={() => setStep(value => value - 1)}>Back</button><button type="button" disabled={step === steps.length - 1} onClick={() => setStep(value => value + 1)}>Next</button></div><p>Ask your administrator which features are enabled in your workspace. Offline captions and translated speech require locally available recognition, translation and voices. Poly room-device access requires a configured gateway and compatibility testing for your devices. Remote access requires your organisation’s approved network connection.</p><Link className="qsvc-action" to="/contact?interest=Intranet"><ActionContents>Request access</ActionContents></Link>{session.status === 'anonymous' ? <p><Link to="/login?next=%2Fintranet">Sign in to check access</Link></p> : <p>Your account does not have intranet access. Ask your administrator to approve it.</p>}</section></div></>}
     </main><SiteFooter /><DownloadFeedback state={token && downloadOwner.current === token ? downloadState : { phase: 'idle' }} onDismiss={() => setDownloadState({ phase: 'idle' })} /></div>;
 }

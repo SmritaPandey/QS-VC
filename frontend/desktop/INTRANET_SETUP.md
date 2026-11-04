@@ -1,6 +1,6 @@
 # QS-VC Intranet — install, connect and admin access
 
-Version 1.1.0 · 3 November 2026
+Version 1.2.0 · 4 November 2026
 
 This guide covers three jobs: installing QS-VC on Windows or Mac, connecting it to your organisation, and giving the three platform admins full access.
 
@@ -76,19 +76,85 @@ node services/auth/scripts/create-platform-admins.cjs
 # Who is a platform admin (these are also the built-in defaults)
 QSVC_ADMIN_EMAILS=services@madylabs.xyz,contact@neurqai.com,smrita.official@gmail.com
 
-# Organisation address admins see on the Intranet page and use in the Windows app
-QSVC_ADMIN_WORKSPACE_URL=https://<your intranet address>/
+# Temporary admin test workspace. Opens the shared online QS-VC app, not an isolated intranet.
+QSVC_ADMIN_WORKSPACE_URL=https://qsvcmeet.com
 
 # Enterprise users who are not admins: one entry per organisation
 ENTERPRISE_ACCESS_JSON=[{"tenantId":"<tenant id>","userIds":["<user id>"],"workspaceUrl":"https://<your intranet address>/"}]
 
-# The installer that the Intranet page serves (outside the web folder, read-only)
+# The auth container reads this path; deploy/aws/compose.yml mounts the host installer folder here.
 ENTERPRISE_WINDOWS_INSTALLER=/opt/qsvc/installers/QS-VC-Windows-Setup.exe
 ```
 
-Copy `QS-VC-Windows-Setup.exe` to `/opt/qsvc/installers/`. Restart auth after any change to `.env`.
+For the Windows download option, place the verified installer in the host folder
+`/opt/qsvc/deploy/aws/installers/` (the read-only volume mounted by
+`deploy/aws/compose.yml`). For the release split into `.part00` through
+`.part03`, assemble and check it from the repository root:
+
+```bash
+cat deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part00 \
+    deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part01 \
+    deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part02 \
+    deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part03 \
+    > deploy/aws/installers/QS-VC-Windows-Setup.exe
+shasum -a 256 deploy/aws/installers/QS-VC-Windows-Setup.exe
+```
+
+Confirm the result is `807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45`,
+then transfer that file to the same relative folder on the deployment host and
+redeploy/restart auth. The Intranet page enables **Download for Windows** only
+when auth can read the file.
+
+The platform admin fallback opens `https://qsvcmeet.com/app` and is labelled as
+an online test workspace. For a real organisation deployment, set
+`QSVC_ADMIN_WORKSPACE_URL` to the organisation's own HTTPS workspace URL. Restart
+auth after changing its environment.
 
 Do **not** set `QSVC_ADMIN_SIGNUP_OPEN`. The script in 2.3 creates the admin accounts directly. Public sign-up keeps refusing these three addresses, so nobody else can claim them.
+
+### 2.5 Optional enterprise MCU and room-system support
+
+QS-VC browser meetings use the SFU by default. SIP/H.323 room devices require a
+separately operated FreeSWITCH MCU and the QS-VC Poly bridge; the Windows/Mac
+installer does not include or install either service. The old `services/mcu`
+package is control-only and must not be presented as the media MCU.
+
+Before enabling the bridge, the operator must configure and verify:
+
+- A built `deploy/poly-bridge` package and an SFU deployment that mounts it.
+- A FreeSWITCH host with the QSVC conference and SIP profiles configured.
+- A reachable drachtio service, private RTP routes/firewall rules, and strong
+  non-default ESL and drachtio secrets.
+- Matching private `SFU_CONTROL_TOKEN` and `BRIDGE_API_TOKEN` values.
+- A working FreeSWITCH H.323 module or an external H.323-to-SIP gateway for
+  legacy H.323 devices. SIP support alone does not provide H.323.
+
+For a self-hosted intranet running this repository's local launcher, build the
+bridge and select the required MCU profile:
+
+```bash
+npm --prefix deploy/poly-bridge ci
+npm --prefix deploy/poly-bridge run build
+npm run intranet:mcu
+```
+
+The launcher fails instead of silently falling back when its module, secrets,
+or configured FreeSWITCH/drachtio services are missing. It does not install or
+start those media services. In a separately managed production deployment,
+the operator must apply the equivalent bridge module and environment settings
+to the deployed SFU and signaling services; running this local launcher does
+not change the hosted workspace.
+
+In an unlocked regular meeting, the signed-in host selects **Host controls →
+Enable room devices**. The endpoint then calls the room alias through the
+organisation's configured gateway route, and the host admits it from the
+waiting list. QS-VC does not provide public SIP/PSTN dial-in numbers.
+
+The bridge and host controls are integrated in code, but no SIP Poly ↔ H.323
+Polycom ↔ browser end-to-end call has been verified. The operator must complete
+AT-01 with real devices and record the media observations before claiming
+interoperability. See [the MCU setup and status guide](../../docs/MCU_USER_MANUAL.md)
+and [Poly bridge instructions](../../deploy/poly-bridge/README.md).
 
 ---
 

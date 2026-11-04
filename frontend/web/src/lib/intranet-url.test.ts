@@ -10,6 +10,10 @@ describe('organisation workspace address', () => {
         expect(intranetUrl('https://www.qsvcmeet.com/')).toBeNull();
         expect(intranetUrl('https://portal.example.test/', 'https://portal.example.test')).toBeNull();
     });
+    it('allows qsvcmeet.com only for the explicit admin online-demo mode', () => {
+        expect(intranetUrl('https://qsvcmeet.com/', 'https://qsvcmeet.com', true)).toBe('https://qsvcmeet.com/app');
+        expect(intranetUrl('https://qsvcmeet.com/app', 'https://qsvcmeet.com')).toBeNull();
+    });
     it('rejects scripts, insecure URLs and credential-bearing links', () => {
         for (const value of ['javascript:alert(1)', 'http://office.local', '//office.local', 'https://user:pass@office.local', 'https://office.local?token=secret', 'https://office.local/#secret', 'invalid']) expect(intranetUrl(value)).toBeNull();
     });
