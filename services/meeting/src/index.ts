@@ -256,6 +256,35 @@ app.get('/api/internal/meetings/:code', async (req, res) => {
     } catch { res.status(503).json({ error: 'Meeting storage unavailable' }); }
 });
 
+// In-meeting "Report a problem". Guests can report too, so no sign-in is required;
+// the global rate limit applies and diagnostics are size-capped.
+const problemReportBody = z.object({
+    category: z.enum(['audio', 'video', 'screen', 'connection', 'captions', 'other']),
+    description: z.string().trim().min(1).max(2000),
+    meetingCode: z.string().trim().max(30).regex(/^[A-Za-z0-9-]*$/).optional(),
+    reporterName: z.string().trim().max(100).optional(),
+    diagnostics: z.record(z.string(), z.unknown()).optional(),
+});
+app.post('/api/meetings/problem-reports', express.json({ limit: '24kb' }), async (req, res) => {
+    const parsed = problemReportBody.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Describe the problem in up to 2000 characters.' });
+    const { category, description, meetingCode, reporterName, diagnostics } = parsed.data;
+    const diag = JSON.stringify(diagnostics || {});
+    if (diag.length > 16000) return res.status(413).json({ error: 'Technical details are too large.' });
+    const id = uuidv4();
+    logger.warn({ event: 'problem_report', id, category, meetingCode }, 'Problem reported from a meeting');
+    try {
+        await pool.query(
+            `INSERT INTO problem_reports (id, meeting_code, category, description, reporter_name, diagnostics) VALUES ($1, $2, $3, $4, $5, $6)`,
+            [id, meetingCode ? meetingCode.toUpperCase() : null, category, description, reporterName || null, diag],
+        );
+        res.status(201).json({ id });
+    } catch (err: any) {
+        logger.error({ err: err.message, id }, 'Problem report not stored');
+        res.status(503).json({ error: 'Your report could not be saved right now. Download it and send it to support instead.' });
+    }
+});
+
 // Signaling reports that the host started or ended the meeting (service-to-service only).
 app.post('/api/internal/meetings/:code/status', express.json(), async (req, res) => {
     try {

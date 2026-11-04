@@ -1,6 +1,8 @@
 export interface BoardPoint { x: number; y: number }
 export interface BoardStroke { id: string; authorId: string; points: BoardPoint[]; color: string; width: number }
-export interface MeetingPoll { id: string; question: string; options: string[]; votes: Record<string, number>; closed: boolean }
+export type PollResults = 'live' | 'afterClose' | 'hosts';
+export interface MeetingPoll { id: string; question: string; options: string[]; votes: Record<string, number>; closed: boolean; results?: PollResults; resultsHidden?: boolean; total?: number }
+export const POLL_RESULT_LABELS: Record<PollResults, string> = { live: 'Everyone, as votes come in', afterClose: 'Everyone, after the poll closes', hosts: 'Only hosts and co-hosts' };
 export interface MeetingQuestion { id: string; text: string; authorId: string; authorName: string; voters: string[]; answer?: string }
 export interface MeetingFile { id: string; name: string; mime: string; size: number; authorId: string; authorName: string }
 export interface CollaborationState { revision: number; strokes: BoardStroke[]; notes: { text: string; version: number }; polls: MeetingPoll[]; questions: MeetingQuestion[]; files: MeetingFile[] }

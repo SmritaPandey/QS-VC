@@ -11,12 +11,20 @@ interface Props {
     speakingLanguage: string; onSpeakingLanguageChange: (code: string) => void; onUseDetectedLanguage: () => void; displayName: string; myPeerId: () => string;
     stopRecognition: MutableRefObject<() => void>;
     onSpeakingChange: (speaking: boolean) => void;
+    /** Controlled from the CC button in the control bar. */
+    showCaptions: boolean;
+    onShowCaptionsChange: (on: boolean) => void;
+    shareSpeech: boolean;
+    onShareSpeechChange: (on: boolean) => void;
 }
 
+const CONSENT_KEY = 'qsvc:caption-speech-consent';
+export function hasCaptionConsent(): boolean { try { return localStorage.getItem(CONSENT_KEY) === 'yes'; } catch { return false; } }
+function rememberConsent(on: boolean) { try { if (on) localStorage.setItem(CONSENT_KEY, 'yes'); else localStorage.removeItem(CONSENT_KEY); } catch { /* per-device convenience only */ } }
+
 /** Explicit browser recognition consent and independent listener preferences. No provider fallback. */
-export default function MeetingCaptions({ open, onClose, connected, audioMuted, speakingLanguage, displayName, myPeerId, onSpeakingChange, stopRecognition, translatedSpeaking, onSpeakingLanguageChange, onUseDetectedLanguage }: Props) {
-    const [shareSpeech, setShareSpeech] = useState(false);
-    const [showCaptions, setShowCaptions] = useState(false);
+export default function MeetingCaptions({ open, onClose, connected, audioMuted, speakingLanguage, displayName, myPeerId, onSpeakingChange, stopRecognition, translatedSpeaking, onSpeakingLanguageChange, onUseDetectedLanguage, showCaptions, onShowCaptionsChange: setShowCaptions, shareSpeech, onShareSpeechChange }: Props) {
+    const setShareSpeech = (on: boolean) => { rememberConsent(on); onShareSpeechChange(on); };
     const [captionLanguage, setCaptionLanguage] = useState('original');
     const [hearLanguage, setHearLanguage] = useState('');
     const [voiceEnabled, setVoiceEnabled] = useState(false);
@@ -60,7 +68,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
                 signaling.request('captionPublish', { id: caption.id, text: caption.text, language: speakingLanguage, isFinal: true, allowGoogleTranslation: capabilities.processing === 'google-cloud' && allowGoogleTranslation })
                     .catch(() => { if (active) setStatus('Could not share that caption. Speech is not being saved.'); });
             },
-            onError: (message) => { if (active) { setStatus(message); setShareSpeech(false); } },
+            onError: (message) => { if (active) { setStatus(message); onShareSpeechChange(false); } },
         });
         setStatus('Sharing speech captions. Your browser may process microphone audio remotely.');
         const stop = () => { active = false; engine.stop(); };
@@ -70,7 +78,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     }, [connected, shareSpeech, audioMuted, speakingLanguage, displayName, stopRecognition, translatedSpeaking, capabilities.processing, allowGoogleTranslation]);
 
     useEffect(() => {
-        if (!connected) { setShareSpeech(false); setVoiceEnabled(false); setAllowGoogleTranslation(false); setCaptions([]); }
+        if (!connected) { onShareSpeechChange(false); setVoiceEnabled(false); setAllowGoogleTranslation(false); setCaptions([]); }
     }, [connected]);
 
     useEffect(() => {
@@ -131,7 +139,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     return <>
         <CaptionOverlay enabled={showCaptions} captions={captions} fontSize="large" />
         {open && <section ref={panelRef} className="meeting-language-settings" id="meeting-language-settings" role="dialog" aria-labelledby="caption-settings-title" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
-            <div className="caption-settings-head"><h2 id="caption-settings-title">Language & captions</h2><button type="button" className="neu-icon-btn" aria-label="Close language settings" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></div>
+            <div className="caption-settings-head"><h2 id="caption-settings-title">Captions & language</h2><button type="button" className="neu-icon-btn" aria-label="Close language settings" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></div>
             <label htmlFor="meeting-speaking-language">I speak</label>
             <select id="meeting-speaking-language" value={speakingLanguage} onChange={event => onSpeakingLanguageChange(event.target.value)}>{LANGUAGES.map(lang => <option value={lang.code} key={lang.code}>{lang.nativeName} · {lang.name}</option>)}</select>
             <button type="button" className="btn-text" onClick={onUseDetectedLanguage}>Use browser or region suggestion</button>

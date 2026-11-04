@@ -23,6 +23,14 @@ function canManagePeer(roomId: string, actorId: string, targetId: string): boole
 function isManager(peer?: PeerState): boolean {
     return peer?.role === 'host' || peer?.role === 'co-host';
 }
+/** Webinars: only the organiser, hosts/co-hosts and people invited on stage may send media or captions. */
+function canPublishInRoom(roomId: string, peerId: string, authSub?: string): boolean {
+    const room = roomManager.getRoom(roomId);
+    if (!room) return false;
+    if (!room.settings.webinar) return true;
+    const peer = room.peers.get(peerId);
+    return (!!room.ownerUserId && room.ownerUserId === authSub) || isManager(peer) || room.stage.has(peerId);
+}
 const PERMISSION_MESSAGES = {
     audio: 'The host has turned off microphones for participants.',
     video: 'The host has turned off cameras for participants.',
@@ -161,7 +169,7 @@ export async function handleRpcMessage(
                 return { jsonrpc: '2.0', id: id!, result: collaborationRpc(ws, connectionState.roomId!, connectionState.peerId!, method, params) };
             case 'captionPublish': {
                 const room = roomManager.getRoom(connectionState.roomId!);
-                if (room?.settings.webinar && (!room.ownerUserId || room.ownerUserId !== connectionState.authUser?.sub)) {
+                if (room?.settings.webinar && !canPublishInRoom(room.id, connectionState.peerId!, connectionState.authUser?.sub)) {
                     throw createError(-32005, 'Only the webinar organiser can publish captions');
                 }
                 return { jsonrpc: '2.0', id: id!, result: publishCaption(ws, connectionState.roomId!, connectionState.peerId!, params) };
@@ -298,7 +306,7 @@ export async function handleRpcMessage(
 
                 const policyRoom = roomManager.getRoom(roomId);
                 if (!policyRoom) throw createError(-32000, 'Room not found');
-                if (policyRoom.settings.webinar && (!policyRoom.ownerUserId || policyRoom.ownerUserId !== connectionState.authUser?.sub)) {
+                if (!canPublishInRoom(roomId, peerId, connectionState.authUser?.sub)) {
                     throw createError(-32005, 'Only the webinar organiser can publish media');
                 }
 
@@ -451,6 +459,13 @@ export async function handleRpcMessage(
                     if (kind === 'audio') peer.audioMuted = muted;
                     if (kind === 'video') peer.videoOff = muted;
                 }
+                if (kind === 'screen' && peer) {
+                    // Clients report presenting explicitly; older clients send muted=true while sharing.
+                    const presenting = typeof params?.presenting === 'boolean' ? params.presenting : muted === true;
+                    if (presenting && !isManager(peer) && room && !room.settings.allowScreenShare) throw createError(-32004, 'Screen sharing is disabled by host');
+                    peer.screenSharing = presenting;
+                    roomManager.broadcast(roomId, 'presenterChanged', { peerId, displayName, presenting });
+                }
 
                 roomManager.broadcast(roomId, 'peerMuteChanged', {
                     peerId, displayName, kind, muted,
@@ -476,6 +491,44 @@ export async function handleRpcMessage(
                 });
 
                 return { jsonrpc: '2.0', id: id!, result: { ok: true } };
+            }
+
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            // HOST CONTROLS — Spotlight someone for everyone (null clears it)
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            case 'setSpotlight': {
+                const { peerId, roomId, displayName } = connectionState;
+                const room = roomManager.getRoom(roomId!);
+                if (!room) throw createError(-32000, 'Room not found');
+                if (!roomManager.isHostOrCoHost(roomId!, peerId!)) throw createError(-32005, 'Only host/co-host can spotlight');
+                const target = params?.targetPeerId ?? null;
+                if (target !== null && (typeof target !== 'string' || !room.peers.has(target))) throw createError(-32602, 'Participant not found');
+                room.spotlightPeerId = target;
+                roomManager.broadcast(roomId!, 'spotlightChanged', { peerId: target, by: displayName });
+                return { jsonrpc: '2.0', id: id!, result: { spotlightPeerId: target } };
+            }
+
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            // HOST CONTROLS — Invite to / remove from stage (webinars)
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            case 'setStage': {
+                const { peerId, roomId, displayName } = connectionState;
+                const room = roomManager.getRoom(roomId!);
+                if (!room) throw createError(-32000, 'Room not found');
+                if (!roomManager.isHostOrCoHost(roomId!, peerId!)) throw createError(-32005, 'Only host/co-host can manage the stage');
+                const parsed = z.object({ targetPeerId: z.string(), onStage: z.boolean() }).safeParse(params);
+                if (!parsed.success || !room.peers.has(parsed.data.targetPeerId)) throw createError(-32602, 'Participant not found');
+                const { targetPeerId, onStage } = parsed.data;
+                if (onStage) room.stage.add(targetPeerId); else room.stage.delete(targetPeerId);
+                const target = room.peers.get(targetPeerId)!;
+                if (!onStage && !isManager(target)) {
+                    for (const kind of ['audio', 'video'] as const) roomManager.sendToPeer(roomId!, targetPeerId, 'forceMute', { kind, by: displayName, reason: 'stage' });
+                    if (target.screenSharing) roomManager.sendToPeer(roomId!, targetPeerId, 'stopPresenting', { by: displayName });
+                    if (room.spotlightPeerId === targetPeerId) { room.spotlightPeerId = null; roomManager.broadcast(roomId!, 'spotlightChanged', { peerId: null }); }
+                }
+                if (onStage && target.handRaised) { target.handRaised = false; roomManager.broadcast(roomId!, 'handRaised', { peerId: targetPeerId, displayName: target.displayName, raised: false }); }
+                roomManager.broadcast(roomId!, 'stageChanged', { peerId: targetPeerId, displayName: target.displayName, onStage, canPublish: canPublishInRoom(roomId!, targetPeerId, target.userId), by: displayName });
+                return { jsonrpc: '2.0', id: id!, result: { onStage } };
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -994,6 +1047,8 @@ async function joinPeerToRoom(
             audioMuted: p.audioMuted,
             videoOff: p.videoOff,
             handRaised: p.handRaised,
+            screenSharing: p.screenSharing,
+            onStage: room.stage.has(id),
             producers: Array.from(p.producers.values()),
         }));
 
@@ -1009,7 +1064,8 @@ async function joinPeerToRoom(
         roomId,
         role: peerState.role,
         routerRtpCapabilities: routerCaps,
-        canPublish: !room.settings.webinar || (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub),
+        canPublish: canPublishInRoom(roomId, peerId, connectionState.authUser?.sub),
+        spotlightPeerId: room.spotlightPeerId,
         settings: { ...room.settings, password: undefined },
         recording: room.recording,
         sendTransport: sfuAvailable ? {

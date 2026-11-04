@@ -251,3 +251,50 @@ it('requires host admission for webinar guests even when the waiting room is off
         vi.mocked(loadMeetingPolicy).mockResolvedValue(null);
     }
 });
+
+it('spotlights for everyone, tracks presenters and clears both when people leave', async () => {
+    const code=`spot-${crypto.randomUUID().slice(0,10)}`;
+    const host=socket(), hostState:any={}, guest=socket(), guestState:any={};
+    await rpc(host,hostState,'joinRoom',{meetingCode:code,displayName:'Host'});
+    await rpc(guest,guestState,'joinRoom',{meetingCode:code,displayName:'Guest'});
+    expect((await rpc(guest,guestState,'setSpotlight',{targetPeerId:hostState.peerId}))?.error?.code).toBe(-32005);
+    expect((await rpc(host,hostState,'setSpotlight',{targetPeerId:'nobody'}))?.error?.code).toBe(-32602);
+    expect((await rpc(host,hostState,'setSpotlight',{targetPeerId:guestState.peerId}))?.result.spotlightPeerId).toBe(guestState.peerId);
+    expect(sent(guest).some(m => m.method === 'spotlightChanged' && m.params.peerId === guestState.peerId)).toBe(true);
+    await rpc(guest,guestState,'muteStateChanged',{kind:'screen',muted:true,presenting:true});
+    const room = roomManager.getRoom(hostState.roomId)!;
+    expect(room.peers.get(guestState.peerId)?.screenSharing).toBe(true);
+    expect(sent(host).some(m => m.method === 'presenterChanged' && m.params.presenting)).toBe(true);
+    const late=socket(), lateState:any={};
+    const joined = await rpc(late,lateState,'joinRoom',{meetingCode:code,displayName:'Late'});
+    expect(joined?.result.spotlightPeerId).toBe(guestState.peerId);
+    expect(joined?.result.existingPeers.find((p: any) => p.peerId === guestState.peerId).screenSharing).toBe(true);
+    await rpc(host,hostState,'updateSettings',{settings:{allowScreenShare:false}});
+    expect((await rpc(late,lateState,'muteStateChanged',{kind:'screen',muted:true,presenting:true}))?.error?.message).toContain('disabled');
+    await handlePeerDisconnect(guestState);
+    expect(room.spotlightPeerId).toBeNull();
+    await handlePeerDisconnect(lateState); await handlePeerDisconnect(hostState);
+});
+
+it('lets webinar hosts invite attendees on stage, and removes their media when taken off stage', async () => {
+    const { loadMeetingPolicy } = await import('../meeting-policy.js');
+    vi.mocked(loadMeetingPolicy).mockResolvedValue({ hostId: 'organiser', status: 'waiting', settings: { webinar: true, waitingRoomEnabled: false, allowChat: true, allowScreenShare: true, allowRecording: false } });
+    const code = `stage-${crypto.randomUUID().slice(0, 10)}`;
+    const host = socket(), attendee = socket(), hostState: any = { authUser: { sub: 'organiser' } }, attendeeState: any = {};
+    try {
+        await rpc(host, hostState, 'joinRoom', { meetingCode: code, displayName: 'Organiser' });
+        await rpc(attendee, attendeeState, 'joinRoom', { meetingCode: code, displayName: 'Attendee' });
+        await rpc(host, hostState, 'admitPeer', { targetPeerId: attendeeState.peerId });
+        expect((await rpc(attendee, attendeeState, 'produce', { kind: 'audio' }))?.error?.message).toContain('Only the webinar organiser');
+        expect((await rpc(attendee, attendeeState, 'setStage', { targetPeerId: attendeeState.peerId, onStage: true }))?.error?.code).toBe(-32005);
+        expect((await rpc(host, hostState, 'setStage', { targetPeerId: attendeeState.peerId, onStage: true }))?.result.onStage).toBe(true);
+        expect(sent(attendee).find(m => m.method === 'stageChanged')?.params.canPublish).toBe(true);
+        expect((await rpc(attendee, attendeeState, 'produce', { kind: 'audio' }))?.error?.message ?? '').not.toContain('Only the webinar organiser');
+        await rpc(host, hostState, 'setStage', { targetPeerId: attendeeState.peerId, onStage: false });
+        expect(sent(attendee).filter(m => m.method === 'forceMute' && m.params.reason === 'stage')).toHaveLength(2);
+        expect((await rpc(attendee, attendeeState, 'produce', { kind: 'audio' }))?.error?.message).toContain('Only the webinar organiser');
+    } finally {
+        await handlePeerDisconnect(attendeeState); await handlePeerDisconnect(hostState);
+        vi.mocked(loadMeetingPolicy).mockResolvedValue(null);
+    }
+});
