@@ -10,6 +10,8 @@
         "dev": "tsc && electron .",
         "package:win": "electron-builder --win",
         "package:mac": "electron-builder --mac",
+        "package:mac:arm64": "npm run build && electron-builder --mac zip --arm64",
+        "package:mac:x64": "npm run build && electron-builder --mac zip --x64",
         "package:linux": "electron-builder --linux"
     },
     "build": {
@@ -92,5 +94,8 @@
         "electron-builder": "25.1.8",
         "typescript": "^5.7.0"
     },
-    "author": "QS-VC"
+    "author": "QS-VC",
+    "allowScripts": {
+        "electron@33.4.11": true
+    }
 }

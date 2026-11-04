@@ -39,6 +39,8 @@ services:
       DATABASE_URL: ${AUTH_DATABASE_URL:?Set the restricted auth database URL}
       ENTERPRISE_ACCESS_JSON: '${ENTERPRISE_ACCESS_JSON:-[]}'
       ENTERPRISE_WINDOWS_INSTALLER: /opt/qsvc/installers/QS-VC-Windows-Setup.exe
+      ENTERPRISE_MACOS_ARM64_INSTALLER: /opt/qsvc/installers/QS-VC-macOS-arm64.zip
+      ENTERPRISE_MACOS_X64_INSTALLER: /opt/qsvc/installers/QS-VC-macOS-x64.zip
     volumes:
       - ./installers:/opt/qsvc/installers:ro
     command: [node, services/auth/dist/index.js]

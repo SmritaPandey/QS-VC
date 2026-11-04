@@ -27,6 +27,8 @@
 .intranet-page .public-auth-form input[aria-invalid=true] { border-color:#c9364f; }
 .intranet-page #workspace-error { color:#aa253b; }
 .intranet-page .service-card .qsvc-action { max-width:100%; }
+.intranet-platform-label { display:block; margin:18px 0 8px; font-weight:600; color:var(--text-primary); }
+.intranet-page select#intranet-download-platform { width:100%; min-height:48px; margin-bottom:16px; padding:10px 14px; border:1px solid var(--border-tone,#cad9df); border-radius:12px; color:var(--text-primary); background:var(--bg-primary); font:inherit; }
 .intranet-page .service-card> a:not(.qsvc-action) { display:inline-flex; align-items:center; min-height:44px; color:var(--accent-primary); text-decoration:underline; text-underline-offset:4px; }
 .intranet-page .intranet-destination { box-shadow:0 4px 20px #006d7710; }
 @media(max-width:420px) { .intranet-page { padding-inline:16px; } .intranet-page .service-card { padding:20px; } .intranet-page .intranet-destination { padding:16px; } }
