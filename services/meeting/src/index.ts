@@ -334,6 +334,60 @@ app.get('/api/meetings/code/:code', async (req, res) => {
     }
 });
 
+// Summarize meetings without returning links or participant data.
+async function meetingAnalytics(req: Request, res: Response, hostOnly: boolean) {
+    const user = (req as any).user as AuthPayload;
+    if (!hostOnly && user.role !== 'admin') return res.status(403).json({ error: 'Administrator access is required' });
+
+    const quarters = req.query.quarters ?? '4';
+    if (typeof quarters !== 'string' || !/^(?:[1-9]|1[0-2])$/.test(quarters)) {
+        return res.status(400).json({ error: 'Choose 1 to 12 quarters' });
+    }
+
+    try {
+        const result = await pool.query(
+            `WITH periods AS (
+                SELECT period
+                FROM generate_series(
+                    date_trunc('quarter', NOW() AT TIME ZONE 'UTC') - ($2::int - 1) * INTERVAL '3 months',
+                    date_trunc('quarter', NOW() AT TIME ZONE 'UTC'),
+                    INTERVAL '3 months'
+                ) AS series(period)
+            ), by_status AS (
+                SELECT status, count(*) AS count,
+                       count(*) FILTER (WHERE scheduled_start IS NOT NULL) AS scheduled
+                FROM meetings WHERE tenant_id = $1 AND ($3::uuid IS NULL OR host_id = $3)
+                GROUP BY status
+            ), by_quarter AS (
+                SELECT date_trunc('quarter', created_at AT TIME ZONE 'UTC') AS period, count(*) AS count
+                FROM meetings
+                WHERE tenant_id = $1 AND ($3::uuid IS NULL OR host_id = $3)
+                    AND created_at >= ((SELECT min(period) FROM periods) AT TIME ZONE 'UTC')
+                GROUP BY 1
+            )
+            SELECT
+                (SELECT json_build_object(
+                    'links', COALESCE(sum(count), 0),
+                    'scheduled', COALESCE(sum(scheduled), 0),
+                    'active', COALESCE(sum(count) FILTER (WHERE status = 'active'), 0)
+                ) FROM by_status) AS totals,
+                COALESCE((SELECT json_agg(json_build_object('status', status, 'count', count) ORDER BY status)
+                    FROM by_status), '[]'::json) AS statuses,
+                (SELECT json_agg(json_build_object('quarter', to_char(periods.period, 'YYYY "Q"Q'),
+                    'count', COALESCE(by_quarter.count, 0)) ORDER BY periods.period)
+                    FROM periods LEFT JOIN by_quarter USING (period)) AS quarters`,
+            [user.tenantId, Number(quarters), hostOnly ? user.sub : null],
+        );
+        res.set('Cache-Control', 'no-store').json(result.rows[0]);
+    } catch (error) {
+        logger.error(error, 'Failed to load meeting analytics');
+        res.status(503).json({ error: 'Meeting analytics are temporarily unavailable' });
+    }
+}
+
+app.get('/api/meetings/admin/analytics', authMiddleware, (req, res) => meetingAnalytics(req, res, false));
+app.get('/api/meetings/me/analytics', authMiddleware, (req, res) => meetingAnalytics(req, res, true));
+
 // List user's meetings
 app.get('/api/meetings', authMiddleware, async (req, res) => {
     try {
@@ -407,7 +461,7 @@ app.patch('/api/meetings/:id/schedule', authMiddleware, validateBody(editSchedul
                 scheduled_start = COALESCE($2::timestamptz, scheduled_start),
                 scheduled_end = COALESCE($3::timestamptz, scheduled_end)
              WHERE id = $4 AND tenant_id = $5 AND host_id = $6
-                 AND scheduled_start IS NOT NULL AND status = 'waiting'
+                 AND scheduled_start IS NOT NULL AND (status = 'waiting' OR ($1 = 'cancelled' AND status = 'cancelled'))
              RETURNING id, status, scheduled_start AS "scheduledStart", scheduled_end AS "scheduledEnd"`,
             [rescheduling ? 'waiting' : 'cancelled', rescheduling ? edit.start : null,
                 rescheduling ? edit.end : null, id.data, user.tenantId, user.sub],

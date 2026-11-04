@@ -1,3 +1,4 @@
+import CancelScheduledMeeting from '../components/CancelScheduledMeeting';
 import { downloadICS, openGoogleCalendar, openOutlookCalendar, type CalendarEvent } from '../lib/calendar-integration';
 import { useSession } from '../lib/use-session';
 import ThemeSelect from '../components/ThemeSelect';
@@ -47,7 +48,8 @@ const ScheduleMeeting: React.FC = () => {
     const { pathname, search } = useLocation();
     const schedulingWebinar = new URLSearchParams(search).get('type') === 'webinar';
     const [submitting, setSubmitting] = useState(false);
-    const [scheduled, setScheduled] = useState<(CalendarEvent & { webinar: boolean; occurrences?: { meetingCode: string; scheduledStart: string; scheduledEnd: string }[] }) | null>(null);
+    const [cancelledCodes, setCancelledCodes] = useState<string[]>([]);
+    const [scheduled, setScheduled] = useState<(CalendarEvent & { id?: string; webinar: boolean; occurrences?: { id?: string; meetingCode: string; scheduledStart: string; scheduledEnd: string }[] }) | null>(null);
     const [inviteInput, setInviteInput] = useState('');
     const [copySuccess, setCopySuccess] = useState(false);
     // Scheduling saves a meeting to an account, so guests are asked to sign in first.
@@ -131,7 +133,9 @@ const ScheduleMeeting: React.FC = () => {
 
             const meetingCode = data.meetingCode || data.code;
             if (typeof meetingCode !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(meetingCode)) throw new Error('Invalid meeting code');
+            setCancelledCodes([]);
             setScheduled({
+                id: typeof data.id === 'string' ? data.id : undefined,
                 title: form.title || 'Scheduled Meeting',
                 occurrences: data.occurrences,
                 webinar: form.webinar,
@@ -192,13 +196,15 @@ const ScheduleMeeting: React.FC = () => {
 
     // ━━━ CONFIRMATION VIEW ━━━
     if (scheduled) {
+        const firstCancelled = cancelledCodes.includes(scheduled.meetingCode);
         return (
             <div className="schedule-page">
                 <div className="schedule-container">
                     <div className="schedule-success"><ThemeSelect />
                         <div className="success-icon"><span className="mi" aria-hidden="true">check_circle</span></div>
-                        <h1>{scheduled.webinar ? 'Webinar scheduled.' : 'Meeting scheduled.'}</h1>
-                        {scheduled.webinar && <p>Share the webinar link with attendees. Signed-out guests need host approval to enter.</p>}
+                        <h1>{firstCancelled && (!scheduled.occurrences || scheduled.occurrences.length <= 1) ? 'Meeting cancelled.' : scheduled.webinar ? 'Webinar scheduled.' : 'Meeting scheduled.'}</h1>
+                        {cancelledCodes.length > 0 && <p role="status">Cancelled occurrences: {cancelledCodes.length}.</p>}
+                        {scheduled.webinar && !firstCancelled && <p>Share the webinar link with attendees. Signed-out guests need host approval to enter.</p>}
                         <div className="success-details">
                             <div className="detail-row">
                                 <span className="detail-label">Title</span>
@@ -220,7 +226,7 @@ const ScheduleMeeting: React.FC = () => {
                             </div>
                             <div className="detail-row">
                                 <span className="detail-label">Link</span>
-                                <span className="detail-value link">{scheduled.meetingUrl}</span>
+                                <span className="detail-value link">{firstCancelled ? 'Cancelled' : scheduled.meetingUrl}</span>
                             </div>
                             {form.invitees.length > 0 && (
                                 <div className="detail-row">
@@ -237,21 +243,31 @@ const ScheduleMeeting: React.FC = () => {
                                     ...scheduled, meetingCode: occurrence.meetingCode, meetingUrl,
                                     startTime: new Date(occurrence.scheduledStart), endTime: new Date(occurrence.scheduledEnd),
                                 };
+                                if (cancelledCodes.includes(occurrence.meetingCode)) return <li key={occurrence.meetingCode}>
+                                    {event.startTime.toLocaleString()} · Cancelled
+                                </li>;
                                 return <li key={occurrence.meetingCode}>
                                     <Link to={new URL(meetingUrl).pathname}>{event.startTime.toLocaleString()}</Link>{' '}
                                     <button type="button" onClick={() => downloadICS(event)}>Download event</button>{' '}
                                     <button type="button" onClick={() => openGoogleCalendar(event)}>Add to Google Calendar</button>{' '}
                                     <button type="button" onClick={() => openOutlookCalendar(event)}>Add to Outlook</button>
+                                    {occurrence.id && <CancelScheduledMeeting id={occurrence.id}
+                                        title={`${scheduled.title} on ${event.startTime.toLocaleString()}`}
+                                        onCancelled={() => setCancelledCodes(codes => [...codes, occurrence.meetingCode])} />}
                                 </li>;
                             })}</ul>
                         </section>}
                         <div className="success-actions">
+                            {!firstCancelled && (!scheduled.occurrences || scheduled.occurrences.length <= 1) && scheduled.id && <CancelScheduledMeeting
+                                id={scheduled.id} title={scheduled.title} onCancelled={() => setCancelledCodes([scheduled.meetingCode])} />}
+                            {!firstCancelled && <>
                             <button type="button" className="qsvc-action qsvc-action--secondary" onClick={() => downloadICS(scheduled)}><ActionContents>Download calendar event</ActionContents></button>
                             {(!scheduled.occurrences || scheduled.occurrences.length <= 1) && <>
                                 <button type="button" className="qsvc-action qsvc-action--secondary" onClick={() => openGoogleCalendar(scheduled)}>Add to Google Calendar</button>
                                 <button type="button" className="qsvc-action qsvc-action--secondary" onClick={() => openOutlookCalendar(scheduled)}>Add to Outlook</button>
                             </>}
                             <button className="btn-primary qsvc-action" onClick={copyInvitation}><ActionContents><span className="mi" aria-hidden="true">{copySuccess ? 'check' : 'content_copy'}</span>{copySuccess ? 'Copied' : 'Copy invitation'}</ActionContents></button>
+                            </>}
                             <button className="btn-secondary qsvc-action qsvc-action--secondary" onClick={() => navigate('/app')}><ActionContents>
                                 Back to meetings</ActionContents></button>
                         </div>

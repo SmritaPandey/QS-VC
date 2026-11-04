@@ -16,8 +16,8 @@ export default function Login() {
     const signedOutNotice = (location.state as { notice?: string } | null)?.notice;
     // Already signed in (e.g. Back after signing in, or a stale bookmark): go where they were heading.
     useEffect(() => {
-        if (session.status === 'authenticated' && !busy) navigate(nextPath(location.search), { replace: true });
-    }, [session.status, busy, navigate, location.search]);
+        if (session.status === 'authenticated' && !busy) navigate(nextPath(location.search, session.profile?.role === 'admin' ? '/admin' : '/app'), { replace: true });
+    }, [session.status, session.profile?.role, busy, navigate, location.search]);
     async function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (busy) return;
@@ -32,7 +32,7 @@ export default function Login() {
             const data = await response.json();
             if (!response.ok || typeof data.token !== 'string' || !data.token) throw new Error(data.error || 'Sign in failed. Please try again.');
             if (!completeSignIn(data.token)) return;
-            navigate(nextPath(location.search), { replace: true });
+            navigate(nextPath(location.search, data.user?.role === 'admin' ? '/admin' : '/app'), { replace: true });
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : 'Cannot reach sign in. Please try again.');
         } finally { setBusy(false); }

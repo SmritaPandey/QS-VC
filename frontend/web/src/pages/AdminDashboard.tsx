@@ -1,3 +1,4 @@
+import AdminAnalytics from '../components/AdminAnalytics';
 import ThemeSelect from '../components/ThemeSelect';
 import { AUTH_API, clearSession, getToken } from '../lib/session';
 import { useSession } from '../lib/use-session';
@@ -57,7 +58,7 @@ const AUTH_URL = import.meta.env.VITE_AUTH_URL || 'http://localhost:4002';
 const MEETING_URL = import.meta.env.VITE_MEETING_URL || 'http://localhost:4003';
 const RECORDING_URL = import.meta.env.VITE_RECORDING_URL || 'http://localhost:4004';
 
-type TabName = 'overview' | 'meetings' | 'users' | 'recordings' | 'analytics' | 'system';
+type TabName = 'overview' | 'meetings' | 'users' | 'recordings' | 'system';
 
 const AdminDashboard: React.FC = () => {
     const navigate = useNavigate();
@@ -183,7 +184,7 @@ const AdminDashboard: React.FC = () => {
             </header>
 
             <nav className="admin-nav">
-                {(['overview', 'meetings', 'users', 'recordings', 'analytics', 'system'] as TabName[]).map(tab => (
+                {(['overview', 'meetings', 'users', 'recordings', 'system'] as TabName[]).map(tab => (
                     <button
                         key={tab}
                         className={`admin-nav-btn ${activeTab === tab ? 'active' : ''}`}
@@ -194,7 +195,6 @@ const AdminDashboard: React.FC = () => {
                             {tab === 'meetings' && 'videocam'}
                             {tab === 'users' && 'group'}
                             {tab === 'recordings' && 'mic'}
-                            {tab === 'analytics' && 'analytics'}
                             {tab === 'system' && 'settings'}
                         </span>
                         {tab.charAt(0).toUpperCase() + tab.slice(1)}
@@ -204,65 +204,7 @@ const AdminDashboard: React.FC = () => {
 
             <main className="admin-content">
                 {activeTab === 'users' && <EnterpriseAccessTerms />}
-                {/* ━━━ OVERVIEW TAB ━━━ */}
-                {activeTab === 'overview' && (
-                    <div className="admin-overview">
-                        <div className="kpi-grid">
-                            <div className="kpi-card">
-                                <span className="kpi-icon"><span className="mi">videocam</span></span>
-                                <div className="kpi-data">
-                                    <span className="kpi-value">{stats.activeMeetings}</span>
-                                    <span className="kpi-label">Active Meetings</span>
-                                </div>
-                            </div>
-                            <div className="kpi-card">
-                                <span className="kpi-icon"><span className="mi">group</span></span>
-                                <div className="kpi-data">
-                                    <span className="kpi-value">{stats.totalParticipants}</span>
-                                    <span className="kpi-label">Participants Now</span>
-                                </div>
-                            </div>
-                            <div className="kpi-card">
-                                <span className="kpi-icon"><span className="mi">person</span></span>
-                                <div className="kpi-data">
-                                    <span className="kpi-value">{stats.totalUsers}</span>
-                                    <span className="kpi-label">Registered Users</span>
-                                </div>
-                            </div>
-                            <div className="kpi-card">
-                                <span className="kpi-icon"><span className="mi">mic</span></span>
-                                <div className="kpi-data">
-                                    <span className="kpi-value">{stats.recordingsCount}</span>
-                                    <span className="kpi-label">Recordings</span>
-                                </div>
-                            </div>
-                            <div className="kpi-card">
-                                <span className="kpi-icon"><span className="mi">calendar_today</span></span>
-                                <div className="kpi-data">
-                                    <span className="kpi-value">{stats.totalMeetingsToday}</span>
-                                    <span className="kpi-label">Meetings Today</span>
-                                </div>
-                            </div>
-                            <div className="kpi-card">
-                                <span className="kpi-icon"><span className="mi">schedule</span></span>
-                                <div className="kpi-data">
-                                    <span className="kpi-value">{stats.avgMeetingDuration}</span>
-                                    <span className="kpi-label">Avg Duration</span>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div className="health-status">
-                            <h3>System Health</h3>
-                            <div className="health-grid">
-                                <HealthDot status={stats.sfuHealth} label="SFU Media Engine" />
-                                <HealthDot status={stats.signalingHealth} label="Signaling Server" />
-                                <HealthDot status={stats.authHealth} label="Auth Service" />
-                                <HealthDot status={stats.recordingHealth} label="Recording Service" />
-                            </div>
-                        </div>
-                    </div>
-                )}
+                {activeTab === 'overview' && <AdminAnalytics onManageAccess={() => setActiveTab('users')} />}
 
                 {/* ━━━ MEETINGS TAB ━━━ */}
                 {activeTab === 'meetings' && (
@@ -431,103 +373,6 @@ const AdminDashboard: React.FC = () => {
                                 </tbody>
                             </table>
                         )}
-                    </div>
-                )}
-
-                {/* ━━━ ANALYTICS TAB ━━━ */}
-                {activeTab === 'analytics' && (
-                    <div className="admin-analytics">
-                        <h2>Platform Analytics</h2>
-
-                        <div className="analytics-cards">
-                            <div className="analytics-card">
-                                <h3>Meeting Volume</h3>
-                                <div className="chart-placeholder">
-                                    <div className="bar-chart">
-                                        {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((day, i) => {
-                                            const height = [65, 80, 45, 90, 70, 20, 15][i];
-                                            return (
-                                                <div key={day} className="bar-col">
-                                                    <div className="bar" style={{ height: `${height}%` }} />
-                                                    <span className="bar-label">{day}</span>
-                                                </div>
-                                            );
-                                        })}
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="analytics-card">
-                                <h3>Participant Trend</h3>
-                                <div className="chart-placeholder">
-                                    <div className="trend-line">
-                                        <svg viewBox="0 0 200 80" className="trend-svg">
-                                            <polyline
-                                                fill="none"
-                                                stroke="var(--accent-primary)"
-                                                strokeWidth="2"
-                                                points="0,60 30,45 60,55 90,30 120,35 150,20 180,25 200,15"
-                                            />
-                                            <polyline
-                                                fill="url(#gradient)"
-                                                stroke="none"
-                                                points="0,60 30,45 60,55 90,30 120,35 150,20 180,25 200,15 200,80 0,80"
-                                            />
-                                            <defs>
-                                                <linearGradient id="gradient" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="0%" stopColor="var(--accent-primary)" stopOpacity="0.3" />
-                                                    <stop offset="100%" stopColor="var(--accent-primary)" stopOpacity="0" />
-                                                </linearGradient>
-                                            </defs>
-                                        </svg>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div className="analytics-card">
-                                <h3>Usage by Feature</h3>
-                                <div className="usage-breakdown">
-                                    {[
-                                        { label: 'Screen Share', pct: 78 },
-                                        { label: 'Recording', pct: 45 },
-                                        { label: 'Virtual BG', pct: 62 },
-                                        { label: 'Noise Suppress', pct: 55 },
-                                        { label: 'Live Captions', pct: 33 },
-                                        { label: 'E2EE', pct: 28 },
-                                    ].map(f => (
-                                        <div key={f.label} className="usage-row">
-                                            <span className="usage-label">{f.label}</span>
-                                            <div className="usage-bar-wrapper">
-                                                <div className="usage-bar" style={{ width: `${f.pct}%` }} />
-                                            </div>
-                                            <span className="usage-pct">{f.pct}%</span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-
-                            <div className="analytics-card">
-                                <h3>Peak Hours</h3>
-                                <div className="peak-hours">
-                                    {Array.from({ length: 24 }, (_, i) => {
-                                        const load = i >= 9 && i <= 17
-                                            ? 40 + Math.floor(Math.random() * 60)
-                                            : Math.floor(Math.random() * 30);
-                                        return (
-                                            <div
-                                                key={i}
-                                                className="hour-cell"
-                                                style={{ opacity: load / 100 }}
-                                                title={`${i}:00 — ${load}% capacity`}
-                                            />
-                                        );
-                                    })}
-                                    <div className="peak-legend">
-                                        <span>12am</span><span>6am</span><span>12pm</span><span>6pm</span><span>12am</span>
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
                     </div>
                 )}
 
