@@ -7,7 +7,7 @@ import { watchMutedSpeech } from '../lib/muted-speech';
 import { recordingManager, recordingRequest } from '../lib/recording';
 import { getToken } from '../lib/session';
 import { useSession } from '../lib/use-session';
-import { useEntitlements } from '../lib/entitlements';
+import { hasFeature, useEntitlements } from '../lib/entitlements';
 import type { NoiseSuppressor } from '../lib/noise-suppression';
 import '../styles/recordings.css';
 import { playSound } from '../lib/sounds';
@@ -134,6 +134,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const session = useSession();
     const signedIn = session.status === 'authenticated' && Boolean(getToken());
     const entitlements = useEntitlements();
+    const isPlatformAdmin = entitlements.isPlatformAdmin;
     const state = { ...((location.state as any) || {}), ...(reconnecting ? carried : {}) };
     const initialInviteToken = new URLSearchParams(location.search).get('invite') || '';
     const [meetingInviteToken, setMeetingInviteToken] = useState(initialInviteToken);
@@ -520,16 +521,17 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     }, [publishPrivateAudio, showNotice]);
 
     const requestPlanFeature = useCallback((feature: string) => {
+        if (entitlements.isPlatformAdmin) return;
         if (entitlements.loading) { showNotice('Checking your plan…'); return; }
         const requiredPlan = entitlements.featureMinimumPlans[feature] || 'starter';
         window.dispatchEvent(new CustomEvent('qsvc:upgrade-required', { detail: { requiredPlan, feature, returnTo: `${location.pathname}${location.search}${location.hash}` } }));
-    }, [entitlements.loading, entitlements.featureMinimumPlans, location.hash, location.pathname, location.search, showNotice]);
+    }, [entitlements.isPlatformAdmin, entitlements.loading, entitlements.featureMinimumPlans, location.hash, location.pathname, location.search, showNotice]);
 
     const changeNoiseMode = useCallback(async (mode: 'off' | 'standard' | 'ai') => {
         if (mode === 'ai') {
             if (!signedIn) { requestPlanFeature('ai_noise_suppression'); return; }
-            if (entitlements.loading) { showNotice('Checking your plan…'); return; }
-            if (!entitlements.features.includes('ai_noise_suppression')) { requestPlanFeature('ai_noise_suppression'); return; }
+            if (!isPlatformAdmin && entitlements.loading) { showNotice('Checking your plan…'); return; }
+            if (!hasFeature(entitlements, 'ai_noise_suppression')) { requestPlanFeature('ai_noise_suppression'); return; }
         }
         const track = localStreamRef.current?.getAudioTracks().find(candidate => candidate.readyState === 'live');
         if (!track) {
@@ -545,7 +547,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             showNotice(error instanceof Error ? error.message : 'Microphone noise settings could not be changed.');
             return;
         }
-    }, [entitlements.features, entitlements.loading, publishAudioTrack, requestPlanFeature, showNotice, signedIn]);
+    }, [entitlements.features, entitlements.loading, isPlatformAdmin, publishAudioTrack, requestPlanFeature, showNotice, signedIn]);
 
     const stopLocalMedia = useCallback(() => {
         stopSpeechRecognition.current();
@@ -1307,8 +1309,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     const handleToggleRecording = useCallback(async () => {
         if (recordingRef.current) { await finishRecording(); return; }
-        if (entitlements.loading) { showNotice('Checking your plan…'); return; }
-        if (!entitlements.features.includes('cloud_recording')) {
+        if (!isPlatformAdmin && entitlements.loading) { showNotice('Checking your plan…'); return; }
+        if (!hasFeature(entitlements, 'cloud_recording')) {
             window.dispatchEvent(new CustomEvent('qsvc:upgrade-required', { detail: { requiredPlan: entitlements.featureMinimumPlans.cloud_recording || 'pro', feature: 'cloud_recording', returnTo: `${location.pathname}${location.search}${location.hash}` } }));
             return;
         }
@@ -1341,7 +1343,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             void signaling.request('setRecordingState', { recording: false }).catch(() => {});
             showNotice(reason instanceof Error ? reason.message : 'Recording could not start.');
         } finally { busyRef.current.record = false; }
-    }, [finishRecording, meetingCode, myRole, connected, showNotice, entitlements.loading, entitlements.features, entitlements.featureMinimumPlans, location.hash, location.pathname, location.search]);
+    }, [finishRecording, meetingCode, myRole, connected, showNotice, entitlements.loading, entitlements.features, entitlements.featureMinimumPlans, isPlatformAdmin, location.hash, location.pathname, location.search]);
 
     useEffect(() => {
         const warn = (event: BeforeUnloadEvent) => {
@@ -1431,7 +1433,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         void handleLeave();
     }, [myRole, connected, peers.size, handleLeave]);
 
-    const privateConversationLimitMs = entitlements.privateConversationLimitSeconds !== undefined
+    const privateConversationLimitMs = isPlatformAdmin ? null : entitlements.privateConversationLimitSeconds !== undefined
         ? (entitlements.privateConversationLimitSeconds === null ? null : entitlements.privateConversationLimitSeconds * 1000)
         : entitlements.plan === 'pro' || (entitlements.plan === 'enterprise' && entitlements.status === 'enterprise_approved')
             ? null
@@ -1539,18 +1541,18 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     }, [closePanels]);
 
     useEffect(() => {
-        if (!signedIn || entitlements.loading) return;
+        if (!signedIn || (entitlements.loading && !isPlatformAdmin)) return;
         let feature = '';
         try {
             feature = sessionStorage.getItem('qsvc:intended-feature') || '';
             if (feature) sessionStorage.removeItem('qsvc:intended-feature');
         } catch { return; }
         if (!feature) return;
-        if (!entitlements.features.includes(feature)) { requestPlanFeature(feature); return; }
+        if (!hasFeature(entitlements, feature)) { requestPlanFeature(feature); return; }
         if (feature === 'ai_noise_suppression') void changeNoiseMode('ai');
         else if (feature === 'ai_captions') toggleCaptions();
         else if (feature === 'background_effects') { closePanels(); setEffectsOpen(true); }
-    }, [signedIn, entitlements.loading, entitlements.features, requestPlanFeature, changeNoiseMode, toggleCaptions, closePanels]);
+    }, [signedIn, entitlements.loading, entitlements.features, isPlatformAdmin, requestPlanFeature, changeNoiseMode, toggleCaptions, closePanels]);
 
     // ── Full screen ──
     useEffect(() => {
@@ -1686,7 +1688,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 {participantsOpen && (
                     <ParticipantsPanel peers={peers} displayName={displayName} myPeerId={myPeerIdRef.current || 'self'} myRole={myRole} myOnStage={myOnStage} audioMuted={audioMuted} videoOff={videoOff} handRaised={handRaised} presenting={screenSharing}
                         speaking={speaking} webinar={webinar} spotlightId={spotlightId} canManage={manager} onSpotlight={setSpotlightFor} onToggleStage={setStageFor}
-                        canStartPrivateConversation={signedIn && manager && connected && !entitlements.loading} privateConversationLimitLabel={privateConversationLimitLabel}
+                        canStartPrivateConversation={signedIn && manager && connected && (isPlatformAdmin || !entitlements.loading)} privateConversationLimitLabel={privateConversationLimitLabel}
                         privateConversationPeerId={privateConversation?.otherPeerId || privateInvite?.otherPeerId || null}
                         privateConversationStatus={privateConversation ? 'active' : privateInvite?.direction === 'outgoing' ? 'outgoing' : 'idle'}
                         onStartPrivateConversation={startPrivateConversation} onClose={() => setParticipantsOpen(false)} />
@@ -1703,10 +1705,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             <ControlBar
                 assistant={signedIn ? <AIChatBot onOpen={() => { setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen || informationOpen} /> : undefined}
                 signedIn={signedIn}
-                captionsLocked={entitlements.loading || !entitlements.features.includes('ai_captions')}
-                effectsLocked={entitlements.loading || !entitlements.features.includes('background_effects')}
+                captionsLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_captions'))}
+                effectsLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'background_effects'))}
                 noiseMode={noiseMode}
-                aiNoiseSuppressionLocked={entitlements.loading || !entitlements.features.includes('ai_noise_suppression')}
+                aiNoiseSuppressionLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_noise_suppression'))}
                 onChangeNoiseMode={changeNoiseMode}
                 onRequirePlanFeature={requestPlanFeature}
                 onSignInForExtras={() => window.dispatchEvent(new CustomEvent('qsvc:upgrade-required', { detail: { requiredPlan: 'starter', returnTo: `${location.pathname}${location.search}${location.hash}` } }))}
@@ -1721,7 +1723,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 effectsOn={effect.kind !== 'none'} onOpenEffects={() => { closePanels(); setEffectsOpen(true); setLanguageOpen(false); setReactionsOpen(false); }}
                 onReportProblem={() => setReportOpen(true)}
                 audioMuted={audioMuted} videoOff={videoOff} screenSharing={screenSharing}
-                isRecording={isRecording} canRecord={myRole === 'host' && !!getToken()} recordingLocked={entitlements.loading || !entitlements.features.includes('cloud_recording')} chatOpen={chatOpen} participantsOpen={participantsOpen}
+                isRecording={isRecording} canRecord={myRole === 'host' && !!getToken()} recordingLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'cloud_recording'))} chatOpen={chatOpen} participantsOpen={participantsOpen}
                 handRaised={handRaised} reactionsOpen={reactionsOpen}
                 onToggleReactions={() => { setReactionsOpen((open) => !open); setLanguageOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }}
                 languageOpen={languageOpen} languageLabel={findLanguage(speechLanguage.code)?.name} languageCode={speechLanguage.code.split('-')[0].toUpperCase()}
