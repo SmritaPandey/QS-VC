@@ -11,8 +11,10 @@ import { roomManager, PeerState, PeerRole } from '../room-manager.js';
 import { logger } from '../logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
+import meetingInvitation from '../../../../shared/meeting-invitation.cjs';
 import { publishCaption, translationCapabilities, translateCaption, clearEmptyRoomCaptions } from '../captions.js';
 
+const { createMeetingInviteToken, verifyMeetingInviteToken } = meetingInvitation;
 const admittingPeers = new Set<string>();
 function canManagePeer(roomId: string, actorId: string, targetId: string): boolean {
     const room = roomManager.getRoom(roomId), actor = room?.peers.get(actorId), target = room?.peers.get(targetId);
@@ -46,7 +48,7 @@ function releaseAwaitingHost(roomId: string): void {
     for (const waiting of [...room.waitingRoom.values()]) {
         if (!waiting.awaitingHost) continue;
         waiting.awaitingHost = false;
-        if (room.settings.waitingRoomEnabled || room.settings.locked || (room.settings.webinar && !waiting.authUser?.sub)) {
+        if ((room.settings.waitingRoomEnabled && !waiting.invited) || room.settings.locked || (room.settings.webinar && !waiting.authUser?.sub && !waiting.invited)) {
             if (waiting.ws?.readyState === 1) waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'waitingStatus', params: { status: 'knocking' } }));
             if (room.hostPeerId) roomManager.sendToPeer(roomId, room.hostPeerId, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
             for (const peer of room.peers.values()) if (peer.role === 'co-host') roomManager.sendToPeer(roomId, peer.id, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
@@ -95,6 +97,7 @@ const roomSettingsSchema = z.object({
 const joinRoomSchema = z.object({
     meetingCode: z.string().min(1).max(30),
     displayName: z.string().min(1).max(100),
+    inviteToken: z.string().max(128).optional(),
     rtpCapabilities: z.record(z.string(), z.unknown()).optional(),
     password: z.string().max(50).optional(),
     role: z.enum(['host', 'co-host', 'participant']).optional(),
@@ -194,7 +197,7 @@ export async function handleRpcMessage(
                         error: { code: -32602, message: 'Invalid params: ' + joinParams.error.issues.map(i => i.message).join(', ') },
                     };
                 }
-                const { meetingCode, displayName: rawName, rtpCapabilities, password } = joinParams.data;
+                const { meetingCode, displayName: rawName, rtpCapabilities, password, inviteToken } = joinParams.data;
                 const displayName = sanitizeString(rawName);
                 const peerId = uuidv4();
 
@@ -204,7 +207,8 @@ export async function handleRpcMessage(
                 const policy = await loadMeetingPolicy(meetingCode);
                 const room = roomManager.getOrCreateRoom(meetingCode, policy?.settings);
                 if (policy?.hostId) room.ownerUserId = policy.hostId;
-                const webinarGuest = room.settings.webinar && !connectionState.authUser?.sub;
+                const isInvited = verifyMeetingInviteToken(meetingCode, inviteToken);
+                const webinarGuest = room.settings.webinar && !connectionState.authUser?.sub && !isInvited;
                 // Platform admins (role from the server-signed session) can enter and run any meeting.
                 const isPlatformAdmin = connectionState.authUser?.role === 'admin';
                 const isOwner = (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub) || isPlatformAdmin;
@@ -217,7 +221,7 @@ export async function handleRpcMessage(
                     if (room.settings.password && room.settings.password !== password) {
                         return { jsonrpc: '2.0', id: id!, error: { code: -32001, message: 'Invalid meeting password' } };
                     }
-                    roomManager.addToWaitingRoom(room.id, { id: peerId, displayName, ws, rtpCapabilities, requestedAt: new Date(), authUser: connectionState.authUser, awaitingHost: true });
+                    roomManager.addToWaitingRoom(room.id, { id: peerId, displayName, ws, rtpCapabilities, requestedAt: new Date(), authUser: connectionState.authUser, awaitingHost: true, invited: isInvited });
                     connectionState.peerId = peerId;
                     connectionState.roomId = room.id;
                     connectionState.displayName = displayName;
@@ -249,7 +253,7 @@ export async function handleRpcMessage(
                 }
 
                 // Waiting room: if enabled and not the first peer (host), put in waiting room
-                if (!isOwner && (webinarGuest || (room.settings.waitingRoomEnabled && room.peers.size > 0))) {
+                if (!isOwner && (webinarGuest || (room.settings.waitingRoomEnabled && room.peers.size > 0 && !isInvited))) {
                     roomManager.addToWaitingRoom(room.id, {
                         id: peerId,
                         displayName,
@@ -278,6 +282,7 @@ export async function handleRpcMessage(
                 const hostWasPresent = room.hostStarted;
                 const joined = await joinPeerToRoom(ws, room.id, peerId, displayName, rtpCapabilities, connectionState, id!);
                 const me = room.peers.get(peerId);
+                if (me?.role === 'host' && joined?.result) joined.result.inviteToken = createMeetingInviteToken(meetingCode);
                 if (me?.role === 'host') {
                     if (!hostWasPresent && room.ownerUserId) void reportMeetingStatus(room.meetingCode, 'active');
                     // Let the host's client finish its join before others stream in.

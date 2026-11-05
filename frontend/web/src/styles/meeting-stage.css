@@ -109,6 +109,10 @@
 .meeting-more-panel .meeting-view-options button { font-size:14px; padding:8px 10px; gap:8px; }
 .meeting-tiles-option { display:grid; gap:6px; margin-top:12px; font-size:13px; color:#b5c9d4; }
 .meeting-tiles-option select { min-height:40px; padding:6px 10px; border-radius:10px; border:1px solid #385063; background:#1a2a3b; color:#edf5fa; font:inherit; font-size:14px; }
+.meeting-audio-output { display:grid; gap:6px; margin:0 0 10px; color:#b5c9d4; font-size:13px; }
+.meeting-audio-output select { width:100%; min-height:42px; padding:7px 10px; border:1px solid #385063; border-radius:10px; background:#1a2a3b; color:#edf5fa; font:inherit; font-size:14px; }
+.meeting-audio-output select:focus-visible { outline:3px solid #43d9c2; outline-offset:2px; }
+.meeting-more-panel .meeting-audio-output + button { margin-bottom:12px; }
 
 /* Backgrounds and effects panel */
 .effects-panel .panel-header p { margin:4px 0 0; font-size:12px; color:#9fb6c4; font-weight:400; }

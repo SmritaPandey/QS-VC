@@ -1,7 +1,7 @@
 import ThemeSelect from '../components/ThemeSelect';
 import ActionContents from '../components/ActionContents';
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { haptic } from '../lib/haptics';
 import { AUTH_API, getToken } from '../lib/session';
 import { CameraCapture, watchCameraVisibility, watchCameraTrack, cameraAccessMessage } from '../lib/camera-capture';
@@ -9,6 +9,7 @@ import { CameraCapture, watchCameraVisibility, watchCameraTrack, cameraAccessMes
 export default function PreMeeting() {
     const { meetingCode } = useParams<{ meetingCode: string }>();
     const navigate = useNavigate();
+    const location = useLocation();
     const videoRef = useRef<HTMLVideoElement>(null);
     const [stream, setStream] = useState<MediaStream | null>(null);
     const [displayName, setDisplayName] = useState('');
@@ -46,7 +47,9 @@ export default function PreMeeting() {
         speakers: MediaDeviceInfo[];
     }>({ cameras: [], mics: [], speakers: [] });
 
-    const inviteLink = `${window.location.origin}/meeting/${meetingCode}/preview`;
+    const inviteToken = new URLSearchParams(location.search).get('invite');
+    const inviteQuery = inviteToken ? `?invite=${encodeURIComponent(inviteToken)}` : '';
+    const inviteLink = `${window.location.origin}/meeting/${meetingCode}/preview${inviteQuery}`;
 
     const refreshDevices = () => navigator.mediaDevices.enumerateDevices().then((devs) => {
         setDevices({
@@ -201,7 +204,7 @@ export default function PreMeeting() {
 
     const handleJoin = () => {
         const name = displayName.trim() || 'Guest';
-        navigate(`/meeting/${meetingCode}`, {
+        navigate(`/meeting/${meetingCode}${inviteQuery}`, {
             state: { displayName: name, audioMuted, videoOff, micId: micId || stream?.getAudioTracks()[0]?.getSettings().deviceId, cameraId: cameraId || stream?.getVideoTracks()[0]?.getSettings().deviceId },
         });
     };

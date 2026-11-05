@@ -90,7 +90,7 @@ export default function VideoGrid({ localStream, myPeerId, myRole, myOnStage, pe
         const stageAction = webinar && canManage && onToggleStage && peer.role !== 'host' && peer.role !== 'co-host'
             ? { onStage: !!peer.onStage, onToggleStage: () => onToggleStage(id, !peer.onStage) } : {};
         return <VideoTile key={id} size={tileSize} displayName={peer.displayName} audioTrack={peer.audioTrack} videoTrack={peer.videoTrack}
-            videoOff={!peer.videoTrack || !!peer.videoOff} audioMuted={peer.audioMuted ?? !peer.audioTrack} handRaised={peer.handRaised}
+            videoOff={!peer.videoTrack || (!peer.presenting && !!peer.videoOff)} audioMuted={peer.audioMuted ?? !peer.audioTrack} handRaised={peer.handRaised}
             sharing={peer.presenting} role={peer.role} speaking={speaking.has(id)} {...actions} {...stageAction} />;
     };
 
@@ -123,15 +123,20 @@ export default function VideoGrid({ localStream, myPeerId, myRole, myOnStage, pe
 }
 
 /** Plays every remote participant's audio, whether or not their tile is on screen. */
-export function RemoteAudio({ peers, volume = 1 }: { peers: Map<string, GridPeer>; volume?: number }) {
+export function RemoteAudio({ peers, volume = 1, outputDeviceId, onOutputError }: { peers: Map<string, GridPeer>; volume?: number; outputDeviceId?: string; onOutputError?: () => void }) {
     return <div className="qs-remote-audio" aria-hidden="true">
-        {Array.from(peers.values()).filter(p => p.audioTrack).map(p => <PeerAudio key={p.peerId} track={p.audioTrack!} volume={volume} />)}
+        {Array.from(peers.values()).filter(p => p.audioTrack).map(p => <PeerAudio key={p.peerId} track={p.audioTrack!} volume={volume} outputDeviceId={outputDeviceId} onOutputError={onOutputError} />)}
     </div>;
 }
 
-function PeerAudio({ track, volume }: { track: MediaStreamTrack; volume: number }) {
+function PeerAudio({ track, volume, outputDeviceId, onOutputError }: { track: MediaStreamTrack; volume: number; outputDeviceId?: string; onOutputError?: () => void }) {
     const ref = useRef<HTMLAudioElement>(null);
     useEffect(() => { if (ref.current) ref.current.srcObject = new MediaStream([track]); }, [track]);
     useEffect(() => { if (ref.current) ref.current.volume = volume; }, [volume, track]);
+    useEffect(() => {
+        const audio = ref.current as (HTMLAudioElement & { setSinkId?: (deviceId: string) => Promise<void> }) | null;
+        if (!audio?.setSinkId) return;
+        void audio.setSinkId(outputDeviceId || 'default').catch(() => onOutputError?.());
+    }, [outputDeviceId, onOutputError, track]);
     return <audio ref={ref} autoPlay />;
 }

@@ -6,6 +6,9 @@ import { config } from './config.js';
 import { logger } from './logger.js';
 import { roomManager } from './room-manager.js';
 import { attachSignalingWebSocket } from './ws-attach.js';
+import meetingInvitation from '../../../shared/meeting-invitation.cjs';
+
+const { createMeetingInviteToken } = meetingInvitation;
 
 const WEB_URL = (process.env.WEB_URL || 'https://qs-vc.vercel.app').replace(/\/$/, '');
 
@@ -51,7 +54,8 @@ app.get('/health', (_req, res) => {
 // Generate a simple meeting code
 app.post('/api/meetings/create', (_req, res) => {
     const code = generateMeetingCode();
-    res.json({ meetingCode: code, joinUrl: `${WEB_URL}/meeting/${code}` });
+    const inviteToken = createMeetingInviteToken(code);
+    res.json({ meetingCode: code, inviteToken, joinUrl: `${WEB_URL}/meeting/${code}/preview?invite=${encodeURIComponent(inviteToken)}` });
 });
 
 // Return ICE servers (STUN + TURN) for WebRTC NAT traversal
@@ -63,6 +67,7 @@ app.get('/api/ice-servers', (_req, res) => {
 app.post('/api/meetings', express.json(), (req, res) => {
     const code = generateMeetingCode();
     const { title, type, scheduledStart, scheduledEnd, settings } = req.body || {};
+    const inviteToken = createMeetingInviteToken(code);
 
     // Store in-memory for the session (production would persist to DB)
     const meeting = {
@@ -76,7 +81,8 @@ app.post('/api/meetings', express.json(), (req, res) => {
         settings: settings || {},
         status: type === 'scheduled' ? 'waiting' : 'active',
         createdAt: new Date().toISOString(),
-        joinUrl: `${WEB_URL}/meeting/${code}/preview`,
+        inviteToken,
+        joinUrl: `${WEB_URL}/meeting/${code}/preview?invite=${encodeURIComponent(inviteToken)}`,
     };
 
     logger.info(`Meeting created: ${code} (${meeting.type})`);

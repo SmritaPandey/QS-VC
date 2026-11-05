@@ -128,6 +128,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const navigate = useNavigate();
     const entitlements = useEntitlements();
     const state = { ...((location.state as any) || {}), ...(reconnecting ? carried : {}) };
+    const initialInviteToken = new URLSearchParams(location.search).get('invite') || '';
+    const [meetingInviteToken, setMeetingInviteToken] = useState(initialInviteToken);
+    const meetingPreviewPath = `/meeting/${meetingCode}/preview${meetingInviteToken ? `?invite=${encodeURIComponent(meetingInviteToken)}` : ''}`;
     const initialMeetingTitle = typeof state.title === 'string' ? state.title.trim() : '';
     const [meetingTitle, setMeetingTitle] = useState(initialMeetingTitle);
     useEffect(() => {
@@ -214,6 +217,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [linkCopied, setLinkCopied] = useState(false);
     const [connectionLost, setConnectionLost] = useState(false);
     const [notice, setNotice] = useState<string | null>(null);
+    const [audioOutputId, setAudioOutputId] = useState('');
+    const [audioOutputDevices, setAudioOutputDevices] = useState<Array<{ deviceId: string; label: string }>>([]);
     const [reactions, setReactions] = useState<MeetingReaction[]>([]);
     const [reactionsOpen, setReactionsOpen] = useState(false);
     // Speaking language for voice-to-text: saved choice, else the user's location.
@@ -256,6 +261,50 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         window.clearTimeout(noticeTimer.current);
         noticeTimer.current = window.setTimeout(() => setNotice(null), 4000);
     }, []);
+
+    const audioOutputSupported = typeof HTMLAudioElement !== 'undefined'
+        && typeof (HTMLAudioElement.prototype as HTMLAudioElement & { setSinkId?: unknown }).setSinkId === 'function';
+    const audioOutputPickerSupported = audioOutputSupported && typeof navigator !== 'undefined'
+        && typeof (navigator.mediaDevices as MediaDevices & { selectAudioOutput?: unknown } | undefined)?.selectAudioOutput === 'function';
+
+    useEffect(() => {
+        let active = true;
+        const refreshOutputs = async () => {
+            if (!navigator.mediaDevices?.enumerateDevices) return;
+            try {
+                const devices = await navigator.mediaDevices.enumerateDevices();
+                if (!active) return;
+                setAudioOutputDevices(devices.filter(device => device.kind === 'audiooutput').map((device, index) => ({
+                    deviceId: device.deviceId,
+                    label: device.label || `Audio device ${index + 1}`,
+                })));
+            } catch { /* Device discovery is optional; system audio remains available. */ }
+        };
+        void refreshOutputs();
+        navigator.mediaDevices?.addEventListener?.('devicechange', refreshOutputs);
+        return () => {
+            active = false;
+            navigator.mediaDevices?.removeEventListener?.('devicechange', refreshOutputs);
+        };
+    }, []);
+
+    const chooseAudioOutput = useCallback(async () => {
+        const devices = navigator.mediaDevices as MediaDevices & { selectAudioOutput?: () => Promise<MediaDeviceInfo> };
+        if (!devices.selectAudioOutput) return;
+        try {
+            const selected = await devices.selectAudioOutput();
+            setAudioOutputDevices(current => current.some(device => device.deviceId === selected.deviceId)
+                ? current
+                : [...current, { deviceId: selected.deviceId, label: selected.label || 'Selected audio device' }]);
+            setAudioOutputId(selected.deviceId);
+        } catch (error) {
+            if ((error as DOMException)?.name !== 'NotAllowedError') showNotice('Could not open the audio device picker.');
+        }
+    }, [showNotice]);
+
+    const reportAudioOutputError = useCallback(() => {
+        showNotice('Could not switch audio output. Your system default is still available.');
+    }, [showNotice]);
 
     function pushReaction(emoji: string, name: string, mine: boolean) {
         const reaction: MeetingReaction = {
@@ -328,6 +377,17 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         sessionActive.current = true;
         initializingRef.current = true;
         const alive = () => mounted && sessionActive.current;
+        let receiveReady = false;
+        const pendingProducers = new Map<string, string>();
+        const consumingProducers = new Set<string>();
+        const consumeProducer = async (peerId: string, producerId: string) => {
+            if (!peerId || !producerId) return;
+            if (!receiveReady) { pendingProducers.set(producerId, peerId); return; }
+            if (consumingProducers.has(producerId)) return;
+            consumingProducers.add(producerId);
+            try { await media.consume(peerId, producerId); }
+            catch (err) { consumingProducers.delete(producerId); console.error('Failed to consume:', err); }
+        };
         let settleAdmission: ((outcome: { result?: any; error?: string; cancelled?: boolean }) => void) | undefined;
         const dropped = () => {
             const current = { audioMuted: audioMutedRef.current, videoOff: videoOffRef.current };
@@ -363,7 +423,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 const stopWaitingStatus = signaling.on('waitingStatus', ({ status }) => { if (alive()) setWaitingAdmission(status === 'waitingForHost' ? 'host' : 'knock'); });
                 unsubscribe.push(stopAdmitted, stopRejected, stopWaitingStatus);
                 let joinResult = await signaling.request('joinRoom', {
-                    meetingCode, displayName,
+                    meetingCode, displayName, inviteToken: initialInviteToken || undefined,
                 });
                 if (joinResult.status === 'waiting' || joinResult.status === 'waitingForHost') {
                     if (alive()) { setRestoring(false); setWaitingAdmission(joinResult.status === 'waitingForHost' ? 'host' : 'knock'); }
@@ -376,6 +436,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 }
                 stopAdmitted(); stopRejected(); stopWaitingStatus(); settleAdmission = undefined;
                 if (!alive()) return;
+                if (typeof joinResult.inviteToken === 'string') setMeetingInviteToken(joinResult.inviteToken);
                 myPeerIdRef.current = joinResult.peerId;
                 canPublishRef.current = joinResult.canPublish !== false;
                 setMyRole(joinResult.role || 'member');
@@ -433,9 +494,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     signaling.on('peerLeft', ({ peerId }: any) => { setKnocks(current => current.filter(k => k.peerId !== peerId)); setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; }); }),
                     signaling.on('newPeer', ({ peerId }: any) => setKnocks(current => current.filter(k => k.peerId !== peerId))),
                     signaling.on('peerKicked', ({ peerId }: any) => setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; })),
-                    signaling.on('newProducer', async ({ peerId, producerId }: any) => {
-                        try { await media.consume(peerId, producerId); } catch (err) { console.error('Failed to consume:', err); }
-                    }),
+                    signaling.on('newProducer', ({ peerId, producerId }: any) => { void consumeProducer(peerId, producerId); }),
                     signaling.on('peerMuteChanged', ({ peerId, kind, muted }: any) => {
                         if (kind === 'audio') patchPeer(peerId, { audioMuted: !!muted });
                         if (kind === 'video') patchPeer(peerId, { videoOff: !!muted });
@@ -502,6 +561,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                             (info: ConsumerInfo) => patchPeer(info.peerId, info.kind === 'audio' ? { audioTrack: info.track } : { videoTrack: info.track }),
                             (_consumerId: string) => { }
                         );
+                        receiveReady = true;
                         const audioTrack = stream?.getAudioTracks()[0];
                         const videoTrack = stream?.getVideoTracks()[0];
                         if (audioTrack?.readyState === 'live') await media.produce(audioTrack, { source: 'mic' });
@@ -512,10 +572,12 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         media.setPaused('audio', audioMutedRef.current);
                         media.setPaused('video', videoOffRef.current);
                         for (const existingPeer of joinResult.existingPeers || []) {
-                            for (const producer of existingPeer.producers) {
-                                if (!alive()) return;
-                                try { await media.consume(existingPeer.peerId, producer.id); } catch (err) { console.error('Failed to consume:', err); }
-                            }
+                            for (const producer of existingPeer.producers || []) pendingProducers.set(producer.id, existingPeer.peerId);
+                        }
+                        for (const [producerId, producerPeerId] of pendingProducers) {
+                            if (!alive()) return;
+                            pendingProducers.delete(producerId);
+                            await consumeProducer(producerPeerId, producerId);
                         }
                         if (joinResult.polyBridgeEnabled) {
                             let stopped = false;
@@ -767,7 +829,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             setCameraNotice('You left this meeting. Rejoin to use your camera and microphone.');
         };
         const onPageShow = (event: PageTransitionEvent) => {
-            if (event.persisted) navigate(`/meeting/${meetingCode}/preview`, { replace: true });
+            if (event.persisted) navigate(meetingPreviewPath, { replace: true });
         };
         window.addEventListener('pagehide', onPageHide);
         window.addEventListener('pageshow', onPageShow);
@@ -777,7 +839,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             window.removeEventListener('pagehide', onPageHide);
             window.removeEventListener('pageshow', onPageShow);
         };
-    }, [applyMute, meetingCode, navigate, stopLocalMedia]);
+    }, [applyMute, meetingPreviewPath, navigate, stopLocalMedia]);
 
     const stopScreenShare = useCallback(async () => {
         if (!sharingRef.current) return;
@@ -979,7 +1041,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     }, []);
 
     const handleCopyLink = useCallback(() => {
-        const url = `${window.location.origin}/meeting/${meetingCode}/preview`;
+        const url = `${window.location.origin}${meetingPreviewPath}`;
         navigator.clipboard.writeText(url).then(() => {
             setLinkCopied(true);
             setTimeout(() => setLinkCopied(false), 2000);
@@ -994,7 +1056,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             setLinkCopied(true);
             setTimeout(() => setLinkCopied(false), 2000);
         });
-    }, [meetingCode]);
+    }, [meetingPreviewPath]);
 
     const formatDuration = (s: number) => {
         const h = Math.floor(s / 3600);
@@ -1128,7 +1190,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         <h1>{joinFailure.title}</h1>
         <p role="alert">{joinFailure.detail}</p>
         <div className="waiting-admission-actions">
-            <button type="button" onClick={() => navigate(`/meeting/${meetingCode}/preview`, { replace: true })}>Try again</button>
+            <button type="button" onClick={() => navigate(meetingPreviewPath, { replace: true })}>Try again</button>
             <button type="button" className="btn-text" onClick={() => navigate('/app')}>Back to meetings</button>
         </div>
     </div></main>;
@@ -1170,7 +1232,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             <div className="meeting-notices">
             {restoring && !connectionLost && <div className="meeting-notice" role="status"><span className="mi mi-sm meeting-spin" aria-hidden="true">progress_activity</span> Reconnecting… Hold on, we’re getting you back into the meeting.</div>}
             {connectionLost && <div className="meeting-notice" role="alert">Connection lost. Check your internet connection, then rejoin.
-                <button className="btn-outline" onClick={() => navigate(`/meeting/${meetingCode}/preview`, { replace: true })}>Rejoin meeting</button>
+                <button className="btn-outline" onClick={() => navigate(meetingPreviewPath, { replace: true })}>Rejoin meeting</button>
             </div>}
             {knocks.length > 0 && (myRole === 'host' || myRole === 'co-host') && <div className="meeting-knock" role="alert">
                 <span className="mi" aria-hidden="true">person_add</span>
@@ -1196,7 +1258,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     <VideoGrid localStream={displayedLocalStream} myPeerId={myPeerIdRef.current} myRole={myRole} myOnStage={myOnStage} peers={peers} displayName={displayName} videoOff={screenSharing ? false : videoOff} audioMuted={audioMuted} handRaised={handRaised} sharing={screenSharing}
                         viewMode={viewMode} tilesPerPage={tilesPerPage} webinar={webinar} speaking={speaking} activeSpeaker={activeSpeaker} spotlightId={spotlightId} pinnedId={pinnedId}
                         canManage={manager} onPin={setPinnedId} onSpotlight={setSpotlightFor} onToggleStage={setStageFor} />
-                    <RemoteAudio peers={peers} volume={translatedSpeaking ? 0.2 : 1} />
+                    <RemoteAudio peers={peers} volume={translatedSpeaking ? 0.2 : 1} outputDeviceId={audioOutputId} onOutputError={reportAudioOutputError} />
                     <ReactionsOverlay reactions={reactions} pickerOpen={reactionsOpen} onSendReaction={handleSendReaction} onClosePicker={closeReactions} onExpire={expireReaction} />
                     <MeetingCaptions translatedSpeaking={translatedSpeaking} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
                         showCaptions={captionsOn} onShowCaptionsChange={setCaptionsOn} shareSpeech={shareSpeech} onShareSpeechChange={setShareSpeech} />
@@ -1223,6 +1285,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 onToggleActivities={() => { setActivitiesOpen(value => !value); setHostToolsOpen(false); setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); setEffectsOpen(false); }}
                 onToggleHostTools={manager ? () => { setHostToolsOpen(value => !value); setActivitiesOpen(false); setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); } : undefined}
                 viewMode={viewMode} onChangeView={changeView} tilesPerPage={tilesPerPage} onChangeTilesPerPage={changeTiles} activitySignal={mutedSpeechPulse} keepSideVisible={mutedSpeechNotice}
+                audioOutputId={audioOutputId} audioOutputDevices={audioOutputDevices} audioOutputSupported={audioOutputSupported}
+                onAudioOutputChange={setAudioOutputId} onChooseAudioOutput={audioOutputPickerSupported ? chooseAudioOutput : undefined}
                 captionsOn={captionsOn} onToggleCaptions={toggleCaptions}
                 fullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen}
                 effectsOn={effect.kind !== 'none'} onOpenEffects={() => { closePanels(); setEffectsOpen(true); setLanguageOpen(false); setReactionsOpen(false); }}

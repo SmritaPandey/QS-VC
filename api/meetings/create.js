@@ -2,6 +2,8 @@
  * Vercel serverless fallback for guest meeting creation.
  * Used when Render meeting/signaling services are cold or stale.
  */
+const { createMeetingInviteToken } = require('../../shared/meeting-invitation.cjs');
+
 function generateMeetingCode() {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const segments = [];
@@ -29,12 +31,14 @@ module.exports = (req, res) => {
   }
 
   const meetingCode = generateMeetingCode();
+  const inviteToken = createMeetingInviteToken(meetingCode);
   const host = req.headers['x-forwarded-host'] || req.headers.host || 'qs-vc.vercel.app';
   const proto = req.headers['x-forwarded-proto'] || 'https';
 
   return res.status(200).json({
     meetingCode,
-    joinUrl: `${proto}://${host}/meeting/${meetingCode}/preview`,
+    inviteToken,
+    joinUrl: `${proto}://${host}/meeting/${meetingCode}/preview?invite=${encodeURIComponent(inviteToken)}`,
     source: 'vercel-api',
   });
 };

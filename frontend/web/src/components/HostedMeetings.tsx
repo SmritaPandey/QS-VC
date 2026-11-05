@@ -8,6 +8,7 @@ const API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || 
 
 export type HostedMeeting = {
     id: string; meetingCode: string; title: string; status: string; type?: string;
+    inviteToken?: string;
     scheduledStart?: string | null; scheduledEnd?: string | null; actualStart?: string | null; actualEnd?: string | null; createdAt: string;
 };
 
@@ -32,7 +33,7 @@ export function groupHosted(meetings: HostedMeeting[], now = Date.now()) {
 function Row({ meeting, label, onCancelled, onExpired }: { meeting: HostedMeeting; label: string; onCancelled: () => void; onExpired: () => void }) {
     const [copied, setCopied] = useState(false);
     const start = when(meeting);
-    const link = `${window.location.origin}/meeting/${encodeURIComponent(meeting.meetingCode)}/preview`;
+    const link = `${window.location.origin}/meeting/${encodeURIComponent(meeting.meetingCode)}/preview${meeting.inviteToken ? `?invite=${encodeURIComponent(meeting.inviteToken)}` : ''}`;
     const ended = meeting.status === 'ended';
     return <article className="workspace-meeting-row" data-status={meeting.status}>
         <time dateTime={start.toISOString()}><span className="workspace-row-day">{fmtDay(start)}</span>{meeting.scheduledStart || meeting.actualStart ? fmtTime(start) : ''}</time>
