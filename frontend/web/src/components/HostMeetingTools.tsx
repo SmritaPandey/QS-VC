@@ -42,6 +42,8 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
     const refreshVersion = useRef(0);
     const closeRef = useRef<HTMLButtonElement>(null);
     const isManager = role === 'host' || role === 'co-host';
+    const coHostCount = participants.filter(peer => peer.role === 'co-host').length;
+    const coHostLimitReached = role === 'host' && coHostCount >= 5;
     const refresh = async () => {
         const version = ++refreshVersion.current;
         try {
@@ -97,7 +99,7 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
         <div className="host-tools-content" aria-busy={busy}>
             {error && <p className="host-tools-error" role="alert">{error}</p>}
             {loading && <p role="status">Checking who is waiting…</p>}
-            <WaitingRoom isHost waitingPeers={waiting} busy={busy || loading} onAdmit={targetPeerId => { void run('admitPeer', { targetPeerId }); }} onReject={targetPeerId => { void run('rejectPeer', { targetPeerId }); }} onAdmitAll={() => { void run('admitAll'); }} />
+            <WaitingRoom isHost waitingPeers={waiting} busy={busy || loading} onAdmit={targetPeerId => { void run('admitPeer', { targetPeerId }); }} onKeepWaiting={targetPeerId => { void run('keepWaiting', { targetPeerId }); }} onReject={targetPeerId => { void run('rejectPeer', { targetPeerId }); }} onAdmitAll={() => { void run('admitAll'); }} />
 
             {roomDevicesEnabled && role === 'host' && <section className="host-tools-settings" aria-labelledby="host-room-devices">
                 <h3 id="host-room-devices">Room devices</h3>
@@ -116,7 +118,7 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
             </section>}
             <section className="host-tools-settings" aria-labelledby="host-access-title">
                 <h3 id="host-access-title">Meeting access</h3>
-                {toggle('quick', 'Quick access', 'bolt', !settings.waitingRoomEnabled, value => setSetting('waitingRoomEnabled', !value), settings.waitingRoomEnabled ? 'Off: people ask to join and you let them in.' : 'On: people with the link join without asking.')}
+                <p className="host-access-policy"><span className="mi mi-sm" aria-hidden="true">hourglass_top</span> Everyone waits for host or co-host approval before entering.</p>
                 {toggle('locked', 'Lock meeting', 'lock', settings.locked, value => setSetting('locked', value), 'No one new can join.')}
                 {toggle('muteOnEntry', 'Mute people when they join', 'mic_off', settings.muteOnEntry, value => setSetting('muteOnEntry', value))}
             </section>
@@ -128,6 +130,8 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
 
             <section aria-labelledby="host-people-title">
                 <div className="host-tools-row"><h3 id="host-people-title">In the meeting ({participants.length})</h3></div>
+                {role === 'host' && <p className="host-cohost-count">Co-hosts: {coHostCount} of 5</p>}
+                {coHostLimitReached && <p id="host-cohost-limit" className="host-cohost-limit" role="status">All five co-host seats are in use. Remove a co-host before promoting another participant.</p>}
                 <div className="host-tools-bulk">
                     <button type="button" disabled={busy || others.length === 0} onClick={() => { void run('muteAll', { kind: 'audio' }); }}><span className="mi mi-sm" aria-hidden="true">mic_off</span>Mute all</button>
                     <button type="button" disabled={busy || raisedHands === 0} onClick={() => { void run('lowerHand', {}); }}><span className="mi mi-sm" aria-hidden="true">back_hand</span>Lower all hands{raisedHands ? ` (${raisedHands})` : ''}</button>
@@ -141,7 +145,7 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
                         <button type="button" className="host-icon-btn" disabled={busy || peer.audioMuted} aria-label={peer.audioMuted ? `${peer.displayName} is muted` : `Mute ${peer.displayName}`} title={peer.audioMuted ? 'Muted' : 'Mute'} onClick={() => { void run('hostMutePeer', { targetPeerId: peer.peerId, kind: 'audio' }); }}><span className="mi mi-sm" aria-hidden="true">{peer.audioMuted ? 'mic_off' : 'mic'}</span></button>
                         <button type="button" className="host-icon-btn" disabled={busy || peer.videoOff} aria-label={peer.videoOff ? `${peer.displayName}'s camera is off` : `Turn off ${peer.displayName}'s camera`} title={peer.videoOff ? 'Camera off' : 'Turn off camera'} onClick={() => { void run('hostMutePeer', { targetPeerId: peer.peerId, kind: 'video' }); }}><span className="mi mi-sm" aria-hidden="true">{peer.videoOff ? 'videocam_off' : 'videocam'}</span></button>
                         {peer.handRaised && <button type="button" className="host-icon-btn" disabled={busy} aria-label={`Lower ${peer.displayName}'s hand`} title="Lower hand" onClick={() => { void run('lowerHand', { targetPeerId: peer.peerId }); }}><span className="mi mi-sm" aria-hidden="true">back_hand</span></button>}
-                        {role === 'host' && <button type="button" className="host-text-btn" disabled={busy} onClick={() => { void run('changeRole', { targetPeerId: peer.peerId, newRole: peer.role === 'co-host' ? 'member' : 'co-host' }); }}>{peer.role === 'co-host' ? 'Remove co-host' : 'Make co-host'}</button>}
+                        {role === 'host' && <button type="button" className="host-text-btn" disabled={busy || (peer.role !== 'co-host' && coHostLimitReached)} aria-describedby={peer.role !== 'co-host' && coHostLimitReached ? 'host-cohost-limit' : undefined} title={peer.role !== 'co-host' && coHostLimitReached ? 'The meeting can have no more than five co-hosts.' : undefined} onClick={() => { void run('changeRole', { targetPeerId: peer.peerId, newRole: peer.role === 'co-host' ? 'member' : 'co-host' }); }}>{peer.role === 'co-host' ? 'Remove co-host' : 'Make co-host'}</button>}
                         <button type="button" className="host-text-btn host-danger" disabled={busy} onClick={() => setConfirmation(peer.peerId)}>Remove</button>
                     </div>}
                     {confirmation === peer.peerId && <div className="host-tools-confirm"><p>Remove {peer.displayName} from this meeting?</p><button type="button" disabled={busy} onClick={() => { void run('kickPeer', { targetPeerId: peer.peerId }); }}>Remove</button><button type="button" disabled={busy} onClick={() => setConfirmation(null)}>Cancel</button></div>}

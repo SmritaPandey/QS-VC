@@ -18,7 +18,7 @@ import pino from 'pino';
 import { createSession, validateSession, requireEnterpriseTerm, endSession, sessionErrorStatus } from './sessions.js';
 import { contactRouter, contactRequestError } from './contact.js';
 import { effectiveRole, isPlatformAdmin } from './platform-admins.js';
-import { FEATURE_MIN_PLAN, getEntitlements } from '../../../shared/entitlements.cjs';
+import { FEATURE_MIN_PLAN, getEntitlements, getPrivateConversationLimitMs } from '../../../shared/entitlements.cjs';
 
 dotenv.config({ path: '../../.env' });
 assertJwtSecret();
@@ -349,7 +349,26 @@ app.get('/api/auth/verify', async (req, res) => {
 
         const token = authHeader.slice(7);
         const payload = await verifyToken(token);
-        res.json({ valid: true, payload });
+        const result = await pool.query(
+            `SELECT u.subscription_plan, u.trial_ends_at, u.enterprise_status, t.plan AS tenant_plan
+             FROM users u JOIN tenants t ON t.id = u.tenant_id
+             WHERE u.id = $1 AND u.tenant_id = $2 AND u.is_active AND t.is_active`,
+            [payload.sub, payload.tenantId],
+        );
+        if (!result.rows.length) return res.status(401).json({ valid: false, error: 'Invalid token' });
+        const now = new Date();
+        if (process.env.NODE_ENV === 'development' && process.env.QSVC_TRIAL_NOW) {
+            const fakeNow = new Date(process.env.QSVC_TRIAL_NOW);
+            if (!Number.isNaN(fakeNow.getTime())) now.setTime(fakeNow.getTime());
+        }
+        const entitlements = getEntitlements(result.rows[0], now);
+        res.set('Cache-Control', 'no-store');
+        res.json({ valid: true, payload: {
+            ...payload,
+            plan: entitlements.plan,
+            status: entitlements.status,
+            privateConversationLimitMs: getPrivateConversationLimitMs({ sub: payload.sub, ...entitlements }),
+        } });
     } catch (err) {
         const status = sessionErrorStatus(err);
         res.status(status).json({ valid: false, error: status === 401 ? 'Invalid token' : 'Authentication temporarily unavailable' });
@@ -377,7 +396,7 @@ app.get('/api/auth/me/entitlements', async (req, res) => {
     res.set('Cache-Control', 'no-store');
     const authorization = req.get('authorization');
     if (!authorization?.startsWith('Bearer ')) {
-        return res.json({ plan: 'guest', status: 'paid_active', trialEndsAt: null, features: [], featureMinimumPlans: FEATURE_MIN_PLAN });
+        return res.json({ plan: 'guest', status: 'paid_active', trialEndsAt: null, features: [], featureMinimumPlans: FEATURE_MIN_PLAN, privateConversationLimitSeconds: 0 });
     }
     try {
         const user = await verifyToken(authorization.slice(7));
@@ -394,7 +413,12 @@ app.get('/api/auth/me/entitlements', async (req, res) => {
             const fakeNow = new Date(process.env.QSVC_TRIAL_NOW);
             if (!Number.isNaN(fakeNow.getTime())) now = fakeNow;
         }
-        res.json(getEntitlements(row, now));
+        const entitlements = getEntitlements(row, now);
+        const privateConversationLimitMs = getPrivateConversationLimitMs({ sub: user.sub, ...entitlements });
+        res.json({
+            ...entitlements,
+            privateConversationLimitSeconds: privateConversationLimitMs === null ? null : Math.floor(privateConversationLimitMs / 1000),
+        });
     } catch (error) {
         const status = sessionErrorStatus(error);
         res.status(status).json({ error: status === 401 ? 'Invalid session' : 'Entitlements unavailable' });

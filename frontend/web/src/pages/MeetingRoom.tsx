@@ -24,6 +24,7 @@ import BrandLogo from '../components/BrandLogo';
 import ControlBar from '../components/ControlBar';
 import MeetingChat from '../components/MeetingChat';
 import ParticipantsPanel from '../components/ParticipantsPanel';
+import PrivateConversationPanel, { type ActivePrivateConversation, type PrivateConversationInvite } from '../components/PrivateConversationPanel';
 import ReactionsOverlay, { MeetingReaction, REACTION_DURATION } from '../components/ReactionsOverlay';
 import AIChatBot from '../components/AIChatBot';
 import MeetingCaptions from '../components/MeetingCaptions';
@@ -41,6 +42,7 @@ interface PeerData {
     displayName: string;
     audioTrack?: MediaStreamTrack;
     videoTrack?: MediaStreamTrack;
+    screenVideoTrack?: MediaStreamTrack;
     role?: string;
     audioMuted?: boolean;
     videoOff?: boolean;
@@ -177,12 +179,18 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const finalizingRecording = useRef<Promise<boolean> | null>(null);
     const finishRecordingRef = useRef<() => Promise<boolean>>(async () => true);
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
+    const [privateInvite, setPrivateInvite] = useState<PrivateConversationInvite | null>(null);
+    const [privateConversation, setPrivateConversation] = useState<ActivePrivateConversation | null>(null);
+    const [privateAudioTrack, setPrivateAudioTrack] = useState<MediaStreamTrack | null>(null);
+    const [privateMicMuted, setPrivateMicMuted] = useState(false);
+    const [focusPrivateAudio, setFocusPrivateAudio] = useState(false);
     const [chatOpen, setChatOpen] = useState(false);
     const [participantsOpen, setParticipantsOpen] = useState(false);
     const [activitiesOpen, setActivitiesOpen] = useState(false);
     const [hostToolsOpen, setHostToolsOpen] = useState(false);
     const [waitingAdmission, setWaitingAdmission] = useState<WaitingMode | null>(null);
-    const [roomSettings, setRoomSettings] = useState<RoomHostSettings>({ locked: false, waitingRoomEnabled: false, muteOnEntry: false, allowScreenShare: true, allowChat: true, allowMicrophone: true, allowCamera: true, allowReactions: true });
+    const waitingStatusRef = useRef<WaitingMode | null>(null);
+    const [roomSettings, setRoomSettings] = useState<RoomHostSettings>({ locked: false, waitingRoomEnabled: true, muteOnEntry: false, allowScreenShare: true, allowChat: true, allowMicrophone: true, allowCamera: true, allowReactions: true });
     const [joinFailure, setJoinFailure] = useState<JoinFailure | null>(null);
     const [restoring, setRestoring] = useState(reconnecting);
     const [knocks, setKnocks] = useState<Array<{ peerId: string; displayName: string }>>([]);
@@ -234,6 +242,12 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     // Refs mirror live state so async handlers and signaling callbacks never act on stale values.
     const audioMutedRef = useRef<boolean>(!!state.audioMuted);
+    const privateConversationRef = useRef<ActivePrivateConversation | null>(null);
+    const privateInviteRef = useRef<PrivateConversationInvite | null>(null);
+    const privateMicMutedRef = useRef(false);
+    const previousMeetingMicMutedRef = useRef<boolean | null>(null);
+    const privateMicTrackRef = useRef<MediaStreamTrack | null>(null);
+    const privateConsumerIdRef = useRef<string | null>(null);
     const videoOffRef = useRef<boolean>(!!state.videoOff || document.hidden);
     const localStreamRef = useRef<MediaStream | null>(null);
     const stopSpeechRecognition = useRef<() => void>(() => {});
@@ -262,6 +276,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const processorSourceRef = useRef<string>('');
     const videoAreaRef = useRef<HTMLDivElement>(null);
     const compositeRef = useRef<MeetingComposite | null>(null);
+    privateConversationRef.current = privateConversation;
+    privateInviteRef.current = privateInvite;
+    privateMicMutedRef.current = privateMicMuted;
     useEffect(() => { peersRef.current = peers; }, [peers]);
 
     const showNotice = useCallback((text: string) => {
@@ -347,14 +364,14 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         if (kind === 'video' && muted) cameraCapture.current.stop();
         stream?.getTracks().filter((t) => t.kind === kind).forEach((t) => { t.enabled = !muted; });
         // While sharing, the video producer carries the screen, so camera-off must not pause it.
-        media.setPaused(kind, kind === 'video' ? muted && !sharingRef.current : muted);
+        media.setPaused(kind, muted, kind === 'audio' ? 'mic' : 'camera');
         if (kind === 'audio') { audioMutedRef.current = muted; setAudioMuted(muted); }
         else { videoOffRef.current = muted; setVideoOff(muted); }
         if (announce && joinedRef.current) signaling.request('muteStateChanged', { kind, muted }).catch((error: Error) => {
             // The host turned this permission off: go back to muted and say why.
             if (!muted && /host has turned off/i.test(error?.message || '')) {
                 stream?.getTracks().filter((t) => t.kind === kind).forEach((t) => { t.enabled = false; });
-                media.setPaused(kind, kind === 'video' ? !sharingRef.current : true);
+                media.setPaused(kind, true, kind === 'audio' ? 'mic' : 'camera');
                 if (kind === 'audio') { audioMutedRef.current = true; setAudioMuted(true); }
                 else { videoOffRef.current = true; setVideoOff(true); cameraCapture.current.stop(); }
                 setNotice(error.message);
@@ -399,7 +416,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
         try {
             if (media.canSend) {
-                if (media.hasProducer('audio')) await media.replaceTrack('audio', outgoingTrack);
+                if (media.hasProducer('audio', 'mic')) await media.replaceTrack('audio', outgoingTrack, 'mic');
                 else await media.produce(outgoingTrack, { source: 'mic' });
             }
             if (!sessionActive.current || revision !== sessionRevision.current) throw new Error('The meeting disconnected before your microphone settings could be applied.');
@@ -414,9 +431,92 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         noiseSuppressorRef.current = nextSuppressor;
         processedAudioTrackRef.current = nextProcessedTrack;
         if (effectiveMode !== mode) { noiseModeRef.current = effectiveMode; setNoiseMode(effectiveMode); }
-        media.setPaused('audio', audioMutedRef.current);
+        media.setPaused('audio', audioMutedRef.current, 'mic');
         return effectiveMode;
     }, [showNotice]);
+
+    const publishPrivateAudio = useCallback(async () => {
+        const conversation = privateConversationRef.current;
+        const rawTrack = localStreamRef.current?.getAudioTracks().find(track => track.readyState === 'live');
+        if (!conversation || !rawTrack || !media.canSend) return false;
+        const sourceTrack = processedAudioTrackRef.current?.readyState === 'live' ? processedAudioTrackRef.current : rawTrack;
+        const track = sourceTrack.clone();
+        track.enabled = !privateMicMutedRef.current;
+        privateMicTrackRef.current?.stop();
+        privateMicTrackRef.current = track;
+        try {
+            await media.closeProducerBySource('private-audio');
+            await media.produce(track, { source: 'private-audio', type: 'private-audio', conversationId: conversation.conversationId });
+            media.setPaused('audio', privateMicMutedRef.current, 'private-audio');
+            return true;
+        } catch (error) {
+            track.stop();
+            privateMicTrackRef.current = null;
+            console.warn('[MeetingRoom] Private audio could not start:', error);
+            return false;
+        }
+    }, []);
+
+    const finishPrivateConversationLocally = useCallback((conversationId?: string) => {
+        const current = privateConversationRef.current;
+        const invite = privateInviteRef.current;
+        if (conversationId && current?.conversationId && current.conversationId !== conversationId) return;
+        if (conversationId && invite?.conversationId && invite.conversationId !== conversationId) return;
+        if (current) {
+            void media.closeProducerBySource('private-audio').catch(() => {});
+            privateMicTrackRef.current?.stop();
+            privateMicTrackRef.current = null;
+            privateConsumerIdRef.current = null;
+            setPrivateAudioTrack(null);
+            const wasMuted = previousMeetingMicMutedRef.current;
+            if (wasMuted !== null) {
+                media.setPaused('audio', wasMuted, 'mic');
+                localStreamRef.current?.getAudioTracks().forEach(track => { track.enabled = !wasMuted; });
+                audioMutedRef.current = wasMuted;
+                setAudioMuted(wasMuted);
+                if (joinedRef.current) signaling.request('muteStateChanged', { kind: 'audio', muted: wasMuted }).catch(() => {});
+            }
+            previousMeetingMicMutedRef.current = null;
+            privateMicMutedRef.current = false;
+            setPrivateMicMuted(false);
+            setFocusPrivateAudio(false);
+            privateConversationRef.current = null;
+            setPrivateConversation(null);
+        }
+        privateInviteRef.current = null;
+        setPrivateInvite(null);
+    }, []);
+
+    const activatePrivateConversation = useCallback((details: any) => {
+        const conversationId = String(details?.conversationId || '');
+        if (!conversationId) return;
+        const otherPeerId = String(details.peerId || '');
+        const otherDisplayName = details.displayName || peersRef.current.get(otherPeerId)?.displayName || 'participant';
+        const wasMuted = audioMutedRef.current;
+        previousMeetingMicMutedRef.current = wasMuted;
+        privateMicMutedRef.current = wasMuted;
+        setPrivateMicMuted(wasMuted);
+        // Pause the ordinary meeting producer; the separate producer is authorized to one peer only.
+        media.setPaused('audio', true, 'mic');
+        audioMutedRef.current = true;
+        setAudioMuted(true);
+        const active: ActivePrivateConversation = {
+            conversationId,
+            otherDisplayName,
+            otherPeerId: otherPeerId || undefined,
+            endsAt: details.expiresAt || null,
+            durationMs: details.durationMs ?? null,
+            otherMicrophoneMuted: !!details.peerMuted,
+        };
+        privateConversationRef.current = active;
+        privateInviteRef.current = null;
+        setPrivateConversation(active);
+        setPrivateInvite(null);
+        setFocusPrivateAudio(false);
+        playSound('success');
+        if (!wasMuted) void publishPrivateAudio().then(ok => { if (!ok) showNotice('The private conversation is connected, but your microphone could not be shared. Check microphone access and unmute the private mic to retry.'); });
+        else showNotice(`Private conversation with ${otherDisplayName} started. Your meeting mic is muted; unmute the private mic when you’re ready to speak.`);
+    }, [publishPrivateAudio, showNotice]);
 
     const requestPlanFeature = useCallback((feature: string) => {
         if (entitlements.loading) { showNotice('Checking your plan…'); return; }
@@ -451,6 +551,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         noiseSuppressorRef.current?.stop();
         noiseSuppressorRef.current = null;
         processedAudioTrackRef.current = null;
+        privateMicTrackRef.current?.stop();
+        privateMicTrackRef.current = null;
+        previousMeetingMicMutedRef.current = null;
+        privateConversationRef.current = null;
+        privateInviteRef.current = null;
         sessionActive.current = false;
         sessionRevision.current++;
         cameraCapture.current.stop();
@@ -475,6 +580,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         let receiveReady = false;
         const pendingProducers = new Map<string, string>();
         const consumingProducers = new Set<string>();
+        const consumerRoutes = new Map<string, { peerId: string; kind: MediaKind; source: string }>();
         const presenterUpdates = new Map<string, boolean>();
         let peerSnapshotReady = false;
         const consumeProducer = async (peerId: string, producerId: string) => {
@@ -517,6 +623,32 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 }
                 void consumeProducer(peerId, producerId);
             }),
+            signaling.on('privateConversationInvite', ({ conversationId, initiatorPeerId, displayName: from, durationMs }: any) => {
+                if (!conversationId || privateConversationRef.current) return;
+                setPrivateInvite({ conversationId, otherPeerId: initiatorPeerId, otherDisplayName: from || 'A host', direction: 'incoming', durationMs });
+                playSound('notice');
+            }),
+            signaling.on('privateConversationState', ({ conversationId, status, targetPeerId, displayName: targetName, durationMs, peerId, muted }: any) => {
+                if (status === 'invited' && conversationId) setPrivateInvite({ conversationId, otherPeerId: targetPeerId, otherDisplayName: targetName || 'participant', direction: 'outgoing', durationMs });
+                if (status === 'active' && peerId && typeof muted === 'boolean') {
+                    setPrivateConversation(current => {
+                        if (!current || current.conversationId !== conversationId || current.otherPeerId !== peerId) return current;
+                        const next = { ...current, otherMicrophoneMuted: muted };
+                        privateConversationRef.current = next;
+                        return next;
+                    });
+                }
+            }),
+            signaling.on('privateConversationStarted', (details: any) => activatePrivateConversation(details)),
+            signaling.on('privateConversationEnded', ({ conversationId, reason }: any) => {
+                const active = privateConversationRef.current?.conversationId === conversationId;
+                const invited = privateInviteRef.current?.conversationId === conversationId;
+                if (!active && !invited) return;
+                finishPrivateConversationLocally(conversationId);
+                if (active && reason && !['ended', 'cancelled', 'declined', 'participant-left', 'time-limit'].includes(reason)) showNotice('The private conversation ended.');
+                else if (active && reason === 'time-limit') showNotice('Your private conversation time is up. Your meeting microphone is restored.');
+                else if (active && reason === 'participant-left') showNotice('The private conversation ended because the other person left.');
+            }),
             signaling.on('presenterChanged', ({ peerId, presenting }: any) => {
                 if (peerId === myPeerIdRef.current) return;
                 const isPresenting = !!presenting;
@@ -531,16 +663,25 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 localStreamRef.current = stream;
                 await signaling.connect();
                 if (!alive()) return;
+                waitingStatusRef.current = null;
                 const admission = new Promise<{ result?: any; error?: string; cancelled?: boolean }>(resolve => { settleAdmission = resolve; });
                 const stopAdmitted = signaling.on('admitted', result => settleAdmission?.({ result }));
                 const stopRejected = signaling.on('rejected', ({ reason }) => settleAdmission?.({ error: reason || 'The host declined your entry.' }));
-                const stopWaitingStatus = signaling.on('waitingStatus', ({ status }) => { if (alive()) setWaitingAdmission(status === 'waitingForHost' ? 'host' : 'knock'); });
+                const stopWaitingStatus = signaling.on('waitingStatus', ({ status }) => {
+                    if (!alive()) return;
+                    const mode: WaitingMode = status === 'waitingForHost' ? 'host' : status === 'keptWaiting' ? 'seen' : 'knock';
+                    waitingStatusRef.current = mode;
+                    setWaitingAdmission(mode);
+                });
                 unsubscribe.push(stopAdmitted, stopRejected, stopWaitingStatus);
                 let joinResult = await signaling.request('joinRoom', {
                     meetingCode, displayName, inviteToken: initialInviteToken || undefined,
                 });
-                if (joinResult.status === 'waiting' || joinResult.status === 'waitingForHost') {
-                    if (alive()) { setRestoring(false); setWaitingAdmission(joinResult.status === 'waitingForHost' ? 'host' : 'knock'); }
+                if (joinResult.status === 'waiting' || joinResult.status === 'waitingForHost' || joinResult.status === 'keptWaiting') {
+                    if (alive()) {
+                        setRestoring(false);
+                        setWaitingAdmission(waitingStatusRef.current || (joinResult.status === 'waitingForHost' ? 'host' : joinResult.status === 'keptWaiting' ? 'seen' : 'knock'));
+                    }
                     const outcome = await admission;
                     if (!alive() || outcome.cancelled) return;
                     setWaitingAdmission(null);
@@ -672,8 +813,30 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         await media.createRecvTransport(joinResult.recvTransport);
                         if (!alive()) return;
                         media.setConsumerCallbacks(
-                            (info: ConsumerInfo) => patchPeer(info.peerId, info.kind === 'audio' ? { audioTrack: info.track } : { videoTrack: info.track }),
-                            (_consumerId: string) => { }
+                            (info: ConsumerInfo) => {
+                                const source = String(info.appData?.source || info.appData?.type || '');
+                                consumerRoutes.set(info.id, { peerId: info.peerId, kind: info.kind, source });
+                                if (source === 'private-audio' && info.kind === 'audio') {
+                                    privateConsumerIdRef.current = info.id;
+                                    setPrivateAudioTrack(info.track);
+                                } else if (info.kind === 'video' && (source === 'screen' || info.appData?.type === 'screen')) {
+                                    if (info.peerId !== myPeerIdRef.current) patchPeer(info.peerId, { screenVideoTrack: info.track, presenting: true });
+                                } else if (info.peerId !== myPeerIdRef.current) {
+                                    patchPeer(info.peerId, info.kind === 'audio' ? { audioTrack: info.track } : { videoTrack: info.track });
+                                }
+                            },
+                            (consumerId: string) => {
+                                const route = consumerRoutes.get(consumerId);
+                                consumerRoutes.delete(consumerId);
+                                if (!route) return;
+                                if (route.source === 'private-audio') {
+                                    if (privateConsumerIdRef.current === consumerId) { privateConsumerIdRef.current = null; setPrivateAudioTrack(null); }
+                                } else if (route.peerId !== myPeerIdRef.current) {
+                                    if (route.kind === 'video' && route.source === 'screen') patchPeer(route.peerId, { screenVideoTrack: undefined, presenting: false });
+                                    else if (route.kind === 'video') patchPeer(route.peerId, { videoTrack: undefined });
+                                    else patchPeer(route.peerId, { audioTrack: undefined });
+                                }
+                            }
                         );
                         receiveReady = true;
                         const audioTrack = stream?.getAudioTracks()[0];
@@ -683,8 +846,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         if (videoTrack?.readyState === 'live' && !videoOffRef.current) await media.produce(videoTrack, { source: 'camera' });
                         if (!alive()) return;
                         // Producers start live; match them to the current (possibly muted) state.
-                        media.setPaused('audio', audioMutedRef.current);
-                        media.setPaused('video', videoOffRef.current);
+                        media.setPaused('audio', audioMutedRef.current, 'mic');
+                        media.setPaused('video', videoOffRef.current, 'camera');
                         const roomSnapshot = await signaling.request('getRoomInfo', {}).catch(() => null);
                         const peersForSync = new Map<string, any>((joinResult.existingPeers || []).map((peer: any) => [peer.peerId, peer]));
                         for (const participant of roomSnapshot?.participants || []) peersForSync.set(participant.peerId, participant);
@@ -815,7 +978,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 next.enabled = wasOn;
                 watchMicrophone(next);
                 await publishAudioTrack(next);
-                media.setPaused('audio', !wasOn);
+                media.setPaused('audio', !wasOn, 'mic');
                 setLocalStream(new MediaStream(current.getTracks()));
                 showNotice(`Your microphone was disconnected. Switched to ${deviceLabel(next)}.`);
             } catch {
@@ -825,9 +988,92 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [applyMute, publishAudioTrack, showNotice]);
 
+    const togglePrivateMicrophone = useCallback(async () => {
+        const conversationId = privateConversationRef.current?.conversationId;
+        if (!conversationId) return;
+        const isSameConversation = () => privateConversationRef.current?.conversationId === conversationId;
+        const nextMuted = !privateMicMutedRef.current;
+        if (nextMuted) {
+            privateMicMutedRef.current = true;
+            setPrivateMicMuted(true);
+            if (privateMicTrackRef.current) privateMicTrackRef.current.enabled = false;
+            media.setPaused('audio', true, 'private-audio');
+            try {
+                await signaling.request('setPrivateConversationMuted', { conversationId, muted: true });
+            } catch (error) {
+                if (isSameConversation()) {
+                    privateMicMutedRef.current = false;
+                    setPrivateMicMuted(false);
+                    if (privateMicTrackRef.current) privateMicTrackRef.current.enabled = true;
+                    media.setPaused('audio', false, 'private-audio');
+                }
+                showNotice(error instanceof Error ? error.message : 'Your private microphone could not be muted.');
+            }
+            return;
+        }
+
+        if (!media.hasProducer('audio', 'private-audio')) {
+            let source = localStreamRef.current?.getAudioTracks().find(track => track.readyState === 'live');
+            if (!source) {
+                if (initializingRef.current || busyRef.current.mic) { showNotice('Preparing your microphone. Try again in a moment.'); return; }
+                busyRef.current.mic = true;
+                try {
+                    const acquired = (await openMicrophone(state.micId)).stream;
+                    source = acquired.getAudioTracks()[0];
+                    if (!source || !sessionActive.current || !isSameConversation()) { acquired.getTracks().forEach(track => track.stop()); return; }
+                    const current = localStreamRef.current ?? new MediaStream();
+                    current.getAudioTracks().forEach(old => { old.stop(); current.removeTrack(old); });
+                    current.addTrack(source);
+                    source.enabled = true;
+                    localStreamRef.current = current;
+                    watchMicrophone(source);
+                    // Keep this track local as the source for the private producer. Do not
+                    // publish it as a room microphone while this side conversation is active.
+                    media.setPaused('audio', true, 'mic');
+                    setLocalStream(new MediaStream(current.getTracks()));
+                } catch (error) {
+                    showNotice(microphoneMessage(error));
+                    return;
+                } finally { busyRef.current.mic = false; }
+            }
+            if (!isSameConversation()) return;
+            try {
+                privateMicMutedRef.current = false;
+                setPrivateMicMuted(false);
+                await signaling.request('setPrivateConversationMuted', { conversationId, muted: false });
+                if (!isSameConversation()) return;
+                const started = await publishPrivateAudio();
+                if (!isSameConversation()) return;
+                if (!started) throw new Error('Your private microphone could not start. Check browser microphone access and try again.');
+            } catch (error) {
+                if (isSameConversation()) {
+                    privateMicMutedRef.current = true;
+                    setPrivateMicMuted(true);
+                    if (privateMicTrackRef.current) privateMicTrackRef.current.enabled = false;
+                    media.setPaused('audio', true, 'private-audio');
+                    signaling.request('setPrivateConversationMuted', { conversationId, muted: true }).catch(() => {});
+                }
+                showNotice(error instanceof Error ? error.message : 'Your private microphone could not be unmuted.');
+            }
+            return;
+        }
+
+        try {
+            await signaling.request('setPrivateConversationMuted', { conversationId, muted: false });
+            if (!isSameConversation()) return;
+            privateMicMutedRef.current = false;
+            setPrivateMicMuted(false);
+            if (privateMicTrackRef.current) privateMicTrackRef.current.enabled = true;
+            media.setPaused('audio', false, 'private-audio');
+        } catch (error) {
+            showNotice(error instanceof Error ? error.message : 'Your private microphone could not be unmuted.');
+        }
+    }, [publishPrivateAudio, showNotice, state.micId, watchMicrophone]);
+
     const handleToggleAudio = useCallback(async () => {
         if (!canPublishRef.current) { showNotice('Only the webinar organiser can share media.'); return; }
         if (!sessionActive.current) return;
+        if (privateConversationRef.current) { await togglePrivateMicrophone(); return; }
         if (audioMutedRef.current && !roomSettingsRef.current.allowMicrophone && !isManagerNow()) { showNotice('The host has turned off microphones for participants. Raise your hand to ask to speak.'); return; }
         const current = localStreamRef.current ?? new MediaStream();
         const live = current.getAudioTracks().some(track => track.readyState === 'live');
@@ -855,7 +1101,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             applyMute('audio', true);
             showNotice(microphoneMessage(error));
         } finally { busyRef.current.mic = false; }
-    }, [applyMute, publishAudioTrack, state.micId, showNotice, watchMicrophone]);
+    }, [applyMute, publishAudioTrack, state.micId, showNotice, togglePrivateMicrophone, watchMicrophone]);
 
     useEffect(() => {
         window.clearTimeout(mutedSpeechTimer.current);
@@ -902,10 +1148,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             current.addTrack(track);
             localStreamRef.current = current;
             watchCamera(track);
-            let relayFailed = !sharingRef.current && !media.canSend;
-            if (!sharingRef.current && media.canSend) {
+            let relayFailed = !media.canSend;
+            if (media.canSend) {
                 try {
-                    if (media.hasProducer('video')) await media.replaceTrack('video', track);
+                    if (media.hasProducer('video', 'camera')) await media.replaceTrack('video', track, 'camera');
                     else await media.produce(track, { source: 'camera' });
                 } catch (error) {
                     console.warn('[MeetingRoom] Camera opened, but video relay failed:', error);
@@ -969,11 +1215,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         setScreenStream(null);
         setScreenSharing(false);
         playSound('toggleOff');
-        const camTrack = processedTrackRef.current?.readyState === 'live' ? processedTrackRef.current : localStreamRef.current?.getVideoTracks()[0];
-        if (camTrack?.readyState === 'live') await media.replaceTrack('video', camTrack).catch(() => { });
+        await media.closeProducerBySource('screen').catch(() => { });
         if (!sessionActive.current || revision !== sessionRevision.current) return;
-        // Back to the camera: respect camera-off again.
-        media.setPaused('video', videoOffRef.current);
         if (joinedRef.current) signaling.request('muteStateChanged', { kind: 'screen', muted: false, presenting: false }).catch(() => { });
     }, []);
 
@@ -995,11 +1238,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             setScreenStream(display);
             setScreenSharing(true);
             if (media.canSend) {
-                if (media.hasProducer('video')) await media.replaceTrack('video', screenTrack);
-                else await media.produce(screenTrack, { type: 'screen' });
+                await media.produce(screenTrack, { source: 'screen', type: 'screen' });
             }
             if (!sessionActive.current || revision !== sessionRevision.current || !sharingRef.current || !roomSettingsRef.current.allowScreenShare || screenTrack.readyState !== 'live') { display.getTracks().forEach(t => t.stop()); return; }
-            media.setPaused('video', false); // the screen is sent even if the camera is off
+            media.setPaused('video', false, 'screen'); // screen sharing is independent of camera state
             playSound('success');
             if (joinedRef.current) signaling.request('muteStateChanged', { kind: 'screen', muted: true, presenting: true }).catch(() => { });
         } catch (err) {
@@ -1080,7 +1322,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             await signaling.request('setRecordingState', { recording: true });
             if (!sessionActive.current || !joinedRef.current) throw new Error('The meeting has disconnected.');
             const composite = createMeetingComposite(() => videoAreaRef.current, () => [
-                ...(localStreamRef.current?.getAudioTracks() || []),
+                ...(privateConversationRef.current ? [] : localStreamRef.current?.getAudioTracks() || []),
                 ...(screenStreamRef.current?.getAudioTracks() || []),
                 ...Array.from(peersRef.current.values()).flatMap(peer => peer.audioTrack ? [peer.audioTrack] : []),
             ], `QS-VC ${meetingCode}`);
@@ -1206,11 +1448,62 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         void handleLeave();
     }, [myRole, connected, peers.size, handleLeave]);
 
+    const privateConversationLimitMs = entitlements.privateConversationLimitSeconds !== undefined
+        ? (entitlements.privateConversationLimitSeconds === null ? null : entitlements.privateConversationLimitSeconds * 1000)
+        : entitlements.plan === 'pro' || (entitlements.plan === 'enterprise' && entitlements.status === 'enterprise_approved')
+            ? null
+            : entitlements.plan === 'starter' || (entitlements.plan === 'starter_trial' && entitlements.status === 'trial_active')
+                ? 30 * 60 * 1000 : 2 * 60 * 1000;
+    const privateConversationLimitLabel = privateConversationLimitMs === null ? 'Unlimited' : `${Math.ceil(privateConversationLimitMs / 60_000)} min`;
+
+    const startPrivateConversation = useCallback(async (targetPeerId: string) => {
+        if (!signedIn || (myRoleRef.current !== 'host' && myRoleRef.current !== 'co-host')) { showNotice('Only a signed-in host or co-host can start a private conversation.'); return; }
+        if (privateConversationRef.current || privateInviteRef.current) { showNotice('Finish the current private conversation first.'); return; }
+        try {
+            const targetName = peersRef.current.get(targetPeerId)?.displayName || 'participant';
+            const result = await signaling.request('startPrivateConversation', { targetPeerId });
+            setPrivateInvite({ conversationId: result.conversationId, otherPeerId: targetPeerId, otherDisplayName: targetName, direction: 'outgoing', durationMs: result.durationMs ?? privateConversationLimitMs });
+        } catch (error) { showNotice(error instanceof Error ? error.message : 'The invitation could not be sent.'); }
+    }, [privateConversationLimitMs, showNotice, signedIn]);
+
+    const acceptPrivateConversation = useCallback(async () => {
+        const invite = privateInviteRef.current;
+        if (!invite || invite.direction !== 'incoming') return;
+        try { await signaling.request('acceptPrivateConversation', { conversationId: invite.conversationId }); }
+        catch (error) { showNotice(error instanceof Error ? error.message : 'The private invitation is no longer available.'); finishPrivateConversationLocally(invite.conversationId); }
+    }, [finishPrivateConversationLocally, showNotice]);
+
+    const declinePrivateConversation = useCallback(async () => {
+        const invite = privateInviteRef.current;
+        if (!invite || invite.direction !== 'incoming') return;
+        try { await signaling.request('declinePrivateConversation', { conversationId: invite.conversationId }); }
+        catch (error) { showNotice(error instanceof Error ? error.message : 'The invitation could not be declined.'); }
+        finishPrivateConversationLocally(invite.conversationId);
+    }, [finishPrivateConversationLocally, showNotice]);
+
+    const cancelPrivateConversationInvite = useCallback(async () => {
+        const invite = privateInviteRef.current;
+        if (!invite || invite.direction !== 'outgoing') return;
+        try { await signaling.request('cancelPrivateConversation', { conversationId: invite.conversationId }); }
+        catch (error) { showNotice(error instanceof Error ? error.message : 'The invitation could not be cancelled.'); }
+        finishPrivateConversationLocally(invite.conversationId);
+    }, [finishPrivateConversationLocally, showNotice]);
+
+    const endPrivateConversation = useCallback(async () => {
+        const active = privateConversationRef.current;
+        if (!active) return;
+        try { await signaling.request('endPrivateConversation', { conversationId: active.conversationId }); }
+        catch (error) { showNotice(error instanceof Error ? error.message : 'The private conversation could not be ended.'); }
+        finishPrivateConversationLocally(active.conversationId);
+    }, [finishPrivateConversationLocally, showNotice]);
+
+    const togglePrivateFocusAudio = useCallback(() => setFocusPrivateAudio(value => !value), []);
+
     // ── Background effects: process the live camera track and send the processed one. ──
     const effectKey = JSON.stringify({ ...effect, src: effect.kind === 'image' ? effect.src?.length : undefined });
     useEffect(() => {
         const raw = localStream?.getVideoTracks().find(track => track.readyState === 'live');
-        const sendTrack = (track: MediaStreamTrack) => { if (!sharingRef.current && media.canSend && media.hasProducer('video')) void media.replaceTrack('video', track).catch(() => {}); };
+        const sendTrack = (track: MediaStreamTrack) => { if (media.canSend && media.hasProducer('video', 'camera')) void media.replaceTrack('video', track, 'camera').catch(() => {}); };
         if (effect.kind === 'none' || videoOff || !raw) {
             processorRef.current?.stop(); processorSourceRef.current = '';
             processedTrackRef.current = null; setProcessedTrack(null); setEffectStatus('idle');
@@ -1239,10 +1532,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     useEffect(() => () => { processorRef.current?.dispose(); processorRef.current = null; }, []);
     const chooseEffect = useCallback((next: BackgroundEffect) => { setEffect(next); saveEffect(next); }, []);
     const displayedLocalStream = useMemo(() => {
-        if (screenSharing) return screenStream;
         if (!processedTrack || !localStream) return localStream;
         return new MediaStream([processedTrack, ...localStream.getAudioTracks()]);
-    }, [screenSharing, screenStream, processedTrack, localStream]);
+    }, [processedTrack, localStream]);
 
     const effectPreview = useMemo(() => processedTrack ? new MediaStream([processedTrack]) : localStream, [processedTrack, localStream]);
 
@@ -1392,10 +1684,14 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             </div>
             <div className="meeting-content">
                 <div ref={videoAreaRef} className={`video-area ${sidePanelOpen ? 'with-panel' : ''}`}>
-                    <VideoGrid localStream={displayedLocalStream} myPeerId={myPeerIdRef.current} myRole={myRole} myOnStage={myOnStage} peers={peers} displayName={displayName} videoOff={screenSharing ? false : videoOff} audioMuted={audioMuted} handRaised={handRaised} sharing={screenSharing}
+                    <VideoGrid localStream={displayedLocalStream} localScreenTrack={screenStream?.getVideoTracks()[0]} myPeerId={myPeerIdRef.current} myRole={myRole} myOnStage={myOnStage} peers={peers} displayName={displayName} videoOff={videoOff} audioMuted={audioMuted} handRaised={handRaised} sharing={screenSharing}
                         viewMode={viewMode} tilesPerPage={tilesPerPage} webinar={webinar} speaking={speaking} activeSpeaker={activeSpeaker} spotlightId={spotlightId} pinnedId={pinnedId}
                         canManage={manager} onPin={setPinnedId} onSpotlight={setSpotlightFor} onToggleStage={setStageFor} />
-                    <RemoteAudio peers={peers} volume={translatedSpeaking ? 0.2 : 1} outputDeviceId={audioOutputId} onOutputError={reportAudioOutputError} />
+                    <RemoteAudio peers={peers} volume={privateConversation ? focusPrivateAudio ? 0 : 0.24 : translatedSpeaking ? 0.2 : 1} outputDeviceId={audioOutputId} onOutputError={reportAudioOutputError} />
+                    {privateAudioTrack && <PrivateAudioPlayback track={privateAudioTrack} outputDeviceId={audioOutputId} onOutputError={reportAudioOutputError} />}
+                    <PrivateConversationPanel invite={privateInvite} active={privateConversation} microphoneMuted={privateMicMuted} focusAudio={focusPrivateAudio}
+                        onAccept={acceptPrivateConversation} onDecline={declinePrivateConversation} onCancel={cancelPrivateConversationInvite}
+                        onEnd={endPrivateConversation} onToggleMicrophone={() => void togglePrivateMicrophone()} onToggleFocusAudio={togglePrivateFocusAudio} />
                     <ReactionsOverlay reactions={reactions} pickerOpen={reactionsOpen} onSendReaction={handleSendReaction} onClosePicker={closeReactions} onExpire={expireReaction} />
                     <MeetingCaptions translatedSpeaking={translatedSpeaking} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
                         showCaptions={captionsOn} onShowCaptionsChange={setCaptionsOn} shareSpeech={shareSpeech} onShareSpeechChange={setShareSpeech} />
@@ -1405,7 +1701,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
                 {participantsOpen && (
                     <ParticipantsPanel peers={peers} displayName={displayName} myPeerId={myPeerIdRef.current || 'self'} myRole={myRole} myOnStage={myOnStage} audioMuted={audioMuted} videoOff={videoOff} handRaised={handRaised} presenting={screenSharing}
-                        speaking={speaking} webinar={webinar} spotlightId={spotlightId} canManage={manager} onSpotlight={setSpotlightFor} onToggleStage={setStageFor} onClose={() => setParticipantsOpen(false)} />
+                        speaking={speaking} webinar={webinar} spotlightId={spotlightId} canManage={manager} onSpotlight={setSpotlightFor} onToggleStage={setStageFor}
+                        canStartPrivateConversation={signedIn && manager && connected && !entitlements.loading} privateConversationLimitLabel={privateConversationLimitLabel}
+                        privateConversationPeerId={privateConversation?.otherPeerId || privateInvite?.otherPeerId || null}
+                        privateConversationStatus={privateConversation ? 'active' : privateInvite?.direction === 'outgoing' ? 'outgoing' : 'idle'}
+                        onStartPrivateConversation={startPrivateConversation} onClose={() => setParticipantsOpen(false)} />
                 )}
                 <MeetingCollaboration key={meetingCode} open={activitiesOpen} connected={connected} role={myRole} myPeerId={myPeerIdRef.current} onClose={closeActivityPanel} />
                 {effectsOpen && <BackgroundEffects effect={effect} onChange={chooseEffect} preview={effectPreview} cameraOn={!videoOff && !!localStream?.getVideoTracks().some(t => t.readyState === 'live')}
@@ -1463,4 +1763,17 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
         </div>
     );
+}
+
+function PrivateAudioPlayback({ track, outputDeviceId, onOutputError }: { track: MediaStreamTrack; outputDeviceId: string; onOutputError: () => void }) {
+    const ref = useRef<HTMLAudioElement>(null);
+    useEffect(() => {
+        if (ref.current) ref.current.srcObject = new MediaStream([track]);
+    }, [track]);
+    useEffect(() => {
+        const audio = ref.current as (HTMLAudioElement & { setSinkId?: (deviceId: string) => Promise<void> }) | null;
+        if (!audio?.setSinkId) return;
+        void audio.setSinkId(outputDeviceId || 'default').catch(onOutputError);
+    }, [outputDeviceId, onOutputError, track]);
+    return <audio ref={ref} className="qs-remote-audio qs-private-audio" autoPlay aria-label="Private conversation audio" />;
 }

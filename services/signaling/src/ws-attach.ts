@@ -28,6 +28,9 @@ interface AuthPayload {
     displayName: string;
     role: string;
     tenantId: string;
+    plan?: 'guest' | 'starter_trial' | 'starter' | 'pro' | 'enterprise';
+    status?: 'trial_active' | 'trial_expired' | 'paid_active' | 'enterprise_pending' | 'enterprise_approved' | 'enterprise_rejected';
+    privateConversationLimitMs?: number | null;
 }
 
 /** Attach JSON-RPC signaling WebSocket to an existing HTTP server. */

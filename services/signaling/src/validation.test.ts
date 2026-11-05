@@ -26,6 +26,7 @@ interface PeerState {
 interface RoomSettings {
     maxParticipants: number;
     waitingRoomEnabled: boolean;
+    meetingKind: 'conference' | 'team' | 'town_hall';
     locked: boolean;
     password: string | null;
     muteOnEntry: boolean;
@@ -37,7 +38,8 @@ interface RoomSettings {
 // Minimal RoomManager re-impl for unit testing (avoids importing ws dependency)
 const DEFAULT_SETTINGS: RoomSettings = {
     maxParticipants: 25,
-    waitingRoomEnabled: false,
+    waitingRoomEnabled: true,
+    meetingKind: 'conference',
     locked: false,
     password: null,
     muteOnEntry: false,
@@ -101,8 +103,12 @@ describe('Signaling: room settings defaults', () => {
         expect(DEFAULT_SETTINGS.maxParticipants).toBe(25);
     });
 
-    it('should have waiting room disabled by default', () => {
-        expect(DEFAULT_SETTINGS.waitingRoomEnabled).toBe(false);
+    it('should require host approval by default', () => {
+        expect(DEFAULT_SETTINGS.waitingRoomEnabled).toBe(true);
+    });
+
+    it('should default to a conference meeting kind', () => {
+        expect(DEFAULT_SETTINGS.meetingKind).toBe('conference');
     });
 
     it('should have room unlocked by default', () => {

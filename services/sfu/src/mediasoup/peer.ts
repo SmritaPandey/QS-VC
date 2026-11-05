@@ -75,6 +75,22 @@ export class Peer {
         return undefined;
     }
 
+    closeProducer(producerId: string): boolean {
+        const producer = this.producers.get(producerId);
+        if (!producer || producer.closed) return false;
+        producer.close();
+        this.producers.delete(producerId);
+        return true;
+    }
+
+    setProducerPaused(producerId: string, paused: boolean): boolean {
+        const producer = this.producers.get(producerId);
+        if (!producer || producer.closed) return false;
+        if (paused && !producer.paused) producer.pause();
+        if (!paused && producer.paused) producer.resume();
+        return true;
+    }
+
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // CONSUMERS
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

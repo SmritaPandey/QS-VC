@@ -30,12 +30,17 @@ interface Props {
     canManage?: boolean;
     onSpotlight?: (peerId: string | null) => void;
     onToggleStage?: (peerId: string, onStage: boolean) => void;
+    canStartPrivateConversation?: boolean;
+    privateConversationLimitLabel?: string;
+    privateConversationPeerId?: string | null;
+    privateConversationStatus?: 'idle' | 'outgoing' | 'active';
+    onStartPrivateConversation?: (peerId: string) => void;
     onClose: () => void;
 }
 
 type Row = { peerId: string; displayName: string; isLocal: boolean; role?: string; micOn: boolean; camOn: boolean; handRaised: boolean; presenting: boolean; onStage?: boolean };
 
-export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self', myRole = 'member', myOnStage = false, audioMuted = false, videoOff = false, handRaised = false, presenting = false, speaking = new Set(), webinar = false, spotlightId = null, canManage = false, onSpotlight, onToggleStage, onClose }: Props) {
+export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self', myRole = 'member', myOnStage = false, audioMuted = false, videoOff = false, handRaised = false, presenting = false, speaking = new Set(), webinar = false, spotlightId = null, canManage = false, onSpotlight, onToggleStage, canStartPrivateConversation = false, privateConversationLimitLabel = '2 min', privateConversationPeerId = null, privateConversationStatus = 'idle', onStartPrivateConversation, onClose }: Props) {
     const [searchQuery, setSearchQuery] = useState('');
 
     const all: Row[] = [
@@ -58,6 +63,7 @@ export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self
     const row = (p: Row) => {
         const isSpeaking = speaking.has(p.peerId) && p.micOn;
         const manageable = canManage && !p.isLocal && p.role !== 'host';
+        const isPrivateConversationPeer = privateConversationPeerId === p.peerId;
         return <div key={p.peerId} className="participant-item" data-speaking={isSpeaking || undefined}>
             <div className="participant-avatar" data-speaking={isSpeaking || undefined}>{p.displayName[0]?.toUpperCase() || '?'}</div>
             <div className="participant-info">
@@ -76,6 +82,9 @@ export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self
                     : <span className={`status-icon mi mi-sm ${p.micOn ? '' : 'is-off'}`} title={p.micOn ? 'Microphone on' : 'Microphone off'}>{p.micOn ? 'mic' : 'mic_off'}</span>}
                 <span className={`status-icon mi mi-sm ${p.camOn ? '' : 'is-off'}`} title={p.camOn ? 'Camera on' : 'Camera off'}>{p.camOn ? 'videocam' : 'videocam_off'}</span>
                 {manageable && webinar && onToggleStage && p.role !== 'co-host' && <button type="button" className="participant-action" onClick={() => onToggleStage(p.peerId, !p.onStage)}>{p.onStage ? 'Move to audience' : 'Invite to stage'}</button>}
+                {canStartPrivateConversation && !p.isLocal && onStartPrivateConversation && <button type="button" className="participant-action participant-private-action" disabled={privateConversationStatus !== 'idle'} onClick={() => onStartPrivateConversation(p.peerId)}>
+                    {privateConversationStatus === 'active' && isPrivateConversationPeer ? 'In conversation' : privateConversationStatus === 'outgoing' && isPrivateConversationPeer ? 'Invite sent' : `Talk privately · ${privateConversationLimitLabel}`}
+                </button>}
                 {manageable && onSpotlight && (!webinar || isOnStage(p)) && <button type="button" className="participant-icon-action" aria-label={spotlightId === p.peerId ? `Remove spotlight from ${p.displayName}` : `Spotlight ${p.displayName} for everyone`} title={spotlightId === p.peerId ? 'Remove spotlight' : 'Spotlight for everyone'} aria-pressed={spotlightId === p.peerId} onClick={() => onSpotlight(spotlightId === p.peerId ? null : p.peerId)}><span className="mi mi-sm" aria-hidden="true">star</span></button>}
             </div>
         </div>;

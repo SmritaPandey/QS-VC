@@ -9,17 +9,18 @@ import { clearSession, getToken, refreshSession } from '../lib/session';
 import '../styles/workspace.css';
 import useScrollReveal from '../lib/scroll-reveal';
 import HostedMeetings from './HostedMeetings';
+import MeetingSetupDialog, { type MeetingSetup } from './MeetingSetupDialog';
 
 const API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
 type Meeting = { id: string; meetingCode: string; title: string; status: string; scheduledStart?: string; createdAt: string; isHost?: boolean };
 type View = 'day' | 'hosted';
 const VIEW_KEY = 'qsvc:workspace-view';
 function savedView(): View { try { return localStorage.getItem(VIEW_KEY) === 'hosted' ? 'hosted' : 'day'; } catch { return 'day'; } }
-type Props = { creating: boolean; signingOut: boolean; sessionError: string; onCreate: () => void; onStart: () => void; onSignOut: () => void; onExpired: () => void };
+type Props = { creating: boolean; signingOut: boolean; sessionError: string; onCreate: (setup: MeetingSetup) => void | Promise<void>; onSignOut: () => void; onExpired: () => void };
 function dateKey(date: Date) { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; }
 function moveDay(date: Date, amount: number) { const next = new Date(date); next.setDate(next.getDate()+amount); return next; }
 
-export default function SignedInWorkspace({ creating, signingOut, sessionError, onCreate, onStart, onSignOut, onExpired }: Props) {
+export default function SignedInWorkspace({ creating, signingOut, sessionError, onCreate, onSignOut, onExpired }: Props) {
     const navigate = useNavigate();
     const [selected, setSelected] = useState(() => new Date(new Date().setHours(0,0,0,0)));
     const session = useSession();
@@ -29,6 +30,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
     const [error, setError] = useState('');
     const [join, setJoin] = useState('');
     const [joinError, setJoinError] = useState('');
+    const [setupAction, setSetupAction] = useState<'link' | 'start' | null>(null);
     const [refresh, setRefresh] = useState(0);
     const [more, setMore] = useState(false);
     const [offset, setOffset] = useState(0);
@@ -91,7 +93,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
         <header className="workspace-header">
             <a className="public-skip" href="#main-content">Skip to content</a>
             <Link className="workspace-brand" to="/app" aria-label="QS-VC meetings"><BrandLogo /></Link>
-            <nav className="workspace-navigation" aria-label="Workspace"><Link to="/app" aria-current="page">Meetings</Link><Link to="/schedule">Schedule</Link><Link to="/schedule?type=webinar">Webinars</Link></nav>
+            <nav className="workspace-navigation" aria-label="Workspace"><Link to="/app" aria-current="page">Meetings</Link><Link to="/schedule">Schedule</Link><Link to="/schedule?type=webinar">Town halls</Link></nav>
             <details className="workspace-account">
                 <summary aria-label="Your account"><span className="workspace-account-initial" aria-hidden="true">{profile?.displayName.trim().charAt(0).toUpperCase() || 'Q'}</span></summary>
                 <div className="workspace-dropdown"><ThemeSelect /><p>{profile?.displayName || (profileError ? 'Account unavailable' : 'Loading account…')}</p>{profile && <span>{profile.email}</span>}{profileError && <button className="qsvc-action qsvc-action--secondary" onClick={() => void refreshSession()}><ActionContents>Retry account</ActionContents></button>}<Link to="/">Visit website<span className="mi" aria-hidden="true">north_east</span></Link><button disabled={signingOut} onClick={onSignOut}>{signingOut ? 'Signing out…' : 'Sign out'}<span className="mi" aria-hidden="true">logout</span></button></div>
@@ -106,7 +108,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                 <p className="workspace-start-copy">Start a room, share a link, or join your team.</p>
             <details className="workspace-new">
                 <summary className="qsvc-action" aria-busy={creating}><ActionContents><span className="mi" aria-hidden="true">video_call</span>{creating ? 'Creating…' : 'New meeting'}<span className="mi workspace-new-caret" aria-hidden="true">expand_more</span></ActionContents></summary>
-                <div className="workspace-dropdown"><button disabled={creating} onClick={() => newAction(onCreate)}><span className="mi" aria-hidden="true">link</span>Create a link</button><button disabled={creating} onClick={() => newAction(onStart)}><span className="mi" aria-hidden="true">videocam</span>Start now</button><button onClick={() => newAction(() => navigate('/schedule'))}><span className="mi" aria-hidden="true">calendar_today</span>Schedule a meeting</button></div>
+                <div className="workspace-dropdown"><button disabled={creating} onClick={() => newAction(() => setSetupAction('link'))}><span className="mi" aria-hidden="true">link</span>Create a link</button><button disabled={creating} onClick={() => newAction(() => setSetupAction('start'))}><span className="mi" aria-hidden="true">videocam</span>Start now</button><button onClick={() => newAction(() => navigate('/schedule'))}><span className="mi" aria-hidden="true">calendar_today</span>Schedule a meeting</button></div>
             </details>
                 <div className="workspace-join-section"><p>Have an invitation?</p>
             <form className="workspace-join" onSubmit={joinMeeting}>
@@ -136,5 +138,6 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                 <p className="workspace-demo"><span className="mi" aria-hidden="true">info</span>Demo environment. Use sample content. Hosts can record when cloud storage is configured.</p>
             </main>
         </div>
+        {setupAction && <MeetingSetupDialog action={setupAction} creating={creating} onClose={() => setSetupAction(null)} onCreate={onCreate} />}
     </div>;
 }

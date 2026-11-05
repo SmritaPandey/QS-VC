@@ -3,12 +3,15 @@ import ActionContents from '../components/ActionContents';
 import SiteNav from '../components/SiteNav';
 import SignedInWorkspace from '../components/SignedInWorkspace';
 import SiteFooter from '../components/SiteFooter';
-import { signOut, refreshSession } from '../lib/session';
+import { clearSession, getToken, signOut, refreshSession } from '../lib/session';
+import type { MeetingSetup } from '../components/MeetingSetupDialog';
+import { authenticatedMeetingRequest, meetingsEndpoint } from '../lib/meeting-creation';
 import LoadingMark from '../components/LoadingMark';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
+const MEETINGS_ENDPOINT = meetingsEndpoint(MEETING_API);
 const SIGNALING_HTTP = (import.meta.env.VITE_SIGNALING_URL || '')
     .replace(/^wss:/i, 'https:')
     .replace(/^ws:/i, 'http:')
@@ -91,18 +94,43 @@ export default function Landing() {
         return () => { document.removeEventListener('keydown', onKeyDown); returnTarget?.focus(); };
     }, [shareLink]);
 
-    const handleCreate = async (startNow = false) => {
+    const handleCreate = async (setup?: MeetingSetup) => {
         setCreating(true);
         try {
-            const { meetingCode, inviteToken } = await createMeetingCode();
+            let meetingCode: string;
+            let inviteToken: string | undefined;
+            if (setup) {
+                const token = getToken();
+                if (!token) throw new Error('Your sign-in has expired. Sign in again to create a meeting.');
+                const response = await fetch(MEETINGS_ENDPOINT, authenticatedMeetingRequest(token, setup));
+                if (getToken() !== token) throw new Error('Your session changed. Please try creating the meeting again.');
+                if (response.status === 401) {
+                    clearSession(token);
+                    setSessionError('Your session expired. Sign in again to create a meeting.');
+                    throw new Error('Your session expired. Sign in again to create a meeting.');
+                }
+                if (!response.ok) {
+                    const data = await response.json().catch(() => null);
+                    throw new Error(typeof data?.message === 'string' ? data.message : 'Could not create the meeting. Please try again.');
+                }
+                const data = await response.json();
+                const code = data.meetingCode || data.code;
+                if (typeof code !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(code)) throw new Error('The meeting service returned an invalid invitation. Please try again.');
+                meetingCode = code;
+                inviteToken = typeof data.inviteToken === 'string' ? data.inviteToken : undefined;
+            } else {
+                if (signedIn) throw new Error('Choose a meeting type before creating a meeting.');
+                ({ meetingCode, inviteToken } = await createMeetingCode());
+            }
             const inviteQuery = inviteToken ? `?invite=${encodeURIComponent(inviteToken)}` : '';
             const fullLink = `${window.location.origin}/meeting/${meetingCode}/preview${inviteQuery}`;
-            if (startNow) { navigate(`/meeting/${meetingCode}/preview${inviteQuery}`); return; }
+            if (setup?.startNow) { navigate(`/meeting/${meetingCode}/preview${inviteQuery}`); return; }
             setShareMeetingCode(meetingCode);
             setShareLink(fullLink);
         } catch (err) {
             console.error('Failed to create meeting:', err);
-            alert('Failed to create meeting. Please try again in a moment.');
+            if (!setup) alert('Failed to create meeting. Please try again in a moment.');
+            else throw err;
         } finally {
             setCreating(false);
         }
@@ -154,7 +182,7 @@ export default function Landing() {
         <div className={`public-site ${signedIn ? 'workspace-page' : 'public-launcher landing-page'}`}>
             <div className="landing-bg-gradient" />
 
-            {signedIn ? <SignedInWorkspace creating={creating} signingOut={signingOut} sessionError={sessionError} onCreate={() => handleCreate()} onStart={() => handleCreate(true)} onSignOut={handleSignOut} onExpired={handleExpired} /> : <>
+            {signedIn ? <SignedInWorkspace creating={creating} signingOut={signingOut} sessionError={sessionError} onCreate={handleCreate} onSignOut={handleSignOut} onExpired={handleExpired} /> : <>
             <SiteNav accountAction={<button className="btn-outline qsvc-action qsvc-action--secondary" onClick={() => navigate('/login')}><ActionContents>Sign in</ActionContents></button>} />
 
             <main className="landing-container" id="main-content">

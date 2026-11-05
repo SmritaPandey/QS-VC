@@ -16,6 +16,7 @@ import dotenv from 'dotenv';
 import pino from 'pino';
 import { attachSignalingIfAvailable } from './signaling-bridge.js';
 import { disableDemoPersistence } from './demo-storage-policy.js';
+import { normalizeMeetingSettings } from './meeting-settings.js';
 import meetingInvitation from '../../../shared/meeting-invitation.cjs';
 
 const { createMeetingInviteToken } = meetingInvitation;
@@ -36,7 +37,7 @@ const logger = pino({
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const createMeetingBody = z.object({
-    title: z.string().max(255).optional(),
+    title: z.string().trim().min(1).max(255).optional(),
     type: z.enum(['instant', 'scheduled', 'recurring']).default('instant'),
     scheduledStart: z.string().datetime().optional(),
     scheduledEnd: z.string().datetime().optional(),
@@ -45,6 +46,7 @@ const createMeetingBody = z.object({
         maxParticipants: z.number().int().min(2).max(500).default(100),
         waitingRoom: z.boolean().default(true),
         webinar: z.boolean().default(false),
+        meetingKind: z.enum(['conference', 'team', 'town_hall']).optional(),
         e2eeRequired: z.boolean().default(false),
         recordingAllowed: z.boolean().default(true),
         chatEnabled: z.boolean().default(true),
@@ -207,7 +209,7 @@ app.post('/api/meetings', authMiddleware, validateBody(createMeetingBody), async
         await pool.query(
             `INSERT INTO meetings (id, tenant_id, meeting_code, title, host_id, type, status, settings)
        VALUES ($1, $2, $3, $4, $5, 'instant', 'waiting', $6)`,
-            [id, user.tenantId, meetingCode, title || 'Instant Meeting', user.sub, JSON.stringify(settings || {})]
+            [id, user.tenantId, meetingCode, title || 'Instant Meeting', user.sub, JSON.stringify(normalizeMeetingSettings(settings))]
         );
 
         logger.info(`Meeting created: ${meetingCode} by ${user.displayName}`);
@@ -237,7 +239,7 @@ app.post('/api/meetings/schedule', scheduleFeature, authMiddleware, validateBody
         const occurrences = times.map(time => ({ ...time, id: uuidv4(), meetingCode: generateMeetingCode() }));
         const occurrencesWithInvites = occurrences.map(occurrence => ({ ...occurrence, inviteToken: createMeetingInviteToken(occurrence.meetingCode) }));
         await insertSchedule(pool, user.tenantId, title || 'Scheduled Meeting', user.sub,
-            recurrence ? 'recurring' : 'scheduled', { ...settings, seriesId }, occurrences);
+            recurrence ? 'recurring' : 'scheduled', { ...normalizeMeetingSettings(settings), seriesId }, occurrences);
 
         const first = occurrences[0];
         const inviteToken = createMeetingInviteToken(first.meetingCode);

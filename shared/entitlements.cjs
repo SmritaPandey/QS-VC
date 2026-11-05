@@ -2,6 +2,16 @@
 
 const PLAN_LEVEL = { guest: 0, starter_trial: 1, starter: 1, pro: 2, enterprise: 3 };
 
+// Private side conversations are available only to signed-in people. The
+// initiator's current entitlement determines the server-side session limit.
+const PRIVATE_CONVERSATION_LIMIT_MS = Object.freeze({
+    guest: 2 * 60 * 1000,
+    starter_trial: 30 * 60 * 1000,
+    starter: 30 * 60 * 1000,
+    pro: null,
+    enterprise: null,
+});
+
 // Populate only when a capability is formally assigned to a plan. Unknown features fail closed.
 const FEATURE_MIN_PLAN = Object.freeze({
     meeting_scheduling: 'starter',
@@ -56,4 +66,14 @@ function getEntitlements(user, now = new Date()) {
     };
 }
 
-module.exports = { PLAN_LEVEL, FEATURE_MIN_PLAN, can, resolvePlan, startTrial, getEntitlements };
+function getPrivateConversationLimitMs(user) {
+    if (!user?.sub) return 0;
+    const plan = user.plan || 'guest';
+    if (plan === 'starter_trial' && user.status === 'trial_expired') return PRIVATE_CONVERSATION_LIMIT_MS.guest;
+    if (plan === 'enterprise' && user.status !== 'enterprise_approved') return PRIVATE_CONVERSATION_LIMIT_MS.guest;
+    return Object.prototype.hasOwnProperty.call(PRIVATE_CONVERSATION_LIMIT_MS, plan)
+        ? PRIVATE_CONVERSATION_LIMIT_MS[plan]
+        : PRIVATE_CONVERSATION_LIMIT_MS.guest;
+}
+
+module.exports = { PLAN_LEVEL, FEATURE_MIN_PLAN, PRIVATE_CONVERSATION_LIMIT_MS, can, resolvePlan, startTrial, getEntitlements, getPrivateConversationLimitMs };

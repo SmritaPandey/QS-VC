@@ -5,6 +5,7 @@ import ThemeSelect from '../components/ThemeSelect';
 import ActionContents from '../components/ActionContents';
 import { clearSession, getToken, refreshSession } from '../lib/session';
 import LoadingMark from '../components/LoadingMark';
+import type { MeetingKind } from '../components/MeetingSetupDialog';
 /**
  * Meeting Scheduling Page — Schedule future meetings with invitations.
  * Features: date/time picker, participant invitations,
@@ -14,6 +15,8 @@ import React, { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 const MEETING_API = import.meta.env.VITE_API_URL || import.meta.env.VITE_MEETING_URL || '';
+const MEETINGS_ENDPOINT_BASE = MEETING_API.replace(/\/+$/, '');
+const MEETINGS_ENDPOINT = MEETINGS_ENDPOINT_BASE.endsWith('/api/meetings') ? MEETINGS_ENDPOINT_BASE : `${MEETINGS_ENDPOINT_BASE}/api/meetings`;
 
 type MeetingDuration = 15 | 30 | 45 | 60 | 90 | 120;
 
@@ -24,14 +27,13 @@ interface ScheduleFormData {
     time: string;
     duration: MeetingDuration;
     enableWaitingRoom: boolean;
-    webinar: boolean;
+    meetingKind: MeetingKind;
     repeat: 'none' | 'daily' | 'weekly';
     repeatCount: number;
     enableE2EE: boolean;
     enableRecording: boolean;
     maxParticipants: number;
     password: string;
-    invitees: string[];
 }
 
 const durationOptions: { value: MeetingDuration; label: string }[] = [
@@ -46,11 +48,12 @@ const durationOptions: { value: MeetingDuration; label: string }[] = [
 const ScheduleMeeting: React.FC = () => {
     const navigate = useNavigate();
     const { pathname, search } = useLocation();
-    const schedulingWebinar = new URLSearchParams(search).get('type') === 'webinar';
+    const requestedKind = new URLSearchParams(search).get('meetingKind') || new URLSearchParams(search).get('type');
+    const schedulingKind: MeetingKind = requestedKind === 'webinar' || requestedKind === 'town_hall' ? 'town_hall' : requestedKind === 'team' ? 'team' : 'conference';
+    const schedulingTownHall = schedulingKind === 'town_hall';
     const [submitting, setSubmitting] = useState(false);
     const [cancelledCodes, setCancelledCodes] = useState<string[]>([]);
-    const [scheduled, setScheduled] = useState<(CalendarEvent & { id?: string; inviteToken?: string; webinar: boolean; occurrences?: { id?: string; meetingCode: string; scheduledStart: string; scheduledEnd: string; inviteToken?: string }[] }) | null>(null);
-    const [inviteInput, setInviteInput] = useState('');
+    const [scheduled, setScheduled] = useState<(CalendarEvent & { id?: string; inviteToken?: string; meetingKind: MeetingKind; occurrences?: { id?: string; meetingCode: string; scheduledStart: string; scheduledEnd: string; inviteToken?: string }[] }) | null>(null);
     const [copySuccess, setCopySuccess] = useState(false);
     // Scheduling saves a meeting to an account, so guests are asked to sign in first.
     const session = useSession();
@@ -68,31 +71,19 @@ const ScheduleMeeting: React.FC = () => {
         time: '10:00',
         duration: 60,
         enableWaitingRoom: true,
-        webinar: schedulingWebinar,
+        meetingKind: schedulingKind,
         repeat: 'none',
         repeatCount: 2,
         enableE2EE: false,
         enableRecording: true,
         maxParticipants: 100,
         password: '',
-        invitees: [],
     });
 
     const updateField = <K extends keyof ScheduleFormData>(key: K, value: ScheduleFormData[K]) => {
         setForm(prev => ({ ...prev, [key]: value }));
     };
-
-    const addInvitee = () => {
-        const email = inviteInput.trim().toLowerCase();
-        if (email && email.includes('@') && !form.invitees.includes(email)) {
-            updateField('invitees', [...form.invitees, email]);
-            setInviteInput('');
-        }
-    };
-
-    const removeInvitee = (email: string) => {
-        updateField('invitees', form.invitees.filter(e => e !== email));
-    };
+    useEffect(() => { setForm(previous => ({ ...previous, meetingKind: schedulingKind })); }, [schedulingKind]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -104,7 +95,7 @@ const ScheduleMeeting: React.FC = () => {
         const endDateTime = new Date(startDateTime.getTime() + form.duration * 60000);
 
         try {
-            const res = await fetch(`${MEETING_API}/api/meetings/schedule`, {
+            const res = await fetch(`${MEETINGS_ENDPOINT}/schedule`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({
@@ -115,8 +106,9 @@ const ScheduleMeeting: React.FC = () => {
                     recurrence: form.repeat === 'none' ? undefined : { frequency: form.repeat, count: form.repeatCount },
                     settings: {
                         maxParticipants: form.maxParticipants,
-                        waitingRoom: form.enableWaitingRoom,
-                        webinar: form.webinar,
+                        meetingKind: form.meetingKind,
+                        waitingRoom: true,
+                        webinar: form.meetingKind === 'town_hall',
                         e2eeRequired: false,
                         recordingAllowed: false,
                         chatEnabled: true,
@@ -140,7 +132,7 @@ const ScheduleMeeting: React.FC = () => {
                 inviteToken,
                 title: form.title || 'Scheduled Meeting',
                 occurrences: data.occurrences,
-                webinar: form.webinar,
+                meetingKind: form.meetingKind,
                 startTime: startDateTime,
                 endTime: endDateTime,
                 timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
@@ -204,9 +196,9 @@ const ScheduleMeeting: React.FC = () => {
                 <div className="schedule-container">
                     <div className="schedule-success"><ThemeSelect />
                         <div className="success-icon"><span className="mi" aria-hidden="true">check_circle</span></div>
-                        <h1>{firstCancelled && (!scheduled.occurrences || scheduled.occurrences.length <= 1) ? 'Meeting cancelled.' : scheduled.webinar ? 'Webinar scheduled.' : 'Meeting scheduled.'}</h1>
+                        <h1>{firstCancelled && (!scheduled.occurrences || scheduled.occurrences.length <= 1) ? 'Meeting cancelled.' : scheduled.meetingKind === 'town_hall' ? 'Town hall scheduled.' : 'Meeting scheduled.'}</h1>
                         {cancelledCodes.length > 0 && <p role="status">Cancelled occurrences: {cancelledCodes.length}.</p>}
-                        {scheduled.webinar && !firstCancelled && <p>Share the webinar link with attendees. Signed-out guests need host approval to enter.</p>}
+                        {!firstCancelled && <p>Share the invitation link with attendees. Everyone waits for the host or a co-host to admit them.</p>}
                         <div className="success-details">
                             <div className="detail-row">
                                 <span className="detail-label">Title</span>
@@ -230,12 +222,6 @@ const ScheduleMeeting: React.FC = () => {
                                 <span className="detail-label">Link</span>
                                 <span className="detail-value link">{firstCancelled ? 'Cancelled' : scheduled.meetingUrl}</span>
                             </div>
-                            {form.invitees.length > 0 && (
-                                <div className="detail-row">
-                                    <span className="detail-label">Invited</span>
-                                    <span className="detail-value">{form.invitees.length} people</span>
-                                </div>
-                            )}
                         </div>
                         {scheduled.occurrences && scheduled.occurrences.length > 1 && <section aria-label="Series occurrences">
                             <h2>Series occurrences</h2>
@@ -285,8 +271,8 @@ const ScheduleMeeting: React.FC = () => {
             <div className="schedule-container">
                 <header className="schedule-header"><ThemeSelect />
                     <button className="btn-back qsvc-action qsvc-action--secondary" onClick={() => navigate('/app')}><ActionContents><span className="mi" aria-hidden="true">arrow_back</span> Back to meetings</ActionContents></button>
-                    <h1>{schedulingWebinar ? 'Schedule a webinar.' : 'Schedule a meeting.'}</h1>
-                    <p>Plan a future meeting and invite participants</p>
+                    <h1>{schedulingTownHall ? 'Schedule a town hall.' : 'Schedule a meeting.'}</h1>
+                    <p>Plan a future meeting, then share its invitation link.</p>
                 </header>
 
                 <form onSubmit={handleSubmit} className="schedule-form">
@@ -317,6 +303,17 @@ const ScheduleMeeting: React.FC = () => {
                                 maxLength={2000}
                             />
                         </div>
+                        <fieldset className="schedule-kind-options">
+                            <legend>Meeting type</legend>
+                            {([
+                                ['conference', 'Conferencing', 'A standard room for a conversation or collaboration.'],
+                                ['team', 'Team meeting', 'A working session for your team.'],
+                                ['town_hall', 'Town hall', 'A presentation-style room with a stage.'],
+                            ] as const).map(([kind, label, detail]) => <label key={kind} className="schedule-kind-option" data-selected={form.meetingKind === kind}>
+                                <input type="radio" name="schedule-meeting-kind" value={kind} checked={form.meetingKind === kind} onChange={() => updateField('meetingKind', kind)} />
+                                <span><strong>{label}</strong><small>{detail}</small></span>
+                            </label>)}
+                        </fieldset>
                     </section>
 
                     {/* ── Date & Time ── */}
@@ -365,32 +362,8 @@ const ScheduleMeeting: React.FC = () => {
 
                     {/* ── Invitations ── */}
                     <section className="form-section">
-                        <h2>Invite Participants</h2>
-                        <div className="invite-input-row">
-                            <input
-                                type="email"
-                                aria-label="Participant email" placeholder="colleague@company.com"
-                                value={inviteInput}
-                                onChange={e => setInviteInput(e.target.value)}
-                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addInvitee(); } }}
-                                className="form-input"
-                            />
-                            <button type="button" className="btn-add qsvc-action" onClick={addInvitee}><ActionContents>+ Add</ActionContents></button>
-                        </div>
-                        {form.invitees.length > 0 && (
-                            <div className="invitee-list">
-                                {form.invitees.map(email => (
-                                    <span key={email} className="invitee-chip">
-                                        {email}
-                                        <button
-                                            type="button"
-                                            className="chip-remove" aria-label={`Remove ${email}`}
-                                            onClick={() => removeInvitee(email)}
-                                        >×</button>
-                                    </span>
-                                ))}
-                            </div>
-                        )}
+                        <h2>Share with attendees</h2>
+                        <p className="schedule-share-note">We’ll create an invitation link after you schedule. Copy and share it with attendees from the confirmation screen.</p>
                     </section>
 
                     {/* ── Settings ── */}
@@ -409,15 +382,10 @@ const ScheduleMeeting: React.FC = () => {
                                 <p>Occurrences repeat at the same UTC time.</p>
                             </>}
                         </div>
-                        <label className="toggle-label"><input type="checkbox" checked={form.webinar} onChange={event => updateField('webinar', event.target.checked)} />Webinar. Only the organiser can share audio, video, or screen.</label>
                         <div className="settings-grid">
                             <label className="toggle-label">
-                                <input
-                                    type="checkbox"
-                                    checked={form.enableWaitingRoom}
-                                    onChange={e => updateField('enableWaitingRoom', e.target.checked)}
-                                />
-                                <span className="toggle-text">Require host admission</span>
+                                <input type="checkbox" checked={form.enableWaitingRoom} disabled aria-describedby="schedule-waiting-room-note" />
+                                <span className="toggle-text">Waiting room required</span>
                             </label>
                             <label className="toggle-label">
                                 <input
@@ -438,6 +406,7 @@ const ScheduleMeeting: React.FC = () => {
                                 <span className="toggle-text">Recording disabled for demo</span>
                             </label>
                         </div>
+                        <p id="schedule-waiting-room-note" className="schedule-share-note">Attendees stay in the waiting room until the host or a co-host admits them.</p>
 
                         <div className="form-row">
                             <div className="form-group">
@@ -477,9 +446,7 @@ const ScheduleMeeting: React.FC = () => {
                                     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
                                 }) : 'Select date'}</span>
                                 <span><span className="mi mi-sm" aria-hidden="true">schedule</span> {form.time} ({form.duration} min)</span>
-                                {form.invitees.length > 0 && (
-                                    <span><span className="mi mi-sm" aria-hidden="true">group</span> {form.invitees.length} invitee{form.invitees.length > 1 ? 's' : ''}</span>
-                                )}
+                                <span><span className="mi mi-sm" aria-hidden="true">groups</span> {form.meetingKind === 'town_hall' ? 'Town hall' : form.meetingKind === 'team' ? 'Team meeting' : 'Conferencing'}</span>
                                 {form.enableE2EE && <span><span className="mi mi-sm" aria-hidden="true">lock</span> E2EE</span>}
                                 {form.enableWaitingRoom && <span>Waiting room enabled</span>}
                             </div>

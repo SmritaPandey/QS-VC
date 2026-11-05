@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FEATURE_MIN_PLAN, getEntitlements, startTrial } from './entitlements.cjs';
+import { FEATURE_MIN_PLAN, getEntitlements, getPrivateConversationLimitMs, startTrial } from './entitlements.cjs';
 
 const started = new Date('2026-11-01T12:00:00.000Z');
 
@@ -44,5 +44,16 @@ describe('plan entitlements and trial eligibility', () => {
         expect(getEntitlements(null).featureMinimumPlans).toEqual(FEATURE_MIN_PLAN);
         expect(getEntitlements({ subscription_plan: 'starter_trial', trial_ends_at: '2026-11-08T12:00:00.000Z' }, started).features).toEqual(['meeting_scheduling', 'ai_captions', 'background_effects', 'ai_noise_suppression']);
         expect(getEntitlements({ subscription_plan: 'pro' }, started).features).toEqual(['meeting_scheduling', 'ai_captions', 'background_effects', 'ai_noise_suppression', 'cloud_recording']);
+    });
+
+    it('applies private conversation limits from the signed-in initiator entitlement', () => {
+        expect(getPrivateConversationLimitMs(undefined)).toBe(0);
+        expect(getPrivateConversationLimitMs({ sub: 'free-user', plan: 'guest', status: 'paid_active' })).toBe(120_000);
+        expect(getPrivateConversationLimitMs({ sub: 'trial-user', plan: 'starter_trial', status: 'trial_active' })).toBe(1_800_000);
+        expect(getPrivateConversationLimitMs({ sub: 'expired-user', plan: 'starter_trial', status: 'trial_expired' })).toBe(120_000);
+        expect(getPrivateConversationLimitMs({ sub: 'starter-user', plan: 'starter', status: 'paid_active' })).toBe(1_800_000);
+        expect(getPrivateConversationLimitMs({ sub: 'pro-user', plan: 'pro', status: 'paid_active' })).toBeNull();
+        expect(getPrivateConversationLimitMs({ sub: 'enterprise-user', plan: 'enterprise', status: 'enterprise_approved' })).toBeNull();
+        expect(getPrivateConversationLimitMs({ sub: 'pending-user', plan: 'enterprise', status: 'enterprise_pending' })).toBe(120_000);
     });
 });

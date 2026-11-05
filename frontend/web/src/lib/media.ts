@@ -9,6 +9,7 @@ export interface ProducerInfo {
     kind: msTypes.MediaKind;
     track: MediaStreamTrack;
     producer: msTypes.Producer;
+    appData: Record<string, unknown>;
 }
 
 export interface ConsumerInfo {
@@ -17,6 +18,7 @@ export interface ConsumerInfo {
     track: MediaStreamTrack;
     consumer: msTypes.Consumer;
     peerId: string;
+    appData: Record<string, unknown>;
 }
 
 export class MediaManager {
@@ -160,7 +162,7 @@ export class MediaManager {
     /**
      * Consume a remote producer (audio or video from another peer).
      */
-    async consume(producerPeerId: string, producerId: string): Promise<ConsumerInfo> {
+    async consume(producerPeerId: string, producerId: string, producerAppData: Record<string, unknown> = {}): Promise<ConsumerInfo> {
         const transport = this.recvTransport;
         const revision = this.revision;
         if (!transport) throw new Error('Recv transport not created');
@@ -192,6 +194,7 @@ export class MediaManager {
             track: consumer.track,
             consumer,
             peerId: producerPeerId,
+            appData: result.appData && typeof result.appData === 'object' ? result.appData : producerAppData,
         };
 
         this.consumers.set(consumer.id, info);
@@ -215,9 +218,9 @@ export class MediaManager {
      * Pause or resume the producer of a kind explicitly (idempotent).
      * Keeps the sent state matching the UI.
      */
-    setPaused(kind: msTypes.MediaKind, paused: boolean): void {
+    setPaused(kind: msTypes.MediaKind, paused: boolean, source?: string): void {
         for (const producer of this.producers.values()) {
-            if (producer.kind !== kind || producer.closed) continue;
+            if (producer.kind !== kind || producer.closed || !this.hasSource(producer, source)) continue;
             if (paused && !producer.paused) producer.pause();
             if (!paused && producer.paused) producer.resume();
         }
@@ -226,9 +229,9 @@ export class MediaManager {
     /**
      * Replace video track (e.g. switch camera or screen share).
      */
-    async replaceTrack(kind: msTypes.MediaKind, newTrack: MediaStreamTrack): Promise<void> {
+    async replaceTrack(kind: msTypes.MediaKind, newTrack: MediaStreamTrack, source?: string): Promise<void> {
         for (const producer of this.producers.values()) {
-            if (producer.kind === kind && !producer.closed) {
+            if (producer.kind === kind && !producer.closed && this.hasSource(producer, source)) {
                 await producer.replaceTrack({ track: newTrack });
                 return;
             }
@@ -237,12 +240,28 @@ export class MediaManager {
 
     get canSend(): boolean { return !!this.sendTransport && !this.sendTransport.closed; }
 
-    hasProducer(kind: msTypes.MediaKind): boolean {
-        return Array.from(this.producers.values()).some(p => p.kind === kind && !p.closed);
+    hasProducer(kind: msTypes.MediaKind, source?: string): boolean {
+        return Array.from(this.producers.values()).some(p => p.kind === kind && !p.closed && this.hasSource(p, source));
+    }
+
+    /** Close one media source without interrupting another producer of the same kind. */
+    async closeProducerBySource(source: string): Promise<void> {
+        const producers = Array.from(this.producers.values()).filter(producer => this.hasSource(producer, source) && !producer.closed);
+        for (const producer of producers) {
+            producer.close();
+            this.producers.delete(producer.id);
+        }
+        await Promise.all(producers.map(producer => signaling.request('closeProducer', { producerId: producer.id })));
     }
 
     getConsumers(): ConsumerInfo[] {
         return Array.from(this.consumers.values());
+    }
+
+    private hasSource(producer: msTypes.Producer, source?: string): boolean {
+        if (!source) return true;
+        const appData = producer.appData as Record<string, unknown>;
+        return appData.source === source || appData.type === source;
     }
 
     /**
