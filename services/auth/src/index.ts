@@ -350,7 +350,7 @@ app.get('/api/auth/verify', async (req, res) => {
         const token = authHeader.slice(7);
         const payload = await verifyToken(token);
         const result = await pool.query(
-            `SELECT u.subscription_plan, u.trial_ends_at, u.enterprise_status, t.plan AS tenant_plan
+            `SELECT u.role, u.subscription_plan, u.trial_ends_at, u.enterprise_status, t.plan AS tenant_plan
              FROM users u JOIN tenants t ON t.id = u.tenant_id
              WHERE u.id = $1 AND u.tenant_id = $2 AND u.is_active AND t.is_active`,
             [payload.sub, payload.tenantId],
@@ -365,9 +365,10 @@ app.get('/api/auth/verify', async (req, res) => {
         res.set('Cache-Control', 'no-store');
         res.json({ valid: true, payload: {
             ...payload,
+            role: result.rows[0].role,
             plan: entitlements.plan,
             status: entitlements.status,
-            privateConversationLimitMs: getPrivateConversationLimitMs({ sub: payload.sub, ...entitlements }),
+            privateConversationLimitMs: getPrivateConversationLimitMs({ sub: payload.sub, role: result.rows[0].role, ...entitlements }),
         } });
     } catch (err) {
         const status = sessionErrorStatus(err);
@@ -401,7 +402,7 @@ app.get('/api/auth/me/entitlements', async (req, res) => {
     try {
         const user = await verifyToken(authorization.slice(7));
         const result = await pool.query(
-            `SELECT u.subscription_plan, u.trial_ends_at, u.enterprise_status, t.plan AS tenant_plan
+            `SELECT u.role, u.subscription_plan, u.trial_ends_at, u.enterprise_status, t.plan AS tenant_plan
              FROM users u JOIN tenants t ON t.id = u.tenant_id
              WHERE u.id = $1 AND u.tenant_id = $2 AND u.is_active AND t.is_active`,
             [user.sub, user.tenantId],
@@ -414,7 +415,7 @@ app.get('/api/auth/me/entitlements', async (req, res) => {
             if (!Number.isNaN(fakeNow.getTime())) now = fakeNow;
         }
         const entitlements = getEntitlements(row, now);
-        const privateConversationLimitMs = getPrivateConversationLimitMs({ sub: user.sub, ...entitlements });
+        const privateConversationLimitMs = getPrivateConversationLimitMs({ sub: user.sub, role: row.role, ...entitlements });
         res.json({
             ...entitlements,
             privateConversationLimitSeconds: privateConversationLimitMs === null ? null : Math.floor(privateConversationLimitMs / 1000),

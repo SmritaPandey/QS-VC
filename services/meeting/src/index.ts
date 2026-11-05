@@ -444,6 +444,7 @@ app.get('/api/meetings', authMiddleware, async (req, res) => {
                 createdAt: m.created_at,
                 hostId: m.host_id,
                 isHost: m.host_id === user.sub,
+                canCancel: m.host_id === user.sub || user.role === 'admin',
                 ...(m.host_id === user.sub ? { inviteToken: createMeetingInviteToken(m.meeting_code) } : {}),
             })),
             total: result.rowCount,
@@ -474,11 +475,11 @@ app.patch('/api/meetings/:id/schedule', scheduleFeature, authMiddleware, validat
             `UPDATE meetings SET status = $1, updated_at = NOW(),
                 scheduled_start = COALESCE($2::timestamptz, scheduled_start),
                 scheduled_end = COALESCE($3::timestamptz, scheduled_end)
-             WHERE id = $4 AND tenant_id = $5 AND host_id = $6
+             WHERE id = $4 AND tenant_id = $5 AND (host_id = $6 OR $7)
                  AND scheduled_start IS NOT NULL AND (status = 'waiting' OR ($1 = 'cancelled' AND status = 'cancelled'))
              RETURNING id, status, scheduled_start AS "scheduledStart", scheduled_end AS "scheduledEnd"`,
             [rescheduling ? 'waiting' : 'cancelled', rescheduling ? edit.start : null,
-                rescheduling ? edit.end : null, id.data, user.tenantId, user.sub],
+                rescheduling ? edit.end : null, id.data, user.tenantId, user.sub, user.role === 'admin'],
         );
         if (!result.rows.length) return res.status(404).json({ error: 'Editable scheduled meeting not found' });
         res.json(result.rows[0]);
