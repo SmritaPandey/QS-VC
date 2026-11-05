@@ -939,6 +939,11 @@ label {
   color:var(--accent-primary);
   font-family:'IBM Plex Mono',monospace;
 }
+.share-modal-qr { display:flex; align-items:center; gap:16px; margin:18px 0 20px; padding:14px; border:1px solid var(--border-subtle); border-radius:12px; background:var(--bg-tertiary); }
+.share-modal-qr-image { display:grid; place-items:center; flex:none; padding:6px; border-radius:8px; background:#fff; }
+.share-modal-qr-image svg { display:block; width:128px; height:auto; }
+.share-modal-qr p { margin:0; color:var(--text-secondary); font-size:14px; line-height:1.5; }
+.share-modal-status { margin:8px 0; color:var(--accent-primary); font-size:14px; }
 .share-link-box {
   display:flex;
   gap:8px;
@@ -3028,6 +3033,8 @@ label {
   .share-link-box {
     flex-direction:column;
   }
+  .share-modal-qr { gap:12px; padding:10px; }
+  .share-modal-qr-image svg { width:96px; }
   .pre-meeting-page {
     padding:88px 20px 40px;
     display:block;
