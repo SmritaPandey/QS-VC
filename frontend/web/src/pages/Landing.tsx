@@ -27,7 +27,7 @@ function generateMeetingCode(): string {
     return `QS-${segments.join('-')}`;
 }
 
-async function createMeetingCode(): Promise<string> {
+async function createMeetingCode(): Promise<{ meetingCode: string; inviteToken?: string }> {
     // Prefer same-origin Vercel serverless (always available in prod), then backends
     const endpoints = [
         '/api/meetings/create',
@@ -40,14 +40,17 @@ async function createMeetingCode(): Promise<string> {
             const res = await fetch(url, { method: 'POST' });
             if (!res.ok) continue;
             const data = await res.json();
-            if (data?.meetingCode) return data.meetingCode as string;
+            if (data?.meetingCode) return {
+                meetingCode: data.meetingCode as string,
+                inviteToken: typeof data.inviteToken === 'string' ? data.inviteToken : undefined,
+            };
         } catch (err) {
             console.warn('Create meeting attempt failed:', url, err);
         }
     }
 
     // Room is created on first WebSocket joinRoom — local code unblocks the share UI
-    return generateMeetingCode();
+    return { meetingCode: generateMeetingCode() };
 }
 
 export default function Landing() {
@@ -91,9 +94,10 @@ export default function Landing() {
     const handleCreate = async (startNow = false) => {
         setCreating(true);
         try {
-            const meetingCode = await createMeetingCode();
-            const fullLink = `${window.location.origin}/meeting/${meetingCode}/preview`;
-            if (startNow) { navigate(`/meeting/${meetingCode}/preview`); return; }
+            const { meetingCode, inviteToken } = await createMeetingCode();
+            const inviteQuery = inviteToken ? `?invite=${encodeURIComponent(inviteToken)}` : '';
+            const fullLink = `${window.location.origin}/meeting/${meetingCode}/preview${inviteQuery}`;
+            if (startNow) { navigate(`/meeting/${meetingCode}/preview${inviteQuery}`); return; }
             setShareMeetingCode(meetingCode);
             setShareLink(fullLink);
         } catch (err) {

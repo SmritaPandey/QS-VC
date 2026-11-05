@@ -17,7 +17,7 @@ export async function loadMeetingPolicy(code: string) {
     const { waitingRoom, chatEnabled, screenShareEnabled, recording_allowed, e2eeRequired, ...settings } = policy.settings;
     return { ...policy, settings: {
         ...settings,
-        waitingRoomEnabled: settings.waitingRoomEnabled ?? waitingRoom ?? false,
+        waitingRoomEnabled: settings.waitingRoomEnabled ?? waitingRoom ?? true,
         allowChat: settings.allowChat ?? chatEnabled ?? true,
         allowScreenShare: settings.allowScreenShare ?? screenShareEnabled ?? true,
         allowRecording: settings.allowRecording ?? recording_allowed ?? true,

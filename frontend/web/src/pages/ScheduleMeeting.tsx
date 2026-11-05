@@ -49,7 +49,7 @@ const ScheduleMeeting: React.FC = () => {
     const schedulingWebinar = new URLSearchParams(search).get('type') === 'webinar';
     const [submitting, setSubmitting] = useState(false);
     const [cancelledCodes, setCancelledCodes] = useState<string[]>([]);
-    const [scheduled, setScheduled] = useState<(CalendarEvent & { id?: string; webinar: boolean; occurrences?: { id?: string; meetingCode: string; scheduledStart: string; scheduledEnd: string }[] }) | null>(null);
+    const [scheduled, setScheduled] = useState<(CalendarEvent & { id?: string; inviteToken?: string; webinar: boolean; occurrences?: { id?: string; meetingCode: string; scheduledStart: string; scheduledEnd: string; inviteToken?: string }[] }) | null>(null);
     const [inviteInput, setInviteInput] = useState('');
     const [copySuccess, setCopySuccess] = useState(false);
     // Scheduling saves a meeting to an account, so guests are asked to sign in first.
@@ -67,7 +67,7 @@ const ScheduleMeeting: React.FC = () => {
         date: tomorrow.toISOString().split('T')[0],
         time: '10:00',
         duration: 60,
-        enableWaitingRoom: false,
+        enableWaitingRoom: true,
         webinar: schedulingWebinar,
         repeat: 'none',
         repeatCount: 2,
@@ -134,8 +134,10 @@ const ScheduleMeeting: React.FC = () => {
             const meetingCode = data.meetingCode || data.code;
             if (typeof meetingCode !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(meetingCode)) throw new Error('Invalid meeting code');
             setCancelledCodes([]);
+            const inviteToken = typeof data.inviteToken === 'string' ? data.inviteToken : undefined;
             setScheduled({
                 id: typeof data.id === 'string' ? data.id : undefined,
+                inviteToken,
                 title: form.title || 'Scheduled Meeting',
                 occurrences: data.occurrences,
                 webinar: form.webinar,
@@ -146,7 +148,7 @@ const ScheduleMeeting: React.FC = () => {
                 reminders: [],
                 isPrivate: true,
                 meetingCode,
-                meetingUrl: `${window.location.origin}/meeting/${meetingCode}/preview`,
+                meetingUrl: `${window.location.origin}/meeting/${meetingCode}/preview${inviteToken ? `?invite=${encodeURIComponent(inviteToken)}` : ''}`,
             });
         } catch (err) {
             console.error('Schedule error:', err);
@@ -238,7 +240,7 @@ const ScheduleMeeting: React.FC = () => {
                         {scheduled.occurrences && scheduled.occurrences.length > 1 && <section aria-label="Series occurrences">
                             <h2>Series occurrences</h2>
                             <ul>{scheduled.occurrences.map(occurrence => {
-                                const meetingUrl = `${window.location.origin}/meeting/${encodeURIComponent(occurrence.meetingCode)}/preview`;
+                                const meetingUrl = `${window.location.origin}/meeting/${encodeURIComponent(occurrence.meetingCode)}/preview${occurrence.inviteToken ? `?invite=${encodeURIComponent(occurrence.inviteToken)}` : ''}`;
                                 const event = {
                                     ...scheduled, meetingCode: occurrence.meetingCode, meetingUrl,
                                     startTime: new Date(occurrence.scheduledStart), endTime: new Date(occurrence.scheduledEnd),

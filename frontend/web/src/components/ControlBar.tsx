@@ -42,6 +42,11 @@ interface Props {
     onReportProblem?: () => void;
     tilesPerPage?: TilesPerPage;
     onChangeTilesPerPage?: (value: TilesPerPage) => void;
+    audioOutputId?: string;
+    audioOutputDevices?: Array<{ deviceId: string; label: string }>;
+    audioOutputSupported?: boolean;
+    onAudioOutputChange?: (deviceId: string) => void;
+    onChooseAudioOutput?: () => void;
     activitySignal?: number;
     keepSideVisible?: boolean;
     viewMode: ViewMode;
@@ -116,6 +121,7 @@ export default function ControlBar({
     onToggleChat, onToggleParticipants, onRaiseHand, onToggleReactions, onToggleLanguage,
     captionsOn = false, onToggleCaptions, fullscreen = false, onToggleFullscreen, effectsOn = false, onOpenEffects, onReportProblem,
     tilesPerPage = 'auto', onChangeTilesPerPage,
+    audioOutputId = '', audioOutputDevices = [], audioOutputSupported = false, onAudioOutputChange, onChooseAudioOutput,
     onLeave, viewMode, onChangeView, activitySignal = 0, keepSideVisible = false,
 }: Props) {
     const [moreOpen, setMoreOpen] = useState(false);
@@ -203,6 +209,17 @@ export default function ControlBar({
                         {onToggleFullscreen && <button type="button" aria-pressed={fullscreen} onClick={() => { setMoreOpen(false); onToggleFullscreen(); }}><span className="mi" aria-hidden="true">{fullscreen ? 'fullscreen_exit' : 'fullscreen'}</span>{fullscreen ? 'Exit full screen' : 'Full screen'}</button>}
                         {onToggleLanguage && <button type="button" aria-expanded={languageOpen} aria-controls="meeting-language-settings" onClick={() => { setMoreOpen(false); onToggleLanguage(); }}><span className="mi" aria-hidden="true">translate</span>Captions and language settings</button>}
                         {onReportProblem && <button type="button" onClick={() => { setMoreOpen(false); onReportProblem(); }}><span className="mi" aria-hidden="true">feedback</span>Report a problem</button>}
+                        <h3>Audio output</h3>
+                        {audioOutputSupported ? <>
+                            <label className="meeting-audio-output"><span>Play meeting audio on</span>
+                                <select value={audioOutputId} onChange={event => onAudioOutputChange?.(event.target.value)}>
+                                    <option value="">System default</option>
+                                    {audioOutputDevices.filter(device => device.deviceId && device.deviceId !== 'default').map(device =>
+                                        <option key={device.deviceId} value={device.deviceId}>{device.label || 'Audio device'}</option>)}
+                                </select>
+                            </label>
+                            {onChooseAudioOutput && <button type="button" onClick={onChooseAudioOutput}><span className="mi" aria-hidden="true">speaker</span>Choose audio device</button>}
+                        </> : <p className="meeting-more-hint">This browser uses your phone’s audio route. Change speaker or headphones from your device’s audio controls.</p>}
                         <h3>Layout</h3>
                         <div className="meeting-view-options" role="group" aria-label="Meeting layout">
                             {VIEWS.map(([view, icon, label]) => <button type="button" key={view} aria-pressed={viewMode === view} onClick={() => onChangeView(view)}><span className="mi" aria-hidden="true">{icon}</span>{label}</button>)}

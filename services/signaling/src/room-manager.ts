@@ -34,6 +34,8 @@ export interface WaitingPeer {
     authUser?: { sub: string; role?: string } | null;
     /** True while the meeting has not been started by its host (Google Meet "waiting for the host"). */
     awaitingHost?: boolean;
+    /** Valid invitation link holder; may bypass the admission queue after the host starts. */
+    invited?: boolean;
 }
 
 export interface RoomSettings {
@@ -72,7 +74,7 @@ export interface RoomState {
 
 const DEFAULT_SETTINGS: RoomSettings = {
     maxParticipants: 25,
-    waitingRoomEnabled: false,
+    waitingRoomEnabled: true,
     locked: false,
     password: null,
     muteOnEntry: false,

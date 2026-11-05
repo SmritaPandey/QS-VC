@@ -16,6 +16,9 @@ import dotenv from 'dotenv';
 import pino from 'pino';
 import { attachSignalingIfAvailable } from './signaling-bridge.js';
 import { disableDemoPersistence } from './demo-storage-policy.js';
+import meetingInvitation from '../../../shared/meeting-invitation.cjs';
+
+const { createMeetingInviteToken } = meetingInvitation;
 
 dotenv.config({ path: '../../.env' });
 assertJwtSecret();
@@ -40,7 +43,7 @@ const createMeetingBody = z.object({
     recurrence: z.object({ frequency: z.enum(['daily', 'weekly']), count: z.number().int().min(2).max(12) }).optional(),
     settings: z.object({
         maxParticipants: z.number().int().min(2).max(500).default(100),
-        waitingRoom: z.boolean().default(false),
+        waitingRoom: z.boolean().default(true),
         webinar: z.boolean().default(false),
         e2eeRequired: z.boolean().default(false),
         recordingAllowed: z.boolean().default(true),
@@ -166,6 +169,7 @@ app.get('/ready', async (_req, res) => {
 app.post('/api/meetings/create', async (_req, res) => {
     try {
         const meetingCode = generateMeetingCode();
+        const inviteToken = createMeetingInviteToken(meetingCode);
         const WEB_URL = (process.env.WEB_URL || 'https://qs-vc.vercel.app').replace(/\/$/, '');
 
         // Try to persist to DB, fall back to in-memory if DB isn't ready
@@ -182,7 +186,8 @@ app.post('/api/meetings/create', async (_req, res) => {
 
         res.json({
             meetingCode,
-            joinUrl: `${WEB_URL}/meeting/${meetingCode}/preview`,
+            inviteToken,
+            joinUrl: `${WEB_URL}/meeting/${meetingCode}/preview?invite=${encodeURIComponent(inviteToken)}`,
         });
     } catch (err: any) {
         logger.error(err, 'Failed to create quick meeting');
@@ -196,6 +201,7 @@ app.post('/api/meetings', authMiddleware, validateBody(createMeetingBody), async
         const user = (req as any).user as AuthPayload;
         const { title, settings } = req.body;
         const meetingCode = generateMeetingCode();
+        const inviteToken = createMeetingInviteToken(meetingCode);
         const id = uuidv4();
 
         await pool.query(
@@ -209,7 +215,8 @@ app.post('/api/meetings', authMiddleware, validateBody(createMeetingBody), async
             id,
             meetingCode,
             title: title || 'Instant Meeting',
-            joinUrl: `${process.env.WEB_URL || 'https://qs-vc.vercel.app'}/meeting/${meetingCode}`,
+            inviteToken,
+            joinUrl: `${process.env.WEB_URL || 'https://qs-vc.vercel.app'}/meeting/${meetingCode}/preview?invite=${encodeURIComponent(inviteToken)}`,
             hostId: user.sub,
         });
     } catch (err: any) {
@@ -228,16 +235,19 @@ app.post('/api/meetings/schedule', scheduleFeature, authMiddleware, validateBody
 
         const seriesId = recurrence ? uuidv4() : undefined;
         const occurrences = times.map(time => ({ ...time, id: uuidv4(), meetingCode: generateMeetingCode() }));
+        const occurrencesWithInvites = occurrences.map(occurrence => ({ ...occurrence, inviteToken: createMeetingInviteToken(occurrence.meetingCode) }));
         await insertSchedule(pool, user.tenantId, title || 'Scheduled Meeting', user.sub,
             recurrence ? 'recurring' : 'scheduled', { ...settings, seriesId }, occurrences);
 
         const first = occurrences[0];
+        const inviteToken = createMeetingInviteToken(first.meetingCode);
         res.status(201).json({
             ...first,
             title: title || 'Scheduled Meeting',
-            joinUrl: `${process.env.WEB_URL || 'https://qs-vc.vercel.app'}/meeting/${first.meetingCode}`,
+            inviteToken,
+            joinUrl: `${process.env.WEB_URL || 'https://qs-vc.vercel.app'}/meeting/${first.meetingCode}/preview?invite=${encodeURIComponent(inviteToken)}`,
             seriesId,
-            occurrences,
+            occurrences: occurrencesWithInvites,
         });
     } catch (err: any) {
         logger.error(err, 'Failed to schedule meeting');
@@ -432,6 +442,7 @@ app.get('/api/meetings', authMiddleware, async (req, res) => {
                 createdAt: m.created_at,
                 hostId: m.host_id,
                 isHost: m.host_id === user.sub,
+                ...(m.host_id === user.sub ? { inviteToken: createMeetingInviteToken(m.meeting_code) } : {}),
             })),
             total: result.rowCount,
         });
