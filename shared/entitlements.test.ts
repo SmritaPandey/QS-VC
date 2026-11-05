@@ -8,7 +8,7 @@ describe('plan entitlements and trial eligibility', () => {
         const user = startTrial({ tenant_plan: 'free' }, started)!;
         expect(user).toMatchObject({ subscription_plan: 'starter_trial', trial_started_at: started.toISOString() });
         expect(user.trial_ends_at).toBe('2026-11-08T12:00:00.000Z');
-        expect(getEntitlements(user, started)).toMatchObject({ plan: 'starter_trial', status: 'trial_active', features: ['meeting_scheduling'] });
+        expect(getEntitlements(user, started)).toMatchObject({ plan: 'starter_trial', status: 'trial_active', features: ['meeting_scheduling', 'ai_captions', 'background_effects', 'ai_noise_suppression'] });
     });
 
     it('keeps trial access on day six', () => {
@@ -40,9 +40,9 @@ describe('plan entitlements and trial eligibility', () => {
     });
 
     it('assigns cloud recording to Pro while scheduling remains a Starter feature', () => {
-        expect(FEATURE_MIN_PLAN).toEqual({ meeting_scheduling: 'starter', cloud_recording: 'pro' });
+        expect(FEATURE_MIN_PLAN).toEqual({ meeting_scheduling: 'starter', ai_captions: 'starter', background_effects: 'starter', ai_noise_suppression: 'starter', cloud_recording: 'pro' });
         expect(getEntitlements(null).featureMinimumPlans).toEqual(FEATURE_MIN_PLAN);
-        expect(getEntitlements({ subscription_plan: 'starter_trial', trial_ends_at: '2026-11-08T12:00:00.000Z' }, started).features).toEqual(['meeting_scheduling']);
-        expect(getEntitlements({ subscription_plan: 'pro' }, started).features).toEqual(['meeting_scheduling', 'cloud_recording']);
+        expect(getEntitlements({ subscription_plan: 'starter_trial', trial_ends_at: '2026-11-08T12:00:00.000Z' }, started).features).toEqual(['meeting_scheduling', 'ai_captions', 'background_effects', 'ai_noise_suppression']);
+        expect(getEntitlements({ subscription_plan: 'pro' }, started).features).toEqual(['meeting_scheduling', 'ai_captions', 'background_effects', 'ai_noise_suppression', 'cloud_recording']);
     });
 });

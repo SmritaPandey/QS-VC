@@ -14,6 +14,14 @@ interface Props {
     isRecording: boolean;
     canRecord?: boolean;
     recordingLocked?: boolean;
+    signedIn?: boolean;
+    captionsLocked?: boolean;
+    effectsLocked?: boolean;
+    noiseMode?: 'off' | 'standard' | 'ai';
+    aiNoiseSuppressionLocked?: boolean;
+    onChangeNoiseMode?: (mode: 'off' | 'standard' | 'ai') => void;
+    onRequirePlanFeature?: (feature: string) => void;
+    onSignInForExtras?: () => void;
     chatOpen: boolean;
     participantsOpen: boolean;
     handRaised: boolean;
@@ -63,6 +71,7 @@ interface ToggleProps {
     iconOff: string;
     /** extra state class when on/off, e.g. 'active-muted' for a muted mic */
     stateClass?: string;
+    locked?: boolean;
     /** 'danger' paints the off state red (mic / camera muted) */
     offTone?: 'neutral' | 'danger';
     onToggle: () => void;
@@ -75,7 +84,7 @@ const FLASH_MS = 900;
 const VIEWS = [['auto', 'auto_awesome_mosaic', 'Auto'], ['tiled', 'grid_view', 'Tiled'], ['spotlight', 'crop_landscape', 'Spotlight'], ['sidebar', 'view_sidebar', 'Sidebar']] as const;
 const TILE_OPTIONS: TilesPerPage[] = ['auto', 4, 9, 16, 25, 49];
 
-function ToggleControl({ on, label, title, iconOn, iconOff, stateClass = '', offTone = 'neutral', onToggle, controls, badge }: ToggleProps) {
+function ToggleControl({ on, label, title, iconOn, iconOff, stateClass = '', locked = false, offTone = 'neutral', onToggle, controls, badge }: ToggleProps) {
     // On click, a small switch briefly replaces the icon, slides to the new state, then fades away.
     const [flash, setFlash] = useState<{ id: number; to: boolean } | null>(null);
     const timer = useRef<number>();
@@ -91,8 +100,9 @@ function ToggleControl({ on, label, title, iconOn, iconOff, stateClass = '', off
     return (
         <button
             type="button"
-            className={`ctrl-btn ctrl-toggle ${stateClass} ${on ? 'is-on' : 'is-off'} ${offTone === 'danger' ? 'tone-danger' : ''} ${flash ? 'is-flashing' : ''}`}
+            className={`ctrl-btn ctrl-toggle ${stateClass} ${locked ? 'is-locked' : ''} ${on ? 'is-on' : 'is-off'} ${offTone === 'danger' ? 'tone-danger' : ''} ${flash ? 'is-flashing' : ''}`}
             aria-label={title}
+            aria-disabled={locked || undefined}
             aria-pressed={on}
             aria-expanded={controls ? on : undefined}
             aria-controls={controls}
@@ -102,6 +112,7 @@ function ToggleControl({ on, label, title, iconOn, iconOff, stateClass = '', off
             <span className="ctrl-icon mi" aria-hidden="true" key={on ? 'on' : 'off'}>{on ? iconOn : iconOff}</span>
             {badge && <span className="ctrl-badge" aria-hidden="true">{badge}</span>}
             <span className="ctrl-label">{label}</span>
+            {locked && <span className="mi ctrl-plan-lock" aria-hidden="true">lock</span>}
             {flash && (
                 <span key={flash.id} className={`ctrl-switch-flash ${flash.to ? 'to-on' : 'to-off'}`} aria-hidden="true"
                     onAnimationEnd={(e) => { if (e.target === e.currentTarget) setFlash(null); }}>
@@ -114,6 +125,8 @@ function ToggleControl({ on, label, title, iconOn, iconOff, stateClass = '', off
 
 export default function ControlBar({
     assistant, isRecording, canRecord = false, recordingLocked = false, onToggleRecording,
+    signedIn = false, captionsLocked = false, effectsLocked = false, noiseMode = 'standard', aiNoiseSuppressionLocked = false,
+    onChangeNoiseMode, onRequirePlanFeature, onSignInForExtras,
     activitiesOpen = false, hostToolsOpen = false, onToggleActivities, onToggleHostTools,
     audioMuted, videoOff, screenSharing,
     chatOpen, participantsOpen, handRaised, reactionsOpen = false, languageOpen = false, languageLabel, languageCode,
@@ -175,8 +188,8 @@ export default function ControlBar({
                 <ToggleControl on={!videoOff} label="Camera" title={videoOff ? 'Start video' : 'Stop video'}
                     iconOn="videocam" iconOff="videocam_off" offTone="danger" stateClass={videoOff ? 'active-muted' : ''} onToggle={onToggleVideo} />
                 {onToggleCaptions && (
-                    <ToggleControl on={captionsOn} label="Captions" title={captionsOn ? 'Turn off captions' : `Turn on captions${languageLabel ? ` (${languageLabel})` : ''}`}
-                        iconOn="closed_caption" iconOff="closed_caption_disabled" stateClass={captionsOn ? 'active' : ''} onToggle={() => { setMoreOpen(false); onToggleCaptions(); }} badge={captionsOn ? languageCode : undefined} />
+                    <ToggleControl on={captionsOn} label="Captions" locked={captionsLocked} title={captionsLocked ? 'AI captions are available on Starter' : captionsOn ? 'Turn off captions' : `Turn on captions${languageLabel ? ` (${languageLabel})` : ''}`}
+                        iconOn="closed_caption" iconOff="closed_caption_disabled" stateClass={captionsOn ? 'active' : ''} onToggle={() => { setMoreOpen(false); if (captionsLocked) onRequirePlanFeature?.('ai_captions'); else onToggleCaptions(); }} badge={captionsOn ? languageCode : undefined} />
                 )}
             </div>
 
@@ -202,13 +215,20 @@ export default function ControlBar({
                         <span className="ctrl-icon mi" aria-hidden="true">more_horiz</span>
                     </button>
                     {moreOpen && <div id="meeting-more-controls" className="meeting-more-panel" role="group" aria-label="Extra meeting controls">
+                        {!signedIn && onSignInForExtras && <button type="button" onClick={() => { setMoreOpen(false); onSignInForExtras(); }}><span className="mi" aria-hidden="true">login</span>Sign in for extra features</button>}
                         {onToggleActivities && <button type="button" aria-expanded={activitiesOpen} aria-controls="meeting-activities" onClick={() => { setMoreOpen(false); onToggleActivities(); }}><span className="mi" aria-hidden="true">dashboard</span>Activities</button>}
                         {onToggleHostTools && <button type="button" aria-expanded={hostToolsOpen} aria-controls="meeting-host-tools" onClick={() => { setMoreOpen(false); onToggleHostTools(); }}><span className="mi" aria-hidden="true">admin_panel_settings</span>Host controls</button>}
-                        {canRecord && <button type="button" aria-pressed={isRecording} aria-label={recordingLocked && !isRecording ? 'Record meeting. Available on Pro.' : undefined} title={recordingLocked && !isRecording ? 'Available on Pro' : undefined} onClick={() => { setMoreOpen(false); onToggleRecording(); }}><span className="mi" aria-hidden="true">{isRecording ? 'stop_circle' : 'fiber_manual_record'}</span>{isRecording ? 'Stop recording' : 'Record meeting'}{recordingLocked && !isRecording && <span className="mi ctrl-plan-lock" aria-hidden="true">lock</span>}</button>}
-                        {onOpenEffects && <button type="button" aria-pressed={effectsOn} onClick={() => { setMoreOpen(false); onOpenEffects(); }}><span className="mi" aria-hidden="true">background_replace</span>Backgrounds and effects</button>}
+                        {signedIn && canRecord && <button type="button" aria-pressed={isRecording} aria-disabled={recordingLocked && !isRecording || undefined} className={recordingLocked && !isRecording ? 'is-feature-locked' : ''} aria-label={recordingLocked && !isRecording ? 'Record meeting. Available on Pro.' : undefined} title={recordingLocked && !isRecording ? 'Available on Pro' : undefined} onClick={() => { setMoreOpen(false); onToggleRecording(); }}><span className="mi" aria-hidden="true">{isRecording ? 'stop_circle' : 'fiber_manual_record'}</span>{isRecording ? 'Stop recording' : 'Record meeting'}{recordingLocked && !isRecording && <span className="mi ctrl-plan-lock" aria-hidden="true">lock</span>}</button>}
+                        {signedIn && onOpenEffects && <button type="button" title={effectsLocked ? 'Available on Starter' : undefined} aria-label={effectsLocked ? 'Backgrounds and effects. Available on Starter.' : undefined} aria-pressed={effectsOn} aria-disabled={effectsLocked || undefined} className={effectsLocked ? 'is-feature-locked' : ''} onClick={() => { setMoreOpen(false); if (effectsLocked) onRequirePlanFeature?.('background_effects'); else onOpenEffects(); }}><span className="mi" aria-hidden="true">background_replace</span>Backgrounds and effects{effectsLocked && <span className="mi ctrl-plan-lock" aria-hidden="true">lock</span>}</button>}
                         {onToggleFullscreen && <button type="button" aria-pressed={fullscreen} onClick={() => { setMoreOpen(false); onToggleFullscreen(); }}><span className="mi" aria-hidden="true">{fullscreen ? 'fullscreen_exit' : 'fullscreen'}</span>{fullscreen ? 'Exit full screen' : 'Full screen'}</button>}
                         {onToggleLanguage && <button type="button" aria-expanded={languageOpen} aria-controls="meeting-language-settings" onClick={() => { setMoreOpen(false); onToggleLanguage(); }}><span className="mi" aria-hidden="true">translate</span>Captions and language settings</button>}
                         {onReportProblem && <button type="button" onClick={() => { setMoreOpen(false); onReportProblem(); }}><span className="mi" aria-hidden="true">feedback</span>Report a problem</button>}
+                        <h3>Microphone noise</h3>
+                        <div className="meeting-view-options" role="group" aria-label="Microphone noise suppression">
+                            <button type="button" aria-pressed={noiseMode === 'standard'} onClick={() => onChangeNoiseMode?.('standard')}><span className="mi" aria-hidden="true">graphic_eq</span>Noise suppression</button>
+                            {signedIn && <button type="button" title={aiNoiseSuppressionLocked ? 'Available on Starter' : 'AI noise suppression'} aria-label={aiNoiseSuppressionLocked ? 'AI noise suppression. Available on Starter.' : 'AI noise suppression'} aria-pressed={noiseMode === 'ai'} aria-disabled={aiNoiseSuppressionLocked || undefined} className={aiNoiseSuppressionLocked ? 'is-feature-locked' : ''} onClick={() => aiNoiseSuppressionLocked ? onRequirePlanFeature?.('ai_noise_suppression') : onChangeNoiseMode?.(noiseMode === 'ai' ? 'standard' : 'ai')}><span className="mi" aria-hidden="true">auto_awesome</span>AI noise suppression{aiNoiseSuppressionLocked && <span className="mi ctrl-plan-lock" aria-hidden="true">lock</span>}</button>}
+                            <button type="button" aria-pressed={noiseMode === 'off'} onClick={() => onChangeNoiseMode?.('off')}><span className="mi" aria-hidden="true">volume_off</span>Off</button>
+                        </div>
                         <h3>Audio output</h3>
                         {audioOutputSupported ? <>
                             <label className="meeting-audio-output"><span>Play meeting audio on</span>
@@ -230,7 +250,7 @@ export default function ControlBar({
                             </select></label>}
                         <p className="meeting-more-hint">Muted-mic reminders analyse sound locally. Nothing is saved or sent.</p>
                         <div className="meeting-more-mobile-actions">
-                            {onToggleCaptions && <button type="button" aria-pressed={captionsOn} onClick={() => { setMoreOpen(false); onToggleCaptions(); }}><span className="mi" aria-hidden="true">closed_caption</span>{captionsOn ? 'Turn off captions' : 'Turn on captions'}</button>}
+                            {onToggleCaptions && <button type="button" aria-pressed={captionsOn} aria-disabled={captionsLocked || undefined} className={captionsLocked ? 'is-feature-locked' : ''} onClick={() => { setMoreOpen(false); if (captionsLocked) onRequirePlanFeature?.('ai_captions'); else onToggleCaptions(); }}><span className="mi" aria-hidden="true">closed_caption</span>{captionsOn ? 'Turn off captions' : 'Turn on captions'}{captionsLocked && <span className="mi ctrl-plan-lock" aria-hidden="true">lock</span>}</button>}
                             <button type="button" onClick={() => { setMoreOpen(false); onToggleScreen(); }}><span className="mi" aria-hidden="true">screen_share</span>{screenSharing ? 'Stop presenting' : 'Present screen'}</button>
                             {onToggleReactions && <button type="button" onClick={() => { setMoreOpen(false); onToggleReactions(); }}><span className="mi" aria-hidden="true">add_reaction</span>Reactions</button>}
                             <button type="button" onClick={() => { setMoreOpen(false); onToggleParticipants(); }}><span className="mi" aria-hidden="true">group</span>Participants</button>

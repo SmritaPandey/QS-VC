@@ -6,7 +6,9 @@ import { CameraCapture, watchCameraVisibility, watchCameraTrack, cameraAccessMes
 import { watchMutedSpeech } from '../lib/muted-speech';
 import { recordingManager, recordingRequest } from '../lib/recording';
 import { getToken } from '../lib/session';
+import { useSession } from '../lib/use-session';
 import { useEntitlements } from '../lib/entitlements';
+import type { NoiseSuppressor } from '../lib/noise-suppression';
 import '../styles/recordings.css';
 import { playSound } from '../lib/sounds';
 import { createMeetingComposite, type MeetingComposite } from '../lib/meeting-recorder';
@@ -126,6 +128,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const { meetingCode } = useParams<{ meetingCode: string }>();
     const location = useLocation();
     const navigate = useNavigate();
+    const session = useSession();
+    const signedIn = session.status === 'authenticated' && Boolean(getToken());
     const entitlements = useEntitlements();
     const state = { ...((location.state as any) || {}), ...(reconnecting ? carried : {}) };
     const initialInviteToken = new URLSearchParams(location.search).get('invite') || '';
@@ -198,6 +202,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [webinar, setWebinar] = useState(false);
     const [myOnStage, setMyOnStage] = useState(false);
     const [captionsOn, setCaptionsOn] = useState(false);
+    const [noiseMode, setNoiseMode] = useState<'off' | 'standard' | 'ai'>('standard');
     const [shareSpeech, setShareSpeech] = useState(false);
     const [reportOpen, setReportOpen] = useState(false);
     const [effectsOpen, setEffectsOpen] = useState(false);
@@ -250,6 +255,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const handRaisedRef = useRef(false);
     const stopScreenShareRef = useRef<() => Promise<void>>(async () => {});
     const processedTrackRef = useRef<MediaStreamTrack | null>(null);
+    const noiseModeRef = useRef<'off' | 'standard' | 'ai'>('standard');
+    const noiseSuppressorRef = useRef<NoiseSuppressor | null>(null);
+    const processedAudioTrackRef = useRef<MediaStreamTrack | null>(null);
     const processorRef = useRef<BackgroundProcessor | null>(null);
     const processorSourceRef = useRef<string>('');
     const videoAreaRef = useRef<HTMLDivElement>(null);
@@ -354,8 +362,95 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         });
     }, []);
 
+    const publishAudioTrack = useCallback(async (rawTrack: MediaStreamTrack, mode = noiseModeRef.current) => {
+        const revision = sessionRevision.current;
+        const previousMode = noiseModeRef.current;
+        const previousSuppressor = noiseSuppressorRef.current;
+        const previousProcessedTrack = processedAudioTrackRef.current;
+        let nextSuppressor: NoiseSuppressor | null = null;
+        let nextProcessedTrack: MediaStreamTrack | null = null;
+        let effectiveMode = mode;
+        let outgoingTrack = rawTrack;
+        if (mode === 'ai') {
+            await rawTrack.applyConstraints({ noiseSuppression: false }).catch(() => {});
+            try {
+                const { NoiseSuppressor: NoiseSuppressorImpl } = await import('../lib/noise-suppression');
+                nextSuppressor = new NoiseSuppressorImpl();
+                const processed = await nextSuppressor.start(new MediaStream([rawTrack]));
+                const filteredTrack = processed.getAudioTracks()[0];
+                if (!filteredTrack) throw new Error('The AI noise filter did not produce an audio track.');
+                nextProcessedTrack = filteredTrack;
+                outgoingTrack = filteredTrack;
+            } catch (error) {
+                nextSuppressor?.stop();
+                nextSuppressor = null;
+                await rawTrack.applyConstraints({ noiseSuppression: true }).catch(() => {});
+                effectiveMode = 'standard';
+                showNotice(error instanceof Error ? `${error.message} Using standard noise suppression.` : 'AI noise suppression could not start. Using standard noise suppression.');
+            }
+        } else {
+            await rawTrack.applyConstraints({ noiseSuppression: mode === 'standard' }).catch(() => {});
+        }
+
+        if (!sessionActive.current || revision !== sessionRevision.current || rawTrack.readyState !== 'live') {
+            nextSuppressor?.stop();
+            throw new Error('The meeting disconnected before your microphone settings could be applied.');
+        }
+
+        try {
+            if (media.canSend) {
+                if (media.hasProducer('audio')) await media.replaceTrack('audio', outgoingTrack);
+                else await media.produce(outgoingTrack, { source: 'mic' });
+            }
+            if (!sessionActive.current || revision !== sessionRevision.current) throw new Error('The meeting disconnected before your microphone settings could be applied.');
+        } catch (error) {
+            nextSuppressor?.stop();
+            await rawTrack.applyConstraints({ noiseSuppression: previousMode === 'standard' }).catch(() => {});
+            throw error;
+        }
+
+        if (previousSuppressor !== nextSuppressor) previousSuppressor?.stop();
+        if (previousProcessedTrack !== nextProcessedTrack) previousProcessedTrack?.stop();
+        noiseSuppressorRef.current = nextSuppressor;
+        processedAudioTrackRef.current = nextProcessedTrack;
+        if (effectiveMode !== mode) { noiseModeRef.current = effectiveMode; setNoiseMode(effectiveMode); }
+        media.setPaused('audio', audioMutedRef.current);
+        return effectiveMode;
+    }, [showNotice]);
+
+    const requestPlanFeature = useCallback((feature: string) => {
+        if (entitlements.loading) { showNotice('Checking your plan…'); return; }
+        const requiredPlan = entitlements.featureMinimumPlans[feature] || 'starter';
+        window.dispatchEvent(new CustomEvent('qsvc:upgrade-required', { detail: { requiredPlan, feature, returnTo: `${location.pathname}${location.search}${location.hash}` } }));
+    }, [entitlements.loading, entitlements.featureMinimumPlans, location.hash, location.pathname, location.search, showNotice]);
+
+    const changeNoiseMode = useCallback(async (mode: 'off' | 'standard' | 'ai') => {
+        if (mode === 'ai') {
+            if (!signedIn) { requestPlanFeature('ai_noise_suppression'); return; }
+            if (entitlements.loading) { showNotice('Checking your plan…'); return; }
+            if (!entitlements.features.includes('ai_noise_suppression')) { requestPlanFeature('ai_noise_suppression'); return; }
+        }
+        const track = localStreamRef.current?.getAudioTracks().find(candidate => candidate.readyState === 'live');
+        if (!track) {
+            noiseModeRef.current = mode;
+            setNoiseMode(mode);
+            return;
+        }
+        try {
+            const appliedMode = await publishAudioTrack(track, mode);
+            noiseModeRef.current = appliedMode;
+            setNoiseMode(appliedMode);
+        } catch (error) {
+            showNotice(error instanceof Error ? error.message : 'Microphone noise settings could not be changed.');
+            return;
+        }
+    }, [entitlements.features, entitlements.loading, publishAudioTrack, requestPlanFeature, showNotice, signedIn]);
+
     const stopLocalMedia = useCallback(() => {
         stopSpeechRecognition.current();
+        noiseSuppressorRef.current?.stop();
+        noiseSuppressorRef.current = null;
+        processedAudioTrackRef.current = null;
         sessionActive.current = false;
         sessionRevision.current++;
         cameraCapture.current.stop();
@@ -380,6 +475,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         let receiveReady = false;
         const pendingProducers = new Map<string, string>();
         const consumingProducers = new Set<string>();
+        const presenterUpdates = new Map<string, boolean>();
+        let peerSnapshotReady = false;
         const consumeProducer = async (peerId: string, producerId: string) => {
             if (!peerId || !producerId) return;
             if (!receiveReady) { pendingProducers.set(producerId, peerId); return; }
@@ -411,6 +508,23 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             }
             dropped();
         })];
+        // Subscribe before joinRoom so a screen producer cannot arrive in the setup-listener gap.
+        unsubscribe.push(
+            signaling.on('newProducer', ({ peerId, producerId, appData }: any) => {
+                if (appData?.type === 'screen' || appData?.source === 'screen') {
+                    presenterUpdates.set(peerId, true);
+                    if (peerSnapshotReady) patchPeer(peerId, { presenting: true });
+                }
+                void consumeProducer(peerId, producerId);
+            }),
+            signaling.on('presenterChanged', ({ peerId, presenting }: any) => {
+                if (peerId === myPeerIdRef.current) return;
+                const isPresenting = !!presenting;
+                presenterUpdates.set(peerId, isPresenting);
+                if (peerSnapshotReady) patchPeer(peerId, { presenting: isPresenting });
+                playSound(isPresenting ? 'success' : 'toggleOff');
+            }),
+        );
         async function init() {
             try {
                 const stream = new MediaStream();
@@ -474,7 +588,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         setSpotlightId(peerId || null);
                         if (peerId && peerId === myPeerIdRef.current) showNotice(`${by || 'The host'} put you in the spotlight. Everyone sees you large.`);
                     }),
-                    signaling.on('presenterChanged', ({ peerId, presenting }: any) => { if (peerId !== myPeerIdRef.current) patchPeer(peerId, { presenting: !!presenting }); }),
                     signaling.on('stopPresenting', ({ by }: any) => { if (sharingRef.current) { void stopScreenShareRef.current(); showNotice(`${by || 'The host'} stopped your presentation.`); } }),
                     signaling.on('stageChanged', ({ peerId, onStage, canPublish, by }: any) => {
                         if (peerId !== myPeerIdRef.current) { patchPeer(peerId, { onStage: !!onStage }); return; }
@@ -494,7 +607,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     signaling.on('peerLeft', ({ peerId }: any) => { setKnocks(current => current.filter(k => k.peerId !== peerId)); setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; }); }),
                     signaling.on('newPeer', ({ peerId }: any) => setKnocks(current => current.filter(k => k.peerId !== peerId))),
                     signaling.on('peerKicked', ({ peerId }: any) => setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; })),
-                    signaling.on('newProducer', ({ peerId, producerId }: any) => { void consumeProducer(peerId, producerId); }),
                     signaling.on('peerMuteChanged', ({ peerId, kind, muted }: any) => {
                         if (kind === 'audio') patchPeer(peerId, { audioMuted: !!muted });
                         if (kind === 'video') patchPeer(peerId, { videoOff: !!muted });
@@ -528,6 +640,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 for (const p of joinResult.existingPeers || []) {
                     patchPeer(p.peerId, { displayName: p.displayName, role: p.role, audioMuted: !!p.audioMuted, videoOff: !!p.videoOff, handRaised: !!p.handRaised, presenting: !!p.screenSharing, onStage: !!p.onStage });
                 }
+                peerSnapshotReady = true;
+                for (const [peerId, presenting] of presenterUpdates) patchPeer(peerId, { presenting });
 
                 // Capture starts only after admission, never while waiting for a host.
                 const manager = joinResult.role === 'host' || joinResult.role === 'co-host';
@@ -571,7 +685,15 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         // Producers start live; match them to the current (possibly muted) state.
                         media.setPaused('audio', audioMutedRef.current);
                         media.setPaused('video', videoOffRef.current);
-                        for (const existingPeer of joinResult.existingPeers || []) {
+                        const roomSnapshot = await signaling.request('getRoomInfo', {}).catch(() => null);
+                        const peersForSync = new Map<string, any>((joinResult.existingPeers || []).map((peer: any) => [peer.peerId, peer]));
+                        for (const participant of roomSnapshot?.participants || []) peersForSync.set(participant.peerId, participant);
+                        for (const existingPeer of peersForSync.values()) {
+                            if (existingPeer.peerId === myPeerIdRef.current) continue;
+                            const presenting = presenterUpdates.has(existingPeer.peerId)
+                                ? presenterUpdates.get(existingPeer.peerId)
+                                : !!existingPeer.screenSharing;
+                            patchPeer(existingPeer.peerId, { displayName: existingPeer.displayName, role: existingPeer.role, audioMuted: !!existingPeer.audioMuted, videoOff: !!existingPeer.videoOff, handRaised: !!existingPeer.handRaised, presenting, onStage: !!existingPeer.onStage });
                             for (const producer of existingPeer.producers || []) pendingProducers.set(producer.id, existingPeer.peerId);
                         }
                         for (const [producerId, producerPeerId] of pendingProducers) {
@@ -692,7 +814,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 current.addTrack(next);
                 next.enabled = wasOn;
                 watchMicrophone(next);
-                if (media.canSend) { if (media.hasProducer('audio')) await media.replaceTrack('audio', next); else await media.produce(next, { source: 'mic' }); }
+                await publishAudioTrack(next);
                 media.setPaused('audio', !wasOn);
                 setLocalStream(new MediaStream(current.getTracks()));
                 showNotice(`Your microphone was disconnected. Switched to ${deviceLabel(next)}.`);
@@ -701,7 +823,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             }
         }, { once: true });
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [applyMute, showNotice]);
+    }, [applyMute, publishAudioTrack, showNotice]);
 
     const handleToggleAudio = useCallback(async () => {
         if (!canPublishRef.current) { showNotice('Only the webinar organiser can share media.'); return; }
@@ -723,10 +845,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             current.addTrack(track);
             localStreamRef.current = current;
             watchMicrophone(track);
-            if (media.canSend) {
-                if (media.hasProducer('audio')) await media.replaceTrack('audio', track);
-                else await media.produce(track, { source: 'mic' });
-            }
+            await publishAudioTrack(track);
             if (!sessionActive.current || revision !== sessionRevision.current) { track.stop(); return; }
             setLocalStream(new MediaStream(current.getTracks()));
             applyMute('audio', false);
@@ -736,7 +855,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             applyMute('audio', true);
             showNotice(microphoneMessage(error));
         } finally { busyRef.current.mic = false; }
-    }, [applyMute, state.micId, showNotice, watchMicrophone]);
+    }, [applyMute, publishAudioTrack, state.micId, showNotice, watchMicrophone]);
 
     useEffect(() => {
         window.clearTimeout(mutedSpeechTimer.current);
@@ -849,6 +968,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         screenStreamRef.current = null;
         setScreenStream(null);
         setScreenSharing(false);
+        playSound('toggleOff');
         const camTrack = processedTrackRef.current?.readyState === 'live' ? processedTrackRef.current : localStreamRef.current?.getVideoTracks()[0];
         if (camTrack?.readyState === 'live') await media.replaceTrack('video', camTrack).catch(() => { });
         if (!sessionActive.current || revision !== sessionRevision.current) return;
@@ -880,6 +1000,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             }
             if (!sessionActive.current || revision !== sessionRevision.current || !sharingRef.current || !roomSettingsRef.current.allowScreenShare || screenTrack.readyState !== 'live') { display.getTracks().forEach(t => t.stop()); return; }
             media.setPaused('video', false); // the screen is sent even if the camera is off
+            playSound('success');
             if (joinedRef.current) signaling.request('muteStateChanged', { kind: 'screen', muted: true, presenting: true }).catch(() => { });
         } catch (err) {
             if (!sessionActive.current || revision !== sessionRevision.current) return;
@@ -945,7 +1066,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         if (recordingRef.current) { await finishRecording(); return; }
         if (entitlements.loading) { showNotice('Checking your plan…'); return; }
         if (!entitlements.features.includes('cloud_recording')) {
-            window.dispatchEvent(new CustomEvent('qsvc:upgrade-required', { detail: { requiredPlan: entitlements.featureMinimumPlans.cloud_recording || 'pro' } }));
+            window.dispatchEvent(new CustomEvent('qsvc:upgrade-required', { detail: { requiredPlan: entitlements.featureMinimumPlans.cloud_recording || 'pro', feature: 'cloud_recording', returnTo: `${location.pathname}${location.search}${location.hash}` } }));
             return;
         }
         if (busyRef.current.record || pendingRecording.current) { showNotice('Finish saving the previous recording first.'); return; }
@@ -977,7 +1098,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             void signaling.request('setRecordingState', { recording: false }).catch(() => {});
             showNotice(reason instanceof Error ? reason.message : 'Recording could not start.');
         } finally { busyRef.current.record = false; }
-    }, [finishRecording, meetingCode, myRole, connected, showNotice, entitlements.loading, entitlements.features]);
+    }, [finishRecording, meetingCode, myRole, connected, showNotice, entitlements.loading, entitlements.features, entitlements.featureMinimumPlans, location.hash, location.pathname, location.search]);
 
     useEffect(() => {
         const warn = (event: BeforeUnloadEvent) => {
@@ -1135,6 +1256,23 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         else if (supported) { setLanguageOpen(true); setReactionsOpen(false); showNotice('Captions are on. To let others read what you say, turn on “Share my speech as captions”.'); }
         else showNotice('Captions are on. This browser can’t caption your own speech, but you’ll see what others say.');
     }, [captionsOn, showNotice]);
+    const closePanels = useCallback(() => {
+        setChatOpen(false); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false);
+    }, []);
+
+    useEffect(() => {
+        if (!signedIn || entitlements.loading) return;
+        let feature = '';
+        try {
+            feature = sessionStorage.getItem('qsvc:intended-feature') || '';
+            if (feature) sessionStorage.removeItem('qsvc:intended-feature');
+        } catch { return; }
+        if (!feature) return;
+        if (!entitlements.features.includes(feature)) { requestPlanFeature(feature); return; }
+        if (feature === 'ai_noise_suppression') void changeNoiseMode('ai');
+        else if (feature === 'ai_captions') toggleCaptions();
+        else if (feature === 'background_effects') { closePanels(); setEffectsOpen(true); }
+    }, [signedIn, entitlements.loading, entitlements.features, requestPlanFeature, changeNoiseMode, toggleCaptions, closePanels]);
 
     // ── Full screen ──
     useEffect(() => {
@@ -1180,7 +1318,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         };
     }, [connected, restoring, myRole, peers.size, webinar, screenSharing, captionsOn, effect, effectStatus, notice, cameraNotice]);
 
-    const closePanels = () => { setChatOpen(false); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); };
     const sidePanelOpen = chatOpen || participantsOpen || activitiesOpen || hostToolsOpen || effectsOpen;
     const manager = myRole === 'host' || myRole === 'co-host';
     const closeActivityPanel = () => { setActivitiesOpen(false); setHostToolsOpen(false); document.querySelector<HTMLButtonElement>('[aria-label="More controls"]')?.focus(); };
@@ -1280,23 +1417,31 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 {pendingRecording.current ? <details><summary>Recording actions</summary><button type="button" onClick={() => void savePendingRecording()}>Retry saving</button><button type="button" onClick={() => { const pending = pendingRecording.current; if (pending) recordingManager.downloadLocally(pending.blob, `QS-VC-${meetingCode}.${pending.format}`); }}>Download unsaved copy</button><button type="button" onClick={() => { if (window.confirm('Discard the unsaved recording? This copy cannot be recovered.')) { pendingRecording.current = null; recordingManager.pending = null; setRecordingStatus('Unsaved copy discarded. You can leave the meeting.'); } }}>Discard unsaved copy</button></details> : <a href={`/recordings/${encodeURIComponent(meetingCode || '')}`}>Manage recordings</a>}
             </div>}
             <ControlBar
-                assistant={<AIChatBot onOpen={() => { setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen} />}
+                assistant={signedIn ? <AIChatBot onOpen={() => { setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen} /> : undefined}
+                signedIn={signedIn}
+                captionsLocked={entitlements.loading || !entitlements.features.includes('ai_captions')}
+                effectsLocked={entitlements.loading || !entitlements.features.includes('background_effects')}
+                noiseMode={noiseMode}
+                aiNoiseSuppressionLocked={entitlements.loading || !entitlements.features.includes('ai_noise_suppression')}
+                onChangeNoiseMode={changeNoiseMode}
+                onRequirePlanFeature={requestPlanFeature}
+                onSignInForExtras={() => window.dispatchEvent(new CustomEvent('qsvc:upgrade-required', { detail: { requiredPlan: 'starter', returnTo: `${location.pathname}${location.search}${location.hash}` } }))}
                 activitiesOpen={activitiesOpen} hostToolsOpen={hostToolsOpen}
                 onToggleActivities={() => { setActivitiesOpen(value => !value); setHostToolsOpen(false); setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); setEffectsOpen(false); }}
                 onToggleHostTools={manager ? () => { setHostToolsOpen(value => !value); setActivitiesOpen(false); setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); } : undefined}
                 viewMode={viewMode} onChangeView={changeView} tilesPerPage={tilesPerPage} onChangeTilesPerPage={changeTiles} activitySignal={mutedSpeechPulse} keepSideVisible={mutedSpeechNotice}
                 audioOutputId={audioOutputId} audioOutputDevices={audioOutputDevices} audioOutputSupported={audioOutputSupported}
                 onAudioOutputChange={setAudioOutputId} onChooseAudioOutput={audioOutputPickerSupported ? chooseAudioOutput : undefined}
-                captionsOn={captionsOn} onToggleCaptions={toggleCaptions}
+                captionsOn={captionsOn} onToggleCaptions={signedIn ? toggleCaptions : undefined}
                 fullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen}
                 effectsOn={effect.kind !== 'none'} onOpenEffects={() => { closePanels(); setEffectsOpen(true); setLanguageOpen(false); setReactionsOpen(false); }}
                 onReportProblem={() => setReportOpen(true)}
                 audioMuted={audioMuted} videoOff={videoOff} screenSharing={screenSharing}
-                isRecording={isRecording} canRecord={myRole === 'host' && !!getToken()} recordingLocked={!entitlements.loading && !entitlements.features.includes('cloud_recording')} chatOpen={chatOpen} participantsOpen={participantsOpen}
+                isRecording={isRecording} canRecord={myRole === 'host' && !!getToken()} recordingLocked={entitlements.loading || !entitlements.features.includes('cloud_recording')} chatOpen={chatOpen} participantsOpen={participantsOpen}
                 handRaised={handRaised} reactionsOpen={reactionsOpen}
                 onToggleReactions={() => { setReactionsOpen((open) => !open); setLanguageOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }}
                 languageOpen={languageOpen} languageLabel={findLanguage(speechLanguage.code)?.name} languageCode={speechLanguage.code.split('-')[0].toUpperCase()}
-                onToggleLanguage={() => { setLanguageOpen((open) => !open); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }}
+                onToggleLanguage={signedIn ? () => { setLanguageOpen((open) => !open); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); } : undefined}
                 onToggleAudio={handleToggleAudio} onToggleVideo={handleToggleVideo}
                 onToggleScreen={handleScreenShare} onToggleRecording={handleToggleRecording}
                 onToggleChat={() => { if (!roomSettings.allowChat && !manager) { showNotice('Chat is disabled by the host.'); return; } setChatOpen(!chatOpen); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); }}

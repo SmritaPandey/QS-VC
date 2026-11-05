@@ -70,8 +70,10 @@ export default function VideoGrid({ localStream, myPeerId, myRole, myOnStage, pe
     const forcedFocus = (viewMode === 'spotlight' || viewMode === 'sidebar') && !pinnedId && !spotlightId && !people.some(p => p.presenting)
         ? (activeSpeaker && activeSpeaker !== selfId ? activeSpeaker : people.find(p => !p.isLocal)?.id ?? null) : null;
     const preview = computeLayout({ people, webinar, pinnedId: pinnedId || forcedFocus, spotlightId, activeSpeaker, pageSize: 1, page: 0 });
-    const hasFocus = viewMode !== 'tiled' && !!preview.focusId;
-    const stripSide = viewMode === 'sidebar' && box.width > 700 ? 'side' : 'bottom';
+    // A presentation always gets the main stage, even when a viewer prefers a tiled gallery.
+    const hasFocus = !!preview.focusId && (viewMode !== 'tiled' || preview.focusReason === 'presenting');
+    const wideStage = box.width > 950 && box.width / Math.max(box.height, 1) > 1.35;
+    const stripSide = (viewMode === 'sidebar' || (viewMode === 'auto' && wideStage)) && wideStage ? 'side' : 'bottom';
     const size = tilesPerPage === 'auto' ? autoPageSize(box.width, box.height, hasFocus) : hasFocus ? Math.min(tilesPerPage, stripSide === 'side' ? 6 : 8) : tilesPerPage;
     const layout = computeLayout({ people, webinar, pinnedId: hasFocus ? (pinnedId || forcedFocus) : null, spotlightId: hasFocus ? spotlightId : null, activeSpeaker, pageSize: size, page });
     useEffect(() => { if (layout.page !== page) setPage(layout.page); }, [layout.page, page]);
