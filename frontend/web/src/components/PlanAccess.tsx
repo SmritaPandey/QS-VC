@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { useEntitlements } from '../lib/entitlements';
+import { hasFeature, useEntitlements } from '../lib/entitlements';
 import { useSession } from '../lib/use-session';
 import type { Plan } from '../../../../shared/entitlements.cjs';
 
@@ -86,10 +86,12 @@ export function Gate({ feature, requiredPlan, children, preview }: { feature: st
     const navigate = useNavigate();
     const contentRef = useRef<HTMLDivElement>(null);
     const minimumPlan = requiredPlan || entitlements.featureMinimumPlans[feature] || 'starter';
-    useEffect(() => { if (contentRef.current) contentRef.current.inert = session.status === 'authenticated' && !entitlements.loading && !entitlements.features.includes(feature); }, [session.status, entitlements.loading, entitlements.features, feature]);
+    const featureAllowed = hasFeature(entitlements, feature);
+    useEffect(() => { if (contentRef.current) contentRef.current.inert = session.status === 'authenticated' && !entitlements.loading && !featureAllowed; }, [session.status, entitlements.loading, featureAllowed]);
     if (session.status !== 'authenticated') return <>{children}</>;
+    if (entitlements.isPlatformAdmin) return <>{children}</>;
     if (entitlements.loading) return <div className="plan-gate-shell" role="status">Checking your plan…</div>;
-    if (entitlements.features.includes(feature)) return <>{children}</>;
+    if (featureAllowed) return <>{children}</>;
     return <div className="plan-gate-shell">
         <div ref={contentRef} className="plan-gate-preview" aria-hidden="true">{preview || children}</div>
         {entitlements.status !== 'trial_expired' && <UpgradePrompt requiredPlan={minimumPlan} onClose={() => navigate('/app')} />}
@@ -98,13 +100,13 @@ export function Gate({ feature, requiredPlan, children, preview }: { feature: st
 
 export function RequirePlan({ feature, requiredPlan, children }: { feature: string; requiredPlan?: Plan; children: ReactNode }) {
     const entitlements = useEntitlements();
-    if (entitlements.features.includes(feature)) return <>{children}</>;
+    if (hasFeature(entitlements, feature)) return <>{children}</>;
     return <UpgradePrompt requiredPlan={requiredPlan || entitlements.featureMinimumPlans[feature] || 'starter'} blocking />;
 }
 
 export function TrialEndedPrompt() {
     const entitlements = useEntitlements();
-    if (entitlements.status !== 'trial_expired') return null;
+    if (entitlements.isPlatformAdmin || entitlements.status !== 'trial_expired') return null;
     return <UpgradePrompt requiredPlan="starter" blocking />;
 }
 
@@ -119,19 +121,19 @@ export function UpgradePromptListener() {
             const detail = (event as CustomEvent<{ requiredPlan?: Plan; returnTo?: string; feature?: string }>).detail;
             const plan = detail?.requiredPlan;
             if (!plan || !['starter', 'pro', 'enterprise'].includes(plan)) return;
-            if (session.profile?.role === 'admin') return;
-            if (typeof detail.feature === 'string' && entitlements.features.includes(detail.feature)) return;
+            if (entitlements.isPlatformAdmin) return;
+            if (typeof detail.feature === 'string' && hasFeature(entitlements, detail.feature)) return;
             const currentPath = `${location.pathname}${location.search}${location.hash}`;
             const returnTo = detail.returnTo?.startsWith('/') && !detail.returnTo.startsWith('//') ? detail.returnTo : currentPath;
             setPrompt({ requiredPlan: plan, returnTo, feature: typeof detail.feature === 'string' ? detail.feature : undefined });
         };
         window.addEventListener('qsvc:upgrade-required', handle);
         return () => window.removeEventListener('qsvc:upgrade-required', handle);
-    }, [entitlements.features, location.hash, location.pathname, location.search, session.profile?.role, session.status]);
+    }, [entitlements.features, entitlements.isPlatformAdmin, location.hash, location.pathname, location.search, session.status]);
     useEffect(() => {
-        if (entitlements.status === 'trial_expired' || session.profile?.role === 'admin'
-            || (prompt?.feature && entitlements.features.includes(prompt.feature))) setPrompt(null);
-    }, [entitlements.features, entitlements.status, prompt?.feature, session.profile?.role]);
+        if (entitlements.status === 'trial_expired' || entitlements.isPlatformAdmin
+            || (prompt?.feature && hasFeature(entitlements, prompt.feature))) setPrompt(null);
+    }, [entitlements.features, entitlements.status, entitlements.isPlatformAdmin, prompt?.feature]);
     if (!prompt || entitlements.loading || entitlements.status === 'trial_expired') return null;
     return <UpgradePrompt requiredPlan={prompt.requiredPlan} signInReturnTo={prompt.returnTo} intendedFeature={prompt.feature} onClose={() => setPrompt(null)} />;
 }

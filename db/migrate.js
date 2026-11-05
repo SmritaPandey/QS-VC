@@ -12,7 +12,10 @@ const path = require('path');
 
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 const { databaseConfig } = require('../shared/database.cjs');
-const pool = new Pool(databaseConfig());
+const pool = new Pool(databaseConfig({
+    ...process.env,
+    DATABASE_URL: process.env.MIGRATION_DATABASE_URL || process.env.DATABASE_URL || process.env.AUTH_DATABASE_URL,
+}));
 pool.on('error', () => console.error('Database connection lost'));
 
 async function migrate() {
