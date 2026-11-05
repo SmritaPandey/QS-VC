@@ -11,17 +11,24 @@ import { roomManager } from '../room-manager.js';
 
 const socket = () => ({ readyState: 1, send: vi.fn(), close: vi.fn() });
 const states: any[] = [];
+const connections = new Map<string, { ws: ReturnType<typeof socket>; state: any }>();
 const rpc = (ws: any, state: any, method: string, params: any = {}) =>
     handleRpcMessage(ws, { jsonrpc: '2.0', id: 1, method, params }, state);
 async function join(code: string, userId?: string) {
     const ws = socket(), state: any = userId ? { authUser: { sub: userId } } : {};
     states.push(state);
     const result = await rpc(ws, state, 'joinRoom', { meetingCode: code, displayName: userId || 'Guest' });
+    if (state.peerId) connections.set(state.peerId, { ws, state });
+    if (result?.result?.status === 'waiting') {
+        const room = roomManager.getRoomByCode(code);
+        const host = room?.hostPeerId ? connections.get(room.hostPeerId) : undefined;
+        if (host) await rpc(host.ws, host.state, 'admitPeer', { targetPeerId: state.peerId });
+    }
     return { ws, state, result };
 }
 const notifications = (ws: ReturnType<typeof socket>) => ws.send.mock.calls
     .map(([raw]) => JSON.parse(raw)).filter(message => message.method === 'recordingStateChanged');
-afterEach(async () => { for (const state of states.splice(0).reverse()) await handlePeerDisconnect(state); });
+afterEach(async () => { for (const state of states.splice(0).reverse()) await handlePeerDisconnect(state); connections.clear(); });
 
 describe('recording notifications', () => {
     it('requires the signed-in host, rejects stale sockets and validates the state', async () => {
@@ -47,7 +54,8 @@ describe('recording notifications', () => {
         expect(notifications(host.ws).at(-1).params.recording).toEqual(recording);
         expect(notifications(member.ws).at(-1).params.recording).toEqual(recording);
         const late = await join(code);
-        expect(late.result?.result.recording).toEqual(recording);
+        const admission = late.ws.send.mock.calls.map(([raw]) => JSON.parse(raw)).find(message => message.method === 'admitted');
+        expect(admission?.params.recording).toEqual(recording);
         const room = roomManager.getRoom(host.state.roomId)!;
         room.peers.get(member.state.peerId)!.role = 'host';
         room.peers.get(member.state.peerId)!.userId = 'other-owner-session';

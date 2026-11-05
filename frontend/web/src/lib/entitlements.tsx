@@ -3,7 +3,7 @@ import type { Entitlements } from '../../../../shared/entitlements.cjs';
 import { AUTH_API, getToken } from './session';
 import { useSession } from './use-session';
 
-type ClientEntitlements = Entitlements & { loading: boolean };
+type ClientEntitlements = Entitlements & { privateConversationLimitSeconds?: number | null; loading: boolean };
 const guest: ClientEntitlements = { plan: 'guest', status: 'paid_active', trialEndsAt: null, features: [], featureMinimumPlans: {}, loading: false };
 const initial: ClientEntitlements = { ...guest, loading: true };
 const EntitlementsContext = createContext<ClientEntitlements>(initial);
@@ -40,7 +40,7 @@ export function EntitlementsProvider({ children }: { children: ReactNode }) {
                 if (!['guest', 'starter_trial', 'starter', 'pro', 'enterprise'].includes(data.plan) || !Array.isArray(data.features)) throw new Error('Invalid entitlements');
                 const featureMinimumPlans = data.featureMinimumPlans && typeof data.featureMinimumPlans === 'object' && !Array.isArray(data.featureMinimumPlans)
                     ? data.featureMinimumPlans : {};
-                if (active) setValue({ plan: data.plan, status: data.status, trialEndsAt: data.trialEndsAt || null, features: data.features, featureMinimumPlans, loading: false });
+                if (active) setValue({ plan: data.plan, status: data.status, trialEndsAt: data.trialEndsAt || null, features: data.features, featureMinimumPlans, privateConversationLimitSeconds: data.privateConversationLimitSeconds, loading: false });
             }).catch(() => { if (active) setValue({ ...guest, loading: false }); });
         return () => { active = false; };
     }, [session.status, session.profile?.id]);

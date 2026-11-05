@@ -8,6 +8,10 @@
 .host-tools-row { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
 .host-waiting ul,.host-tools-people { margin:12px 0 0; padding:0; list-style:none; }
 .host-waiting li,.host-tools-people li { padding:12px 0; border-bottom:1px solid #354c5b; overflow-wrap:anywhere; }
+.host-waiting-person { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; min-width:0; }
+.host-reviewed-label,.host-invited-label { display:inline-flex; align-items:center; min-height:24px; padding:2px 8px; border-radius:999px; font-size:12px; line-height:1.35; }
+.host-reviewed-label { color:#d7f7ef; background:#164c48; }
+.host-invited-label { color:#d4e5ed; background:#2b4050; }
 .host-tools-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .host-tools-settings label { display:flex; justify-content:space-between; align-items:center; gap:16px; min-height:48px; font-size:14px; }
 .host-tools-settings input { width:20px; height:20px; accent-color:#43d9c2; }
@@ -38,11 +42,20 @@
 .host-person { display:flex; align-items:center; gap:10px; min-width:0; }
 .host-avatar { flex:none; display:grid; place-items:center; width:32px; height:32px; border-radius:50%; background:#24414f; color:#bff3ea; font-size:14px; font-weight:500; }
 .host-person-name { display:flex; flex-direction:column; min-width:0; }
-.host-tools-content .host-icon-btn { width:40px; min-height:40px; padding:0; display:grid; place-items:center; border-radius:50%; }
-.host-tools-content .host-text-btn { min-height:40px; border-radius:999px; padding:6px 12px; }
+.host-tools-content .host-icon-btn { width:44px; min-height:44px; padding:0; display:grid; place-items:center; border-radius:50%; }
+.host-tools-content .host-text-btn { min-height:44px; border-radius:999px; padding:6px 12px; }
 .host-tools-content .host-danger { border-color:#9c5362; color:#ffbac5; }
 .host-tools-end { background:transparent; padding:0; }
 .host-tools-content .host-tools-end button { width:100%; justify-content:center; background:#5c1f2b; border-color:#9c3546; color:#fff; }
+.host-access-policy { display:flex; align-items:flex-start; gap:8px; padding:10px 12px; border-radius:10px; color:#e5f2f4 !important; background:#203846; }
+.host-access-policy .mi { flex:none; color:#78e3d2; }
+.host-cohost-count { margin:4px 0 0 !important; color:#e5f2f4 !important; }
+.host-tools-content .host-cohost-limit { margin:8px 0 0; padding:10px 12px; border:1px solid #547080; border-radius:10px; color:#e5f2f4; background:#203846; }
+.host-tools-content button:disabled { opacity:.56; }
+.host-tools-content { min-width:0; }
+.host-tools-content li { min-width:0; }
+.host-tools-actions button { min-width:44px; min-height:44px; }
+@media(max-width:420px) { .host-tools-content { padding:12px; } .host-tools-actions { gap:6px; } .host-tools-actions button { flex:1 1 auto; } }
 
 /* Someone is asking to join (shown to hosts and co-hosts). */
 .meeting-knock { pointer-events:auto; display:flex; align-items:center; gap:12px; padding:12px 14px; border-radius:14px; background:#152635; border:1px solid #43d9c240; box-shadow:0 12px 32px #0006; color:#edf5fa; animation:meeting-knock-in 220ms ease-out; }

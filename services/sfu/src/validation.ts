@@ -39,6 +39,11 @@ export const resumeBody = z.object({
     peerId: peerIdSchema,
 });
 
+export const producerControlBody = z.object({
+    peerId: peerIdSchema,
+    paused: z.boolean().optional(),
+});
+
 export const cascadeNodeBody = z.object({
     nodeId: z.string().min(1).max(128),
     host: z.string().min(1).max(255),

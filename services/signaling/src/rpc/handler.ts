@@ -7,10 +7,11 @@ import { loadMeetingPolicy, reportMeetingStatus } from '../meeting-policy.js';
  */
 import { collaborationRpc } from '../collaboration.js';
 import { sfuClient } from '../sfu-client.js';
-import { roomManager, PeerState, PeerRole } from '../room-manager.js';
+import { roomManager, PeerState, PeerRole, type PrivateConversation, type VerifiedSignalingUser } from '../room-manager.js';
 import { logger } from '../logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
+import { getPrivateConversationLimitMs } from '../../../../shared/entitlements.cjs';
 import meetingInvitation from '../../../../shared/meeting-invitation.cjs';
 import { publishCaption, translationCapabilities, translateCaption, clearEmptyRoomCaptions } from '../captions.js';
 
@@ -39,8 +40,7 @@ const PERMISSION_MESSAGES = {
 } as const;
 
 /**
- * The host has arrived: let in everyone who was waiting for them. With the waiting room on,
- * they move to "asking to join" and the host decides; otherwise they are admitted (Google Meet behaviour).
+ * The host has arrived: move pre-host attendees into the host's approval queue.
  */
 function releaseAwaitingHost(roomId: string): void {
     const room = roomManager.getRoom(roomId);
@@ -48,13 +48,9 @@ function releaseAwaitingHost(roomId: string): void {
     for (const waiting of [...room.waitingRoom.values()]) {
         if (!waiting.awaitingHost) continue;
         waiting.awaitingHost = false;
-        if ((room.settings.waitingRoomEnabled && !waiting.invited) || room.settings.locked || (room.settings.webinar && !waiting.authUser?.sub && !waiting.invited)) {
-            if (waiting.ws?.readyState === 1) waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'waitingStatus', params: { status: 'knocking' } }));
-            if (room.hostPeerId) roomManager.sendToPeer(roomId, room.hostPeerId, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
-            for (const peer of room.peers.values()) if (peer.role === 'co-host') roomManager.sendToPeer(roomId, peer.id, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
-        } else {
-            void admitWaitingPeer(roomId, waiting.id).catch(error => logger.warn(`Auto-admit after host joined failed: ${error.message}`));
-        }
+        if (waiting.ws?.readyState === 1) waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'waitingStatus', params: { status: 'knocking' } }));
+        if (room.hostPeerId) roomManager.sendToPeer(roomId, room.hostPeerId, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
+        for (const peer of room.peers.values()) if (peer.role === 'co-host') roomManager.sendToPeer(roomId, peer.id, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
     }
 }
 
@@ -83,6 +79,63 @@ function sanitizeChat(s: string): string {
         .slice(0, 4096);
 }
 
+function conversationHasPeer(session: PrivateConversation, peerId: string): boolean {
+    return session.initiatorPeerId === peerId || session.targetPeerId === peerId;
+}
+
+async function setPublicMicPaused(roomId: string, peer: PeerState, paused: boolean): Promise<void> {
+    const publicMics = [...peer.producers.values()].filter(producer =>
+        producer.kind === 'audio' && producer.appData?.source === 'mic' && producer.appData?.type !== 'private-audio');
+    for (const producer of publicMics) {
+        await sfuClient.setProducerPaused(roomId, peer.id, producer.id, paused);
+    }
+}
+
+async function finishPrivateConversation(roomId: string, conversationId: string, reason: string, byPeerId?: string): Promise<boolean> {
+    const room = roomManager.getRoom(roomId);
+    const session = room?.privateConversations.get(conversationId);
+    if (!room || !session) return false;
+    // Delete synchronously before awaits to make timeout, disconnect and end requests idempotent.
+    room.privateConversations.delete(conversationId);
+    if (session.timer) clearTimeout(session.timer);
+
+    for (const participantId of [session.initiatorPeerId, session.targetPeerId]) {
+        const participant = room.peers.get(participantId);
+        if (!participant) continue;
+        for (const producer of [...participant.producers.values()]) {
+            if (producer.appData?.type !== 'private-audio' || producer.appData?.conversationId !== conversationId) continue;
+            await sfuClient.closeProducer(roomId, participantId, producer.id).catch(error => logger.warn(error, 'Could not close private conversation producer'));
+            participant.producers.delete(producer.id);
+        }
+        if (session.status === 'active') {
+            const wasMuted = session.previousAudioMuted?.[participantId] ?? participant.audioMuted;
+            participant.audioMuted = wasMuted;
+            await setPublicMicPaused(roomId, participant, wasMuted).catch(error => logger.warn(error, 'Could not restore meeting microphone state'));
+            roomManager.broadcast(roomId, 'peerMuteChanged', {
+                peerId: participantId,
+                displayName: participant.displayName,
+                kind: 'audio',
+                muted: wasMuted,
+            }, participantId);
+        }
+    }
+    for (const participantId of [session.initiatorPeerId, session.targetPeerId]) {
+        roomManager.sendToPeer(roomId, participantId, 'privateConversationEnded', {
+            conversationId,
+            reason,
+            byPeerId: byPeerId || null,
+        });
+    }
+    return true;
+}
+
+async function finishPrivateConversationsForPeer(roomId: string, peerId: string, reason: string): Promise<void> {
+    const room = roomManager.getRoom(roomId);
+    if (!room) return;
+    const sessions = [...room.privateConversations.values()].filter(session => conversationHasPeer(session, peerId));
+    for (const session of sessions) await finishPrivateConversation(roomId, session.id, reason, peerId);
+}
+
 // RPC param validation schemas
 const roomSettingsSchema = z.object({
     maxParticipants: z.number().int().min(1).max(1000).optional(),
@@ -93,6 +146,10 @@ const roomSettingsSchema = z.object({
     allowMicrophone: z.boolean().optional(), allowCamera: z.boolean().optional(),
     allowReactions: z.boolean().optional(),
 }).strict();
+const waitingPeerSchema = z.object({ targetPeerId: z.string().min(1).max(128) }).strict();
+const privateConversationStartSchema = z.object({ targetPeerId: z.string().min(1).max(128) }).strict();
+const privateConversationIdSchema = z.object({ conversationId: z.string().min(1).max(128) }).strict();
+const closeProducerSchema = z.object({ producerId: z.string().min(1).max(128) }).strict();
 
 const joinRoomSchema = z.object({
     meetingCode: z.string().min(1).max(30),
@@ -130,7 +187,7 @@ const joiningSockets = new WeakSet<object>();
 export async function handleRpcMessage(
     ws: any,
     message: RpcRequest,
-    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: { sub: string; role?: string } | null }
+    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: VerifiedSignalingUser | null }
 ): Promise<RpcResponse | null> {
     const { method, params, id } = message;
 
@@ -162,6 +219,9 @@ export async function handleRpcMessage(
                 }
                 if (parsed.data.recording && !room.settings.allowRecording) {
                     throw createError(-32005, 'Recording is disabled for this meeting');
+                }
+                if (parsed.data.recording && [...room.privateConversations.values()].some(session => session.status === 'active')) {
+                    throw createError(-32005, 'End the private conversation before starting a recording.');
                 }
                 roomManager.updateRecording(room.id, parsed.data.recording ? { peerId: peer.id, displayName: peer.displayName } : null);
                 return { jsonrpc: '2.0', id: id!, result: { recording: room.recording } };
@@ -205,7 +265,7 @@ export async function handleRpcMessage(
                 // Always resolve persisted ownership before creating a room. An unavailable
                 // database must not turn a scheduled meeting into a guest-owned room.
                 const policy = await loadMeetingPolicy(meetingCode);
-                const room = roomManager.getOrCreateRoom(meetingCode, policy?.settings);
+                const room = roomManager.getOrCreateRoom(meetingCode, { ...policy?.settings, waitingRoomEnabled: true });
                 if (policy?.hostId) room.ownerUserId = policy.hostId;
                 const isInvited = verifyMeetingInviteToken(meetingCode, inviteToken);
                 const webinarGuest = room.settings.webinar && !connectionState.authUser?.sub && !isInvited;
@@ -253,7 +313,7 @@ export async function handleRpcMessage(
                 }
 
                 // Waiting room: if enabled and not the first peer (host), put in waiting room
-                if (!isOwner && (webinarGuest || (room.settings.waitingRoomEnabled && room.peers.size > 0 && !isInvited))) {
+                if (!isOwner && (webinarGuest || (room.settings.waitingRoomEnabled && room.peers.size > 0))) {
                     roomManager.addToWaitingRoom(room.id, {
                         id: peerId,
                         displayName,
@@ -261,6 +321,7 @@ export async function handleRpcMessage(
                         rtpCapabilities,
                         requestedAt: new Date(),
                         authUser: connectionState.authUser,
+                        invited: isInvited,
                     });
 
                     connectionState.peerId = peerId;
@@ -314,20 +375,43 @@ export async function handleRpcMessage(
 
                 const policyRoom = roomManager.getRoom(roomId);
                 if (!policyRoom) throw createError(-32000, 'Room not found');
-                if (!canPublishInRoom(roomId, peerId, connectionState.authUser?.sub)) {
+                const privateConversationId = appData?.type === 'private-audio' && typeof appData?.conversationId === 'string'
+                    ? appData.conversationId : null;
+                const privateConversation = privateConversationId ? policyRoom.privateConversations.get(privateConversationId) : null;
+                const isPrivateSideAudio = !!privateConversation && privateConversation.status === 'active' &&
+                    [privateConversation.initiatorPeerId, privateConversation.targetPeerId].includes(peerId) &&
+                    (privateConversation.endsAt === null || privateConversation.endsAt > Date.now());
+                const activeConversationForPeer = [...policyRoom.privateConversations.values()].find(session =>
+                    session.status === 'active' && conversationHasPeer(session, peerId));
+                if (kind === 'audio' && activeConversationForPeer && !isPrivateSideAudio) {
+                    throw createError(-32005, 'Your meeting microphone is paused during the private conversation.');
+                }
+                if (appData?.type === 'private-audio' && (kind !== 'audio' || !isPrivateSideAudio)) {
+                    throw createError(-32005, 'Private audio is only allowed during an active private conversation.');
+                }
+                if (!isPrivateSideAudio && !canPublishInRoom(roomId, peerId, connectionState.authUser?.sub)) {
                     throw createError(-32005, 'Only the webinar organiser can publish media');
                 }
 
                 // Host management: participants need permission to share, talk or show video.
                 const producerPeer = policyRoom.peers.get(peerId);
                 const screen = appData?.type === 'screen' || appData?.source === 'screen';
-                if (!isManager(producerPeer)) {
+                if (!isManager(producerPeer) && !isPrivateSideAudio) {
                     if (screen && !policyRoom.settings.allowScreenShare) throw createError(-32004, 'Screen sharing is disabled by host');
                     if (!screen && kind === 'audio' && !policyRoom.settings.allowMicrophone) throw createError(-32004, PERMISSION_MESSAGES.audio);
                     if (!screen && kind === 'video' && !policyRoom.settings.allowCamera) throw createError(-32004, PERMISSION_MESSAGES.video);
                 }
 
                 const result = await sfuClient.produce(roomId, peerId, transportId, kind, rtpParameters, appData);
+
+                // The session can expire or be ended while the SFU request is in flight.
+                if (isPrivateSideAudio && policyRoom.privateConversations.get(privateConversationId!) !== privateConversation) {
+                    await sfuClient.closeProducer(roomId, peerId, result.producerId).catch(() => { });
+                    throw createError(-32005, 'This private conversation has ended.');
+                }
+                if (isPrivateSideAudio && privateConversation?.privateAudioMuted?.[peerId]) {
+                    await sfuClient.setProducerPaused(roomId, peerId, result.producerId, true);
+                }
 
                 // Track the producer in signaling state
                 const room = roomManager.getRoom(roomId);
@@ -343,13 +427,20 @@ export async function handleRpcMessage(
                     }
                 }
 
-                // Notify other peers about the new producer
-                roomManager.broadcast(roomId, 'newProducer', {
+                // Private audio is discoverable only by its paired participant.
+                const producerNotification = {
                     peerId,
                     producerId: result.producerId,
                     kind,
                     appData: appData || {},
-                }, peerId);
+                };
+                if (isPrivateSideAudio && privateConversation) {
+                    const otherPeerId = privateConversation.initiatorPeerId === peerId
+                        ? privateConversation.targetPeerId : privateConversation.initiatorPeerId;
+                    roomManager.sendToPeer(roomId, otherPeerId, 'newProducer', producerNotification);
+                } else {
+                    roomManager.broadcast(roomId, 'newProducer', producerNotification, peerId);
+                }
 
                 return { jsonrpc: '2.0', id: id!, result: { producerId: result.producerId } };
             }
@@ -365,6 +456,19 @@ export async function handleRpcMessage(
                 const room = roomManager.getRoom(roomId);
                 const peer = room?.peers.get(peerId);
                 if (!peer) throw createError(-32000, 'Peer not found');
+                const producerPeer = room?.peers.get(producerPeerId);
+                const producerInfo = producerPeer?.producers.get(producerId);
+                if (!producerPeer || !producerInfo) throw createError(-32000, 'Producer not found');
+                const privateSessionId = producerInfo.appData?.type === 'private-audio' ? producerInfo.appData?.conversationId : null;
+                if (privateSessionId) {
+                    const privateSession = room?.privateConversations.get(privateSessionId);
+                    const isPair = privateSession?.status === 'active' &&
+                        ((privateSession.initiatorPeerId === peerId && privateSession.targetPeerId === producerPeerId) ||
+                         (privateSession.targetPeerId === peerId && privateSession.initiatorPeerId === producerPeerId));
+                    if (!isPair || (privateSession?.endsAt !== null && privateSession?.endsAt !== undefined && privateSession.endsAt <= Date.now())) {
+                        throw createError(-32005, 'This private audio is only available to its two participants.');
+                    }
+                }
                 // The browser only knows its receive capabilities after loading the router's
                 // capabilities returned by joinRoom, so it sends them with consume.
                 const capabilities = z.record(z.string(), z.unknown()).optional().safeParse(params?.rtpCapabilities);
@@ -384,8 +488,192 @@ export async function handleRpcMessage(
                         kind: result.kind,
                         rtpParameters: result.rtpParameters,
                         producerPeerId,
+                        appData: producerInfo.appData || {},
                     },
                 };
+            }
+
+            case 'closeProducer': {
+                const parsed = closeProducerSchema.safeParse(params);
+                if (!parsed.success) throw createError(-32602, 'Invalid producer');
+                const { peerId, roomId } = connectionState;
+                if (!peerId || !roomId) throw createError(-32000, 'Not joined a room');
+                const room = roomManager.getRoom(roomId);
+                const peer = room?.peers.get(peerId);
+                const producer = peer?.producers.get(parsed.data.producerId);
+                if (!room || !peer || !producer) throw createError(-32000, 'Producer not found');
+                await sfuClient.closeProducer(roomId, peerId, parsed.data.producerId);
+                peer.producers.delete(parsed.data.producerId);
+                if (producer.appData?.type === 'screen' || producer.appData?.source === 'screen') {
+                    peer.screenSharing = false;
+                    roomManager.broadcast(roomId, 'presenterChanged', { peerId, displayName: peer.displayName, presenting: false });
+                }
+                return { jsonrpc: '2.0', id: id!, result: { closed: true } };
+            }
+
+            case 'startPrivateConversation': {
+                const parsed = privateConversationStartSchema.safeParse(params);
+                if (!parsed.success) throw createError(-32602, 'Invalid participant');
+                const { peerId, roomId, authUser } = connectionState;
+                if (!peerId || !roomId) throw createError(-32000, 'Not joined a room');
+                const room = roomManager.getRoom(roomId);
+                const initiator = room?.peers.get(peerId);
+                const target = room?.peers.get(parsed.data.targetPeerId);
+                if (!room || !initiator || !target) throw createError(-32000, 'Participant is no longer in this meeting.');
+                if (!authUser?.sub || !initiator.userId || !isManager(initiator)) {
+                    throw createError(-32005, 'Only a signed-in host or co-host can start a private conversation.');
+                }
+                if (room.recording) throw createError(-32005, 'End the meeting recording before starting a private conversation.');
+                if (target.id === peerId) throw createError(-32005, 'Choose another participant to talk with privately.');
+                if (room.privateConversations.size > 0 && [...room.privateConversations.values()].some(session =>
+                    [session.initiatorPeerId, session.targetPeerId].includes(peerId) ||
+                    [session.initiatorPeerId, session.targetPeerId].includes(target.id))) {
+                    throw createError(-32005, 'One of these participants is already in a private conversation.');
+                }
+                const durationMs = getPrivateConversationLimitMs(authUser);
+                if (!durationMs && durationMs !== null) throw createError(-32005, 'Private conversations are available after signing in.');
+                const session: PrivateConversation = {
+                    id: uuidv4(), initiatorPeerId: peerId, targetPeerId: target.id,
+                    status: 'invited', durationMs, startedAt: null, endsAt: null,
+                };
+                room.privateConversations.set(session.id, session);
+                roomManager.sendToPeer(roomId, target.id, 'privateConversationInvite', {
+                    conversationId: session.id,
+                    initiatorPeerId: peerId,
+                    displayName: initiator.displayName,
+                    durationMs,
+                });
+                roomManager.sendToPeer(roomId, peerId, 'privateConversationState', {
+                    conversationId: session.id,
+                    status: 'invited',
+                    targetPeerId: target.id,
+                    displayName: target.displayName,
+                    durationMs,
+                });
+                return { jsonrpc: '2.0', id: id!, result: { conversationId: session.id, status: session.status, durationMs } };
+            }
+
+            case 'acceptPrivateConversation': {
+                const parsed = privateConversationIdSchema.safeParse(params);
+                if (!parsed.success) throw createError(-32602, 'Invalid conversation');
+                const { peerId, roomId } = connectionState;
+                const room = roomId ? roomManager.getRoom(roomId) : undefined;
+                const session = room?.privateConversations.get(parsed.data.conversationId);
+                if (!peerId || !room || !session || session.targetPeerId !== peerId || session.status !== 'invited') {
+                    throw createError(-32005, 'This invitation is no longer available.');
+                }
+                if (room.recording) throw createError(-32005, 'End the meeting recording before starting a private conversation.');
+                const initiator = room.peers.get(session.initiatorPeerId);
+                const target = room.peers.get(session.targetPeerId);
+                if (!initiator || !target) {
+                    await finishPrivateConversation(room.id, session.id, 'participant-left');
+                    throw createError(-32000, 'A participant is no longer in this meeting.');
+                }
+                session.status = 'activating';
+                session.previousAudioMuted = {
+                    [initiator.id]: !!initiator.audioMuted,
+                    [target.id]: !!target.audioMuted,
+                };
+                session.privateAudioMuted = { ...session.previousAudioMuted };
+                const pausedPeers: PeerState[] = [];
+                try {
+                    // Pause both public microphone producers before private audio starts.
+                    // This protects the room even if a client misses the UI transition.
+                    for (const participant of [initiator, target]) {
+                        await setPublicMicPaused(room.id, participant, true);
+                        participant.audioMuted = true;
+                        pausedPeers.push(participant);
+                        roomManager.broadcast(room.id, 'peerMuteChanged', {
+                            peerId: participant.id,
+                            displayName: participant.displayName,
+                            kind: 'audio',
+                            muted: true,
+                        }, participant.id);
+                    }
+                } catch (error) {
+                    for (const participant of pausedPeers) {
+                        const wasMuted = session.previousAudioMuted[participant.id];
+                        participant.audioMuted = wasMuted;
+                        await setPublicMicPaused(room.id, participant, wasMuted).catch(() => { });
+                    }
+                    if (room.privateConversations.get(session.id) === session) session.status = 'invited';
+                    throw createError(-32000, 'The public microphones could not be muted safely. Please try again.');
+                }
+                if (room.privateConversations.get(session.id) !== session) {
+                    for (const participant of pausedPeers) {
+                        const wasMuted = session.previousAudioMuted[participant.id];
+                        participant.audioMuted = wasMuted;
+                        await setPublicMicPaused(room.id, participant, wasMuted).catch(() => { });
+                    }
+                    throw createError(-32005, 'This private conversation has ended.');
+                }
+                const now = Date.now();
+                session.status = 'active';
+                session.startedAt = now;
+                session.endsAt = session.durationMs === null ? null : now + session.durationMs;
+                if (session.durationMs !== null) {
+                    session.timer = setTimeout(() => { void finishPrivateConversation(room.id, session.id, 'time-limit'); }, session.durationMs);
+                    (session.timer as any).unref?.();
+                }
+                for (const [ownPeerId, otherPeer] of [[initiator.id, target], [target.id, initiator]] as const) {
+                    roomManager.sendToPeer(room.id, ownPeerId, 'privateConversationStarted', {
+                        conversationId: session.id,
+                        peerId: otherPeer.id,
+                        displayName: otherPeer.displayName,
+                        peerMuted: !!session.privateAudioMuted?.[otherPeer.id],
+                        durationMs: session.durationMs,
+                        startedAt: new Date(now).toISOString(),
+                        expiresAt: session.endsAt === null ? null : new Date(session.endsAt).toISOString(),
+                    });
+                }
+                return { jsonrpc: '2.0', id: id!, result: { conversationId: session.id, status: 'active', durationMs: session.durationMs, expiresAt: session.endsAt === null ? null : new Date(session.endsAt).toISOString() } };
+            }
+
+            case 'setPrivateConversationMuted': {
+                const parsed = privateConversationIdSchema.extend({ muted: z.boolean() }).strict().safeParse(params);
+                if (!parsed.success) throw createError(-32602, 'Invalid private microphone state');
+                const { peerId, roomId } = connectionState;
+                const room = roomId ? roomManager.getRoom(roomId) : undefined;
+                const session = room?.privateConversations.get(parsed.data.conversationId);
+                if (!peerId || !room || !session || session.status !== 'active' || !conversationHasPeer(session, peerId)) {
+                    throw createError(-32005, 'You are not in this private conversation.');
+                }
+                if (session.endsAt !== null && session.endsAt <= Date.now()) {
+                    await finishPrivateConversation(room.id, session.id, 'time-limit');
+                    throw createError(-32005, 'This private conversation has ended.');
+                }
+                session.privateAudioMuted ||= {};
+                session.privateAudioMuted[peerId] = parsed.data.muted;
+                for (const producer of room.peers.get(peerId)?.producers.values() || []) {
+                    if (producer.appData?.type === 'private-audio' && producer.appData?.conversationId === session.id) {
+                        await sfuClient.setProducerPaused(room.id, peerId, producer.id, parsed.data.muted);
+                    }
+                }
+                const otherPeerId = session.initiatorPeerId === peerId ? session.targetPeerId : session.initiatorPeerId;
+                roomManager.sendToPeer(room.id, otherPeerId, 'privateConversationState', {
+                    conversationId: session.id,
+                    status: 'active',
+                    peerId,
+                    muted: parsed.data.muted,
+                });
+                return { jsonrpc: '2.0', id: id!, result: { muted: parsed.data.muted } };
+            }
+
+            case 'declinePrivateConversation':
+            case 'cancelPrivateConversation':
+            case 'endPrivateConversation': {
+                const parsed = privateConversationIdSchema.safeParse(params);
+                if (!parsed.success) throw createError(-32602, 'Invalid conversation');
+                const { peerId, roomId } = connectionState;
+                const room = roomId ? roomManager.getRoom(roomId) : undefined;
+                const session = room?.privateConversations.get(parsed.data.conversationId);
+                if (!peerId || !room || !session) throw createError(-32000, 'Private conversation not found.');
+                if (![session.initiatorPeerId, session.targetPeerId].includes(peerId)) throw createError(-32005, 'You are not part of this private conversation.');
+                if (method === 'declinePrivateConversation' && (peerId !== session.targetPeerId || session.status !== 'invited')) throw createError(-32005, 'This invitation cannot be declined.');
+                if (method === 'cancelPrivateConversation' && (peerId !== session.initiatorPeerId || session.status !== 'invited')) throw createError(-32005, 'This invitation cannot be cancelled.');
+                const reason = method === 'declinePrivateConversation' ? 'declined' : method === 'cancelPrivateConversation' ? 'cancelled' : 'ended';
+                await finishPrivateConversation(room.id, session.id, reason, peerId);
+                return { jsonrpc: '2.0', id: id!, result: { ended: true } };
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -459,12 +747,17 @@ export async function handleRpcMessage(
                 // Update peer state
                 const room = roomManager.getRoom(roomId);
                 const peer = room?.peers.get(peerId);
+                const activePrivateConversation = room && [...room.privateConversations.values()].find(session =>
+                    session.status === 'active' && conversationHasPeer(session, peerId));
+                if (kind === 'audio' && muted === false && activePrivateConversation) {
+                    throw createError(-32004, 'Your meeting microphone stays muted during a private conversation.');
+                }
                 if (room && peer && muted === false && !isManager(peer)) {
                     if (kind === 'audio' && !room.settings.allowMicrophone) throw createError(-32004, PERMISSION_MESSAGES.audio);
                     if (kind === 'video' && !room.settings.allowCamera) throw createError(-32004, PERMISSION_MESSAGES.video);
                 }
                 if (peer) {
-                    if (kind === 'audio') peer.audioMuted = muted;
+                    if (kind === 'audio' && !activePrivateConversation) peer.audioMuted = muted;
                     if (kind === 'video') peer.videoOff = muted;
                 }
                 if (kind === 'screen' && peer) {
@@ -560,6 +853,22 @@ export async function handleRpcMessage(
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             // HOST CONTROLS — Admit from waiting room
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            case 'keepWaiting': {
+                const parsed = waitingPeerSchema.safeParse(params);
+                if (!parsed.success) throw createError(-32602, 'Invalid waiting-room request');
+                const { peerId, roomId } = connectionState;
+                if (!peerId || !roomId) throw createError(-32000, 'Not joined a room');
+                if (!roomManager.isHostOrCoHost(roomId, peerId)) {
+                    throw createError(-32005, 'Only host/co-host can manage the waiting room');
+                }
+                const waiting = roomManager.keepWaiting(roomId, parsed.data.targetPeerId);
+                if (!waiting) throw createError(-32000, 'Peer is not waiting for admission');
+                if (waiting.ws?.readyState === 1) {
+                    waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'waitingStatus', params: { status: 'keptWaiting' } }));
+                }
+                return { jsonrpc: '2.0', id: id!, result: { keptWaiting: true, peerId: waiting.id } };
+            }
+
             case 'admitPeer': {
                 const { targetPeerId } = params;
                 const { peerId, roomId } = connectionState;
@@ -641,6 +950,8 @@ export async function handleRpcMessage(
                     peerId: w.id,
                     displayName: w.displayName,
                     requestedAt: w.requestedAt.toISOString(),
+                    invited: !!w.invited,
+                    reviewed: !!w.reviewedAt,
                 }));
 
                 return { jsonrpc: '2.0', id: id!, result: { waitingPeers: list } };
@@ -712,6 +1023,7 @@ export async function handleRpcMessage(
                 });
 
                 // Remove from SFU and signaling
+                await finishPrivateConversationsForPeer(roomId, targetPeerId, 'participant-left');
                 await sfuClient.removePeer(roomId, targetPeerId).catch(() => { });
                 const kicked = roomManager.removePeer(roomId, targetPeerId);
 
@@ -757,6 +1069,9 @@ export async function handleRpcMessage(
 
                 const parsedSettings = roomSettingsSchema.safeParse(settings);
                 if (!parsedSettings.success) throw createError(-32602, 'Invalid settings');
+                if (parsedSettings.data.waitingRoomEnabled === false) {
+                    throw createError(-32005, 'Host approval is required for every attendee.');
+                }
                 roomManager.updateSettings(roomId, parsedSettings.data);
                 // Turning a permission off applies right away to everyone who is not a host or co-host.
                 const settingsRoom = roomManager.getRoom(roomId);
@@ -765,12 +1080,6 @@ export async function handleRpcMessage(
                     for (const p of settingsRoom.peers.values()) {
                         if (isManager(p)) continue;
                         roomManager.sendToPeer(roomId, p.id, 'forceMute', { kind, by: connectionState.displayName, reason: 'permission' });
-                    }
-                }
-                if (parsedSettings.data.waitingRoomEnabled === false && settingsRoom) {
-                    // Quick access back on: let in everyone who was asking to join.
-                    for (const w of roomManager.getWaitingRoom(roomId).filter(w => !w.awaitingHost && (!settingsRoom.settings.webinar || w.authUser?.sub))) {
-                        void admitWaitingPeer(roomId, w.id).catch(() => {});
                     }
                 }
                 return { jsonrpc: '2.0', id: id!, result: { updated: true } };
@@ -793,6 +1102,11 @@ export async function handleRpcMessage(
                 }
 
                 if (targetPeerId === peerId) throw createError(-32005, 'Host cannot demote itself');
+                if (newRole !== 'co-host') {
+                    const initiatedSessions = [...(roomManager.getRoom(roomId)?.privateConversations.values() || [])]
+                        .filter(session => session.initiatorPeerId === targetPeerId);
+                    for (const session of initiatedSessions) await finishPrivateConversation(roomId, session.id, 'initiator-role-changed', peerId);
+                }
                 roomManager.changePeerRole(roomId, targetPeerId, newRole);
                 return { jsonrpc: '2.0', id: id!, result: { changed: true } };
             }
@@ -822,6 +1136,9 @@ export async function handleRpcMessage(
                 // Remove all peers
                 const room = roomManager.getRoom(roomId);
                 if (room) {
+                    for (const session of [...room.privateConversations.values()]) {
+                        await finishPrivateConversation(roomId, session.id, 'meeting-ended', peerId);
+                    }
                     for (const [pid, p] of room.peers) {
                         await sfuClient.removePeer(roomId, pid).catch(() => { });
                         if (p.ws && p.ws.readyState === 1) {
@@ -904,7 +1221,7 @@ export async function handleRpcMessage(
                     handRaised: p.handRaised,
                     screenSharing: p.screenSharing,
                     joinedAt: p.joinedAt.toISOString(),
-                    producers: Array.from(p.producers.values()),
+                    producers: Array.from(p.producers.values()).filter(producer => producer.appData?.type !== 'private-audio'),
                 }));
 
                 return {
@@ -1096,7 +1413,7 @@ async function joinPeerToRoom(
             handRaised: p.handRaised,
             screenSharing: p.screenSharing,
             onStage: room.stage.has(id),
-            producers: Array.from(p.producers.values()),
+                    producers: Array.from(p.producers.values()).filter(producer => producer.appData?.type !== 'private-audio'),
         }));
 
     // Notify existing peers
@@ -1144,12 +1461,13 @@ async function joinPeerToRoom(
  * Handle peer disconnect (WebSocket close or leaveRoom).
  */
 export async function handlePeerDisconnect(
-    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: { sub: string; role?: string } | null }
+    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: VerifiedSignalingUser | null }
 ): Promise<void> {
     const { peerId, roomId, displayName } = connectionState;
     if (!peerId || !roomId) return;
 
     try {
+        await finishPrivateConversationsForPeer(roomId, peerId, 'participant-left');
         await sfuClient.removePeer(roomId, peerId).catch(() => { });
 
         roomManager.removePeer(roomId, peerId);

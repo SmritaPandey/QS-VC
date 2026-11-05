@@ -3,8 +3,9 @@
  * QS-VC Internet Launch Script (Cloudflare Tunnel Edition)
  * Starts local services + creates a FREE Cloudflare tunnel.
  * 
- * No domain, no signup, no passwords, no interstitial pages.
- * Share the link on WhatsApp and anyone can join from mobile/laptop!
+ * Guest links work without signup; host tools require a signed-in account.
+ * The tunnel carries the web page and signaling; external media also needs direct
+ * SFU/TURN network access configured in .env.
  * 
  * Usage: node start-internet.js
  */
@@ -15,6 +16,7 @@ const net = require('net');
 const ROOT = __dirname;
 const SIGNALING_PORT = 4001;
 const WEB_PORT = 5173;
+const procs = [];
 
 function log(service, msg) {
     const ts = new Date().toLocaleTimeString();
@@ -79,7 +81,7 @@ function waitForPort(port, timeout = 30000) {
  */
 function startCloudflaredTunnel(port) {
     return new Promise((resolve, reject) => {
-        const binPath = path.join(ROOT, 'node_modules', 'cloudflared', 'bin', 'cloudflared.exe');
+        const binPath = path.join(ROOT, 'node_modules', 'cloudflared', 'bin', 'cloudflared');
         const args = ['tunnel', '--url', `http://localhost:${port}`, '--no-autoupdate'];
         
         log('Tunnel', `Starting cloudflared: ${binPath} ${args.join(' ')}`);
@@ -138,15 +140,37 @@ function startCloudflaredTunnel(port) {
 }
 
 async function main() {
+    require('dotenv').config({ path: path.join(ROOT, '.env') });
     console.log('');
     console.log('╔═══════════════════════════════════════════════╗');
     console.log('║   QS-VC — Internet Deployment (Free Trial)   ║');
     console.log('║   ☁️  Powered by Cloudflare Tunnel             ║');
-    console.log('║   No domain • No signup • No passwords       ║');
+    console.log('║   Guest access • Signed-in host tools         ║');
     console.log('╚═══════════════════════════════════════════════╝');
     console.log('');
 
-    const procs = [];
+    // Keep the internet preview on the same conferencing services as the intranet profile.
+    const tsxPath = path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+    for (const [service, port] of [['sfu', 4000], ['auth', 4002], ['meeting', 4003], ['recording', 4004]]) {
+        const cwd = path.join(ROOT, 'services', service);
+        if (!(await isPortInUse(port))) {
+            const serviceEnv = {
+                PORT: String(port),
+                [`${service.toUpperCase()}_PORT`]: String(port),
+                ...(service === 'sfu' ? { SFU_CONTROL_HOST: '127.0.0.1' } : {}),
+            };
+            procs.push(startService(service, process.execPath, [tsxPath, 'src/index.ts'], cwd, serviceEnv));
+        }
+        await waitForPort(port);
+        const response = await fetch(`http://localhost:${port}/health`, { signal: AbortSignal.timeout(3000) });
+        if (!response.ok || (await response.json()).service !== `qsvc-${service}`) {
+            throw new Error(`Port ${port} does not serve QS-VC ${service}.`);
+        }
+        if (service === 'auth' || service === 'meeting') {
+            const ready = await fetch(`http://localhost:${port}/ready`, { signal: AbortSignal.timeout(8000) });
+            if (!ready.ok) throw new Error(`QS-VC ${service} cannot reach its database. Check the root .env and PostgreSQL.`);
+        }
+    }
 
     // ── 1. Start Signaling Service ──
     const sigInUse = await isPortInUse(SIGNALING_PORT);
@@ -154,9 +178,9 @@ async function main() {
         log('Signaling', `Already running on port ${SIGNALING_PORT}`);
     } else {
         log('Signaling', 'Starting signaling service...');
-        const tsxPath = path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
-        const sigEntry = path.join(ROOT, 'services', 'signaling', 'src', 'index.ts');
-        const sigProc = startService('Signaling', process.execPath, [tsxPath, sigEntry], ROOT, {
+        const sigProc = startService('Signaling', process.execPath, [tsxPath, 'src/index.ts'], path.join(ROOT, 'services', 'signaling'), {
+            PORT: String(SIGNALING_PORT),
+            SIGNALING_PORT: String(SIGNALING_PORT),
             CORS_ORIGINS: '*',
         });
         procs.push(sigProc);
@@ -215,8 +239,10 @@ async function main() {
         console.log('');
         console.log('  ══════════════════════════════════════════════════');
         console.log('');
-        console.log('  ✅ No passwords, no signup — just open & join!');
-        console.log('  ✅ Works on mobile (Android/iOS) and laptop');
+        console.log('  ✅ Guests can join without signing up, subject to host admission settings.');
+        console.log('  ✅ Signed-in hosts get meeting setup, waiting-room and plan-gated tools.');
+        console.log('  ✅ The web app is available on mobile and laptop');
+        console.log('  ⚠️  Remote camera/audio/screen share also needs SFU_ANNOUNCED_IP, reachable SFU media ports, and TURN for restrictive networks.');
         console.log('  ✅ HTTPS secured by Cloudflare (free)');
     } else {
         console.log(`  🌐 Local only:  http://localhost:${WEB_PORT}`);
@@ -238,6 +264,7 @@ async function main() {
 }
 
 main().catch(err => {
+    procs.forEach(proc => proc.kill());
     console.error('Fatal error:', err);
     process.exit(1);
 });

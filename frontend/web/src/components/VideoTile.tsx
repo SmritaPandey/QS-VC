@@ -15,6 +15,7 @@ export interface TileActions {
 
 interface Props extends TileActions {
     displayName: string;
+    mediaLabel?: 'Camera' | 'Screen';
     stream?: MediaStream | null;
     videoTrack?: MediaStreamTrack;
     /** used only for the little speaking bars; playback happens in RemoteAudio */
@@ -38,7 +39,7 @@ export function initialsOf(name: string): string {
     return (first + last).toUpperCase() || '?';
 }
 
-export default function VideoTile({ displayName, stream, audioTrack, videoTrack, isLocal, videoOff, audioMuted, handRaised, sharing, speaking = false, role, size = 'grid', pinned, onPin, spotlighted, onSpotlight, onStage, onToggleStage }: Props) {
+export default function VideoTile({ displayName, mediaLabel, stream, audioTrack, videoTrack, isLocal, videoOff, audioMuted, handRaised, sharing, speaking = false, role, size = 'grid', pinned, onPin, spotlighted, onSpotlight, onStage, onToggleStage }: Props) {
     const micOn = audioMuted !== undefined ? !audioMuted : !!audioTrack;
     const tileRef = useRef<HTMLDivElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -92,11 +93,11 @@ export default function VideoTile({ displayName, stream, audioTrack, videoTrack,
         if (document.fullscreenElement === tileRef.current) void document.exitFullscreen?.();
         else void tileRef.current?.requestFullscreen?.().catch(() => {});
     };
-    const name = displayName.replace(/\s*\(You\)\s*$/, '');
+    const name = `${displayName.replace(/\s*\(You\)\s*$/, '')}${mediaLabel ? ` ${mediaLabel.toLowerCase()}` : ''}`;
     const hasMenu = !!(onPin || onSpotlight || onToggleStage) || canFullscreen;
 
     return (
-        <div ref={tileRef} className={`video-tile qs-tile qs-tile--${size} ${isLocal ? 'local' : ''} ${sharing ? 'is-sharing' : ''}`}
+        <div ref={tileRef} className={`video-tile qs-tile qs-tile--${size} ${isLocal ? 'local' : ''} ${sharing ? 'is-sharing' : ''} ${mediaLabel === 'Camera' ? 'is-paired-camera' : ''}`}
             data-speaking={speaking && micOn ? 'true' : undefined} data-pinned={pinned || undefined} data-spotlight={spotlighted || undefined}
             onDoubleClick={event => { if ((event.target as HTMLElement).closest('button')) return; toggleFullscreen(); }}>
             <video
@@ -137,7 +138,7 @@ export default function VideoTile({ displayName, stream, audioTrack, videoTrack,
                 {micOn && !videoOff ? <span ref={indicatorRef} className="qsvc-speaking" role="img" aria-label="Microphone on"><i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" /></span> : <span className="mi mi-sm" aria-label={micOn ? 'Microphone on' : 'Microphone off'} style={{ color: micOn ? 'var(--accent-success)' : 'var(--accent-danger)' }}>
                     {micOn ? 'mic' : 'mic_off'}
                 </span>}
-                <span className="tile-name">{displayName}</span>
+                <span className="tile-name">{displayName}{mediaLabel ? ` · ${mediaLabel}` : ''}</span>
                 {(role === 'host' || role === 'co-host') && <span className="qs-role">{role === 'host' ? 'Host' : 'Co-host'}</span>}
                 {handRaised && <span className="mi mi-sm tile-hand" aria-label="Hand raised">front_hand</span>}
             </div>

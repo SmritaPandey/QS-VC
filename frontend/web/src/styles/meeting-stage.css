@@ -19,6 +19,8 @@
 .qs-tile { transition:box-shadow 160ms ease, border-color 160ms ease; }
 .qs-tile .tile-video.is-mirrored { transform:scaleX(-1); }
 .qs-tile.is-sharing .tile-video { transform:none; object-fit:contain; background:#0b1420; }
+.qs-tile.is-paired-camera { border-color:#43d9c266; }
+.qs-tile.is-paired-camera .tile-name-badge { border-color:#43d9c266; }
 .qs-tile[data-speaking='true'] { border-color:#43d9c2; box-shadow:0 0 0 2px #43d9c2, 0 0 18px #43d9c255; }
 .qs-tile--strip .tile-name-badge { bottom:6px; left:6px; padding:4px 7px; font-size:12px; gap:4px; }
 .qs-tile--strip .avatar-glass { transform:scale(.62); }
@@ -121,6 +123,7 @@
 .participants-group { margin:14px 8px 6px; font-size:12px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:#8fa7b5; }
 .participants-empty { margin:4px 8px 10px; font-size:13px; color:#8fa7b5; }
 .participants-panel .participant-status { flex-wrap:wrap; justify-content:flex-end; }
+.participants-panel .participant-private-action { min-height:44px; }
 
 /* More menu additions */
 .meeting-room .meeting-more-panel { width:300px; max-height:min(560px, calc(100dvh - 160px)); }

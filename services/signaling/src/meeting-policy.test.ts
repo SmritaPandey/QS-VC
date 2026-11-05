@@ -21,6 +21,10 @@ it('maps the stored meeting-service setting names to live controls', async () =>
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok:true,json:async()=>({hostId:'owner',status:'waiting',settings:{waitingRoom:true,chatEnabled:false,screenShareEnabled:false}})}));
     expect((await loadMeetingPolicy('QS-TEST'))?.settings).toMatchObject({waitingRoomEnabled:true,allowChat:false,allowScreenShare:false,allowRecording:true});
 });
+it('preserves the selected meeting kind while requiring the waiting room for every meeting', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok:true,json:async()=>({hostId:'owner',status:'waiting',settings:{meetingKind:'town_hall',webinar:true,waitingRoomEnabled:false}})}));
+    expect((await loadMeetingPolicy('QS-TEST'))?.settings).toMatchObject({meetingKind:'town_hall',webinar:true,waitingRoomEnabled:true});
+});
 it('preserves explicit recording restrictions in either stored setting form', async () => {
     for (const settings of [{ allowRecording: false }, { recording_allowed: false }]) {
         vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ok:true,json:async()=>({hostId:'owner',status:'waiting',settings})}));

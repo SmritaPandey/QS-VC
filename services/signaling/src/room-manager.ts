@@ -6,6 +6,7 @@ import { logger } from './logger.js';
  */
 
 export type PeerRole = 'host' | 'co-host' | 'member' | 'guest';
+export const MAX_CO_HOSTS = 5;
 
 export interface PeerState {
     id: string;
@@ -24,6 +25,14 @@ export interface PeerState {
     joinedAt: Date;
 }
 
+export interface VerifiedSignalingUser {
+    sub: string;
+    role?: string;
+    plan?: 'guest' | 'starter_trial' | 'starter' | 'pro' | 'enterprise';
+    status?: 'trial_active' | 'trial_expired' | 'paid_active' | 'enterprise_pending' | 'enterprise_approved' | 'enterprise_rejected';
+    privateConversationLimitMs?: number | null;
+}
+
 export interface WaitingPeer {
     id: string;
     displayName: string;
@@ -31,17 +40,33 @@ export interface WaitingPeer {
     rtpCapabilities: any;
     requestedAt: Date;
     /** Signed-in user (kept so admission preserves the account and its rights). */
-    authUser?: { sub: string; role?: string } | null;
+    authUser?: VerifiedSignalingUser | null;
     /** True while the meeting has not been started by its host (Google Meet "waiting for the host"). */
     awaitingHost?: boolean;
-    /** Valid invitation link holder; may bypass the admission queue after the host starts. */
+    /** Valid invitation link holder; identifies the link path but does not bypass host admission. */
     invited?: boolean;
+    /** Host or co-host has acknowledged the request while leaving the attendee in this queue. */
+    reviewedAt?: Date;
+}
+
+export interface PrivateConversation {
+    id: string;
+    initiatorPeerId: string;
+    targetPeerId: string;
+    status: 'invited' | 'activating' | 'active';
+    durationMs: number | null;
+    startedAt: number | null;
+    endsAt: number | null;
+    previousAudioMuted?: Record<string, boolean>;
+    privateAudioMuted?: Record<string, boolean>;
+    timer?: ReturnType<typeof setTimeout>;
 }
 
 export interface RoomSettings {
     webinar?: boolean;
+    meetingKind: 'conference' | 'team' | 'town_hall';
     maxParticipants: number;       // default 25
-    waitingRoomEnabled: boolean;   // default false
+    waitingRoomEnabled: boolean;   // host approval is required for every non-host attendee
     locked: boolean;               // no new joins
     password: string | null;       // meeting password
     muteOnEntry: boolean;          // mute mic on join
@@ -69,12 +94,15 @@ export interface RoomState {
     spotlightPeerId: string | null;
     /** Webinar attendees the host invited on stage: they may turn on mic, camera and share. */
     stage: Set<string>;
+    /** Active and pending pair-only audio sessions. */
+    privateConversations: Map<string, PrivateConversation>;
     createdAt: Date;
 }
 
 const DEFAULT_SETTINGS: RoomSettings = {
     maxParticipants: 25,
     waitingRoomEnabled: true,
+    meetingKind: 'conference',
     locked: false,
     password: null,
     muteOnEntry: false,
@@ -99,17 +127,25 @@ class RoomManager {
         }
 
         const roomId = uuidv4();
+        const meetingKind = settings?.meetingKind ?? (settings?.webinar ? 'town_hall' : 'conference');
         const room: RoomState = {
             id: roomId,
             meetingCode,
             hostPeerId: null,
             peers: new Map(),
             waitingRoom: new Map(),
-            settings: { ...DEFAULT_SETTINGS, ...settings },
+            settings: {
+                ...DEFAULT_SETTINGS,
+                ...settings,
+                meetingKind,
+                webinar: meetingKind === 'town_hall',
+                waitingRoomEnabled: true,
+            },
             recording: null,
             hostStarted: false,
             spotlightPeerId: null,
             stage: new Set(),
+            privateConversations: new Map(),
             createdAt: new Date(),
         };
 
@@ -148,17 +184,22 @@ class RoomManager {
             peer.role = 'host';
             room.hostPeerId = peer.id;
         }
-        // Platform admins always get host controls (mute, remove, lock, record, end) in any meeting.
+        // Platform admins get host controls without creating a second host.
         if (peer.platformAdmin && peer.role !== 'host') {
-            peer.role = 'host';
-            if (!room.hostPeerId) room.hostPeerId = peer.id;
+            if (!room.hostPeerId) {
+                peer.role = 'host';
+                room.hostPeerId = peer.id;
+            } else if ([...room.peers.values()].filter(other => other.role === 'co-host').length < MAX_CO_HOSTS) {
+                peer.role = 'co-host';
+            }
         }
         // The owner is back: a co-host who covered while they were away returns to co-host.
         if (peer.role === 'host' && room.ownerUserId && room.ownerUserId === peer.userId) {
             for (const other of room.peers.values()) {
-                if (other.role === 'host' && other.userId !== peer.userId && !other.platformAdmin) {
-                    other.role = 'co-host';
-                    this.broadcast(roomId, 'roleChanged', { peerId: other.id, role: 'co-host', displayName: other.displayName });
+                if (other.role === 'host' && other.id !== peer.id) {
+                    const coHostCount = [...room.peers.values()].filter(p => p.role === 'co-host').length;
+                    other.role = coHostCount < MAX_CO_HOSTS ? 'co-host' : 'member';
+                    this.broadcast(roomId, 'roleChanged', { peerId: other.id, role: other.role, displayName: other.displayName });
                 }
             }
             room.hostPeerId = peer.id;
@@ -289,7 +330,8 @@ class RoomManager {
     updateSettings(roomId: string, settings: Partial<RoomSettings>): void {
         const room = this.rooms.get(roomId);
         if (!room) return;
-        Object.assign(room.settings, settings);
+        if (settings.waitingRoomEnabled === false) throw new Error('Host approval is required for every attendee.');
+        Object.assign(room.settings, settings, { waitingRoomEnabled: true });
         if (!room.settings.allowRecording && room.recording) this.updateRecording(roomId, null);
         this.broadcast(roomId, 'settingsUpdated', { settings: { ...room.settings, password: undefined } });
     }
@@ -307,9 +349,24 @@ class RoomManager {
         if (!room) return;
         const peer = room.peers.get(targetPeerId);
         if (!peer) return;
+        if (newRole === 'host' && [...room.peers.values()].some(other => other.id !== targetPeerId && other.role === 'host')) {
+            throw new Error('A meeting can have only one host.');
+        }
+        if (newRole === 'co-host' && peer.role !== 'co-host' && [...room.peers.values()].filter(other => other.role === 'co-host').length >= MAX_CO_HOSTS) {
+            throw new Error(`A meeting can have up to ${MAX_CO_HOSTS} co-hosts.`);
+        }
         peer.role = newRole;
+        if (newRole === 'host') room.hostPeerId = targetPeerId;
         if (newRole !== 'host' && room.recording?.peerId === targetPeerId) this.updateRecording(roomId, null);
         this.broadcast(roomId, 'roleChanged', { peerId: targetPeerId, role: newRole, displayName: peer.displayName });
+    }
+
+    keepWaiting(roomId: string, peerId: string): WaitingPeer | undefined {
+        const waiting = this.rooms.get(roomId)?.waitingRoom.get(peerId);
+        if (!waiting || waiting.awaitingHost) return undefined;
+        waiting.reviewedAt = new Date();
+        this.broadcast(roomId, 'waitingRoomUpdated', { peerId, reviewed: true });
+        return waiting;
     }
 
     /** Broadcast a JSON-RPC notification to all peers in a room except the sender. */

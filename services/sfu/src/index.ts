@@ -16,7 +16,7 @@ import { CascadeManager } from './mediasoup/cascade-manager.js';
 // VALIDATION SCHEMAS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-import { createTransportBody, connectTransportBody, produceBody, consumeBody, resumeBody, cascadeNodeBody, cascadeHeartbeatBody } from './validation.js';
+import { createTransportBody, connectTransportBody, produceBody, consumeBody, resumeBody, producerControlBody, cascadeNodeBody, cascadeHeartbeatBody } from './validation.js';
 
 function validateBody<T>(schema: z.ZodSchema<T>) {
     return (req: Request, res: Response, next: NextFunction) => {
@@ -245,6 +245,25 @@ app.post<{ roomId: string; consumerId: string }>('/api/rooms/:roomId/consumers/:
         logger.error(err, 'Failed to resume consumer');
         res.status(500).json({ error: err.message });
     }
+});
+
+app.post<{ roomId: string; producerId: string }>('/api/rooms/:roomId/producers/:producerId/close', validateBody(producerControlBody), (req, res) => {
+    const room = rooms.get(req.params.roomId);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const peer = room.getPeer(req.body.peerId);
+    if (!peer) return res.status(404).json({ error: 'Peer not found' });
+    if (!peer.closeProducer(req.params.producerId)) return res.status(404).json({ error: 'Producer not found' });
+    res.json({ closed: true });
+});
+
+app.post<{ roomId: string; producerId: string }>('/api/rooms/:roomId/producers/:producerId/pause', validateBody(producerControlBody), (req, res) => {
+    if (req.body.paused === undefined) return res.status(400).json({ error: 'paused is required' });
+    const room = rooms.get(req.params.roomId);
+    if (!room) return res.status(404).json({ error: 'Room not found' });
+    const peer = room.getPeer(req.body.peerId);
+    if (!peer) return res.status(404).json({ error: 'Peer not found' });
+    if (!peer.setProducerPaused(req.params.producerId, req.body.paused)) return res.status(404).json({ error: 'Producer not found' });
+    res.json({ paused: req.body.paused });
 });
 
 // Get room info

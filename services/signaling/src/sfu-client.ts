@@ -69,6 +69,16 @@ export const sfuClient = {
             body: JSON.stringify({ peerId, transportId, kind, rtpParameters, appData }),
         }),
 
+    closeProducer: (roomId: string, peerId: string, producerId: string) =>
+        sfuFetch(`/api/rooms/${encodeURIComponent(roomId)}/producers/${encodeURIComponent(producerId)}/close`, {
+            method: 'POST', body: JSON.stringify({ peerId }),
+        }),
+
+    setProducerPaused: (roomId: string, peerId: string, producerId: string, paused: boolean) =>
+        sfuFetch(`/api/rooms/${encodeURIComponent(roomId)}/producers/${encodeURIComponent(producerId)}/pause`, {
+            method: 'POST', body: JSON.stringify({ peerId, paused }),
+        }),
+
     consume: (roomId: string, consumerPeerId: string, producerPeerId: string, producerId: string, rtpCapabilities: any) =>
         sfuFetch(`/api/rooms/${roomId}/consume`, {
             method: 'POST',

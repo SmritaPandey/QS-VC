@@ -6,13 +6,15 @@ import { z } from 'zod';
 
 // Re-define schemas locally (matching meeting/src/index.ts)
 const createMeetingBody = z.object({
-    title: z.string().max(255).optional(),
+    title: z.string().trim().min(1).max(255).optional(),
     type: z.enum(['instant', 'scheduled', 'recurring']).default('instant'),
     scheduledStart: z.string().datetime().optional(),
     scheduledEnd: z.string().datetime().optional(),
     settings: z.object({
         maxParticipants: z.number().int().min(2).max(500).default(100),
-        waitingRoom: z.boolean().default(false),
+        waitingRoom: z.boolean().default(true),
+        webinar: z.boolean().default(false),
+        meetingKind: z.enum(['conference', 'team', 'town_hall']).optional(),
         e2eeRequired: z.boolean().default(false),
         recordingAllowed: z.boolean().default(true),
         chatEnabled: z.boolean().default(true),
@@ -64,6 +66,7 @@ describe('Meeting: createMeetingBody schema', () => {
             settings: {
                 maxParticipants: 20,
                 waitingRoom: true,
+                meetingKind: 'team',
                 e2eeRequired: true,
             },
         });
@@ -71,11 +74,17 @@ describe('Meeting: createMeetingBody schema', () => {
         if (result.success) {
             expect(result.data.settings?.maxParticipants).toBe(20);
             expect(result.data.settings?.waitingRoom).toBe(true);
+            expect(result.data.settings?.meetingKind).toBe('team');
         }
     });
 
     it('should reject invalid meeting type', () => {
         const result = createMeetingBody.safeParse({ type: 'unknown' });
+        expect(result.success).toBe(false);
+    });
+
+    it('should reject a blank meeting title', () => {
+        const result = createMeetingBody.safeParse({ title: '   ' });
         expect(result.success).toBe(false);
     });
 
