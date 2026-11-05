@@ -15,7 +15,7 @@ import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import pino from 'pino';
-import { createSession, validateSession, requireEnterpriseTerm, endSession, sessionErrorStatus } from './sessions.js';
+import { createSession, validateSession, requireEnterpriseTerm, endSession, sessionErrorStatus, InvalidSessionError } from './sessions.js';
 import { contactRouter, contactRequestError } from './contact.js';
 import { effectiveRole, isPlatformAdmin } from './platform-admins.js';
 import { FEATURE_MIN_PLAN, getEntitlements, getPrivateConversationLimitMs } from '../../../shared/entitlements.cjs';
@@ -170,11 +170,22 @@ async function personalTenantId(): Promise<string | null> {
     return null;
 }
 
-async function verifyToken(token: string) {
+async function verifyToken(token: string): Promise<jwt.JwtPayload> {
     const payload = jwt.verify(token, JWT_SECRET);
     if (typeof payload === 'string') throw new Error('Invalid token');
     await validateSession(pool, payload);
-    return payload;
+    const result = await pool.query(
+        `SELECT email, role FROM users WHERE id = $1 AND tenant_id = $2 AND is_active = true`,
+        [payload.sub, payload.tenantId],
+    );
+    if (result.rows.length !== 1) throw new InvalidSessionError('Account is no longer active');
+    const user = result.rows[0];
+    const role = effectiveRole(user.email, user.role);
+    // Existing allow-listed admin sessions take effect immediately, without requiring a new login.
+    if (role !== user.role) {
+        await pool.query('UPDATE users SET role = $1, updated_at = NOW() WHERE id = $2 AND role <> $1', [role, payload.sub]);
+    }
+    return { ...payload, email: user.email, role } as jwt.JwtPayload;
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -350,7 +361,7 @@ app.get('/api/auth/verify', async (req, res) => {
         const token = authHeader.slice(7);
         const payload = await verifyToken(token);
         const result = await pool.query(
-            `SELECT u.role, u.subscription_plan, u.trial_ends_at, u.enterprise_status, t.plan AS tenant_plan
+            `SELECT u.email, u.role, u.subscription_plan, u.trial_ends_at, u.enterprise_status, t.plan AS tenant_plan
              FROM users u JOIN tenants t ON t.id = u.tenant_id
              WHERE u.id = $1 AND u.tenant_id = $2 AND u.is_active AND t.is_active`,
             [payload.sub, payload.tenantId],
@@ -361,14 +372,15 @@ app.get('/api/auth/verify', async (req, res) => {
             const fakeNow = new Date(process.env.QSVC_TRIAL_NOW);
             if (!Number.isNaN(fakeNow.getTime())) now.setTime(fakeNow.getTime());
         }
-        const entitlements = getEntitlements(result.rows[0], now);
+        const role = effectiveRole(result.rows[0].email, result.rows[0].role);
+        const entitlements = getEntitlements({ ...result.rows[0], role }, now);
         res.set('Cache-Control', 'no-store');
         res.json({ valid: true, payload: {
             ...payload,
-            role: result.rows[0].role,
+            role,
             plan: entitlements.plan,
             status: entitlements.status,
-            privateConversationLimitMs: getPrivateConversationLimitMs({ sub: payload.sub, role: result.rows[0].role, ...entitlements }),
+            privateConversationLimitMs: getPrivateConversationLimitMs({ sub: payload.sub, role, ...entitlements }),
         } });
     } catch (err) {
         const status = sessionErrorStatus(err);
@@ -402,7 +414,7 @@ app.get('/api/auth/me/entitlements', async (req, res) => {
     try {
         const user = await verifyToken(authorization.slice(7));
         const result = await pool.query(
-            `SELECT u.role, u.subscription_plan, u.trial_ends_at, u.enterprise_status, t.plan AS tenant_plan
+            `SELECT u.email, u.role, u.subscription_plan, u.trial_ends_at, u.enterprise_status, t.plan AS tenant_plan
              FROM users u JOIN tenants t ON t.id = u.tenant_id
              WHERE u.id = $1 AND u.tenant_id = $2 AND u.is_active AND t.is_active`,
             [user.sub, user.tenantId],
@@ -414,8 +426,9 @@ app.get('/api/auth/me/entitlements', async (req, res) => {
             const fakeNow = new Date(process.env.QSVC_TRIAL_NOW);
             if (!Number.isNaN(fakeNow.getTime())) now = fakeNow;
         }
-        const entitlements = getEntitlements(row, now);
-        const privateConversationLimitMs = getPrivateConversationLimitMs({ sub: user.sub, role: row.role, ...entitlements });
+        const role = effectiveRole(row.email, row.role);
+        const entitlements = getEntitlements({ ...row, role }, now);
+        const privateConversationLimitMs = getPrivateConversationLimitMs({ sub: user.sub, role, ...entitlements });
         res.json({
             ...entitlements,
             privateConversationLimitSeconds: privateConversationLimitMs === null ? null : Math.floor(privateConversationLimitMs / 1000),

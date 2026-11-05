@@ -18,7 +18,10 @@ export function EntitlementsProvider({ children }: { children: ReactNode }) {
             if (response.status === 403 && response.headers.get('content-type')?.includes('application/json')) {
                 const result = await response.clone().json().catch(() => null);
                 if (result?.code === 'UPGRADE_REQUIRED' && typeof result.requiredPlan === 'string') {
-                    window.dispatchEvent(new CustomEvent('qsvc:upgrade-required', { detail: { requiredPlan: result.requiredPlan } }));
+                    window.dispatchEvent(new CustomEvent('qsvc:upgrade-required', { detail: {
+                        requiredPlan: result.requiredPlan,
+                        ...(typeof result.feature === 'string' ? { feature: result.feature } : {}),
+                    } }));
                 }
             }
             return response;

@@ -56,7 +56,7 @@ describe('private cloud recordings', () => {
         try {
             const response = await request('/DEMO', 'POST', video);
             expect(response.status).toBe(403);
-            expect(await response.json()).toEqual({ code: 'UPGRADE_REQUIRED', requiredPlan: 'pro' });
+            expect(await response.json()).toEqual({ code: 'UPGRADE_REQUIRED', requiredPlan: 'pro', feature: 'cloud_recording' });
             expect(objects.size).toBe(0);
         } finally { recordingAllowed = true; }
     });

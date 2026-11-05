@@ -25,3 +25,11 @@ it('returns the existing profile contract without exposing the session identifie
     await profileHandler(async () => ({ sub: 'user' }), { query: vi.fn().mockResolvedValue({ rows: [{ id: 'user', preferences: { _authSessionId: 'secret', language: 'ja' } }] }) })({ headers: { authorization: 'Bearer valid' } } as Request, res as unknown as Response);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ id: 'user', preferences: { language: 'ja' } }));
 });
+
+it('applies the platform admin allow-list to an already-signed-in profile', async () => {
+    const res = response();
+    await profileHandler(async () => ({ sub: 'user' }), { query: vi.fn().mockResolvedValue({ rows: [{
+        id: 'user', email: 'contact@neurqai.com', role: 'member', preferences: {},
+    }] }) })({ headers: { authorization: 'Bearer valid' } } as Request, res as unknown as Response);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ role: 'admin' }));
+});
