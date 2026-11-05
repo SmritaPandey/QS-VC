@@ -18,7 +18,7 @@ export function requireFeature(AUTH_URL: string, feature: string) {
             if (!response.ok) return res.status(503).json({ error: 'Entitlements temporarily unavailable' });
             const entitlements = await response.json() as { features?: unknown };
             if (!Array.isArray(entitlements.features) || !entitlements.features.includes(feature)) {
-                return res.status(403).json({ code: 'UPGRADE_REQUIRED', requiredPlan });
+                return res.status(403).json({ code: 'UPGRADE_REQUIRED', requiredPlan, feature });
             }
             next();
         } catch {

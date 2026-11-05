@@ -119,14 +119,19 @@ export function UpgradePromptListener() {
             const detail = (event as CustomEvent<{ requiredPlan?: Plan; returnTo?: string; feature?: string }>).detail;
             const plan = detail?.requiredPlan;
             if (!plan || !['starter', 'pro', 'enterprise'].includes(plan)) return;
+            if (session.profile?.role === 'admin') return;
+            if (typeof detail.feature === 'string' && entitlements.features.includes(detail.feature)) return;
             const currentPath = `${location.pathname}${location.search}${location.hash}`;
             const returnTo = detail.returnTo?.startsWith('/') && !detail.returnTo.startsWith('//') ? detail.returnTo : currentPath;
             setPrompt({ requiredPlan: plan, returnTo, feature: typeof detail.feature === 'string' ? detail.feature : undefined });
         };
         window.addEventListener('qsvc:upgrade-required', handle);
         return () => window.removeEventListener('qsvc:upgrade-required', handle);
-    }, [location.hash, location.pathname, location.search, session.status]);
-    useEffect(() => { if (entitlements.status === 'trial_expired') setPrompt(null); }, [entitlements.status]);
-    if (!prompt || entitlements.status === 'trial_expired') return null;
+    }, [entitlements.features, location.hash, location.pathname, location.search, session.profile?.role, session.status]);
+    useEffect(() => {
+        if (entitlements.status === 'trial_expired' || session.profile?.role === 'admin'
+            || (prompt?.feature && entitlements.features.includes(prompt.feature))) setPrompt(null);
+    }, [entitlements.features, entitlements.status, prompt?.feature, session.profile?.role]);
+    if (!prompt || entitlements.loading || entitlements.status === 'trial_expired') return null;
     return <UpgradePrompt requiredPlan={prompt.requiredPlan} signInReturnTo={prompt.returnTo} intendedFeature={prompt.feature} onClose={() => setPrompt(null)} />;
 }

@@ -16,6 +16,7 @@ describe('signed-in meeting creation contract', () => {
         expect(request.headers).toEqual({ 'Content-Type': 'application/json', Authorization: 'Bearer session-token' });
         expect(JSON.parse(String(request.body))).toEqual({
             title: 'Planning session',
+            type: 'instant',
             settings: { meetingKind: 'town_hall', webinar: true, waitingRoom: true },
         });
     });

@@ -10,18 +10,21 @@ interface Props {
     onCreate: (setup: MeetingSetup) => void | Promise<void>;
 }
 
-const kinds: Array<{ value: MeetingKind; label: string; detail: string }> = [
+type SetupKind = MeetingKind | 'instant';
+
+const kinds: Array<{ value: SetupKind; label: string; detail: string }> = [
+    { value: 'instant', label: 'Instant meeting', detail: 'Start a meeting right away and invite people to join.' },
     { value: 'conference', label: 'Conferencing', detail: 'A standard meeting for conversations and collaboration.' },
     { value: 'team', label: 'Team meeting', detail: 'A working session for your team.' },
-    { value: 'town_hall', label: 'Town hall', detail: 'A presentation-style room with a stage.' },
+    { value: 'town_hall', label: 'Town hall / webinar', detail: 'A presentation-style room with a stage.' },
 ];
 
 export default function MeetingSetupDialog({ action, creating, onClose, onCreate }: Props) {
     const dialogRef = useRef<HTMLDialogElement>(null);
     const [title, setTitle] = useState('');
-    const [meetingKind, setMeetingKind] = useState<MeetingKind>('conference');
+    const [meetingKind, setMeetingKind] = useState<SetupKind>(action === 'start' ? 'instant' : 'conference');
     const [error, setError] = useState('');
-    const startNow = action === 'start';
+    const startNow = action === 'start' || meetingKind === 'instant';
 
     useEffect(() => {
         const dialog = dialogRef.current;
@@ -36,7 +39,7 @@ export default function MeetingSetupDialog({ action, creating, onClose, onCreate
         const cleanTitle = title.trim();
         if (!cleanTitle) { setError('Enter a title for your meeting.'); return; }
         try {
-            await onCreate({ title: cleanTitle, meetingKind, startNow });
+            await onCreate({ title: cleanTitle, meetingKind: meetingKind === 'instant' ? 'conference' : meetingKind, startNow });
             onClose();
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : 'Could not create the meeting. Please try again.');

@@ -82,7 +82,7 @@ export function createRecordingApp(options: Options = {}) {
         const access = await authorize(typeof authorization === 'string' ? authorization : undefined, 'cloud_recording');
         if (access === 'unauthorized') { res.status(401).json({ error: 'Your session expired. Sign in again.' }); return null; }
         if (access === 'deny') {
-            res.status(403).json({ code: 'UPGRADE_REQUIRED', requiredPlan: FEATURE_MIN_PLAN.cloud_recording });
+            res.status(403).json({ code: 'UPGRADE_REQUIRED', requiredPlan: FEATURE_MIN_PLAN.cloud_recording, feature: 'cloud_recording' });
             return null;
         }
         const user = await identity(req, res);

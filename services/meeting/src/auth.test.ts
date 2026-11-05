@@ -37,7 +37,7 @@ it('rejects a guest at the API boundary with the configured required plan', asyn
     await requireFeature('http://auth', 'meeting_scheduling')(req, res as unknown as Response, next);
     expect(fetchMock).toHaveBeenCalledWith('http://auth/api/auth/me/entitlements', expect.objectContaining({ headers: {} }));
     expect(res.status).toHaveBeenCalledWith(403);
-    expect(res.json).toHaveBeenCalledWith({ code: 'UPGRADE_REQUIRED', requiredPlan: 'starter' });
+    expect(res.json).toHaveBeenCalledWith({ code: 'UPGRADE_REQUIRED', requiredPlan: 'starter', feature: 'meeting_scheduling' });
     expect(next).not.toHaveBeenCalled();
 });
 
