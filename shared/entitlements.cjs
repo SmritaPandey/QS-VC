@@ -24,6 +24,7 @@ const FEATURE_MIN_PLAN = Object.freeze({
 function can(user, feature) {
     const required = FEATURE_MIN_PLAN[feature];
     if (!required) return false;
+    if (user?.role === 'admin') return true;
     const plan = user?.plan || 'guest';
     if (plan === 'starter_trial' && user?.status === 'trial_expired') return false;
     if (plan === 'enterprise' && user?.status !== 'enterprise_approved') return false;
@@ -61,13 +62,14 @@ function getEntitlements(user, now = new Date()) {
     return {
         ...resolved,
         trialEndsAt: user?.trial_ends_at ? new Date(user.trial_ends_at).toISOString() : null,
-        features: Object.keys(FEATURE_MIN_PLAN).filter(feature => can(resolved, feature)),
+        features: Object.keys(FEATURE_MIN_PLAN).filter(feature => can({ ...resolved, role: user?.role }, feature)),
         featureMinimumPlans: FEATURE_MIN_PLAN,
     };
 }
 
 function getPrivateConversationLimitMs(user) {
     if (!user?.sub) return 0;
+    if (user.role === 'admin') return null;
     const plan = user.plan || 'guest';
     if (plan === 'starter_trial' && user.status === 'trial_expired') return PRIVATE_CONVERSATION_LIMIT_MS.guest;
     if (plan === 'enterprise' && user.status !== 'enterprise_approved') return PRIVATE_CONVERSATION_LIMIT_MS.guest;

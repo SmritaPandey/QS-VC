@@ -46,6 +46,14 @@ describe('plan entitlements and trial eligibility', () => {
         expect(getEntitlements({ subscription_plan: 'pro' }, started).features).toEqual(['meeting_scheduling', 'ai_captions', 'background_effects', 'ai_noise_suppression', 'cloud_recording']);
     });
 
+    it('grants admins every configured feature and unlimited private conversations regardless of plan', () => {
+        const admin = { role: 'admin', tenant_plan: 'free' };
+        expect(getEntitlements(admin, started).features).toEqual(Object.keys(FEATURE_MIN_PLAN));
+        expect(getPrivateConversationLimitMs({ sub: 'admin-user', role: 'admin', plan: 'guest' })).toBeNull();
+        expect(getEntitlements({ ...admin, subscription_plan: 'starter_trial', trial_ends_at: '2026-11-06T12:00:00.000Z' }, started).features)
+            .toEqual(Object.keys(FEATURE_MIN_PLAN));
+    });
+
     it('applies private conversation limits from the signed-in initiator entitlement', () => {
         expect(getPrivateConversationLimitMs(undefined)).toBe(0);
         expect(getPrivateConversationLimitMs({ sub: 'free-user', plan: 'guest', status: 'paid_active' })).toBe(120_000);
