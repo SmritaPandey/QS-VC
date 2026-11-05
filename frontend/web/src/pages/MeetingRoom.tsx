@@ -21,6 +21,7 @@ import { BackgroundProcessor, savedEffect, saveEffect, effectLabel, type Backgro
 import { SpeechToTextEngine } from '../lib/speech-to-text';
 import '../styles/meeting-stage.css';
 import BrandLogo from '../components/BrandLogo';
+import MeetingInformation from '../components/MeetingInformation';
 import ControlBar from '../components/ControlBar';
 import MeetingChat from '../components/MeetingChat';
 import ParticipantsPanel from '../components/ParticipantsPanel';
@@ -227,7 +228,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const mutedSpeechTimer = useRef<number>();
     const [duration, setDuration] = useState(0);
     const [handRaised, setHandRaised] = useState(false);
-    const [linkCopied, setLinkCopied] = useState(false);
+    const [informationOpen, setInformationOpen] = useState(false);
     const [connectionLost, setConnectionLost] = useState(false);
     const [notice, setNotice] = useState<string | null>(null);
     const [audioOutputId, setAudioOutputId] = useState('');
@@ -1403,24 +1404,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         document.querySelector<HTMLButtonElement>('[aria-controls="meeting-chat-panel"]')?.focus();
     }, []);
 
-    const handleCopyLink = useCallback(() => {
-        const url = `${window.location.origin}${meetingPreviewPath}`;
-        navigator.clipboard.writeText(url).then(() => {
-            setLinkCopied(true);
-            setTimeout(() => setLinkCopied(false), 2000);
-        }).catch(() => {
-            // Fallback for older browsers
-            const input = document.createElement('input');
-            input.value = url;
-            document.body.appendChild(input);
-            input.select();
-            document.execCommand('copy');
-            document.body.removeChild(input);
-            setLinkCopied(true);
-            setTimeout(() => setLinkCopied(false), 2000);
-        });
-    }, [meetingPreviewPath]);
-
     const formatDuration = (s: number) => {
         const h = Math.floor(s / 3600);
         const m = Math.floor((s % 3600) / 60);
@@ -1551,6 +1534,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const closePanels = useCallback(() => {
         setChatOpen(false); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false);
     }, []);
+    const openInformation = useCallback(() => {
+        closePanels(); setLanguageOpen(false); setReactionsOpen(false); setInformationOpen(true);
+    }, [closePanels]);
 
     useEffect(() => {
         if (!signedIn || entitlements.loading) return;
@@ -1629,10 +1615,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             <div className="meeting-top-bar">
                 <div className="top-bar-left">
                     <BrandLogo meeting iconOnly />
-                    <button className="share-link-btn" onClick={handleCopyLink} title="Copy invite link">
-                        <span className="meeting-code-display">{meetingCode}</span>
-                        <span className="mi mi-sm share-copy-icon">{linkCopied ? 'check' : 'content_copy'}</span>
-                        {linkCopied && <span className="copied-tooltip">Link copied!</span>}
+                    <button type="button" className="meeting-info-trigger" onClick={openInformation} aria-label="Meeting information" aria-haspopup="dialog" aria-expanded={informationOpen} title="Meeting information">
+                        <span className="mi" aria-hidden="true">notifications</span>
                     </button>
                     <div className="meeting-local-clock" title={`Your local time · ${timeZone}`} aria-label={`Your local time is ${localTime}, ${localDate}, ${timeZone}`}>
                         <time dateTime={clockNow.toISOString()}>{localTime}</time>
@@ -1717,7 +1701,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 {pendingRecording.current ? <details><summary>Recording actions</summary><button type="button" onClick={() => void savePendingRecording()}>Retry saving</button><button type="button" onClick={() => { const pending = pendingRecording.current; if (pending) recordingManager.downloadLocally(pending.blob, `QS-VC-${meetingCode}.${pending.format}`); }}>Download unsaved copy</button><button type="button" onClick={() => { if (window.confirm('Discard the unsaved recording? This copy cannot be recovered.')) { pendingRecording.current = null; recordingManager.pending = null; setRecordingStatus('Unsaved copy discarded. You can leave the meeting.'); } }}>Discard unsaved copy</button></details> : <a href={`/recordings/${encodeURIComponent(meetingCode || '')}`}>Manage recordings</a>}
             </div>}
             <ControlBar
-                assistant={signedIn ? <AIChatBot onOpen={() => { setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen} /> : undefined}
+                assistant={signedIn ? <AIChatBot onOpen={() => { setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen || informationOpen} /> : undefined}
                 signedIn={signedIn}
                 captionsLocked={entitlements.loading || !entitlements.features.includes('ai_captions')}
                 effectsLocked={entitlements.loading || !entitlements.features.includes('background_effects')}
@@ -1748,6 +1732,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 onToggleParticipants={() => { setParticipantsOpen(!participantsOpen); setChatOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); }}
                 onRaiseHand={handleRaiseHand} onLeave={requestLeave}
             />
+            <MeetingInformation open={informationOpen} meetingCode={meetingCode || ''} joinUrl={`${window.location.origin}${meetingPreviewPath}`} meetingTitle={meetingTitle} onClose={() => setInformationOpen(false)} />
             {reportOpen && <ReportProblem meetingCode={meetingCode || ''} displayName={displayName} diagnostics={collectDiagnostics} onClose={() => setReportOpen(false)} />}
             {leaveOpen && <div className="meeting-dialog-backdrop" onClick={() => setLeaveOpen(false)}>
                 <div className="meeting-dialog" role="dialog" aria-modal="true" aria-labelledby="leave-title" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') setLeaveOpen(false); }}>

@@ -13,6 +13,7 @@
     "dependencies": {
         "@sapphi-red/web-noise-suppressor": "^0.4.1",
         "mediasoup-client": "^3.7.0",
+        "qrcode.react": "^4.2.0",
         "react": "^18.3.0",
         "react-dom": "^18.3.0",
         "react-router-dom": "^7.1.0"

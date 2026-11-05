@@ -6,6 +6,8 @@ import SiteFooter from '../components/SiteFooter';
 import { clearSession, getToken, signOut, refreshSession } from '../lib/session';
 import type { MeetingSetup } from '../components/MeetingSetupDialog';
 import { authenticatedMeetingRequest, meetingsEndpoint } from '../lib/meeting-creation';
+import { shareMeetingInvite } from '../lib/meeting-sharing';
+import { QRCodeSVG } from 'qrcode.react';
 import LoadingMark from '../components/LoadingMark';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -66,6 +68,8 @@ export default function Landing() {
     const [shareLink, setShareLink] = useState('');
     const [shareMeetingCode, setShareMeetingCode] = useState('');
     const [copyError, setCopyError] = useState('');
+    const [shareStatus, setShareStatus] = useState('');
+    const [shareBusy, setShareBusy] = useState(false);
     const [copied, setCopied] = useState(false);
     const navigate = useNavigate();
     const shareDialogRef = useRef<HTMLDivElement>(null);
@@ -138,6 +142,7 @@ export default function Landing() {
 
     const handleCopy = async () => {
         setCopyError('');
+        setShareStatus('');
         try {
             await navigator.clipboard.writeText(shareLink);
             setCopied(true);
@@ -154,6 +159,21 @@ export default function Landing() {
                 setTimeout(() => setCopied(false), 2000);
             } catch { setCopyError('Couldn’t copy. Select and copy the invitation link.'); }
             finally { document.body.removeChild(ta); }
+        }
+    };
+
+    const handleShareInvite = async () => {
+        if (!shareLink || shareBusy) return;
+        setShareBusy(true);
+        setCopyError('');
+        setShareStatus('');
+        try {
+            const result = await shareMeetingInvite('QS-VC meeting invitation', shareMeetingCode, shareLink);
+            setShareStatus(result === 'shared' ? 'Share sheet closed.' : result === 'copied' ? 'Invite link copied.' : 'Sharing canceled.');
+        } catch {
+            setShareStatus('Could not share the invite link. Copy it and try again.');
+        } finally {
+            setShareBusy(false);
         }
     };
 
@@ -270,6 +290,12 @@ export default function Landing() {
                         <p style={{ color: 'var(--text-secondary)', margin: '8px 0 16px' }}>
                             Share this link with participants:
                         </p>
+                        <div className="share-modal-qr">
+                            <div className="share-modal-qr-image">
+                                <QRCodeSVG value={shareLink} size={128} level="M" includeMargin title={`QR code to join meeting ${shareMeetingCode}`} />
+                            </div>
+                            <p>Scan this code to join with the same invitation.</p>
+                        </div>
                         <div className="share-link-box">
                             <input
                                 type="text"
@@ -282,7 +308,10 @@ export default function Landing() {
                                 {copied ? 'Copied' : 'Copy'}</ActionContents></button>
                         </div>
                         {copyError && <p role="alert">{copyError}</p>}
+                        {shareStatus && <p className="share-modal-status" role="status" aria-live="polite">{shareStatus}</p>}
                         <div className="share-modal-actions">
+                            <button className="btn-outline qsvc-action qsvc-action--secondary" onClick={() => void handleShareInvite()} disabled={shareBusy} aria-busy={shareBusy}><ActionContents><span className="mi mi-sm" aria-hidden="true">ios_share</span>
+                                {shareBusy ? 'Opening share…' : 'Share invite'}</ActionContents></button>
                             <button className="btn-primary btn-lg qsvc-action" onClick={handleGoToMeeting}><ActionContents><span className="mi mi-sm" aria-hidden="true">videocam</span>
                                 Check my devices</ActionContents></button>
                             <button className="btn-outline qsvc-action qsvc-action--secondary" onClick={() => setShareLink('')}><ActionContents>
