@@ -11,13 +11,15 @@ describe('meeting layout', () => {
         expect(layout.tiles).toContain('p25');
         expect(computeLayout({ people: people(30), pageSize: 9, page: 7 }).page).toBe(3);
     });
-    it('focus priority: own pin, then spotlight, then the latest presenter', () => {
+    it('keeps the latest presenter on stage ahead of viewer pin and host spotlight', () => {
         const list = people(4).map(p => ({ ...p, presenting: p.id === 'p2' }));
         expect(computeLayout({ people: list, pageSize: 9, page: 0 })).toMatchObject({ focusId: 'p2', focusReason: 'presenting' });
-        expect(computeLayout({ people: list, pageSize: 9, page: 0, spotlightId: 'p3' })).toMatchObject({ focusId: 'p3', focusReason: 'spotlight' });
-        expect(computeLayout({ people: list, pageSize: 9, page: 0, spotlightId: 'p3', pinnedId: 'p1' })).toMatchObject({ focusId: 'p1', focusReason: 'pinned' });
+        expect(computeLayout({ people: list, pageSize: 9, page: 0, spotlightId: 'p3' })).toMatchObject({ focusId: 'p2', focusReason: 'presenting' });
+        expect(computeLayout({ people: list, pageSize: 9, page: 0, spotlightId: 'p3', pinnedId: 'p1' })).toMatchObject({ focusId: 'p2', focusReason: 'presenting' });
         expect(computeLayout({ people: list, pageSize: 9, page: 0, pinnedId: 'gone' }).focusId).toBe('p2');
-        expect(computeLayout({ people: list, pageSize: 9, page: 0, spotlightId: 'p3' }).tiles).not.toContain('p3');
+        const noPresenter = list.map(person => ({ ...person, presenting: false }));
+        expect(computeLayout({ people: noPresenter, pageSize: 9, page: 0, spotlightId: 'p3' })).toMatchObject({ focusId: 'p3', focusReason: 'spotlight' });
+        expect(computeLayout({ people: noPresenter, pageSize: 9, page: 0, pinnedId: 'p1' })).toMatchObject({ focusId: 'p1', focusReason: 'pinned' });
     });
     it('webinars show only the stage and count the audience', () => {
         const list = [...people(5), { id: 'guest', onStage: true }];

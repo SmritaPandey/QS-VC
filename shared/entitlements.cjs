@@ -3,7 +3,13 @@
 const PLAN_LEVEL = { guest: 0, starter_trial: 1, starter: 1, pro: 2, enterprise: 3 };
 
 // Populate only when a capability is formally assigned to a plan. Unknown features fail closed.
-const FEATURE_MIN_PLAN = Object.freeze({ meeting_scheduling: 'starter', cloud_recording: 'pro' });
+const FEATURE_MIN_PLAN = Object.freeze({
+    meeting_scheduling: 'starter',
+    ai_captions: 'starter',
+    background_effects: 'starter',
+    ai_noise_suppression: 'starter',
+    cloud_recording: 'pro',
+});
 
 function can(user, feature) {
     const required = FEATURE_MIN_PLAN[feature];

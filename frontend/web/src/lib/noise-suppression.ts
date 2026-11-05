@@ -1,81 +1,62 @@
-/**
- * Noise suppression using RNNoise via AudioWorklet.
- * Wraps the RNNoise WASM module for real-time noise cancellation.
- *
- * In production: compile rnnoise.wasm and load via AudioWorklet.
- * This scaffold provides the integration API.
- */
+import { loadRnnoise, RnnoiseWorkletNode } from '@sapphi-red/web-noise-suppressor';
+import rnnoiseWorkletPath from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?url';
+import rnnoiseWasmPath from '@sapphi-red/web-noise-suppressor/rnnoise.wasm?url';
+import rnnoiseSimdWasmPath from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?url';
 
+/** RNNoise processor whose output track replaces the raw microphone track sent to the SFU. */
 export class NoiseSuppressor {
     private audioContext: AudioContext | null = null;
     private sourceNode: MediaStreamAudioSourceNode | null = null;
     private destinationNode: MediaStreamAudioDestinationNode | null = null;
-    private workletNode: AudioWorkletNode | null = null;
-    private active: boolean = false;
+    private workletNode: RnnoiseWorkletNode | null = null;
     private processedStream: MediaStream | null = null;
 
-    /** Initialize the noise suppressor with a source stream. */
     async start(sourceStream: MediaStream): Promise<MediaStream> {
         const audioTrack = sourceStream.getAudioTracks()[0];
-        if (!audioTrack) throw new Error('No audio track in source stream');
+        if (!audioTrack) throw new Error('No microphone track is available.');
+        if (!('audioWorklet' in AudioContext.prototype)) throw new Error('AI noise suppression is not supported by this browser.');
 
-        this.audioContext = new AudioContext({ sampleRate: 48000 });
-
-        // Create source from input stream
-        this.sourceNode = this.audioContext.createMediaStreamSource(sourceStream);
-
-        // Create destination for processed output
-        this.destinationNode = this.audioContext.createMediaStreamDestination();
-
+        const context = new AudioContext({ sampleRate: 48000 });
+        this.audioContext = context;
         try {
-            // Try to load RNNoise AudioWorklet (production path)
-            await this.audioContext.audioWorklet.addModule('/rnnoise-processor.js');
-            this.workletNode = new AudioWorkletNode(this.audioContext, 'rnnoise-processor');
-            this.sourceNode.connect(this.workletNode);
-            this.workletNode.connect(this.destinationNode);
-        } catch {
-            // Fallback: use a simple gain-based noise gate
-            console.warn('RNNoise WASM not available, using noise gate fallback');
-            const compressor = this.audioContext.createDynamicsCompressor();
-            compressor.threshold.value = -50;
-            compressor.knee.value = 40;
-            compressor.ratio.value = 12;
-            compressor.attack.value = 0;
-            compressor.release.value = 0.25;
+            if (context.sampleRate !== 48000) throw new Error('AI noise suppression needs 48 kHz audio, which this device does not provide.');
+            const [wasmBinary] = await Promise.all([
+                loadRnnoise({ url: rnnoiseWasmPath, simdUrl: rnnoiseSimdWasmPath }),
+                context.audioWorklet.addModule(rnnoiseWorkletPath),
+            ]);
+            if (context.state === 'suspended') await context.resume();
 
-            this.sourceNode.connect(compressor);
-            compressor.connect(this.destinationNode);
+            const source = context.createMediaStreamSource(new MediaStream([audioTrack]));
+            const destination = context.createMediaStreamDestination();
+            const worklet = new RnnoiseWorkletNode(context, { wasmBinary, maxChannels: 1 });
+            source.connect(worklet);
+            worklet.connect(destination);
+
+            this.sourceNode = source;
+            this.destinationNode = destination;
+            this.workletNode = worklet;
+            this.processedStream = destination.stream;
+            return destination.stream;
+        } catch (error) {
+            this.stop();
+            throw error;
         }
-
-        this.processedStream = this.destinationNode.stream;
-
-        // Copy video tracks from source
-        for (const videoTrack of sourceStream.getVideoTracks()) {
-            this.processedStream.addTrack(videoTrack);
-        }
-
-        this.active = true;
-        return this.processedStream;
     }
 
-    /** Stop noise suppression. */
     stop(): void {
-        this.active = false;
         this.sourceNode?.disconnect();
+        this.sourceNode = null;
         this.workletNode?.disconnect();
-        if (this.audioContext) {
-            this.audioContext.close().catch(() => { });
-            this.audioContext = null;
-        }
+        this.workletNode?.destroy();
+        this.workletNode = null;
+        this.destinationNode?.stream.getTracks().forEach(track => track.stop());
+        this.destinationNode = null;
         this.processedStream = null;
+        const context = this.audioContext;
+        this.audioContext = null;
+        if (context && context.state !== 'closed') void context.close().catch(() => {});
     }
 
-    /** Check if noise suppression is active. */
-    isActive(): boolean {
-        return this.active;
-    }
-
-    /** Get the processed stream. */
     getStream(): MediaStream | null {
         return this.processedStream;
     }

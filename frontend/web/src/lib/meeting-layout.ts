@@ -43,8 +43,8 @@ export function computeLayout({ people, webinar = false, pinnedId, spotlightId, 
     const audienceCount = people.length - visible.length;
     const has = (id?: string | null) => !!id && visible.some(p => p.id === id);
     const presenter = [...visible].reverse().find(p => p.presenting)?.id;
-    const focusId = has(pinnedId) ? pinnedId! : has(spotlightId) ? spotlightId! : presenter ?? null;
-    const focusReason: LayoutResult['focusReason'] = !focusId ? null : focusId === pinnedId ? 'pinned' : focusId === spotlightId ? 'spotlight' : 'presenting';
+    const focusId = presenter ?? (has(spotlightId) ? spotlightId! : has(pinnedId) ? pinnedId! : null);
+    const focusReason: LayoutResult['focusReason'] = presenter ? 'presenting' : !focusId ? null : focusId === spotlightId ? 'spotlight' : 'pinned';
 
     let order = visible.filter(p => p.id !== focusId).map(p => p.id);
     const size = Math.max(1, pageSize);

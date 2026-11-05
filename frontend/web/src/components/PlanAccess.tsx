@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useEntitlements } from '../lib/entitlements';
 import { useSession } from '../lib/use-session';
 import type { Plan } from '../../../../shared/entitlements.cjs';
@@ -23,34 +23,41 @@ export function TrialChip() {
     return <span className="trial-chip" aria-label={`Starter trial, ${days} days left`}>Starter trial · {days} {days === 1 ? 'day' : 'days'} left</span>;
 }
 
-export function UpgradePrompt({ requiredPlan, onClose, blocking = false }: { requiredPlan: Plan; onClose?: () => void; blocking?: boolean }) {
+export function UpgradePrompt({ requiredPlan, onClose, blocking = false, signInReturnTo, intendedFeature }: { requiredPlan: Plan; onClose?: () => void; blocking?: boolean; signInReturnTo?: string; intendedFeature?: string }) {
     const entitlements = useEntitlements();
     const session = useSession();
-    const navigate = useNavigate();
     const dialogRef = useRef<HTMLElement>(null);
     const guest = session.status !== 'authenticated';
     const trialEnded = entitlements.status === 'trial_expired';
     const enterprisePending = entitlements.status === 'enterprise_pending';
     const enterpriseRejected = entitlements.status === 'enterprise_rejected';
     const requiredLabel = requiredPlan === 'enterprise' ? 'Quantum-Premise' : requiredPlan.charAt(0).toUpperCase() + requiredPlan.slice(1);
+    const signInHref = signInReturnTo ? `/login?next=${encodeURIComponent(signInReturnTo)}` : '/login';
     useEffect(() => { dialogRef.current?.focus(); }, []);
     let actions: ReactNode;
     if (enterprisePending || enterpriseRejected) {
         actions = <div className="upgrade-actions"><Link to="/app">Back to meetings</Link></div>;
+    } else if (guest) {
+        actions = <div className="upgrade-actions">
+            <Link className="public-primary" to={signInHref} onClick={() => {
+                if (intendedFeature) { try { sessionStorage.setItem('qsvc:intended-feature', intendedFeature); } catch { /* Optional return context. */ } }
+                onClose?.();
+            }}>Sign in</Link>
+            <button className="upgrade-later" type="button" onClick={onClose}>Maybe later</button>
+        </div>;
     } else if (trialEnded) {
         actions = <div className="upgrade-plans">
-            <Link to="/pricing#plan-starter" className="upgrade-plan" onClick={onClose}><strong>Starter</strong><span>Core tools for your team</span><b>View plan</b></Link>
-            <Link to="/pricing#plan-pro" className="upgrade-plan upgrade-plan--pro" onClick={onClose}><CrownBadge plan="pro" /><strong>Pro</strong><span>Advanced capabilities</span><b>View plan</b></Link>
+            <Link to="/pricing#plan-starter" target="_blank" rel="noopener noreferrer" className="upgrade-plan" onClick={onClose}><strong>Starter</strong><span>Core tools for your team</span><b>View plan</b></Link>
+            <Link to="/pricing#plan-pro" target="_blank" rel="noopener noreferrer" className="upgrade-plan upgrade-plan--pro" onClick={onClose}><CrownBadge plan="pro" /><strong>Pro</strong><span>Advanced capabilities</span><b>View plan</b></Link>
         </div>;
-    } else if (requiredPlan === 'pro' && !guest) {
+    } else if (requiredPlan === 'pro') {
         actions = <div className="upgrade-plans">
-            <Link to="/pricing#plan-pro" className="upgrade-plan upgrade-plan--pro" onClick={onClose}><CrownBadge plan="pro" /><strong>Pro</strong><span>Advanced capabilities</span><b>Upgrade to Pro</b></Link>
-            <Link to="/pricing" className="upgrade-compare" onClick={onClose}>Compare plans</Link>
+            <Link to="/pricing#plan-pro" target="_blank" rel="noopener noreferrer" className="upgrade-plan upgrade-plan--pro" onClick={onClose}><CrownBadge plan="pro" /><strong>Pro</strong><span>Advanced capabilities</span><b>Upgrade to Pro</b></Link>
+            <Link to="/pricing" target="_blank" rel="noopener noreferrer" className="upgrade-compare" onClick={onClose}>Compare plans</Link>
         </div>;
     } else {
         actions = <div className="upgrade-actions">
-            <button className="public-primary" type="button" onClick={() => navigate('/pricing')}>{guest ? 'Choose a plan' : `Upgrade to ${requiredLabel}`}</button>
-            {guest && <button className="upgrade-later" type="button" onClick={onClose}>Maybe later</button>}
+            <Link className="public-primary" to="/pricing" target="_blank" rel="noopener noreferrer" onClick={onClose}>{`Upgrade to ${requiredLabel}`}</Link>
         </div>;
     }
     return <div className="upgrade-backdrop" role="presentation" onMouseDown={event => { if (!blocking && event.target === event.currentTarget) onClose?.(); }}>
@@ -66,8 +73,8 @@ export function UpgradePrompt({ requiredPlan, onClose, blocking = false }: { req
         }}>
             <button className="upgrade-close" type="button" aria-label="Close upgrade prompt" onClick={onClose} disabled={blocking}>×</button>
             <span className="mi upgrade-icon" aria-hidden="true">{trialEnded ? 'hourglass_disabled' : enterprisePending || enterpriseRejected ? 'domain' : 'lock'}</span>
-            <h2 id="upgrade-title">{trialEnded ? 'Your Starter trial has ended' : enterprisePending ? 'Quantum-Premise access pending' : enterpriseRejected ? 'Quantum-Premise access not approved' : guest ? 'Unlock this feature' : `Available on ${requiredLabel}`}</h2>
-            <p id="upgrade-copy">{trialEnded ? 'Choose a plan to keep using your meetings workspace.' : enterprisePending ? 'Your Quantum-Premise request is waiting for administrator approval.' : enterpriseRejected ? 'Contact your organisation administrator to discuss Quantum-Premise access.' : 'Choose a plan to access this feature.'}</p>
+            <h2 id="upgrade-title">{trialEnded ? 'Your Starter trial has ended' : enterprisePending ? 'Quantum-Premise access pending' : enterpriseRejected ? 'Quantum-Premise access not approved' : guest ? 'Sign in to use extra features' : <>Available on {requiredLabel} {requiredPlan === 'pro' && <CrownBadge plan="pro" />}</>}</h2>
+            <p id="upgrade-copy">{trialEnded ? 'Choose a plan to keep using your meetings workspace.' : enterprisePending ? 'Your Quantum-Premise request is waiting for administrator approval.' : enterpriseRejected ? 'Contact your organisation administrator to discuss Quantum-Premise access.' : guest ? 'Sign in to access this meeting feature.' : 'Choose a plan to access this feature.'}</p>
             {actions}
         </section>
     </div>;
@@ -102,19 +109,24 @@ export function TrialEndedPrompt() {
 }
 
 export function UpgradePromptListener() {
-    const [requiredPlan, setRequiredPlan] = useState<Plan | null>(null);
+    const [prompt, setPrompt] = useState<{ requiredPlan: Plan; returnTo: string; feature?: string } | null>(null);
     const entitlements = useEntitlements();
     const session = useSession();
+    const location = useLocation();
     useEffect(() => {
         const handle = (event: Event) => {
-            if (session.status !== 'authenticated') return;
-            const plan = (event as CustomEvent<{ requiredPlan?: Plan }>).detail?.requiredPlan;
-            if (plan && ['starter', 'pro', 'enterprise'].includes(plan)) setRequiredPlan(plan);
+            if (session.status === 'checking') return;
+            const detail = (event as CustomEvent<{ requiredPlan?: Plan; returnTo?: string; feature?: string }>).detail;
+            const plan = detail?.requiredPlan;
+            if (!plan || !['starter', 'pro', 'enterprise'].includes(plan)) return;
+            const currentPath = `${location.pathname}${location.search}${location.hash}`;
+            const returnTo = detail.returnTo?.startsWith('/') && !detail.returnTo.startsWith('//') ? detail.returnTo : currentPath;
+            setPrompt({ requiredPlan: plan, returnTo, feature: typeof detail.feature === 'string' ? detail.feature : undefined });
         };
         window.addEventListener('qsvc:upgrade-required', handle);
         return () => window.removeEventListener('qsvc:upgrade-required', handle);
-    }, [session.status]);
-    useEffect(() => { if (entitlements.status === 'trial_expired') setRequiredPlan(null); }, [entitlements.status]);
-    if (!requiredPlan || entitlements.status === 'trial_expired') return null;
-    return <UpgradePrompt requiredPlan={requiredPlan} onClose={() => setRequiredPlan(null)} />;
+    }, [location.hash, location.pathname, location.search, session.status]);
+    useEffect(() => { if (entitlements.status === 'trial_expired') setPrompt(null); }, [entitlements.status]);
+    if (!prompt || entitlements.status === 'trial_expired') return null;
+    return <UpgradePrompt requiredPlan={prompt.requiredPlan} signInReturnTo={prompt.returnTo} intendedFeature={prompt.feature} onClose={() => setPrompt(null)} />;
 }
