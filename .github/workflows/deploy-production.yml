@@ -2,6 +2,13 @@
 name: QSVC Production Deployment
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/**'
+      - 'db/**'
+      - 'deploy/aws/**'
+      - 'frontend/desktop/**'
   workflow_dispatch:
 
 permissions:
@@ -12,13 +19,33 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  changes:
+    name: Detect release changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      desktop: ${{ steps.filter.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          backend: |
+            services/**
+            db/**
+            deploy/aws/**
+          desktop: frontend/desktop/**
+
   verify:
     name: Verify production revision
     uses: ./.github/workflows/ci.yml
 
   build-installers:
     name: Build Windows and Mac installers
-    needs: verify
+    needs: [verify, changes]
+    if: needs.changes.outputs.desktop == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     timeout-minutes: 45
     steps:
@@ -102,7 +129,8 @@ jobs:
 
   build-linux-installer:
     name: Build Linux x64 desktop archive
-    needs: verify
+    needs: [verify, changes]
+    if: needs.changes.outputs.desktop == 'true' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -142,7 +170,12 @@ jobs:
           retention-days: 7
 
   deploy:
-    needs: [verify, build-installers, build-linux-installer]
+    needs: [verify, changes, build-installers, build-linux-installer]
+    if: >-
+      always() && needs.verify.result == 'success' &&
+      (needs.changes.outputs.backend == 'true' || needs.changes.outputs.desktop == 'true' || github.event_name == 'workflow_dispatch') &&
+      (needs.build-installers.result == 'success' || needs.build-installers.result == 'skipped') &&
+      (needs.build-linux-installer.result == 'success' || needs.build-linux-installer.result == 'skipped')
     name: Deploy QSVC to AWS
     runs-on: ubuntu-latest
     environment: production
@@ -165,12 +198,14 @@ jobs:
           persist-credentials: false
 
       - name: Download platform installers
+        if: needs.build-installers.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: qsvc-platform-installers
           path: /tmp/qsvc-platform-installers
 
       - name: Download Linux installer
+        if: needs.build-linux-installer.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: qsvc-linux-installer
@@ -208,6 +243,16 @@ jobs:
               print("Migration:", filename)
           PY
 
+      - name: Check GitHub deployment role configuration
+        env:
+          DEPLOY_ROLE_ARN: ${{ vars.QSVC_DEPLOY_ROLE_ARN }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$DEPLOY_ROLE_ARN" ]]; then
+            echo "QSVC_DEPLOY_ROLE_ARN is missing. Add it as a GitHub Actions variable for the production environment (or repository)."
+            exit 1
+          fi
+
       - name: Configure AWS credentials using OIDC
         uses: aws-actions/configure-aws-credentials@v6.3.0
         with:
@@ -220,17 +265,26 @@ jobs:
         run: |
           set -euo pipefail
 
-          test -n "$DEPLOY_BUCKET"
-          test -n "$EC2_INSTANCE_ID"
+          if [[ -z "$DEPLOY_BUCKET" ]]; then
+            echo "QSVC_DEPLOY_BUCKET is missing. Set it as a GitHub Actions variable for the production environment (or repository)."
+            exit 1
+          fi
+          if [[ -z "$EC2_INSTANCE_ID" ]]; then
+            echo "QSVC_EC2_INSTANCE_ID is missing. Set it as a GitHub Actions variable for the production environment (or repository)."
+            exit 1
+          fi
 
           aws sts get-caller-identity \
             --query '{Account:Account,Arn:Arn}'
 
-          aws ssm describe-instance-information \
+          PING_STATUS=$(aws ssm describe-instance-information \
             --filters "Key=InstanceIds,Values=$EC2_INSTANCE_ID" \
             --query 'InstanceInformationList[].PingStatus' \
-            --output text \
-            | grep -qx Online
+            --output text)
+          if [[ "$PING_STATUS" != "Online" ]]; then
+            echo "EC2 instance $EC2_INSTANCE_ID is not online in Systems Manager (PingStatus: ${PING_STATUS:-not registered}). Check its SSM agent, instance role, and network access."
+            exit 1
+          fi
 
       - name: Package approved source
         shell: bash
@@ -240,14 +294,18 @@ jobs:
           RELEASE_DIR="/tmp/qsvc-release-source"
           mkdir -p "$RELEASE_DIR/deploy/aws/installers"
           git archive --format=tar "$RELEASE_SHA" | tar -x -C "$RELEASE_DIR"
-          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Windows-x64.zip "$RELEASE_DIR/deploy/aws/installers/"
-          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Windows-x64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
-          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-arm64.zip "$RELEASE_DIR/deploy/aws/installers/"
-          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-arm64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
-          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-x64.zip "$RELEASE_DIR/deploy/aws/installers/"
-          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-x64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
-          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Linux-x64.tar.gz "$RELEASE_DIR/deploy/aws/installers/"
-          install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Linux-x64.tar.gz.sha256 "$RELEASE_DIR/deploy/aws/installers/"
+          if [[ "${{ needs.build-installers.result }}" == success ]]; then
+            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Windows-x64.zip "$RELEASE_DIR/deploy/aws/installers/"
+            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Windows-x64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
+            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-arm64.zip "$RELEASE_DIR/deploy/aws/installers/"
+            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-arm64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
+            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-x64.zip "$RELEASE_DIR/deploy/aws/installers/"
+            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-x64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
+          fi
+          if [[ "${{ needs.build-linux-installer.result }}" == success ]]; then
+            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Linux-x64.tar.gz "$RELEASE_DIR/deploy/aws/installers/"
+            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Linux-x64.tar.gz.sha256 "$RELEASE_DIR/deploy/aws/installers/"
+          fi
           tar -czf /tmp/qsvc-release.tar.gz -C "$RELEASE_DIR" .
 
           sha256sum /tmp/qsvc-release.tar.gz \
@@ -317,13 +375,19 @@ jobs:
           set -euo pipefail
 
           for attempt in $(seq 1 120); do
-            STATUS=$(
-              aws ssm get-command-invocation \
-                --command-id "$COMMAND_ID" \
-                --instance-id "$EC2_INSTANCE_ID" \
-                --query Status \
-                --output text
-            )
+            if ! STATUS=$(aws ssm get-command-invocation \
+              --command-id "$COMMAND_ID" \
+              --instance-id "$EC2_INSTANCE_ID" \
+              --query Status \
+              --output text 2>/tmp/qsvc-ssm-poll-error); then
+              if grep -q 'InvocationDoesNotExist' /tmp/qsvc-ssm-poll-error; then
+                echo "SSM has not published invocation status yet (attempt $attempt/120)"
+                sleep 5
+                continue
+              fi
+              cat /tmp/qsvc-ssm-poll-error >&2
+              exit 1
+            fi
 
             echo "Deployment status: $STATUS"
 
@@ -333,7 +397,12 @@ jobs:
                 exit 0
                 ;;
               Failed|Cancelled|TimedOut|Cancelling)
-                echo "Deployment failed"
+                echo "Deployment failed; remote command output follows:"
+                aws ssm get-command-invocation \
+                  --command-id "$COMMAND_ID" \
+                  --instance-id "$EC2_INSTANCE_ID" \
+                  --query '{Status:Status,ResponseCode:ResponseCode,Stdout:StandardOutputContent,Stderr:StandardErrorContent}' \
+                  --output json || true
                 exit 1
                 ;;
               Pending|InProgress|Delayed)

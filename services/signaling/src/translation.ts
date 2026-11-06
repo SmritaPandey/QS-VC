@@ -21,6 +21,9 @@ export function translationLanguage(code: string): string {
 }
 
 function apiKey(): string {
+    if (process.env.QSVC_DEPLOYMENT === 'onprem' && process.env.ENABLE_ONPREM_GOOGLE_TRANSLATION !== 'true') {
+        throw new Error('Google translation is disabled in on-premises deployment unless explicitly enabled');
+    }
     const key = process.env.GOOGLE_TRANSLATE_API_KEY?.trim();
     if (!key) throw new Error('Translation unavailable: provider is not configured');
     return key;

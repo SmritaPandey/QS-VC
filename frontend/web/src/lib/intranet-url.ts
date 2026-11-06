@@ -1,9 +1,26 @@
+function defaultOnlineHosts(): string[] {
+    const configured = typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_DEFAULT_WORKSPACE_URL;
+    if (configured) {
+        try {
+            const parsed = new URL(configured);
+            return [parsed.hostname.replace(/\.$/, '').toLowerCase()];
+        } catch {
+            return [];
+        }
+    }
+    if (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_DEPLOYMENT === 'onprem') {
+        return [];
+    }
+    return ['qsvcmeet.com', 'www.qsvcmeet.com'];
+}
+
 export function isOnlineTestWorkspace(value: unknown): boolean {
     if (typeof value !== 'string') return false;
     try {
         const url = new URL(value.trim());
+        const hosts = defaultOnlineHosts();
         return url.protocol === 'https:' && !url.username && !url.password
-            && ['qsvcmeet.com', 'www.qsvcmeet.com'].includes(url.hostname.replace(/\.$/, '').toLowerCase());
+            && hosts.includes(url.hostname.replace(/\.$/, '').toLowerCase());
     } catch { return false; }
 }
 

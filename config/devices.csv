@@ -1,0 +1,13 @@
+# QS-VC Device Registry
+# Columns: name, model, protocol, extension, ip_or_cidr, room_number, auto_admit
+# name         - Human-readable device/room name (e.g. "Boardroom 4th Floor")
+# model        - Device model (e.g. "Poly Studio X50", "Poly G7500", "Cisco SX80")
+# protocol     - "sip" or "h323"
+# extension    - Numeric SIP extension for this device (3-10 digits)
+# ip_or_cidr   - Static IP or CIDR the device registers from (for ACL, or empty)
+# room_number  - Numeric room number this device is assigned to (matches room_numbers table)
+# auto_admit   - "true" to skip lobby for calls from this device, "false" for host approval
+#
+# Example:
+# Boardroom 401,Poly Studio X50,sip,4010,10.1.4.0/24,401,true
+name,model,protocol,extension,ip_or_cidr,room_number,auto_admit

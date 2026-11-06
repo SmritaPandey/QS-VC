@@ -22,7 +22,15 @@ export function createPolyBridge(sfu: SfuAdapter) {
   fs.on("member-del", (e) => rooms.get(e.room)?.onMemberDel(e).catch(console.error));
   fs.on("member-mute", (e) => rooms.get(e.room)?.onMemberMute(e).catch(console.error));
   fs.on("lobby", (e) => {
-    if (!rooms.has(e.room) || !validCallId(e.uuid)) return;
+    if (!validCallId(e.uuid)) return;
+    // Direct dial-in via numeric room number
+    const dialedNumber = e.dialedNumber as string | undefined;
+    if (dialedNumber) {
+      handleDialIn(e.uuid, dialedNumber, e).catch(console.error);
+      return;
+    }
+    // Standard lobby flow: room bridge must already be running (started via /rooms/:room/start)
+    if (!rooms.has(e.room)) return;
     waitingCalls.set(e.uuid, e.room);
     sfu.notifyLobby(e.room, { callId: e.uuid, displayName: e.displayName, protocol: e.protocol, remoteAddress: e.remoteAddress, encrypted: e.encrypted }).catch(console.error);
   });
@@ -54,6 +62,52 @@ export function createPolyBridge(sfu: SfuAdapter) {
   });
   function validCallId(value: string) {
     return /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
+  }
+
+  /** Ensure the bridge is running for a room, starting it if necessary. */
+  async function ensureRoom(roomId: string): Promise<void> {
+    if (rooms.has(roomId)) return;
+    await sfu.ensureBridge(roomId);
+    const rb = new RoomBridge(roomId, sfu, fs);
+    rooms.set(roomId, rb);
+    try { await rb.start(); } catch (e) { rooms.delete(roomId); await rb.stop(); throw e; }
+  }
+
+  /** Handle a dial-in call that arrived via a numeric room number. */
+  async function handleDialIn(uuid: string, dialedNumber: string, ev: any): Promise<void> {
+    const resolved = await sfu.resolveDialedNumber(dialedNumber);
+    if (!resolved) {
+      // Number not in service: play error tone and hang up
+      await fs.api(`uuid_broadcast ${uuid} ivr/ivr-invalid_number.wav both`);
+      // Give it a moment to play, then kill
+      setTimeout(() => fs.api(`uuid_kill ${uuid} UNALLOCATED_NUMBER`).catch(() => undefined), 3000);
+      return;
+    }
+    const { roomId, autoAdmit } = resolved;
+    try {
+      await ensureRoom(roomId);
+    } catch (e) {
+      console.error(`[dial-in] failed to start bridge for room ${roomId}:`, e);
+      await fs.api(`uuid_kill ${uuid} NORMAL_TEMPORARY_FAILURE`);
+      return;
+    }
+    if (autoAdmit) {
+      // Immediately admit into the conference (skip lobby)
+      const result = await fs.admit(uuid, roomId);
+      if (result.startsWith("-ERR")) {
+        console.error(`[dial-in] admit failed for ${uuid} to ${roomId}: ${result}`);
+      }
+    } else {
+      // Park in lobby, notify host
+      waitingCalls.set(uuid, roomId);
+      await sfu.notifyLobby(roomId, {
+        callId: uuid,
+        displayName: ev.displayName,
+        protocol: ev.protocol,
+        remoteAddress: ev.remoteAddress,
+        encrypted: ev.encrypted,
+      });
+    }
   }
 
   http.post("/rooms/:room/start", wrap(async (req, res) => {

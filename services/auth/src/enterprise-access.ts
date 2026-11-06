@@ -176,9 +176,11 @@ export function enterpriseRouter(
             if (!grant && platformAdmin) {
                 // Until an isolated enterprise workspace is configured, platform
                 // admins can use the shared online QS-VC app as a clearly marked test workspace.
+                const onpremDefault = process.env.QSVC_PUBLIC_URL ? `${process.env.QSVC_PUBLIC_URL.replace(/\/$/, '')}/app` : '';
+                const defaultWorkspace = process.env.QSVC_DEPLOYMENT === 'onprem' ? onpremDefault : 'https://qsvcmeet.com/app';
                 const workspaceUrl = process.env.QSVC_ADMIN_WORKSPACE_URL
                     || (Array.isArray(grants) ? grants[0]?.workspaceUrl : undefined)
-                    || 'https://qsvcmeet.com/app';
+                    || defaultWorkspace;
                 if (workspaceUrl) grant = { workspaceUrl };
             }
             if (!grant) { res.status(403).json({ error: 'Your account has not been approved for enterprise access.' }); return; }
