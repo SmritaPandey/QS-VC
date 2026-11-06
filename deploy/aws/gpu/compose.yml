@@ -1,0 +1,60 @@
+# QS-VC AI host on an AWS GPU instance (g6.xlarge = 1× NVIDIA L4 24 GB, or g5.xlarge = A10G).
+# Runs speech recognition (Whisper + IndicConformer) and translation (IndicTrans2) on the GPU.
+# Reached ONLY by the backend instance over the VPC private network (security group rule).
+#
+#   cd /opt/qsvc && docker compose -f deploy/aws/gpu/compose.yml --env-file deploy/aws/gpu/.env up -d --build
+#   Optional AI minutes on the same GPU: add  --profile llm  (then: docker exec qsvc-ollama ollama pull qwen2.5:7b)
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: '3' }
+services:
+  asr:
+    <<: *gpu
+    container_name: qsvc-asr
+    build:
+      context: ../../../services/asr
+      args:
+        BASE: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+        ONNX_RUNTIME: onnxruntime-gpu==1.20.1
+    environment:
+      ASR_ENGINE: ${ASR_ENGINE:-hybrid}
+      ASR_MODEL: ${ASR_MODEL:-large-v3-turbo}
+      ASR_LANGUAGES: ${ASR_LANGUAGES:-}
+      ASR_INDIC_LANGUAGES: ${ASR_INDIC_LANGUAGES:-}
+      ASR_PROMPT: ${ASR_PROMPT:-QS-VC, UPSWAN, UPDESCO}
+      ASR_MAX_PARALLEL: ${ASR_MAX_PARALLEL:-4}
+      ASR_API_KEY: ${ASR_API_KEY:?Set the same ASR_API_KEY as the backend}
+      HF_TOKEN: ${HF_TOKEN:-}
+    ports: ["8000:8000"]
+    volumes: [asr_models:/models]
+  mt:
+    <<: *gpu
+    container_name: qsvc-mt
+    build:
+      context: ../../../services/mt
+      args:
+        BASE: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+    environment:
+      MT_LANGUAGES: ${MT_LANGUAGES:-}
+      MT_API_KEY: ${MT_API_KEY:?Set the same value as LIBRETRANSLATE_API_KEY on the backend}
+      MT_GLOSSARY_FILE: /app/glossary.example.json
+      MT_BEAMS: ${MT_BEAMS:-3}
+    ports: ["5000:5000"]
+    volumes: [mt_models:/models]
+  ollama:
+    <<: *gpu
+    profiles: [llm]
+    container_name: qsvc-ollama
+    image: ollama/ollama:0.5.4
+    ports: ["11434:11434"]
+    volumes: [ollama_models:/root/.ollama]
+volumes:
+  asr_models:
+  mt_models:
+  ollama_models:

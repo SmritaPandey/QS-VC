@@ -25,6 +25,7 @@ test -f "certs/rds-ca.pem"
 test -f "db/migrations/006_enterprise_access_terms.sql"
 test -f "db/migrations/009_platform_admin_analytics.sql"
 test -f "db/migrations/013_linux_desktop_support.sql"
+test -f "db/migrations/014_meeting_transcripts.sql"
 
 # Installer ZIPs and their release checksums are built on the protected
 # platform runners and included in the approved release archive.
