@@ -135,7 +135,6 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                     {meeting.status !== 'ended' && meeting.status !== 'cancelled' && <Link className="workspace-row-join qsvc-action" to={`/meeting/${encodeURIComponent(meeting.meetingCode)}/preview`}><ActionContents>Join</ActionContents></Link>}</div></article>)}</div>{more && <button className="workspace-load-more qsvc-action qsvc-action--secondary" disabled={loading} onClick={() => setOffset(value => value+50)}><ActionContents>{loading ? 'Loading…' : 'Load more meetings'}</ActionContents></button>}</>}
                 </section>
                 </div>}
-                <p className="workspace-demo"><span className="mi" aria-hidden="true">info</span>Demo environment. Use sample content. Hosts can record when cloud storage is configured.</p>
             </main>
         </div>
         {setupAction && <MeetingSetupDialog action={setupAction} creating={creating} onClose={() => setSetupAction(null)} onCreate={onCreate} />}
