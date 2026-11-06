@@ -13,6 +13,10 @@ WORKDIR /app
 COPY services/auth/package.json ./
 COPY services/auth/package-lock.json ./package-lock.json
 RUN npm ci --omit=dev
+# Latest Alpine security fixes; drop npm/yarn/corepack, which the service never uses at runtime.
+RUN apk upgrade --no-cache \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /opt/yarn-* \
+              /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn /usr/local/bin/yarnpkg
 COPY --from=0 /app/dist ./dist
 COPY shared/ /shared/
 EXPOSE 4002
