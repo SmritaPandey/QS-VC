@@ -48,3 +48,10 @@ tmp/
 # md
 INTRANET_SETUP.md
 QS-VC-Intranet-Setup.md
+
+# On-prem release & workspace safety
+Claude outputs/
+.venv*/
+certs/*.pem
+release/
+

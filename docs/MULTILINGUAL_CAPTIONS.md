@@ -38,6 +38,7 @@ speaker mic (meeting track) ──16 kHz PCM──► signaling ──► servic
 | Option | Speech (`ASR_URL`) | Translation | Guide |
 |---|---|---|---|
 | India production | E2E Networks GPU (`https://ai.<domain>/asr`) | IndicTrans2 (`https://ai.<domain>/mt`) | `deploy/e2e/README.md` |
+| AWS Free plan (CPU, demo) | m7i-flex.large, Whisper `small` | IndicTrans2 (CPU) | `deploy/aws/cpu/README.md` |
 | AWS GPU | g6/g5 in the same VPC | IndicTrans2 | `deploy/aws/gpu/README.md` |
 | Intranet | Customer GPU server | IndicTrans2 | `docs/INTRANET_AI_PREREQUISITES.md` |
 

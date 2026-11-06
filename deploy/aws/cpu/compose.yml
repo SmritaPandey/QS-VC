@@ -1,0 +1,60 @@
+# QS-VC AI host on a CPU-only AWS Free plan instance: m7i-flex.large (2 vCPU, 8 GiB).
+# Speech recognition (Whisper "small", int8) + translation (IndicTrans2 distilled, CPU).
+# Demo capacity: about 1 person speaking at a time, captions ~3–5 s after each sentence.
+# Reached ONLY by the backend instance over the VPC private network (security group rule).
+#
+#   cd /opt/qsvc && docker compose -f deploy/aws/cpu/compose.yml --env-file deploy/aws/cpu/.env up -d --build
+x-app: &app
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: '3' }
+services:
+  asr:
+    <<: *app
+    container_name: qsvc-asr
+    image: qsvc-asr:cpu
+    build:
+      context: ../../../services/asr
+      args:
+        INDIC: '0'                    # IndicConformer does not fit in 8 GiB next to translation
+    environment:
+      ASR_ENGINE: whisper
+      ASR_DEVICE: cpu
+      ASR_MODEL: ${ASR_MODEL:-small}  # "base" is faster but less accurate
+      ASR_COMPUTE_TYPE: int8
+      ASR_CPU_THREADS: '2'
+      ASR_BEAM_SIZE: ${ASR_BEAM_SIZE:-2}
+      ASR_MAX_PARALLEL: '1'
+      ASR_PARTIAL_INTERVAL_MS: ${ASR_PARTIAL_INTERVAL_MS:-2500}   # fewer live-text updates on CPU
+      ASR_END_SILENCE_MS: ${ASR_END_SILENCE_MS:-600}
+      ASR_MAX_UTTERANCE_S: ${ASR_MAX_UTTERANCE_S:-8}
+      ASR_LANGUAGES: ${ASR_LANGUAGES:-en,hi}
+      ASR_PROMPT: ${ASR_PROMPT:-QS-VC, UPSWAN, UPDESCO}
+      ASR_API_KEY: ${ASR_API_KEY:?Set the same ASR_API_KEY as the backend}
+    ports: ["8000:8000"]
+    volumes: [asr_models:/models]
+    mem_limit: 2g
+  mt:
+    <<: *app
+    container_name: qsvc-mt
+    image: qsvc-mt:cpu
+    build:
+      context: ../../../services/mt
+      args:
+        TORCH_INDEX: https://download.pytorch.org/whl/cpu
+    environment:
+      MT_DEVICE: cpu
+      MT_LANGUAGES: ${MT_LANGUAGES:-en,hi,bn,ta,te,mr,gu,kn,ml,pa,or,ur}
+      MT_API_KEY: ${MT_API_KEY:?Set the same value as LIBRETRANSLATE_API_KEY on the backend}
+      MT_GLOSSARY_FILE: /app/glossary.example.json
+      MT_BEAMS: ${MT_BEAMS:-2}
+      MT_MAX_PARALLEL: '1'
+      OMP_NUM_THREADS: '1'            # leave the second core for speech recognition
+      MKL_NUM_THREADS: '1'
+    ports: ["5000:5000"]
+    volumes: [mt_models:/models]
+    mem_limit: 4500m
+volumes:
+  asr_models:
+  mt_models:
