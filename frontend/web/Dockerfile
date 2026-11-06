@@ -13,6 +13,8 @@ COPY shared/ /shared/
 RUN npx vite build
 
 FROM nginx:alpine
+# Latest Alpine security fixes for the static web server image.
+RUN apk upgrade --no-cache
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY frontend/web/nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 5173

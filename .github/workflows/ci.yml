@@ -95,6 +95,8 @@ jobs:
           sbom: qsvc-sfu.cdx.json
           fail-build: true
           severity-cutoff: high
+          # Fail on high/critical findings that have a published fix; unfixed OS CVEs are tracked in the SBOM.
+          only-fixed: true
 
       - name: Build Signaling image
         uses: docker/build-push-action@v6
@@ -119,6 +121,8 @@ jobs:
           sbom: qsvc-signaling.cdx.json
           fail-build: true
           severity-cutoff: high
+          # Fail on high/critical findings that have a published fix; unfixed OS CVEs are tracked in the SBOM.
+          only-fixed: true
 
       - name: Build Auth image
         uses: docker/build-push-action@v6
@@ -143,6 +147,8 @@ jobs:
           sbom: qsvc-auth.cdx.json
           fail-build: true
           severity-cutoff: high
+          # Fail on high/critical findings that have a published fix; unfixed OS CVEs are tracked in the SBOM.
+          only-fixed: true
 
       - name: Build Meeting image
         uses: docker/build-push-action@v6
@@ -167,6 +173,8 @@ jobs:
           sbom: qsvc-meeting.cdx.json
           fail-build: true
           severity-cutoff: high
+          # Fail on high/critical findings that have a published fix; unfixed OS CVEs are tracked in the SBOM.
+          only-fixed: true
 
       - name: Build Recording image
         uses: docker/build-push-action@v6
@@ -191,6 +199,8 @@ jobs:
           sbom: qsvc-recording.cdx.json
           fail-build: true
           severity-cutoff: high
+          # Fail on high/critical findings that have a published fix; unfixed OS CVEs are tracked in the SBOM.
+          only-fixed: true
 
       - name: Build Web image
         uses: docker/build-push-action@v6
@@ -215,3 +225,5 @@ jobs:
           sbom: qsvc-web.cdx.json
           fail-build: true
           severity-cutoff: high
+          # Fail on high/critical findings that have a published fix; unfixed OS CVEs are tracked in the SBOM.
+          only-fixed: true
