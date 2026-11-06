@@ -7,7 +7,7 @@
  */
 import { playSound } from './sounds';
 
-export type HapticKind = 'tap' | 'toggleOn' | 'toggleOff' | 'success' | 'warning';
+export type HapticKind = 'tap' | 'toggleOn' | 'toggleOff' | 'success' | 'warning' | 'notice';
 
 const PATTERNS: Record<HapticKind, number | number[]> = {
     tap: 8,
@@ -15,6 +15,7 @@ const PATTERNS: Record<HapticKind, number | number[]> = {
     toggleOff: [6, 40, 6],
     success: [10, 30, 14],
     warning: [20, 60, 20],
+    notice: [12, 35, 12],
 };
 
 let iosLabel: HTMLLabelElement | null = null;

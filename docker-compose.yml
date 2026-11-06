@@ -106,6 +106,16 @@ services:
       - POSTGRES_USER=qsvc
       - POSTGRES_PASSWORD=qsvc_dev_2025
       - JWT_SECRET=dev-jwt-secret-change-in-production
+      - LIBRETRANSLATE_URL=${LIBRETRANSLATE_URL:-}
+      - LIBRETRANSLATE_API_KEY=${LIBRETRANSLATE_API_KEY:-}
+      - CAPTION_TRANSLATION_PROVIDER=${CAPTION_TRANSLATION_PROVIDER:-}
+      - GOOGLE_TRANSLATE_API_KEY=${GOOGLE_TRANSLATE_API_KEY:-}
+      - ASR_URL=${ASR_URL:-}
+      - ASR_API_KEY=${ASR_API_KEY:-}
+      - MINUTES_LLM_URL=${MINUTES_LLM_URL:-}
+      - MINUTES_LLM_MODEL=${MINUTES_LLM_MODEL:-}
+      - MINUTES_LLM_API_KEY=${MINUTES_LLM_API_KEY:-}
+      - MEETING_INTERNAL_URL=${MEETING_INTERNAL_URL:-http://meeting:4003}
     depends_on:
       postgres:
         condition: service_healthy
@@ -194,3 +204,43 @@ services:
       - VITE_AUTH_URL=http://localhost:4002
       - VITE_MEETING_URL=http://localhost:4003
       - VITE_RECORDING_URL=http://localhost:4004
+
+  # ── Self-hosted AI (opt-in): docker compose --profile ai up -d asr mt ──
+  # Then set ASR_URL=http://asr:8000 and LIBRETRANSLATE_URL=http://mt:5000 for signaling.
+  asr:
+    profiles: ["ai"]
+    build:
+      context: ./services/asr
+      args:
+        BASE: ${ASR_BASE_IMAGE:-python:3.11-slim}
+    container_name: qsvc-asr
+    environment:
+      - ASR_MODEL=${ASR_MODEL:-}
+      - ASR_LANGUAGES=${ASR_LANGUAGES:-}
+      - ASR_PROMPT=${ASR_PROMPT:-}
+      - ASR_API_KEY=${ASR_API_KEY:-}
+    volumes:
+      - asr_models:/models
+    restart: unless-stopped
+    # GPU: uncomment and build with ASR_BASE_IMAGE=nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+    # deploy: { resources: { reservations: { devices: [ { driver: nvidia, count: 1, capabilities: [gpu] } ] } } }
+
+  mt:
+    profiles: ["ai"]
+    build:
+      context: ./services/mt
+      args:
+        BASE: ${MT_BASE_IMAGE:-python:3.11-slim}
+    container_name: qsvc-mt
+    environment:
+      - MT_LANGUAGES=${MT_LANGUAGES:-}
+      - MT_API_KEY=${LIBRETRANSLATE_API_KEY:-}
+      - MT_GLOSSARY_FILE=/app/glossary.example.json
+    volumes:
+      - mt_models:/models
+    restart: unless-stopped
+    # deploy: { resources: { reservations: { devices: [ { driver: nvidia, count: 1, capabilities: [gpu] } ] } } }
+
+volumes:
+  asr_models:
+  mt_models:

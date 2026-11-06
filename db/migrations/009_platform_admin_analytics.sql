@@ -1,12 +1,12 @@
 CREATE TABLE platform_installer_downloads (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    platform text NOT NULL CHECK (platform IN ('windows', 'macos-arm64', 'macos-x64')),
+    platform text NOT NULL CHECK (platform IN ('windows', 'macos-arm64', 'macos-x64', 'linux-x64')),
     downloaded_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE TABLE platform_desktop_activations (
     activation_date date NOT NULL,
-    platform text NOT NULL CHECK (platform IN ('win32', 'darwin')),
+    platform text NOT NULL CHECK (platform IN ('win32', 'darwin', 'linux')),
     architecture text NOT NULL CHECK (architecture IN ('x64', 'arm64')),
     app_version varchar(40) NOT NULL,
     activation_count bigint NOT NULL DEFAULT 1 CHECK (activation_count > 0),
@@ -142,7 +142,7 @@ BEGIN
     ), installer_totals AS (
         SELECT platforms.platform,
             count(downloads.id)::bigint AS count
-        FROM (VALUES ('windows'), ('macos-arm64'), ('macos-x64')) AS platforms(platform)
+        FROM (VALUES ('windows'), ('macos-arm64'), ('macos-x64'), ('linux-x64')) AS platforms(platform)
         LEFT JOIN public.platform_installer_downloads downloads USING (platform)
         GROUP BY platforms.platform
     ), activation_totals AS (

@@ -46,23 +46,26 @@ it('lets platform admins in without a per-user grant, using the admin workspace 
     expect((await check({ sub: 'someone', tenantId: 'any', role: 'member' })).next).not.toHaveBeenCalled();
 });
 
-it('reports only the Windows and Mac installers that are actually staged', async () => {
+it('reports the desktop installers that are actually staged', async () => {
     const folder = mkdtempSync(path.join(tmpdir(), 'qsvc-enterprise-downloads-'));
     try {
         const arm = path.join(folder, 'arm64.zip');
         const intel = path.join(folder, 'x64.zip');
         const windows = path.join(folder, 'windows-x64.zip');
+        const linux = path.join(folder, 'linux-x64.tar.gz');
         writeFileSync(arm, 'apple-silicon-test-artifact');
         writeFileSync(windows, 'windows-installer-archive');
+        writeFileSync(linux, 'linux-desktop-archive');
         vi.stubEnv('ENTERPRISE_WINDOWS_INSTALLER', windows);
         vi.stubEnv('ENTERPRISE_MACOS_ARM64_INSTALLER', arm);
         vi.stubEnv('ENTERPRISE_MACOS_X64_INSTALLER', intel);
+        vi.stubEnv('ENTERPRISE_LINUX_X64_INSTALLER', linux);
         const router = enterpriseRouter(async () => ({}));
         const route = router.stack.find(layer => layer.route?.path === '/')!.route!;
         const res = { locals: {}, json: vi.fn() };
         await route.stack[0].handle({} as Request, res as unknown as Response, vi.fn());
         expect(res.json).toHaveBeenCalledWith(expect.objectContaining({
-            downloads: { windows: true, macAppleSilicon: true, macIntel: false },
+            downloads: { windows: true, macAppleSilicon: true, macIntel: false, linuxX64: true },
             windowsAvailable: true,
         }));
     } finally {
@@ -89,11 +92,11 @@ it.each([
     }
 });
 
-it('registers explicit Windows and both Mac ZIP routes plus the legacy route', () => {
+it('registers explicit platform routes plus the legacy route', () => {
     const router = enterpriseRouter(async () => ({}));
     const paths = router.stack.filter(layer => layer.route).map(layer => layer.route?.path);
     expect(paths).toEqual(expect.arrayContaining([
-        '/windows', '/macos/arm64', '/macos/x64', '/download/:platform',
+        '/windows', '/macos/arm64', '/macos/x64', '/linux/x64', '/download/:platform',
     ]));
 });
 

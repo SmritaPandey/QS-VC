@@ -60,7 +60,7 @@ describe('room caption and configured translation owners', () => {
         vi.stubEnv('LIBRETRANSLATE_URL', '');
         const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
         const peer = participant();
-        expect(await translationCapabilities(peer.ws, peer.roomId, peer.id)).toEqual({ configured: false, languages: [], processing: 'configured-server' });
+        expect(await translationCapabilities(peer.ws, peer.roomId, peer.id)).toEqual({ configured: false, languages: [], processing: 'configured-server', transcript: { saving: false } });
         const { id } = publishCaption(peer.ws, peer.roomId, peer.id, final);
         await expect(translateCaption(peer.ws, peer.roomId, peer.id, { id, target: 'hi' })).rejects.toThrow('no configured server');
         expect(fetch).not.toHaveBeenCalled();
@@ -86,7 +86,8 @@ describe('room caption and configured translation owners', () => {
         await expect(translateCaption(peer.ws, peer.roomId, peer.id, { id, target: 'fr' })).rejects.toThrow('Language pair unavailable');
         expect(request).toHaveBeenCalledTimes(1);
     });
-    it('bounds final history to 100 and clears empty-room history', async () => {
+    it('bounds final history (CAPTION_ROOM_HISTORY) and clears empty-room history', async () => {
+        vi.stubEnv('CAPTION_ROOM_HISTORY', '100');
         vi.useFakeTimers(); const peer = participant();
         for (let i = 0; i < 101; i++) {
             publishCaption(peer.ws, peer.roomId, peer.id, { ...final, id: `part-${i}` });

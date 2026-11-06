@@ -12,7 +12,8 @@
         "package:mac": "electron-builder --mac",
         "package:mac:arm64": "npm run build && electron-builder --mac zip --arm64",
         "package:mac:x64": "npm run build && electron-builder --mac zip --x64",
-        "package:linux": "electron-builder --linux"
+        "package:linux": "npm run package:linux:x64",
+        "package:linux:x64": "npm run build && electron-builder --linux tar.gz --x64"
     },
     "build": {
         "appId": "com.qsvc.desktop",
@@ -61,10 +62,14 @@
         },
         "linux": {
             "target": [
-                "dir"
+                {
+                    "target": "tar.gz",
+                    "arch": ["x64"]
+                }
             ],
             "icon": "assets/icon.png",
-            "category": "Network"
+            "category": "Network",
+            "artifactName": "QS-VC-Linux-${arch}.tar.gz"
         },
         "mac": {
             "target": [

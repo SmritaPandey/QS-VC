@@ -12,6 +12,7 @@ INSTALLER_DIR="deploy/aws/installers"
 WINDOWS_INSTALLER="$INSTALLER_DIR/QS-VC-Windows-x64.zip"
 MAC_ARM64_INSTALLER="$INSTALLER_DIR/QS-VC-macOS-arm64.zip"
 MAC_X64_INSTALLER="$INSTALLER_DIR/QS-VC-macOS-x64.zip"
+LINUX_X64_INSTALLER="$INSTALLER_DIR/QS-VC-Linux-x64.tar.gz"
 
 echo "Checking production deployment..."
 
@@ -23,6 +24,7 @@ test -f "certs/rds-ca.pem"
 # Ensure the deployment includes the latest required access and admin analytics migrations.
 test -f "db/migrations/006_enterprise_access_terms.sql"
 test -f "db/migrations/009_platform_admin_analytics.sql"
+test -f "db/migrations/013_linux_desktop_support.sql"
 
 # Installer ZIPs and their release checksums are built on the protected
 # platform runners and included in the approved release archive.
@@ -33,17 +35,21 @@ test -f "$MAC_ARM64_INSTALLER"
 test -f "$MAC_X64_INSTALLER"
 test -f "$MAC_ARM64_INSTALLER.sha256"
 test -f "$MAC_X64_INSTALLER.sha256"
+test -f "$LINUX_X64_INSTALLER"
+test -f "$LINUX_X64_INSTALLER.sha256"
 (
   cd "$INSTALLER_DIR"
   sha256sum --check --status QS-VC-Windows-x64.zip.sha256
   sha256sum --check --status QS-VC-macOS-arm64.zip.sha256
   sha256sum --check --status QS-VC-macOS-x64.zip.sha256
+  sha256sum --check --status QS-VC-Linux-x64.tar.gz.sha256
 )
 unzip -tq "$WINDOWS_INSTALLER"
 unzip -tq "$MAC_ARM64_INSTALLER"
 unzip -tq "$MAC_X64_INSTALLER"
-chmod 0644 "$WINDOWS_INSTALLER" "$MAC_ARM64_INSTALLER" "$MAC_X64_INSTALLER"
-echo "Verified and staged Windows and both Mac installer ZIPs"
+tar -tzf "$LINUX_X64_INSTALLER" >/dev/null
+chmod 0644 "$WINDOWS_INSTALLER" "$MAC_ARM64_INSTALLER" "$MAC_X64_INSTALLER" "$LINUX_X64_INSTALLER"
+echo "Verified and staged Windows, Mac, and Linux desktop archives"
 
 # This script must run under an approved privileged
 # deployment identity with Docker and AWS permissions.

@@ -16,7 +16,7 @@ const termBody = z.object({
     expiresAt: z.string().datetime({ offset: true }),
 });
 const activationBody = z.object({
-    platform: z.enum(['win32', 'darwin']),
+    platform: z.enum(['win32', 'darwin', 'linux']),
     architecture: z.enum(['x64', 'arm64']),
     appVersion: z.string().trim().min(1).max(40).regex(/^[A-Za-z0-9.+-]+$/),
 });
@@ -201,8 +201,9 @@ export function enterpriseRouter(
             windows: process.env.ENTERPRISE_WINDOWS_INSTALLER,
             macAppleSilicon: process.env.ENTERPRISE_MACOS_ARM64_INSTALLER,
             macIntel: process.env.ENTERPRISE_MACOS_X64_INSTALLER,
+            linuxX64: process.env.ENTERPRISE_LINUX_X64_INSTALLER,
         };
-        const extensions = { windows: '.zip', macAppleSilicon: '.zip', macIntel: '.zip' } as const;
+        const extensions = { windows: '.zip', macAppleSilicon: '.zip', macIntel: '.zip', linuxX64: '.tar.gz' } as const;
         const available = async (platform: keyof typeof configured) => {
             const file = configured[platform];
             if (!file || !path.isAbsolute(file) || !file.toLowerCase().endsWith(extensions[platform])) return false;
@@ -212,6 +213,7 @@ export function enterpriseRouter(
             windows: await available('windows'),
             macAppleSilicon: await available('macAppleSilicon'),
             macIntel: await available('macIntel'),
+            linuxX64: await available('linuxX64'),
         };
     }
     if (db) router.post('/activation', async (req, res) => {
@@ -231,7 +233,7 @@ export function enterpriseRouter(
         const downloads = await installer();
         res.json({ workspaceUrl: res.locals.workspaceUrl, workspaceMode: res.locals.workspaceMode, downloads, windowsAvailable: downloads.windows, expiresAt: res.locals.expiresAt });
     });
-    const downloadAsset = async (platform: 'windows' | 'macAppleSilicon' | 'macIntel', res: Response) => {
+    const downloadAsset = async (platform: 'windows' | 'macAppleSilicon' | 'macIntel' | 'linuxX64', res: Response) => {
         const availability = await installer();
         if (!availability[platform]) {
             res.status(503).json({ error: 'This installer is not available yet.' });
@@ -241,11 +243,13 @@ export function enterpriseRouter(
             windows: process.env.ENTERPRISE_WINDOWS_INSTALLER!,
             macAppleSilicon: process.env.ENTERPRISE_MACOS_ARM64_INSTALLER!,
             macIntel: process.env.ENTERPRISE_MACOS_X64_INSTALLER!,
+            linuxX64: process.env.ENTERPRISE_LINUX_X64_INSTALLER!,
         }[platform];
         const filename = {
             windows: 'QS-VC-Windows-x64.zip',
             macAppleSilicon: 'QS-VC-macOS-arm64.zip',
             macIntel: 'QS-VC-macOS-x64.zip',
+            linuxX64: 'QS-VC-Linux-x64.tar.gz',
         }[platform];
         res.download(file, filename, async error => {
             if (error) {
@@ -257,6 +261,7 @@ export function enterpriseRouter(
                     windows: 'windows',
                     macAppleSilicon: 'macos-arm64',
                     macIntel: 'macos-x64',
+                    linuxX64: 'linux-x64',
                 }[platform];
                 try { await db.query('SELECT public.qsvc_record_installer_download($1)', [artifact]); }
                 catch { console.error('QS-VC installer download completed but could not be counted.'); }
@@ -266,11 +271,13 @@ export function enterpriseRouter(
     router.get('/windows', (_req, res) => downloadAsset('windows', res));
     router.get('/macos/arm64', (_req, res) => downloadAsset('macAppleSilicon', res));
     router.get('/macos/x64', (_req, res) => downloadAsset('macIntel', res));
+    router.get('/linux/x64', (_req, res) => downloadAsset('linuxX64', res));
     router.get('/download/:platform', (req, res) => {
         const platform = req.params.platform;
         if (platform === 'windows') return downloadAsset('windows', res);
         if (platform === 'macos-arm64') return downloadAsset('macAppleSilicon', res);
         if (platform === 'macos-x64') return downloadAsset('macIntel', res);
+        if (platform === 'linux-x64') return downloadAsset('linuxX64', res);
         return res.sendStatus(404);
     });
     return router;

@@ -11,6 +11,7 @@ import { hasFeature, useEntitlements } from '../lib/entitlements';
 import type { NoiseSuppressor } from '../lib/noise-suppression';
 import '../styles/recordings.css';
 import { playSound } from '../lib/sounds';
+import { haptic } from '../lib/haptics';
 import { createMeetingComposite, type MeetingComposite } from '../lib/meeting-recorder';
 import VideoGrid, { RemoteAudio, type ViewMode, type TilesPerPage } from '../components/VideoGrid';
 import BackgroundEffects from '../components/BackgroundEffects';
@@ -19,6 +20,7 @@ import { hasCaptionConsent } from '../components/MeetingCaptions';
 import { useSpeaking } from '../lib/speaking';
 import { BackgroundProcessor, savedEffect, saveEffect, effectLabel, type BackgroundEffect } from '../lib/virtual-background';
 import { SpeechToTextEngine } from '../lib/speech-to-text';
+import { ServerSpeechEngine } from '../lib/server-speech';
 import '../styles/meeting-stage.css';
 import BrandLogo from '../components/BrandLogo';
 import MeetingInformation from '../components/MeetingInformation';
@@ -196,6 +198,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [joinFailure, setJoinFailure] = useState<JoinFailure | null>(null);
     const [restoring, setRestoring] = useState(reconnecting);
     const [knocks, setKnocks] = useState<Array<{ peerId: string; displayName: string }>>([]);
+    const notifiedKnocks = useRef(new Set<string>());
     const [leaveOpen, setLeaveOpen] = useState(false);
     const myRoleRef = useRef('member');
     myRoleRef.current = myRole;
@@ -240,6 +243,12 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [speechLanguage, setSpeechLanguage] = useState<MeetingLanguage>(() => initialMeetingLanguage());
     const [translatedSpeaking, setTranslatedSpeaking] = useState(false);
     const getMyPeerId = useCallback(() => myPeerIdRef.current, []);
+    /** Captions use the same microphone the meeting sends (noise-suppressed when that is on). */
+    const getCaptionMicTrack = useCallback((): MediaStreamTrack | null => {
+        const processed = processedAudioTrackRef.current;
+        if (processed?.readyState === 'live') return processed;
+        return localStreamRef.current?.getAudioTracks().find(track => track.readyState === 'live') || null;
+    }, []);
     const [languageOpen, setLanguageOpen] = useState(false);
 
     // Refs mirror live state so async handlers and signaling callbacks never act on stale values.
@@ -724,7 +733,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         if (peerId === myPeerIdRef.current) {
                             const before = myRoleRef.current;
                             setMyRole(role);
-                            if (role !== 'host' && role !== 'co-host') { setHostToolsOpen(false); setKnocks([]); }
+                            if (role !== 'host' && role !== 'co-host') { setHostToolsOpen(false); setKnocks([]); notifiedKnocks.current.clear(); }
                             if (role !== before) showNotice(role === 'host' ? 'You are now the host.' : role === 'co-host' ? 'You are now a co-host. You can admit people and manage the meeting.' : 'You are no longer a co-host.');
                         } else patchPeer(peerId, { role });
                     }),
@@ -744,12 +753,18 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     signaling.on('hostLeft', () => showNotice('The host left. The meeting continues; host controls return when the host or a co-host is back.')),
                     signaling.on('waitingRoomPeer', ({ peerId, displayName: name }: any) => {
                         if (!isManagerNow()) return;
-                        playSound('notice');
+                        if (!notifiedKnocks.current.has(peerId)) {
+                            notifiedKnocks.current.add(peerId);
+                            haptic('notice');
+                        }
                         setKnocks(current => current.some(k => k.peerId === peerId) ? current : [...current, { peerId, displayName: name || 'Guest' }]);
                     }),
-                    signaling.on('newPeer', ({ peerId, displayName: name, role }: any) => patchPeer(peerId, { displayName: name, role })),
-                    signaling.on('peerLeft', ({ peerId }: any) => { setKnocks(current => current.filter(k => k.peerId !== peerId)); setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; }); }),
-                    signaling.on('newPeer', ({ peerId }: any) => setKnocks(current => current.filter(k => k.peerId !== peerId))),
+                    signaling.on('newPeer', ({ peerId, displayName: name, role }: any) => {
+                        notifiedKnocks.current.delete(peerId);
+                        patchPeer(peerId, { displayName: name, role });
+                        setKnocks(current => current.filter(k => k.peerId !== peerId));
+                    }),
+                    signaling.on('peerLeft', ({ peerId }: any) => { notifiedKnocks.current.delete(peerId); setKnocks(current => current.filter(k => k.peerId !== peerId)); setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; }); }),
                     signaling.on('peerKicked', ({ peerId }: any) => setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; })),
                     signaling.on('peerMuteChanged', ({ peerId, kind, muted }: any) => {
                         if (kind === 'audio') patchPeer(peerId, { audioMuted: !!muted });
@@ -1421,7 +1436,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     const answerKnock = useCallback((peerId: string, admit: boolean) => {
         setKnocks(current => current.filter(k => k.peerId !== peerId));
-        signaling.request(admit ? 'admitPeer' : 'rejectPeer', { targetPeerId: peerId }).catch((error: Error) => showNotice(error?.message || 'That request could not be answered.'));
+        signaling.request(admit ? 'admitPeer' : 'rejectPeer', { targetPeerId: peerId }).then(() => {
+            if (!admit) notifiedKnocks.current.delete(peerId);
+        }).catch((error: Error) => showNotice(error?.message || 'That request could not be answered.'));
     }, [showNotice]);
     const endForEveryone = useCallback(async () => {
         setLeaveOpen(false);
@@ -1527,7 +1544,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const toggleCaptions = useCallback(() => {
         if (captionsOn) { setCaptionsOn(false); setShareSpeech(false); stopSpeechRecognition.current(); return; }
         setCaptionsOn(true);
-        const supported = SpeechToTextEngine.isSupported();
+        // Server recognition (any modern browser) or the browser's own recognizer.
+        const supported = SpeechToTextEngine.isSupported() || ServerSpeechEngine.isSupported();
         if (!canPublishRef.current) { showNotice('Captions are on. You’ll see what the speakers say.'); return; }
         if (supported && hasCaptionConsent()) { setShareSpeech(true); showNotice('Captions are on, including your own speech.'); }
         else if (supported) { setLanguageOpen(true); setReactionsOpen(false); showNotice('Captions are on. To let others read what you say, turn on “Share my speech as captions”.'); }
@@ -1618,7 +1636,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 <div className="top-bar-left">
                     <BrandLogo meeting iconOnly />
                     <button type="button" className="meeting-info-trigger" onClick={openInformation} aria-label="Meeting information" aria-haspopup="dialog" aria-expanded={informationOpen} title="Meeting information">
-                        <span className="mi" aria-hidden="true">notifications</span>
+                        <span className="mi" aria-hidden="true">info</span>
                     </button>
                     <div className="meeting-local-clock" title={`Your local time · ${timeZone}`} aria-label={`Your local time is ${localTime}, ${localDate}, ${timeZone}`}>
                         <time dateTime={clockNow.toISOString()}>{localTime}</time>
@@ -1680,7 +1698,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         onEnd={endPrivateConversation} onToggleMicrophone={() => void togglePrivateMicrophone()} onToggleFocusAudio={togglePrivateFocusAudio} />
                     <ReactionsOverlay reactions={reactions} pickerOpen={reactionsOpen} onSendReaction={handleSendReaction} onClosePicker={closeReactions} onExpire={expireReaction} />
                     <MeetingCaptions translatedSpeaking={translatedSpeaking} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
-                        showCaptions={captionsOn} onShowCaptionsChange={setCaptionsOn} shareSpeech={shareSpeech} onShareSpeechChange={setShareSpeech} />
+                        showCaptions={captionsOn} onShowCaptionsChange={setCaptionsOn} shareSpeech={shareSpeech} onShareSpeechChange={setShareSpeech}
+                        getMicTrack={getCaptionMicTrack} isHost={manager} meetingCode={meetingCode} />
                 </div>
 
                 {chatOpen && <MeetingChat messages={chatMessages} onSend={handleSendChat} onClose={closeChat} />}
