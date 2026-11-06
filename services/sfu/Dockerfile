@@ -1,4 +1,7 @@
-FROM node:20-alpine AS builder
+# mediasoup ships a prebuilt worker only for glibc Linux. On Alpine (musl) it compiles ~1400 C++ files
+# from source, and Alpine's newer GCC fails on mediasoup's bundled libwebrtc (missing <cstdint>).
+# Debian slim downloads the prebuilt worker; the toolchain stays as a fallback if that download fails.
+FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 COPY package*.json ./
@@ -7,8 +10,10 @@ COPY tsconfig.json ./
 COPY src/ ./src/
 RUN npm run build
 
-FROM node:20-alpine
-RUN apk add --no-cache python3 py3-pip make g++ linux-headers && ln -sf python3 /usr/bin/python
+FROM node:20-bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-pip make g++ ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY package*.json ./

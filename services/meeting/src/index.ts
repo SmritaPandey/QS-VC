@@ -327,20 +327,22 @@ app.post('/api/internal/meetings/:code/transcript', express.json({ limit: '2mb' 
     const code = String(req.params.code).toUpperCase().slice(0, 30);
     const { startedAt, segments, minutes } = parsed.data;
     try {
-        await pool.query(
-            `INSERT INTO meeting_transcripts (meeting_code, started_at, minutes) VALUES ($1, $2, $3)
-             ON CONFLICT (meeting_code, started_at) DO UPDATE SET minutes = COALESCE(EXCLUDED.minutes, meeting_transcripts.minutes), updated_at = NOW()`,
-            [code, startedAt, minutes ?? null],
-        );
-        if (segments.length) {
+        const tenant = await rawPool.query('SELECT public.qsvc_tenant_id_by_meeting_code($1) AS tenant_id', [code]);
+        if (!tenant.rows[0]?.tenant_id) return res.status(404).json({ error: 'Meeting not found' });
+        await pool.runWithTenant(tenant.rows[0].tenant_id, async () => {
             await pool.query(
-                `INSERT INTO meeting_transcript_segments (meeting_code, segment_id, started_at, speaker, language, text, spoken_at)
-                 SELECT $1, s.id, $2, s.speaker, s.language, s.text, to_timestamp(s.ts / 1000.0)
-                 FROM jsonb_to_recordset($3::jsonb) AS s(id text, speaker text, language text, text text, ts bigint)
-                 ON CONFLICT (meeting_code, segment_id) DO NOTHING`,
-                [code, startedAt, JSON.stringify(segments.map(segment => ({ id: segment.id, speaker: segment.speaker, language: segment.language, text: segment.text, ts: segment.timestamp })))],
+                `INSERT INTO meeting_transcripts (meeting_code, started_at, minutes) VALUES ($1, $2, $3)
+                 ON CONFLICT (meeting_code, started_at) DO UPDATE SET minutes = COALESCE(EXCLUDED.minutes, meeting_transcripts.minutes), updated_at = NOW()`,
+                [code, startedAt, minutes ?? null],
             );
-        }
+            if (segments.length) await pool.query(
+                    `INSERT INTO meeting_transcript_segments (meeting_code, segment_id, started_at, speaker, language, text, spoken_at)
+                     SELECT $1, s.id, $2, s.speaker, s.language, s.text, to_timestamp(s.ts / 1000.0)
+                     FROM jsonb_to_recordset($3::jsonb) AS s(id text, speaker text, language text, text text, ts bigint)
+                     ON CONFLICT (meeting_code, segment_id) DO NOTHING`,
+                    [code, startedAt, JSON.stringify(segments.map(segment => ({ id: segment.id, speaker: segment.speaker, language: segment.language, text: segment.text, ts: segment.timestamp })))],
+                );
+        });
         res.json({ stored: segments.length });
     } catch (err: any) {
         logger.warn('Transcript not stored: ' + err.message);
@@ -356,16 +358,42 @@ app.get('/api/meetings/code/:code/transcript', authMiddleware, async (req, res) 
         const meeting = await pool.query('SELECT host_id FROM public.qsvc_meeting_by_code($1)', [code]);
         if (!meeting.rows.length) return res.status(404).json({ error: 'Meeting not found' });
         if (meeting.rows[0].host_id !== user.sub && user.role !== 'admin') return res.status(403).json({ error: 'Only the meeting host can open its transcript' });
+        const limitValue = Number(req.query.limit);
+        const limit = Number.isInteger(limitValue) && limitValue > 0 ? Math.min(limitValue, 1000) : 500;
+        let cursor: { at: string; id: string } | null = null;
+        if (typeof req.query.cursor === 'string') {
+            try {
+                const value = JSON.parse(Buffer.from(req.query.cursor, 'base64url').toString('utf8'));
+                if (!value || typeof value.at !== 'string' || !Number.isFinite(Date.parse(value.at)) || typeof value.id !== 'string' || value.id.length > 200) throw new Error();
+                cursor = { at: value.at, id: value.id };
+            } catch { return res.status(400).json({ error: 'Invalid transcript cursor' }); }
+        }
         const [sessions, rows] = await Promise.all([
-            pool.query('SELECT started_at, minutes FROM meeting_transcripts WHERE meeting_code = $1 ORDER BY started_at', [code]),
-            pool.query('SELECT segment_id, speaker, language, text, spoken_at FROM meeting_transcript_segments WHERE meeting_code = $1 ORDER BY spoken_at, segment_id LIMIT 200000', [code]),
+            pool.query('SELECT started_at, minutes FROM meeting_transcripts WHERE meeting_code = $1 AND started_at >= NOW() - INTERVAL \'90 days\' ORDER BY started_at DESC LIMIT 100', [code]),
+            cursor
+                ? pool.query('SELECT segment_id, speaker, language, text, spoken_at FROM meeting_transcript_segments WHERE meeting_code = $1 AND (spoken_at, segment_id) > ($2::timestamptz, $3::text) ORDER BY spoken_at, segment_id LIMIT $4', [code, cursor.at, cursor.id, limit + 1])
+                : pool.query('SELECT segment_id, speaker, language, text, spoken_at FROM meeting_transcript_segments WHERE meeting_code = $1 ORDER BY spoken_at, segment_id LIMIT $2', [code, limit + 1]),
         ]);
-        const minutes = sessions.rows.map((row: any) => row.minutes).filter(Boolean).join('\n\n') || null;
+        const segments = rows.rows.slice(0, limit);
+        const recentMinutes = sessions.rows.find((row: any) => row.minutes)?.minutes || null;
+        const jsonPage = () => ({ meetingCode: code, minutes: recentMinutes, sessions: sessions.rows.map((row: any) => ({ startedAt: row.started_at })), segments: segments.map((row: any) => ({ id: row.segment_id, speaker: row.speaker, language: row.language, text: row.text, spokenAt: row.spoken_at })) });
+        const responseBytes = () => {
+            if (req.query.format === 'txt') return Buffer.byteLength(transcriptAsText(segments, recentMinutes));
+            if (req.query.format === 'srt') return Buffer.byteLength(transcriptAsSrt(segments));
+            return Buffer.byteLength(JSON.stringify(jsonPage()));
+        };
+        while (segments.length > 1 && responseBytes() > 1_048_576) segments.pop();
+        if (responseBytes() > 1_048_576) return res.status(413).json({ error: 'Transcript page exceeds the 1 MiB export limit. Request a smaller page.' });
+        const hasMore = rows.rows.length > segments.length;
+        const last = segments[segments.length - 1];
+        const nextCursor = hasMore && last ? Buffer.from(JSON.stringify({ at: new Date(last.spoken_at).toISOString(), id: last.segment_id })).toString('base64url') : null;
         res.setHeader('Cache-Control', 'no-store');
+        if (nextCursor) res.setHeader('X-Transcript-Next-Cursor', nextCursor);
+        res.setHeader('X-Transcript-Truncated', String(hasMore));
         const format = String(req.query.format || 'json');
-        if (format === 'txt') { res.type('text/plain; charset=utf-8').setHeader('Content-Disposition', `attachment; filename="${code}-transcript.txt"`); return res.send(transcriptAsText(rows.rows, minutes)); }
-        if (format === 'srt') { res.type('application/x-subrip; charset=utf-8').setHeader('Content-Disposition', `attachment; filename="${code}.srt"`); return res.send(transcriptAsSrt(rows.rows)); }
-        res.json({ meetingCode: code, minutes, sessions: sessions.rows.map((row: any) => ({ startedAt: row.started_at, minutes: row.minutes })), segments: rows.rows.map((row: any) => ({ id: row.segment_id, speaker: row.speaker, language: row.language, text: row.text, spokenAt: row.spoken_at })) });
+        if (format === 'txt') { res.type('text/plain; charset=utf-8').setHeader('Content-Disposition', `attachment; filename="${code}-transcript.txt"`); return res.send(transcriptAsText(segments, recentMinutes)); }
+        if (format === 'srt') { res.type('application/x-subrip; charset=utf-8').setHeader('Content-Disposition', `attachment; filename="${code}.srt"`); return res.send(transcriptAsSrt(segments)); }
+        res.json({ ...jsonPage(), nextCursor });
     } catch (err: any) {
         logger.warn('Transcript not read: ' + err.message);
         res.status(503).json({ error: 'Transcript storage unavailable' });
@@ -672,6 +700,18 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 const HOST = process.env.HOST || '0.0.0.0';
 const server = http.createServer(app);
 
+async function pruneExpiredTranscripts(): Promise<void> {
+    try {
+        const result = await rawPool.query('SELECT public.qsvc_prune_old_meeting_transcripts() AS removed');
+        logger.info({ removed: result.rows[0]?.removed ?? 0 }, 'Pruned transcripts older than 90 days');
+    } catch (error) {
+        logger.warn({ error }, 'Transcript retention cleanup failed; verify migration 016 is applied');
+    }
+}
+const transcriptRetentionTimer = setInterval(() => { void pruneExpiredTranscripts(); }, 24 * 60 * 60 * 1000);
+transcriptRetentionTimer.unref();
+void pruneExpiredTranscripts();
+
 attachSignalingIfAvailable(server).then((attached) => {
     server.listen(PORT, HOST, () => {
         logger.info(`📋 QS-VC Meeting Service running on ${HOST}:${PORT}${attached ? ' (+ signaling /ws)' : ''}`);
@@ -681,5 +721,5 @@ attachSignalingIfAvailable(server).then((attached) => {
     process.exit(1);
 });
 
-process.on('SIGTERM', () => { rawPool.end(); process.exit(0); });
-process.on('SIGINT', () => { rawPool.end(); process.exit(0); });
+process.on('SIGTERM', () => { clearInterval(transcriptRetentionTimer); rawPool.end(); process.exit(0); });
+process.on('SIGINT', () => { clearInterval(transcriptRetentionTimer); rawPool.end(); process.exit(0); });

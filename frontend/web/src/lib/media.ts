@@ -3,7 +3,7 @@
  */
 import { Device, types as msTypes } from 'mediasoup-client';
 import { signaling } from './signaling';
-import type { E2EEManager } from './e2ee';
+import { encodedTransformsSupported, type E2EEManager } from './e2ee';
 
 export interface ProducerInfo {
     id: string;
@@ -44,6 +44,10 @@ export class MediaManager {
 
     setE2EEManager(manager: E2EEManager | null): void { this.e2ee = manager; }
 
+    private iceServers: RTCIceServer[] | undefined;
+    /** TURN/STUN servers from the signaling service, used when a direct path to the SFU is blocked. */
+    setIceServers(servers: RTCIceServer[] | undefined): void { this.iceServers = servers?.length ? servers : undefined; }
+
     /**
      * Initialize the mediasoup Device with router RTP capabilities.
      */
@@ -71,6 +75,10 @@ export class MediaManager {
             iceParameters: transportParams.iceParameters,
             iceCandidates: transportParams.iceCandidates,
             dtlsParameters: transportParams.dtlsParameters,
+            iceServers: this.iceServers,
+            // End-to-end encryption needs encoded-frame access on every sender and receiver.
+            // Chrome only allows it when the peer connection is created with this flag.
+            additionalSettings: encodedTransformsSupported() ? ({ encodedInsertableStreams: true } as Partial<RTCConfiguration>) : undefined,
         });
 
         // When the transport needs to connect to the SFU
@@ -115,6 +123,10 @@ export class MediaManager {
             iceParameters: transportParams.iceParameters,
             iceCandidates: transportParams.iceCandidates,
             dtlsParameters: transportParams.dtlsParameters,
+            iceServers: this.iceServers,
+            // End-to-end encryption needs encoded-frame access on every sender and receiver.
+            // Chrome only allows it when the peer connection is created with this flag.
+            additionalSettings: encodedTransformsSupported() ? ({ encodedInsertableStreams: true } as Partial<RTCConfiguration>) : undefined,
         });
 
         this.recvTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
@@ -139,33 +151,44 @@ export class MediaManager {
         const transport = this.sendTransport;
         const revision = this.revision;
         if (!transport) throw new Error('Send transport not created');
-
+        const e2ee = this.e2ee;
         const wasEnabled = track.enabled;
-        if (this.e2ee) {
+        if (e2ee) {
+            // Do not produce clear media while waiting for a key or installing the frame transform.
             track.enabled = false;
-            await this.e2ee.waitUntilActive();
+            try { await e2ee.waitUntilActive(); }
+            catch (error) { track.enabled = wasEnabled; throw error; }
         }
-        const producer = await transport.produce({
-            track,
-            // The page owns camera/screen lifetime; replacing a producer must not stop its previous source.
-            stopTracks: false,
-            encodings: track.kind === 'video'
-                ? [
-                    { maxBitrate: 100000, scaleResolutionDownBy: 4 },   // low
-                    { maxBitrate: 300000, scaleResolutionDownBy: 2 },   // mid
-                    { maxBitrate: 900000, scaleResolutionDownBy: 1 },   // high
-                ]
-                : undefined,
-            codecOptions: track.kind === 'video'
-                ? { videoGoogleStartBitrate: 1000 }
-                : undefined,
-            appData,
-        });
 
-        if (this.e2ee) {
+        let producer: msTypes.Producer;
+        try {
+            producer = await transport.produce({
+                track,
+                // The page owns camera/screen lifetime; replacing a producer must not stop its previous source.
+                stopTracks: false,
+                encodings: track.kind === 'video'
+                    ? [
+                        { maxBitrate: 100000, scaleResolutionDownBy: 4 },   // low
+                        { maxBitrate: 300000, scaleResolutionDownBy: 2 },   // mid
+                        { maxBitrate: 900000, scaleResolutionDownBy: 1 },   // high
+                    ]
+                    : undefined,
+                codecOptions: track.kind === 'video'
+                    ? { videoGoogleStartBitrate: 1000 }
+                    : undefined,
+                appData,
+            });
+        } catch (error) {
+            if (e2ee) track.enabled = wasEnabled;
+            throw error;
+        }
+
+        if (e2ee) {
+            // The source is disabled until createEncodedStreams() is attached. Any browser that
+            // cannot provide the transform fails closed and never sends this producer.
             try {
                 if (!producer.rtpSender) throw new Error('The media transport did not expose an encoded sender');
-                await this.e2ee.setupSenderTransform(producer.rtpSender);
+                e2ee.setupSenderTransform(producer.rtpSender);
                 track.enabled = wasEnabled;
             } catch (error) {
                 producer.close();
@@ -205,7 +228,7 @@ export class MediaManager {
         if (this.e2ee) {
             try {
                 if (!consumer.rtpReceiver) throw new Error('The media transport did not expose an encoded receiver');
-                await this.e2ee.setupReceiverTransform(consumer.rtpReceiver);
+                this.e2ee.setupReceiverTransform(consumer.rtpReceiver);
             } catch (error) {
                 consumer.close();
                 throw error;

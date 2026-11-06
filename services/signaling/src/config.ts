@@ -29,13 +29,4 @@ export const config = {
         port: parseInt(process.env.REDIS_PORT || '6379', 10),
     },
 
-    // DB — supports DATABASE_URL (Render) or individual env vars (local)
-    databaseUrl: process.env.DATABASE_URL || undefined,
-    db: {
-        host: process.env.POSTGRES_HOST || 'localhost',
-        port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
-        database: process.env.POSTGRES_DB || 'qsvc',
-        user: process.env.POSTGRES_USER || 'qsvc',
-        password: process.env.POSTGRES_PASSWORD || 'qsvc_dev_2025',
-    },
 };
