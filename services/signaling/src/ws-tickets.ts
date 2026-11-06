@@ -9,13 +9,11 @@ export interface WebSocketTicketPayload {
 }
 
 const TICKET_TTL_SECONDS = 30;
-const redis = config.redisUrl || process.env.REDIS_PASSWORD
-    ? new Redis(config.redisUrl || {
-        host: config.redis.host,
-        port: config.redis.port,
-        password: process.env.REDIS_PASSWORD,
-    }, { lazyConnect: true, maxRetriesPerRequest: 1, enableOfflineQueue: false, retryStrategy: () => null })
-    : null;
+const allowProcessLocalTickets = process.env.NODE_ENV !== 'production' || process.env.WS_TICKET_STORE === 'memory';
+const redisOptions = { lazyConnect: true, maxRetriesPerRequest: 1, enableOfflineQueue: false, retryStrategy: () => null } as const;
+const redis = config.redisUrl ? new Redis(config.redisUrl, redisOptions)
+    : process.env.REDIS_PASSWORD ? new Redis({ host: config.redis.host, port: config.redis.port, password: process.env.REDIS_PASSWORD, ...redisOptions })
+        : null;
 const memoryTickets = new Map<string, { payload: WebSocketTicketPayload; expiresAt: number }>();
 
 async function readyRedis(): Promise<Redis | null> {
@@ -32,7 +30,7 @@ export async function createWebSocketTicket(payload: WebSocketTicketPayload): Pr
     if (store) {
         const saved = await store.set(`qsvc:ws-ticket:${ticket}`, JSON.stringify(payload), 'EX', TICKET_TTL_SECONDS, 'NX');
         if (saved !== 'OK') throw new Error('Could not create signaling ticket');
-    } else if (process.env.NODE_ENV === 'production') {
+    } else if (!allowProcessLocalTickets) {
         throw new Error('Signaling ticket storage is not configured');
     } else {
         if (memoryTickets.size >= 10000) {
@@ -56,7 +54,7 @@ export async function consumeWebSocketTicket(ticket: string): Promise<WebSocketT
             1,
             `qsvc:ws-ticket:${ticket}`,
         ) as string | null;
-    } else if (process.env.NODE_ENV === 'production') {
+    } else if (!allowProcessLocalTickets) {
         throw new Error('Signaling ticket storage is not configured');
     } else {
         const record = memoryTickets.get(ticket);

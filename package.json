@@ -2,7 +2,7 @@
   "name": "qs-vc",
   "version": "0.1.0",
   "private": true,
-  "description": "QS-VC: Quantum-Safe Video Conferencing Platform",
+  "description": "QS-VC video conferencing with an optional post-quantum encrypted-media preview",
   "workspaces": [
     "services/sfu",
     "services/signaling",
@@ -28,6 +28,7 @@
     "build:meeting": "npm -w services/meeting run build",
     "build:recording": "npm -w services/recording run build",
     "build:web": "npm -w frontend/web run build",
+    "smoke:deploy": "node scripts/deploy-smoke-check.mjs",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npx vitest run --reporter=verbose",
     "test:watch": "npx vitest",
@@ -47,6 +48,15 @@
     "puppeteer": "^24.40.0",
     "typescript": "^5.7.0",
     "vitest": "^4.1.12"
+  },
+  "overrides": {
+    "express": {
+      "qs": "^6.17.1"
+    },
+    "tar": "^7.5.22",
+    "proxy-addr": "^2.0.8",
+    "qs": "^6.17.1",
+    "ws": "^8.22.1"
   },
   "engines": {
     "node": ">=20.0.0"

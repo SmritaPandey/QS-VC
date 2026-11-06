@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>QS-VC — Quantum-Safe Video Conferencing Presentation</title>
+<title>QS-VC — Video Conferencing Presentation</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
   :root { --primary:#0a1628; --accent:#00bcd4; --accent2:#1565c0; --accent3:#7c4dff; --text:#e0e7ef; --text-muted:#8fa4c0; --border:rgba(0,188,212,0.2); --card-bg:rgba(15,31,58,0.9); }
@@ -80,16 +80,16 @@
     <div style="display:flex;flex-direction:column;align-items:center;text-align:center;justify-content:center;height:100%">
       <img src="qsvc_logo.png" alt="QS-VC" style="width:100px;border-radius:16px;margin-bottom:30px">
       <h1>Quantum-Safe<br>Video Conferencing</h1>
-      <p class="subtitle-lg" style="text-align:center;margin:0 auto 30px">Secure HD/4K video calls with NIST-approved post-quantum cryptography, real-time AI captions &amp; translation, and flexible deployment for the quantum era.</p>
+      <p class="subtitle-lg" style="text-align:center;margin:0 auto 30px">End-to-end encrypted meetings secured with NIST-standardized post-quantum cryptography.</p>
       <div class="stats-row">
-        <div class="stat"><div class="value">PQC L5</div><div class="label">NIST Security Level</div></div>
+        <div class="stat"><div class="value">E2EE</div><div class="label">On by default</div></div>
         <div class="stat"><div class="value">10K+</div><div class="label">Participants/Call</div></div>
         <div class="stat"><div class="value">99+</div><div class="label">Languages STT</div></div>
         <div class="stat"><div class="value">99.995%</div><div class="label">Uptime SLA</div></div>
       </div>
       <div class="badge-row" style="justify-content:center;margin-top:24px">
+        <span class="badge">NIST FIPS 203 / 204</span>
         <span class="badge">End-to-End Encrypted</span>
-        <span class="badge">Zero-Knowledge SFU</span>
         <span class="badge">AI-Powered Captions</span>
         <span class="badge">Air-Gap Ready</span>
         <span class="badge">HSM Key Mgmt</span>
@@ -102,8 +102,8 @@
   <div class="slide bg-gradient" id="slide-2">
     <div class="slide-logo"><img src="qsvc_logo.png" alt=""><span>QS-VC</span></div>
     <div class="divider"></div>
-    <h2>The Quantum Threat to Video Calls</h2>
-    <p class="subtitle" style="margin-bottom:24px">Today's encrypted video calls use RSA/ECC algorithms that quantum computers will break. Adversaries are already harvesting encrypted traffic — the "Harvest Now, Decrypt Later" attack.</p>
+    <h2>Protecting meeting media</h2>
+    <p class="subtitle" style="margin-bottom:24px">QS-VC encrypts every meeting end to end with post-quantum key exchange, so recorded traffic stays unreadable even to a future quantum computer.</p>
     <div class="grid-2">
       <div class="card" style="border-left:3px solid #ef5350">
         <h4>⚠️ The Risk</h4>
@@ -116,13 +116,13 @@
         </ul>
       </div>
       <div class="card" style="border-left:3px solid #00bcd4">
-        <h4>🛡️ QS-VC Solution</h4>
+        <h4>🔐 The QS-VC Solution</h4>
         <ul>
-          <li>Hybrid Kyber-1024 + X25519 key exchange for every call</li>
-          <li>Dilithium-5 + Ed25519 signatures for all signaling</li>
-          <li>E2EE media frames — SFU never sees plaintext</li>
-          <li>Crypto-agility: dual-layer, if one breaks other protects</li>
-          <li>60-second media key rotation for minimal exposure</li>
+          <li>ML-KEM-1024 key exchange (NIST FIPS 203)</li>
+          <li>ML-DSA-87 signatures (NIST FIPS 204)</li>
+          <li>AES-256-GCM end-to-end media encryption, on by default</li>
+          <li>New key whenever someone leaves; 60-second epochs</li>
+          <li>Meeting security code to verify nobody intercepted keys</li>
         </ul>
       </div>
     </div>
@@ -134,7 +134,7 @@
     <div class="slide-logo"><img src="qsvc_logo.png" alt=""><span>QS-VC</span></div>
     <div class="divider"></div>
     <h2>Video Conferencing Features</h2>
-    <p class="subtitle">Everything you need for world-class video meetings, built quantum-safe from the ground up.</p>
+    <p class="subtitle">Quantum-safe meetings in Chrome, Edge, Safari and Firefox — no plug-ins.</p>
     <div class="grid-3">
       <div class="card card-sm"><h4>📹 HD/4K Video</h4><p>VP9/AV1 codecs, Simulcast + SVC, adaptive bitrate, up to 4K@30fps.</p></div>
       <div class="card card-sm"><h4>🎙️ Crystal Audio</h4><p>Opus 48kHz stereo, AI noise suppression (RNNoise + U-Net), echo cancel.</p></div>
@@ -187,17 +187,17 @@
     <div class="slide-logo"><img src="qsvc_logo.png" alt=""><span>QS-VC</span></div>
     <div class="divider"></div>
     <h2>Quantum-Safe Security Architecture</h2>
-    <p class="subtitle" style="margin-bottom:20px">Every layer of the media pipeline is protected with post-quantum cryptography.</p>
-    <div class="layer"><div class="num">1</div><div><h4>Signaling Security (Quantum-TLS)</h4><p>Hybrid Kyber-1024 + X25519 key exchange, Dilithium-5 + Ed25519 signatures, TLS 1.3 with PQC extensions</p></div></div>
-    <div class="layer"><div class="num">2</div><div><h4>Media End-to-End Encryption (E2EE)</h4><p>SFrame via Insertable Streams, per-participant Kyber keypairs, frame-level AES-256-GCM, zero-knowledge SFU</p></div></div>
-    <div class="layer"><div class="num">3</div><div><h4>Key Management</h4><p>HSM-backed key hierarchy (Shamir 5-of-8), 60-second media key rotation, hourly TURN credential rotation</p></div></div>
-    <div class="layer"><div class="num">4</div><div><h4>Recording Encryption</h4><p>Kyber-wrapped Data Encryption Keys for recordings, encrypted object storage (MinIO/S3), tamper-proof metadata</p></div></div>
-    <div class="layer"><div class="num">5</div><div><h4>Audit Trail</h4><p>Merkle-tree verified hash chains, Dilithium-signed audit entries, configurable retention, SIEM integration</p></div></div>
+    <p class="subtitle" style="margin-bottom:20px">Defence in depth with NIST-standardized post-quantum cryptography at every key step.</p>
+    <div class="layer"><div class="num">1</div><div><h4>Post-quantum key exchange</h4><p>ML-KEM-1024 (NIST FIPS 203, security category 5) delivers each meeting key to every participant. KDF: SP 800-108 Rev. 1 Counter mode with HMAC-SHA-256.</p></div></div>
+    <div class="layer"><div class="num">2</div><div><h4>Post-quantum signatures</h4><p>ML-DSA-87 (NIST FIPS 204) signs every identity and key envelope, so keys cannot be forged or altered in transit.</p></div></div>
+    <div class="layer"><div class="num">3</div><div><h4>End-to-end media encryption</h4><p>AES-256-GCM encrypts every audio, video and screen-share frame on the sender's device. The SFU forwards frames it cannot decrypt.</p></div></div>
+    <div class="layer"><div class="num">4</div><div><h4>Key rotation</h4><p>A new meeting key whenever someone leaves (forward secrecy for the rest of the call), plus 60-second frame-key epochs and replay protection.</p></div></div>
+    <div class="layer"><div class="num">5</div><div><h4>Verifiable</h4><p>Every participant sees a meeting security code derived from all identity keys; matching codes prove nobody intercepted the keys.</p></div></div>
     <div class="badge-row" style="margin-top:14px">
-      <span class="badge">NIST PQC Level 5</span>
-      <span class="badge">HSM-Backed (Shamir 5-of-8)</span>
-      <span class="badge">60s Key Rotation</span>
-      <span class="badge">Zero-Knowledge Architecture</span>
+      <span class="badge">NIST FIPS 203</span>
+      <span class="badge">NIST FIPS 204</span>
+      <span class="badge">End-to-End Encrypted</span>
+      <span class="badge">Server Cannot Decrypt Media</span>
     </div>
     <div class="slide-number">5 / 8</div>
   </div>
@@ -255,7 +255,7 @@
           <li>Up to 10,000 participants</li>
           <li>4K video + live streaming</li>
           <li>AI: 99+ language STT &amp; translation</li>
-          <li>Quantum-safe E2EE (PQC)</li>
+          <li>Post-quantum end-to-end encryption (ML-KEM-1024 + ML-DSA-87)</li>
           <li>Meeting summarization &amp; actions</li>
           <li>SIP/H.323 room system gateway</li>
           <li>Whiteboard &amp; breakout rooms</li>
@@ -285,8 +285,8 @@
     <div class="slide-logo"><img src="qsvc_logo.png" alt=""><span>QS-VC</span></div>
     <div style="display:flex;flex-direction:column;align-items:center;text-align:center;justify-content:center;height:100%">
       <img src="qsvc_logo.png" alt="" style="width:80px;border-radius:14px;margin-bottom:24px">
-      <h1 style="font-size:44px">Secure Calls Today.<br>Quantum-Safe Tomorrow.</h1>
-      <p class="subtitle-lg" style="text-align:center;margin:0 auto 30px;max-width:600px">Schedule a demo and experience quantum-safe video conferencing — crystal-clear HD/4K with post-quantum encryption protecting every frame.</p>
+      <h1 style="font-size:44px">Meet, share and collaborate.</h1>
+      <p class="subtitle-lg" style="text-align:center;margin:0 auto 30px;max-width:600px">Schedule a demo of quantum-safe, end-to-end encrypted meetings.</p>
       <div class="cta-box" style="max-width:600px">
         <h3 style="font-size:22px;margin-bottom:12px">Get Started</h3>
         <div style="display:flex;flex-direction:column;gap:10px;font-size:15px;font-weight:600;color:var(--accent)">

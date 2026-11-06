@@ -51,7 +51,7 @@ function releaseAwaitingHost(roomId: string): void {
     for (const waiting of [...room.waitingRoom.values()]) {
         if (!waiting.awaitingHost) continue;
         waiting.awaitingHost = false;
-        if (waiting.ws?.readyState === 1) waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'waitingStatus', params: { status: 'knocking' } }));
+        roomManager.sendToSocket(waiting.ws, 'waitingStatus', { status: 'knocking' }, waiting.id);
         if (room.hostPeerId) roomManager.sendToPeer(roomId, room.hostPeerId, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
         for (const peer of room.peers.values()) if (peer.role === 'co-host') roomManager.sendToPeer(roomId, peer.id, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
     }
@@ -66,7 +66,7 @@ async function admitWaitingPeer(roomId: string, targetId: string) {
         const result = await joinPeerToRoom(waiting.ws, roomId, waiting.id, waiting.displayName, waiting.rtpCapabilities, { authUser: waiting.authUser }, null,
             () => { if (room.waitingRoom.get(targetId) !== waiting) throw createError(-32000, 'Admission cancelled'); });
         room.waitingRoom.delete(targetId);
-        if (waiting.ws.readyState === 1) waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'admitted', params: result?.result || {} }));
+        roomManager.sendToSocket(waiting.ws, 'admitted', result?.result || {}, waiting.id);
         return result;
     } finally { admittingPeers.delete(targetId); }
 }
@@ -161,6 +161,7 @@ const joinRoomSchema = z.object({
     rtpCapabilities: z.record(z.string(), z.unknown()).optional(),
     password: z.string().max(50).optional(),
     role: z.enum(['host', 'co-host', 'participant']).optional(),
+    supportsE2EE: z.boolean().optional(),
 });
 
 const chatMessageSchema = z.object({
@@ -191,7 +192,7 @@ const CAPTION_SPEAKER_PLAN_MESSAGE = 'Sign in with a plan that includes captions
 export async function handleRpcMessage(
     ws: any,
     message: RpcRequest,
-    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: VerifiedSignalingUser | null; expectedMeetingCode?: string }
+    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: VerifiedSignalingUser | null; expectedMeetingCode?: string; joinAttempts?: number }
 ): Promise<RpcResponse | null> {
     const { method, params, id } = message;
 
@@ -206,7 +207,11 @@ export async function handleRpcMessage(
     if (method === 'joinRoom' && joiningSockets.has(ws)) {
         return { jsonrpc: '2.0', id: id!, error: { code: -32000, message: 'Join already in progress' } };
     }
-    if (method === 'joinRoom') joiningSockets.add(ws);
+    if (method === 'joinRoom') {
+        if ((connectionState.joinAttempts || 0) >= 5) return { jsonrpc: '2.0', id: id!, error: { code: -32003, message: 'Too many meeting join attempts on this connection' } };
+        connectionState.joinAttempts = (connectionState.joinAttempts || 0) + 1;
+        joiningSockets.add(ws);
+    }
     try {
         switch (method) {
             case 'setRecordingState': {
@@ -321,6 +326,12 @@ export async function handleRpcMessage(
                 // database must not turn a scheduled meeting into a guest-owned room.
                 const policy = await loadMeetingPolicy(meetingCode);
                 const room = roomManager.getOrCreateRoom(meetingCode, { ...policy?.settings, waitingRoomEnabled: true });
+                // End-to-end (post-quantum keyed) media encryption is on unless the organiser turned it
+                // off for this meeting, or the room bridges SIP/H.323 devices that cannot decrypt.
+                if (room.settings.e2eeRequired === undefined) room.settings.e2eeRequired = e2eeDefault();
+                if (room.settings.e2eeRequired && joinParams.data.supportsE2EE !== true) {
+                    throw createError(-32005, 'This meeting uses end-to-end encrypted media. Use a current version of Chrome, Edge, Safari or Firefox.');
+                }
                 if (policy?.hostId) room.ownerUserId = policy.hostId;
                 const isInvited = verifyMeetingInviteToken(meetingCode, inviteToken);
                 const webinarGuest = room.settings.webinar && !connectionState.authUser?.sub && !isInvited;
@@ -918,9 +929,7 @@ export async function handleRpcMessage(
                 }
                 const waiting = roomManager.keepWaiting(roomId, parsed.data.targetPeerId);
                 if (!waiting) throw createError(-32000, 'Peer is not waiting for admission');
-                if (waiting.ws?.readyState === 1) {
-                    waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'waitingStatus', params: { status: 'keptWaiting' } }));
-                }
+                roomManager.sendToSocket(waiting.ws, 'waitingStatus', { status: 'keptWaiting' }, waiting.id);
                 return { jsonrpc: '2.0', id: id!, result: { keptWaiting: true, peerId: waiting.id } };
             }
 
@@ -960,13 +969,7 @@ export async function handleRpcMessage(
                 if (!waiting) throw createError(-32000, 'Peer not in waiting room');
 
                 // Notify the rejected peer
-                if (waiting.ws && waiting.ws.readyState === 1) {
-                    waiting.ws.send(JSON.stringify({
-                        jsonrpc: '2.0',
-                        method: 'rejected',
-                        params: { reason: 'Host denied entry' },
-                    }));
-                }
+                roomManager.sendToSocket(waiting.ws, 'rejected', { reason: 'Host denied entry' }, waiting.id);
 
                 return { jsonrpc: '2.0', id: id!, result: { rejected: true, peerId: targetPeerId } };
             }
@@ -1205,7 +1208,7 @@ export async function handleRpcMessage(
                     room.hostStarted = false;
                     for (const waiting of room.waitingRoom.values()) {
                         if (waiting.ws?.readyState === 1) {
-                            waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'rejected', params: { reason: 'Host ended the meeting' } }));
+                            roomManager.sendToSocket(waiting.ws, 'rejected', { reason: 'Host ended the meeting' }, waiting.id);
                             waiting.ws.close(4000, 'Meeting ended');
                         }
                     }
@@ -1297,28 +1300,47 @@ export async function handleRpcMessage(
             // E2EE KEY EXCHANGE
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             case 'exchangeE2EEKeys': {
-                const { kemPublicKey, signingPublicKey, signature } = params;
+                const { peerId: advertisedPeerId, kemPublicKey, signingPublicKey, signature } = params;
                 const room = roomManager.getRoom(connectionState.roomId!);
                 if (!room) throw createError(-32002, 'Not in a room');
+                if (!room.settings.e2eeRequired) throw createError(-32005, 'End-to-end media encryption was not enabled for this meeting');
 
                 // Store peer's E2EE public key and broadcast to others
                 const peer = room.peers.get(connectionState.peerId!);
                 if (!peer) throw createError(-32002, 'Peer not found');
+                if (advertisedPeerId !== peer.id) throw createError(-32602, 'Encryption key identity does not match the connected peer');
 
                 if ([kemPublicKey, signingPublicKey, signature].some(value => typeof value !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length > 7000)) {
                     throw createError(-32602, 'Invalid E2EE key bundle');
                 }
-                peer.e2eeKeyBundle = { kemPublicKey, signingPublicKey, signature };
+                if (peer.e2eeKeyBundle && (peer.e2eeKeyBundle.kemPublicKey !== kemPublicKey || peer.e2eeKeyBundle.signingPublicKey !== signingPublicKey || peer.e2eeKeyBundle.signature !== signature)) {
+                    throw createError(-32001, 'Encryption identity cannot change during an active meeting');
+                }
+                peer.e2eeKeyBundle = { peerId: peer.id, kemPublicKey, signingPublicKey, signature };
+                // The first registered participant becomes the key holder and generates the group key.
+                const holder = room.e2eeKeyHolderPeerId ? room.peers.get(room.e2eeKeyHolderPeerId) : undefined;
+                let generate = false;
+                if (!holder?.e2eeKeyBundle) {
+                    room.e2eeKeyHolderPeerId = peer.id;
+                    peer.e2eeKeyReady = true;
+                    generate = true;
+                }
+                const keyHolder = room.peers.get(room.e2eeKeyHolderPeerId!)!;
 
                 roomManager.broadcast(connectionState.roomId!, 'e2eeKeyExchange', {
-                    peerId: connectionState.peerId,
                     role: peer.role,
                     ...peer.e2eeKeyBundle,
+                    keyHolderPeerId: keyHolder.id,
                 }, connectionState.peerId!);
 
                 return {
                     jsonrpc: '2.0', id: id!,
-                    result: { registered: true },
+                    result: {
+                        registered: true,
+                        keyHolderPeerId: keyHolder.id,
+                        keyHolderSigningPublicKey: keyHolder.e2eeKeyBundle!.signingPublicKey,
+                        generate,
+                    },
                 };
             }
 
@@ -1326,27 +1348,24 @@ export async function handleRpcMessage(
                 const { targetPeerId, envelope } = params;
                 const room = roomManager.getRoom(connectionState.roomId!);
                 if (!room) throw createError(-32002, 'Not in a room');
+                if (!room.settings.e2eeRequired) throw createError(-32005, 'End-to-end media encryption was not enabled for this meeting');
                 const sender = room.peers.get(connectionState.peerId!);
-                if (!sender || sender.role !== 'host' || room.hostPeerId !== sender.id) throw createError(-32001, 'Only the meeting host can distribute the E2EE group key');
+                if (!sender || room.e2eeKeyHolderPeerId !== sender.id) throw createError(-32001, 'Only the meeting key holder can distribute the E2EE group key');
                 if (typeof targetPeerId !== 'string' || !room.peers.has(targetPeerId) || targetPeerId === sender.id) throw createError(-32602, 'Invalid E2EE key recipient');
-                if (!envelope || envelope.targetPeerId !== targetPeerId || ['ciphertext', 'iv', 'encryptedKey', 'signature'].some(key => typeof envelope[key] !== 'string' || envelope[key].length > 7000)) {
+                const targetPeer = room.peers.get(targetPeerId);
+                if (!sender.e2eeKeyBundle || !targetPeer?.e2eeKeyBundle) throw createError(-32001, 'Both key holder and recipient encryption identities must be registered first');
+                if (!Number.isInteger(envelope?.keyId) || envelope.keyId < 0 || envelope.keyId > 255) throw createError(-32602, 'Invalid encrypted E2EE key envelope');
+                if (!envelope || envelope.senderPeerId !== sender.id || envelope.targetPeerId !== targetPeerId || ['ciphertext', 'iv', 'encryptedKey', 'signature'].some(key => typeof envelope[key] !== 'string' || envelope[key].length > 7000)) {
                     throw createError(-32602, 'Invalid encrypted E2EE key envelope');
                 }
 
                 // Forward encrypted epoch key to specific peer
-                const targetPeer = room.peers.get(targetPeerId);
-                if (targetPeer && (targetPeer as any).ws) {
-                    const notification = JSON.stringify({
-                        jsonrpc: '2.0',
-                        method: 'e2eeEpochKey',
-                        params: {
-                            hostPeerId: connectionState.peerId,
-                            hostSigningPublicKey: sender.e2eeKeyBundle?.signingPublicKey,
-                            envelope,
-                        },
-                    });
-                    (targetPeer as any).ws.send(notification);
-                }
+                roomManager.sendToPeer(room.id, targetPeerId, 'e2eeEpochKey', {
+                    keyHolderPeerId: sender.id,
+                    hostPeerId: sender.id,
+                    hostSigningPublicKey: sender.e2eeKeyBundle.signingPublicKey,
+                    envelope,
+                });
 
                 return {
                     jsonrpc: '2.0', id: id!,
@@ -1354,12 +1373,23 @@ export async function handleRpcMessage(
                 };
             }
 
+            case 'e2eeKeyReceived': {
+                // The participant installed the current group key, so it can take over as key holder.
+                const room = roomManager.getRoom(connectionState.roomId!);
+                if (!room) throw createError(-32002, 'Not in a room');
+                const peer = room.peers.get(connectionState.peerId!);
+                if (!peer?.e2eeKeyBundle) throw createError(-32001, 'Register an encryption identity first');
+                peer.e2eeKeyReady = true;
+                return { jsonrpc: '2.0', id: id!, result: { ok: true } };
+            }
+
             case 'e2eeRekey': {
                 // Triggered when a participant leaves and host re-keys
                 const room = roomManager.getRoom(connectionState.roomId!);
                 if (!room) throw createError(-32002, 'Not in a room');
+                if (!room.settings.e2eeRequired) throw createError(-32005, 'End-to-end media encryption was not enabled for this meeting');
                 const actor = room.peers.get(connectionState.peerId!);
-                if (!actor || actor.role !== 'host' || room.hostPeerId !== actor.id) throw createError(-32001, 'Only the host can rotate the E2EE group key');
+                if (!actor || room.e2eeKeyHolderPeerId !== actor.id) throw createError(-32001, 'Only the meeting key holder can rotate the E2EE group key');
 
                 // Broadcast rekey notification to all peers
                 roomManager.broadcast(connectionState.roomId!, 'e2eeRekeyRequired', {
@@ -1514,6 +1544,7 @@ async function joinPeerToRoom(
             dtlsParameters: recvTransport.dtlsParameters,
         } : null,
         existingPeers,
+        e2eeKeyHolderPeerId: room.e2eeKeyHolderPeerId ?? null,
         sfuAvailable,
         polyBridgeEnabled: process.env.POLY_BRIDGE_ENABLED === 'true',
         hostPresent: !!room.hostPeerId,
@@ -1551,6 +1582,11 @@ export async function handlePeerDisconnect(
     connectionState.peerId = undefined;
     connectionState.roomId = undefined;
     connectionState.displayName = undefined;
+}
+
+/** End-to-end media encryption is the default. QSVC_E2EE_DEFAULT=off turns the default off. */
+function e2eeDefault(): boolean {
+    return !/^(off|false|0|no)$/i.test(process.env.QSVC_E2EE_DEFAULT || '');
 }
 
 function createError(code: number, message: string): Error & { code: number } {

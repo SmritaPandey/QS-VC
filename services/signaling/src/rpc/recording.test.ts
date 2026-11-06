@@ -12,8 +12,9 @@ import { roomManager } from '../room-manager.js';
 const socket = () => ({ readyState: 1, send: vi.fn(), close: vi.fn() });
 const states: any[] = [];
 const connections = new Map<string, { ws: ReturnType<typeof socket>; state: any }>();
+// Test browsers support encrypted media unless a test says otherwise (end-to-end encryption is on by default).
 const rpc = (ws: any, state: any, method: string, params: any = {}) =>
-    handleRpcMessage(ws, { jsonrpc: '2.0', id: 1, method, params }, state);
+    handleRpcMessage(ws, { jsonrpc: '2.0', id: 1, method, params: method === 'joinRoom' ? { supportsE2EE: true, ...params } : params }, state);
 async function join(code: string, userId?: string) {
     const ws = socket(), state: any = userId ? { authUser: { sub: userId } } : {};
     states.push(state);

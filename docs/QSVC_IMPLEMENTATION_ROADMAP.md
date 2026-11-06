@@ -1,5 +1,9 @@
 # QSVC implementation and security roadmap
 
+> Historical assessment dated 4 November 2026. The fixes recorded below were
+> applied in later working-tree changes. For current source status and remaining
+> release evidence, see [Security remediation status](SECURITY_REMEDIATION_STATUS.md).
+
 4 November 2026 · Source assessment, local repair candidate and proposed operating plan
 
 ## Decision
@@ -36,7 +40,7 @@ Evidence terms: **Source** means executable code/configuration inspected; **Loca
 | E2EE | client `e2ee.ts`, scheduling and policy | Helper exists; active media hookup not established. Server refuses meetings requiring unverifiable E2EE. No post-quantum assurance established |
 | Assistant | `AIChatBot.tsx`, `public-help-replies.ts` | Local control-help replies; not evidence of deployed LLM inference |
 
-README architecture claims (Redis/MinIO/quantum-safe enterprise capabilities) must be checked against executable paths. Redis references are not shared room coordination. MinIO variables are not enough to configure the current S3 adapter. SSO/payment buttons and MCU/SIP feature descriptions are not proof of working integration.
+README and architecture documents describe targets, not proof of deployment. Redis is not shared room coordination. The intranet production profile no longer starts an unused MinIO service; cloud recording remains unavailable there until a reviewed storage integration is supplied. SSO/payment buttons and MCU/SIP feature descriptions are not proof of working integration.
 
 The [security baseline](QSVC_SECURITY_BASELINE.md) gives concrete findings and six-category audit coverage for the original revision. Implementation priority below is not a CVSS score.
 

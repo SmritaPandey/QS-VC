@@ -3,7 +3,7 @@
  */
 import { Device, types as msTypes } from 'mediasoup-client';
 import { signaling } from './signaling';
-import { encodedTransformsSupported, type E2EEManager } from './e2ee';
+import type { E2EEManager } from './e2ee';
 
 export interface ProducerInfo {
     id: string;
@@ -78,7 +78,7 @@ export class MediaManager {
             iceServers: this.iceServers,
             // End-to-end encryption needs encoded-frame access on every sender and receiver.
             // Chrome only allows it when the peer connection is created with this flag.
-            additionalSettings: encodedTransformsSupported() ? ({ encodedInsertableStreams: true } as Partial<RTCConfiguration>) : undefined,
+            additionalSettings: this.e2ee && this.e2ee.getMode() !== 'none' ? ({ encodedInsertableStreams: true } as Partial<RTCConfiguration>) : undefined,
         });
 
         // When the transport needs to connect to the SFU
@@ -126,7 +126,7 @@ export class MediaManager {
             iceServers: this.iceServers,
             // End-to-end encryption needs encoded-frame access on every sender and receiver.
             // Chrome only allows it when the peer connection is created with this flag.
-            additionalSettings: encodedTransformsSupported() ? ({ encodedInsertableStreams: true } as Partial<RTCConfiguration>) : undefined,
+            additionalSettings: this.e2ee && this.e2ee.getMode() !== 'none' ? ({ encodedInsertableStreams: true } as Partial<RTCConfiguration>) : undefined,
         });
 
         this.recvTransport.on('connect', async ({ dtlsParameters }, callback, errback) => {
@@ -153,12 +153,13 @@ export class MediaManager {
         if (!transport) throw new Error('Send transport not created');
         const e2ee = this.e2ee;
         const wasEnabled = track.enabled;
-        if (e2ee) {
-            // Do not produce clear media while waiting for a key or installing the frame transform.
-            track.enabled = false;
-            try { await e2ee.waitUntilActive(); }
-            catch (error) { track.enabled = wasEnabled; throw error; }
-        }
+        // Hold the source silent/black until the encryptor is attached. Frames encoded before a
+        // group key arrives are dropped by the encryptor, so nothing is sent unencrypted and nobody
+        // has to wait for the key before publishing.
+        if (e2ee) track.enabled = false;
+        // VP8 keeps its payload header readable for the SFU (see e2ee-frame.ts); H.264 packetisation
+        // cannot survive frame encryption, so encrypted meetings always publish VP8.
+        const vp8 = e2ee && track.kind === 'video' ? this.device?.rtpCapabilities.codecs?.find(codec => codec.mimeType.toLowerCase() === 'video/vp8') : undefined;
 
         let producer: msTypes.Producer;
         try {
@@ -176,6 +177,7 @@ export class MediaManager {
                 codecOptions: track.kind === 'video'
                     ? { videoGoogleStartBitrate: 1000 }
                     : undefined,
+                ...(vp8 ? { codec: vp8 } : {}),
                 appData,
             });
         } catch (error) {
@@ -188,7 +190,7 @@ export class MediaManager {
             // cannot provide the transform fails closed and never sends this producer.
             try {
                 if (!producer.rtpSender) throw new Error('The media transport did not expose an encoded sender');
-                e2ee.setupSenderTransform(producer.rtpSender);
+                e2ee.setupSenderTransform(producer.rtpSender, track.kind === 'video' ? 'video' : 'audio');
                 track.enabled = wasEnabled;
             } catch (error) {
                 producer.close();
@@ -228,7 +230,7 @@ export class MediaManager {
         if (this.e2ee) {
             try {
                 if (!consumer.rtpReceiver) throw new Error('The media transport did not expose an encoded receiver');
-                this.e2ee.setupReceiverTransform(consumer.rtpReceiver);
+                this.e2ee.setupReceiverTransform(consumer.rtpReceiver, producerPeerId, consumer.kind === 'video' ? 'video' : 'audio', consumer.id);
             } catch (error) {
                 consumer.close();
                 throw error;

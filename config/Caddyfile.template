@@ -6,13 +6,35 @@
 {$QSVC_DOMAIN:meet.internal} {
     # Internal TLS (self-signed / internal CA for intranet air-gapped environments)
     tls internal
+    # Access logs never keep credentials: query strings that carry invitation or ticket
+    # values are redacted and authorization/cookie headers are dropped.
+    log {
+        output stdout
+        format filter {
+            wrap json
+            fields {
+                request>uri query {
+                    replace invite REDACTED
+                    replace token REDACTED
+                    replace ticket REDACTED
+                }
+                request>headers>Authorization delete
+                request>headers>Cookie delete
+                request>headers>Sec-Websocket-Protocol delete
+            }
+        }
+    }
 
     # Security Headers
     header {
-        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
         X-Content-Type-Options "nosniff"
         X-Frame-Options "SAMEORIGIN"
         Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    handle /health {
+        respond "QS-VC intranet gateway" 200
     }
 
     # Auth Service API
@@ -32,17 +54,29 @@
 
     # Signaling WebSocket
     handle /ws {
-        reverse_proxy signaling:4001
+        reverse_proxy signaling:4001 {
+            # Replace any client-supplied value with the address observed by Caddy.
+            header_up X-QSVC-Client-IP {http.request.remote.host}
+        }
     }
 
     # Signaling HTTP fallback / ICE servers
     handle /api/ice-servers {
-        reverse_proxy signaling:4001
+        reverse_proxy signaling:4001 {
+            header_up X-QSVC-Client-IP {http.request.remote.host}
+        }
+    }
+
+    # Signed-in users swap their login for a single-use WebSocket ticket here.
+    handle /api/signaling-ticket {
+        reverse_proxy signaling:4001 {
+            header_up X-QSVC-Client-IP {http.request.remote.host}
+        }
     }
 
     # Frontend Static Web App (Served via Nginx)
     handle {
-        reverse_proxy web:80
+        reverse_proxy web:5173
     }
 }
 

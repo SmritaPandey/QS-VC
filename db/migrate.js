@@ -37,6 +37,16 @@ async function migrate() {
         const applied = await client.query('SELECT filename FROM _migrations ORDER BY id');
         const appliedSet = new Set(applied.rows.map((r) => r.filename));
 
+        // Never infer that an existing schema is fresh just because a legacy
+        // deployment predates the migration ledger. Replaying 001 over live
+        // tables can fail part-way through or leave mixed versions behind.
+        if (appliedSet.size === 0) {
+            const existingSchema = await client.query("SELECT to_regclass('public.users') IS NOT NULL AS present");
+            if (existingSchema.rows[0]?.present) {
+                throw new Error('Existing schema has no migration ledger. Verify its applied migration set and record a reviewed baseline before running migrations.');
+            }
+        }
+
         // Read migration files
         const migrationsDir = path.join(__dirname, 'migrations');
         const files = fs.readdirSync(migrationsDir)

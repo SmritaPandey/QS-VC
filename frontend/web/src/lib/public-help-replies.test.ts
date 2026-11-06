@@ -8,8 +8,10 @@ describe('public product guide', () => {
         expect(answer.text).toContain('planned');
         expect(answer.link?.to).toBe('/pricing');
     });
-    it('keeps security and deployment statements qualified', () => {
-        expect(productReply('Is my meeting quantum safe?').text).toContain('part of QS-VC’s design');
+    it('states the encryption that meetings actually use and keeps deployment statements qualified', () => {
+        expect(productReply('Is my meeting quantum safe?').text).toContain('end-to-end encrypted by default');
+        expect(productReply('Is my meeting quantum safe?').text).toContain('ML-KEM-1024 (NIST FIPS 203)');
+        expect(productReply('Is my meeting quantum safe?').text).toContain('security code');
         expect(productReply('Can my meeting work offline?').text).toContain('separate validation');
         expect(productReply('Which languages can I use?').text).toContain('depend on');
     });

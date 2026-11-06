@@ -1,216 +1,268 @@
 import { PQCManager, PQC_ALGORITHMS, type PQCSignature } from '../../../../shared/crypto/pqc';
+import { clearPrefixLength, FrameCrypto, KEY_ROTATION_MS } from './e2ee-frame';
 
-const HEADER_BYTES = 16;
-const KEY_ROTATION_MS = 60_000;
+/**
+ * End-to-end media encryption for QS-VC meetings.
+ *
+ * Key management (post-quantum):
+ * - Every participant creates an ML-KEM-1024 (FIPS 203) key pair and an ML-DSA-87 (FIPS 204) signing
+ *   key pair, and publishes a self-signed bundle bound to the meeting code and its server peer ID.
+ * - One participant at a time is the meeting's key holder (the server elects it: normally the first
+ *   to join, re-elected when it leaves). The holder generates a random 256-bit group key and sends it
+ *   to each participant: ML-KEM encapsulation → SP 800-108 Counter/HMAC-SHA-256 wrapping key →
+ *   AES-256-GCM, with the whole envelope signed by the holder's ML-DSA-87 key.
+ * - The holder rotates the group key whenever someone leaves, so a departed participant cannot
+ *   decrypt later media. A newly elected holder always rotates before distributing.
+ *
+ * Media (see e2ee-frame.ts): AES-256-GCM per frame with sender-unique derived keys and nonces.
+ * Chrome/Edge use encoded streams on the main thread; Safari and Firefox use RTCRtpScriptTransform.
+ */
+
 const encoder = new TextEncoder();
 const arrayBuffer = (bytes: Uint8Array): ArrayBuffer => bytes.slice().buffer as ArrayBuffer;
 
 export interface E2EEKeyBundle {
+    peerId: string;
     kemPublicKey: string;
     signingPublicKey: string;
     signature: string;
 }
 
 export interface E2EEKeyEnvelope {
+    senderPeerId: string;
     targetPeerId: string;
+    keyId: number;
     ciphertext: string;
     iv: string;
     encryptedKey: string;
     signature: string;
 }
 
-const toBase64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+const toBase64 = (bytes: Uint8Array) => { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s); };
 const fromBase64 = (value: string) => Uint8Array.from(atob(value), char => char.charCodeAt(0));
 const signatureRecord = (signature: string): PQCSignature => ({
     algorithm: PQC_ALGORITHMS.SIG_ML_DSA_87, signature: fromBase64(signature), publicKey: new Uint8Array(), timestamp: 0,
 });
 
-const MAX_CLEAR_BYTES = 10;
 type EncodedFrame = RTCEncodedVideoFrame | RTCEncodedAudioFrame;
 type EncodedStreams = { readable: ReadableStream<EncodedFrame>; writable: WritableStream<EncodedFrame> };
+type ScriptTransformCtor = new (worker: Worker, options?: unknown) => unknown;
+const scriptTransformCtor = (): ScriptTransformCtor | undefined => (globalThis as { RTCRtpScriptTransform?: ScriptTransformCtor }).RTCRtpScriptTransform;
 
-/** Bytes left readable for the SFU: VP8 key frame 10, delta 3, Opus 1 (same split as Jitsi's E2EE). */
-function clearPrefixLength(frame: EncodedFrame): number {
-    const type = (frame as RTCEncodedVideoFrame).type;
-    if (type === 'key') return 10;
-    if (type === 'delta') return 3;
-    if (type === 'empty') return 0;
-    return 1;
-}
-
-/** Chrome/Edge expose encoded streams on RTCRtpSender; Safari and Firefox need RTCRtpScriptTransform instead. */
-export function encodedTransformsSupported(): boolean {
+/** Chrome/Edge: encoded streams on the main thread (requires the encodedInsertableStreams flag). */
+export function encodedStreamsSupported(): boolean {
     return typeof RTCRtpSender !== 'undefined' && 'createEncodedStreams' in RTCRtpSender.prototype;
 }
 
+/** Safari 15.4+, Firefox 117+ and newer Chrome: transforms in a dedicated worker. */
+export function scriptTransformSupported(): boolean {
+    return !!scriptTransformCtor() && typeof Worker !== 'undefined';
+}
+
+/** True when this browser can take part in an end-to-end encrypted meeting. */
+export function encodedTransformsSupported(): boolean {
+    return encodedStreamsSupported() || scriptTransformSupported();
+}
+
+const ENVELOPE_LABEL = 'QS-VC-MEK:v2';
+
 export class E2EEManager {
     private readonly pqc = new PQCManager();
-    private readonly epochKeys = new Map<string, CryptoKey>();
-    private readonly senderPrefix = crypto.getRandomValues(new Uint8Array(8));
+    private readonly prefix = crypto.getRandomValues(new Uint8Array(8));
+    private readonly mode: 'streams' | 'script' | 'none';
+    private frames: FrameCrypto | null = null;
+    private worker: Worker | null = null;
     private mek: Uint8Array | null = null;
-    private active = false;
+    private keyId = -1;
+    private peerId = '';
     private resolveReady!: () => void;
     private readonly ready = new Promise<void>(resolve => { this.resolveReady = resolve; });
-    private frameCounter = 0;
-    private frameEpoch = -1;
+    private active = false;
+    private readonly keyListeners = new Set<() => void>();
+    private senderFramesSeen = 0;
 
-    constructor(private readonly meetingCode: string) { }
-
-    async initAsHost(): Promise<E2EEKeyBundle> {
-        await this.pqc.init();
-        this.mek = crypto.getRandomValues(new Uint8Array(32));
-        this.activate();
-        return this.createKeyBundle();
+    constructor(private readonly meetingCode: string) {
+        // Development-only switch to exercise the Safari/Firefox (worker) path in Chrome.
+        const forceScript = import.meta.env?.DEV && (globalThis as { __QSVC_E2EE_FORCE_SCRIPT?: boolean }).__QSVC_E2EE_FORCE_SCRIPT === true && scriptTransformSupported();
+        this.mode = forceScript ? 'script' : encodedStreamsSupported() ? 'streams' : scriptTransformSupported() ? 'script' : 'none';
     }
 
-    async initAsParticipant(): Promise<E2EEKeyBundle> {
-        await this.pqc.init();
-        return this.createKeyBundle();
-    }
+    /** 'none' = no media transform API (key management still works; media setup will refuse). */
+    getMode(): 'streams' | 'script' | 'none' { return this.mode; }
 
-    private async createKeyBundle(): Promise<E2EEKeyBundle> {
+    /** Create this participant's ML-KEM-1024 / ML-DSA-87 identity and the signed bundle to publish. */
+    async init(peerId: string): Promise<E2EEKeyBundle> {
+        this.peerId = peerId;
+        await this.pqc.init();
+        if (this.mode !== 'script') this.frames = new FrameCrypto(this.meetingCode, peerId, this.prefix.slice());
+        else {
+            this.worker = new Worker(new URL('./e2ee-worker.ts', import.meta.url), { type: 'module', name: 'qsvc-e2ee' });
+            this.worker.onerror = event => console.error('[E2EE] Encryption worker failed:', event.message || event);
+            this.worker.onmessage = event => { if (event.data?.type === 'stats' && typeof event.data.senderFramesSeen === 'number') this.senderFramesSeen = event.data.senderFramesSeen; };
+            this.worker.postMessage({ type: 'init', meetingCode: this.meetingCode, peerId, prefix: this.prefix.slice() });
+        }
         const kemPublicKey = toBase64(this.pqc.getPublicKey());
         const signingPublicKey = toBase64(this.pqc.getSigningPublicKey());
-        const signature = await this.pqc.sign(encoder.encode(`${this.meetingCode}|${kemPublicKey}|${signingPublicKey}`));
-        return { kemPublicKey, signingPublicKey, signature: toBase64(signature.signature) };
+        const signature = await this.pqc.sign(encoder.encode(`${this.meetingCode}|${peerId}|${kemPublicKey}|${signingPublicKey}`));
+        return { peerId, kemPublicKey, signingPublicKey, signature: toBase64(signature.signature) };
     }
 
-    async verifyKeyBundle(bundle: E2EEKeyBundle): Promise<boolean> {
+    /** Older call sites. A "host" here just means the first key holder. */
+    async initAsParticipant(peerId: string): Promise<E2EEKeyBundle> { return this.init(peerId); }
+    async initAsHost(peerId: string): Promise<E2EEKeyBundle> { const bundle = await this.init(peerId); this.generateGroupKey(); return bundle; }
+
+    async verifyKeyBundle(bundle: E2EEKeyBundle, expectedPeerId: string): Promise<boolean> {
         try {
+            if (!bundle || bundle.peerId !== expectedPeerId) return false;
             return await this.pqc.verify(
-                encoder.encode(`${this.meetingCode}|${bundle.kemPublicKey}|${bundle.signingPublicKey}`),
+                encoder.encode(`${this.meetingCode}|${bundle.peerId}|${bundle.kemPublicKey}|${bundle.signingPublicKey}`),
                 signatureRecord(bundle.signature), fromBase64(bundle.signingPublicKey),
             );
         } catch { return false; }
     }
 
-    async wrapMeetingKeyForPeer(targetPeerId: string, kemPublicKey: string): Promise<E2EEKeyEnvelope> {
-        if (!this.mek || !this.active) throw new Error('Meeting encryption is not ready');
-        const capsule = await this.pqc.encapsulateForPeer(fromBase64(kemPublicKey));
-        const wrappingKey = await crypto.subtle.importKey('raw', arrayBuffer(capsule.combinedSecret), 'AES-GCM', false, ['encrypt']);
-        const iv = crypto.getRandomValues(new Uint8Array(12));
-        const encryptedKey = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: arrayBuffer(iv) }, wrappingKey, arrayBuffer(this.mek)));
-        const body = `${this.meetingCode}|${targetPeerId}|${toBase64(capsule.ciphertext)}|${toBase64(iv)}|${toBase64(encryptedKey)}`;
-        const signature = await this.pqc.sign(encoder.encode(body));
-        return { targetPeerId, ciphertext: toBase64(capsule.ciphertext), iv: toBase64(iv), encryptedKey: toBase64(encryptedKey), signature: toBase64(signature.signature) };
+    /** Key holder only: create a fresh group key (first key or a rotation). Returns its key id. */
+    generateGroupKey(): number {
+        const next = this.keyId < 0 ? crypto.getRandomValues(new Uint8Array(1))[0] : (this.keyId + 1) % 256;
+        this.install(next, crypto.getRandomValues(new Uint8Array(32)));
+        return next;
     }
 
-    async acceptMeetingKey(envelope: E2EEKeyEnvelope, hostPeerId: string, hostSigningPublicKey: string, ownPeerId: string): Promise<void> {
-        if (envelope.targetPeerId !== ownPeerId) throw new Error('Meeting key is addressed to another participant');
-        const body = `${this.meetingCode}|${ownPeerId}|${envelope.ciphertext}|${envelope.iv}|${envelope.encryptedKey}`;
-        const valid = await this.pqc.verify(encoder.encode(body), signatureRecord(envelope.signature), fromBase64(hostSigningPublicKey));
-        if (!valid) throw new Error(`Meeting key signature from ${hostPeerId} is invalid`);
-        const shared = await this.pqc.decapsulate(fromBase64(envelope.ciphertext));
-        const wrappingKey = await crypto.subtle.importKey('raw', arrayBuffer(shared), 'AES-GCM', false, ['decrypt']);
-        const mek = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: arrayBuffer(fromBase64(envelope.iv)) }, wrappingKey, arrayBuffer(fromBase64(envelope.encryptedKey)));
-        this.mek = new Uint8Array(mek);
-        this.activate();
+    /** Rotate the group key (the holder does this whenever someone leaves). */
+    rekey(): number { return this.generateGroupKey(); }
+
+    private install(keyId: number, mek: Uint8Array): void {
+        this.mek?.fill(0);
+        this.mek = mek.slice();
+        this.keyId = keyId;
+        if (this.frames) this.frames.setKey(keyId, mek);
+        if (this.worker) this.worker.postMessage({ type: 'key', keyId, mek: mek.slice() });
+        mek.fill(0);
+        this.active = true;
+        this.resolveReady();
+        for (const listener of this.keyListeners) listener();
+    }
+
+    onKeyChange(listener: () => void): () => void { this.keyListeners.add(listener); return () => { this.keyListeners.delete(listener); }; }
+
+    async wrapMeetingKeyForPeer(targetPeerId: string, kemPublicKey: string): Promise<E2EEKeyEnvelope> {
+        if (!this.mek || !this.active || !this.peerId) throw new Error('Meeting encryption is not ready');
+        const keyId = this.keyId;
+        const mek = this.mek.slice();
+        try {
+            const context = encoder.encode(`QS-VC-MEK-KDF:v2|${this.meetingCode}|${this.peerId}|${targetPeerId}|${keyId}`);
+            const capsule = await this.pqc.encapsulateForPeer(fromBase64(kemPublicKey), context);
+            let wrappingKey: CryptoKey;
+            try { wrappingKey = await crypto.subtle.importKey('raw', arrayBuffer(capsule.combinedSecret), 'AES-GCM', false, ['encrypt']); }
+            finally { capsule.combinedSecret.fill(0); }
+            const ciphertext = toBase64(capsule.ciphertext);
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const associatedData = encoder.encode(`${ENVELOPE_LABEL}|${this.meetingCode}|${this.peerId}|${targetPeerId}|${keyId}|${ciphertext}`);
+            const encryptedKey = toBase64(new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: arrayBuffer(iv), additionalData: arrayBuffer(associatedData) }, wrappingKey, arrayBuffer(mek))));
+            const ivText = toBase64(iv);
+            const body = `${ENVELOPE_LABEL}|${this.meetingCode}|${this.peerId}|${targetPeerId}|${keyId}|${ciphertext}|${ivText}|${encryptedKey}`;
+            const signature = await this.pqc.sign(encoder.encode(body));
+            return { senderPeerId: this.peerId, targetPeerId, keyId, ciphertext, iv: ivText, encryptedKey, signature: toBase64(signature.signature) };
+        } finally { mek.fill(0); }
+    }
+
+    /** Accept a group key from the current key holder after checking its ML-DSA-87 signature. */
+    async acceptMeetingKey(envelope: E2EEKeyEnvelope, holderPeerId: string, holderSigningPublicKey: string, ownPeerId: string): Promise<void> {
+        if (!envelope || envelope.senderPeerId !== holderPeerId || envelope.targetPeerId !== ownPeerId) throw new Error('Meeting key sender or recipient does not match this session');
+        if (!Number.isInteger(envelope.keyId) || envelope.keyId < 0 || envelope.keyId > 255) throw new Error('Invalid meeting key id');
+        const { keyId, ciphertext, iv, encryptedKey } = envelope;
+        const body = `${ENVELOPE_LABEL}|${this.meetingCode}|${holderPeerId}|${ownPeerId}|${keyId}|${ciphertext}|${iv}|${encryptedKey}`;
+        const valid = await this.pqc.verify(encoder.encode(body), signatureRecord(envelope.signature), fromBase64(holderSigningPublicKey));
+        if (!valid) throw new Error(`Meeting key signature from ${holderPeerId} is invalid`);
+        const context = encoder.encode(`QS-VC-MEK-KDF:v2|${this.meetingCode}|${holderPeerId}|${ownPeerId}|${keyId}`);
+        const shared = await this.pqc.decapsulate(fromBase64(ciphertext), context);
+        let wrappingKey: CryptoKey;
+        try { wrappingKey = await crypto.subtle.importKey('raw', arrayBuffer(shared), 'AES-GCM', false, ['decrypt']); }
+        finally { shared.fill(0); }
+        const associatedData = encoder.encode(`${ENVELOPE_LABEL}|${this.meetingCode}|${holderPeerId}|${ownPeerId}|${keyId}|${ciphertext}`);
+        const mek = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: arrayBuffer(fromBase64(iv)), additionalData: arrayBuffer(associatedData) }, wrappingKey, arrayBuffer(fromBase64(encryptedKey))));
+        if (mek.length !== 32) throw new Error('Invalid meeting key length');
+        this.install(keyId, mek);
     }
 
     async waitUntilActive(timeoutMs = 15_000): Promise<void> {
         if (this.active) return;
-        await Promise.race([
-            this.ready,
-            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('Waiting for the host to establish end-to-end encryption timed out')), timeoutMs)),
-        ]);
-    }
-
-    rekey(): void {
-        if (!this.active) throw new Error('Meeting encryption is not ready');
-        this.mek?.fill(0);
-        this.mek = crypto.getRandomValues(new Uint8Array(32));
-        this.epochKeys.clear();
-    }
-
-    private activate(): void { this.active = true; this.resolveReady(); }
-
-    private async keyFor(epoch: number, prefix: Uint8Array): Promise<CryptoKey> {
-        if (!this.mek) throw new Error('Meeting encryption key is not established');
-        const cacheKey = `${epoch}:${toBase64(prefix)}`;
-        const cached = this.epochKeys.get(cacheKey);
-        if (cached) return cached;
-        const material = await crypto.subtle.importKey('raw', arrayBuffer(this.mek), 'HKDF', false, ['deriveKey']);
-        const info = new Uint8Array(4 + prefix.length);
-        new DataView(info.buffer).setUint32(0, epoch, false);
-        info.set(prefix, 4);
-        const key = await crypto.subtle.deriveKey(
-            { name: 'HKDF', hash: 'SHA-256', salt: arrayBuffer(encoder.encode(`QS-VC-SFrame:${this.meetingCode}`)), info: arrayBuffer(info) },
-            material, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt'],
-        );
-        this.epochKeys.set(cacheKey, key);
-        for (const entry of this.epochKeys.keys()) if (Number(entry.split(':', 1)[0]) < epoch - 1) this.epochKeys.delete(entry);
-        return key;
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            await Promise.race([
+                this.ready,
+                new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('Waiting for the meeting encryption key timed out')), timeoutMs); }),
+            ]);
+        } finally { if (timer) clearTimeout(timer); }
     }
 
     /**
-     * Encrypt every outgoing frame. Must be called synchronously right after the sender exists:
-     * Chrome rejects createEncodedStreams once media has started ("Too late to create encoded streams").
-     * Frames are dropped until the meeting key is known, so nothing is ever sent in the clear.
-     *
-     * Frame layout: [codec header in clear][16-byte E2EE header][AES-GCM ciphertext][1 byte: clear length].
-     * The first few codec bytes stay readable (as in Jitsi/SFrame) so the SFU can still spot VP8 key
-     * frames and switch simulcast layers; they are authenticated as additional data.
+     * Encrypt everything this sender sends. Call synchronously right after the producer exists:
+     * Chrome rejects a late createEncodedStreams(). Until a group key is installed every frame is
+     * dropped, so media never leaves the device unencrypted.
      */
-    setupSenderTransform(sender: RTCRtpSender): void {
+    setupSenderTransform(sender: RTCRtpSender, kind: 'audio' | 'video' = (sender.track?.kind as 'audio' | 'video') || 'audio'): void {
+        if (this.mode === 'script') {
+            const Transform = scriptTransformCtor();
+            if (!this.worker || !Transform) throw new Error('Media encryption is not initialised');
+            (sender as unknown as { transform: unknown }).transform = new Transform(this.worker, { operation: 'encrypt', kind });
+            return;
+        }
+        const frames = this.mode === 'streams' ? this.frames : null;
         const streams = (sender as RTCRtpSender & { createEncodedStreams?: () => EncodedStreams }).createEncodedStreams?.();
-        if (!streams) throw new Error('This browser does not support encoded media transforms required for end-to-end encryption');
+        if (!streams || !frames) throw new Error('This browser does not support encoded media transforms required for end-to-end encryption');
+        const isVideo = kind === 'video';
         const transform = new TransformStream<EncodedFrame, EncodedFrame>({ transform: async (frame, controller) => {
-            if (!this.active || !this.mek) return;
-            const epoch = Math.floor(Date.now() / KEY_ROTATION_MS);
-            if (this.frameEpoch !== epoch) { this.frameEpoch = epoch; this.frameCounter = 0; }
-            if (this.frameCounter >= 0xffff_fffe) return;
-            const counter = ++this.frameCounter;
-            const data = new Uint8Array(frame.data);
-            const clearBytes = Math.min(clearPrefixLength(frame), data.length);
-            const header = new Uint8Array(HEADER_BYTES);
-            const view = new DataView(header.buffer);
-            view.setUint32(0, epoch, false); header.set(this.senderPrefix, 4); view.setUint32(12, counter, false);
-            const iv = header.slice(4, 16);
-            const clear = data.subarray(0, clearBytes);
-            const aad = new Uint8Array(clearBytes + HEADER_BYTES); aad.set(clear); aad.set(header, clearBytes);
-            try {
-                const key = await this.keyFor(epoch, this.senderPrefix);
-                const encrypted = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: arrayBuffer(iv), additionalData: arrayBuffer(aad) }, key, arrayBuffer(data.subarray(clearBytes))));
-                const out = new Uint8Array(clearBytes + HEADER_BYTES + encrypted.length + 1);
-                out.set(clear); out.set(header, clearBytes); out.set(encrypted, clearBytes + HEADER_BYTES); out[out.length - 1] = clearBytes;
-                frame.data = out.buffer;
-                controller.enqueue(frame);
-            } catch { /* drop the frame rather than send it unencrypted */ }
+            this.senderFramesSeen++;
+            const out = await frames.encrypt(frame.data, clearPrefixLength(frame as { type?: string; data: ArrayBuffer }, isVideo)).catch(() => null);
+            if (!out) return;
+            frame.data = out;
+            controller.enqueue(frame);
         } });
         void streams.readable.pipeThrough(transform).pipeTo(streams.writable).catch(() => undefined);
     }
 
-    /** Decrypt every incoming frame. Same timing rule as setupSenderTransform. */
-    setupReceiverTransform(receiver: RTCRtpReceiver): void {
+    /** Decrypt everything received from senderPeerId on this receiver. Same timing rule as senders. */
+    setupReceiverTransform(receiver: RTCRtpReceiver, senderPeerId: string, kind: 'audio' | 'video' = (receiver.track?.kind as 'audio' | 'video') || 'audio', streamTag = ''): void {
+        if (!senderPeerId) throw new Error('The encrypted media sender identity is missing');
+        if (this.mode === 'script') {
+            const Transform = scriptTransformCtor();
+            if (!this.worker || !Transform) throw new Error('Media encryption is not initialised');
+            (receiver as unknown as { transform: unknown }).transform = new Transform(this.worker, { operation: 'decrypt', kind, senderPeerId, streamTag });
+            return;
+        }
+        const frames = this.mode === 'streams' ? this.frames : null;
         const streams = (receiver as RTCRtpReceiver & { createEncodedStreams?: () => EncodedStreams }).createEncodedStreams?.();
-        if (!streams) throw new Error('This browser does not support encoded media transforms required for end-to-end encryption');
+        if (!streams || !frames) throw new Error('This browser does not support encoded media transforms required for end-to-end encryption');
         const transform = new TransformStream<EncodedFrame, EncodedFrame>({ transform: async (frame, controller) => {
-            if (!this.active || !this.mek) return;
-            const data = new Uint8Array(frame.data);
-            if (data.length < HEADER_BYTES + 17) return;
-            const clearBytes = data[data.length - 1];
-            if (clearBytes > MAX_CLEAR_BYTES || data.length < clearBytes + HEADER_BYTES + 17) return;
-            const header = data.slice(clearBytes, clearBytes + HEADER_BYTES), view = new DataView(header.buffer);
-            const epoch = view.getUint32(0, false), prefix = header.slice(4, 12);
-            const iv = header.slice(4, 16);
-            const aad = data.slice(0, clearBytes + HEADER_BYTES);
-            try {
-                const plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: arrayBuffer(iv), additionalData: arrayBuffer(aad) }, await this.keyFor(epoch, prefix), arrayBuffer(data.subarray(clearBytes + HEADER_BYTES, data.length - 1))));
-                const out = new Uint8Array(clearBytes + plain.length); out.set(data.subarray(0, clearBytes)); out.set(plain, clearBytes);
-                frame.data = out.buffer;
-                controller.enqueue(frame);
-            } catch { /* Never pass undeciphered media to the renderer. */ }
+            const out = await frames.decrypt(frame.data, senderPeerId, streamTag).catch(() => null);
+            if (!out) return; // never pass undeciphered media to the renderer
+            frame.data = out;
+            controller.enqueue(frame);
         } });
         void streams.readable.pipeThrough(transform).pipeTo(streams.writable).catch(() => undefined);
     }
+
+    /**
+     * Outgoing frames that actually passed through the encryptor. If a browser accepted the transform
+     * but routed media around it, this stays at 0 while we publish — the caller then stops sending
+     * (fail closed) instead of risking unencrypted media.
+     */
+    getSenderFramesSeen(): number { return this.senderFramesSeen; }
 
     isActive(): boolean { return this.active; }
+    getKeyId(): number { return this.keyId; }
     getCurrentEpoch(): number { return Math.floor(Date.now() / KEY_ROTATION_MS); }
 
     destroy(): void {
         this.active = false;
-        this.epochKeys.clear();
         this.mek?.fill(0);
         this.mek = null;
+        this.frames?.destroy();
+        this.frames = null;
+        if (this.worker) { this.worker.postMessage({ type: 'destroy' }); this.worker.terminate(); this.worker = null; }
+        this.prefix.fill(0);
+        this.keyListeners.clear();
+        this.pqc.destroy();
     }
 }

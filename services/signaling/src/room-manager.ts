@@ -23,7 +23,9 @@ export interface PeerState {
     handRaised: boolean;
     screenSharing: boolean;
     joinedAt: Date;
-    e2eeKeyBundle?: { kemPublicKey: string; signingPublicKey: string; signature: string };
+    e2eeKeyBundle?: { peerId: string; kemPublicKey: string; signingPublicKey: string; signature: string };
+    /** The peer confirmed it holds the current end-to-end encryption group key. */
+    e2eeKeyReady?: boolean;
 }
 
 export interface VerifiedSignalingUser {
@@ -65,6 +67,8 @@ export interface PrivateConversation {
 
 export interface RoomSettings {
     webinar?: boolean;
+    /** When true, media production is blocked until the required E2EE key setup succeeds. */
+    e2eeRequired?: boolean;
     meetingKind: 'conference' | 'team' | 'town_hall';
     maxParticipants: number;       // default 25
     waitingRoomEnabled: boolean;   // host approval is required for every non-host attendee
@@ -105,6 +109,8 @@ export interface RoomState {
     stage: Set<string>;
     /** Active and pending pair-only audio sessions. */
     privateConversations: Map<string, PrivateConversation>;
+    /** Participant that generates, distributes and rotates the end-to-end media group key. */
+    e2eeKeyHolderPeerId?: string | null;
     createdAt: Date;
 }
 
@@ -123,7 +129,7 @@ const DEFAULT_SETTINGS: RoomSettings = {
     allowReactions: true,
 };
 
-class RoomManager {
+export class RoomManager {
     private rooms: Map<string, RoomState> = new Map();
     private codeToRoomId: Map<string, string> = new Map();
 
@@ -134,6 +140,11 @@ class RoomManager {
             const room = this.rooms.get(existingId);
             if (room) return room;
         }
+
+        // Rooms live in this process's memory: bound how many can exist so guests creating ad-hoc
+        // codes cannot exhaust it. Capacity beyond this needs another signaling instance.
+        const maxRooms = Math.max(1, Number(process.env.SIGNALING_MAX_ROOMS) || 2000);
+        if (this.rooms.size >= maxRooms) throw new Error('The meeting service is at capacity. Please try again shortly.');
 
         const roomId = uuidv4();
         const meetingKind = settings?.meetingKind ?? (settings?.webinar ? 'town_hall' : 'conference');
@@ -192,6 +203,9 @@ class RoomManager {
         room.ownerUserId = opts?.ownerUserId ?? null;
         room.hostStarted = true;
         room.settings.waitingRoomEnabled = !autoAdmit;
+        // Room-system (SIP/H.323) bridges mix decoded audio on the server, which cannot read
+        // end-to-end encrypted media. These rooms use WebRTC transport encryption (DTLS-SRTP).
+        room.settings.e2eeRequired = false;
 
         logger.info(`Persistent room created: ${meetingCode} (${room.id}), autoAdmit=${autoAdmit}`);
         return room;
@@ -261,6 +275,8 @@ class RoomManager {
     addToWaitingRoom(roomId: string, waiting: WaitingPeer): void {
         const room = this.rooms.get(roomId);
         if (!room) throw new Error(`Room ${roomId} not found`);
+        const maxWaiting = Math.min(500, Math.max(50, room.settings.maxParticipants * 2));
+        if (!room.waitingRoom.has(waiting.id) && room.waitingRoom.size >= maxWaiting) throw new Error('The meeting waiting room is full');
         room.waitingRoom.set(waiting.id, waiting);
         logger.info(`Peer ${waiting.id} (${waiting.displayName}) in waiting room for ${room.meetingCode}`);
     }
@@ -303,6 +319,34 @@ class RoomManager {
         return Array.from(room.waitingRoom.values());
     }
 
+    /**
+     * The end-to-end encryption key holder left: hand the job to someone who already holds the key
+     * (host, then co-host, then the longest-present participant). The new holder rotates the key
+     * before distributing, so the departed holder cannot read later media. If nobody holds the key
+     * yet, the new holder generates the first one.
+     */
+    electE2EEKeyHolder(roomId: string, previousHolderPeerId: string | null): PeerState | null {
+        const room = this.rooms.get(roomId);
+        if (!room) return null;
+        const registered = [...room.peers.values()].filter(p => p.id !== previousHolderPeerId && p.e2eeKeyBundle);
+        const pick = (list: PeerState[]) => list.find(p => p.role === 'host') || list.find(p => p.role === 'co-host') || list[0];
+        const ready = registered.filter(p => p.e2eeKeyReady);
+        const next = pick(ready) || pick(registered) || null;
+        room.e2eeKeyHolderPeerId = next?.id ?? null;
+        if (next) {
+            const generate = !next.e2eeKeyReady;
+            next.e2eeKeyReady = true;
+            logger.info(`E2EE key holder for ${room.meetingCode} is now ${next.id}${generate ? ' (new key)' : ''}`);
+            this.broadcast(roomId, 'e2eeKeyHolderChanged', {
+                peerId: next.id,
+                previousHolderPeerId,
+                signingPublicKey: next.e2eeKeyBundle!.signingPublicKey,
+                generate,
+            });
+        }
+        return next;
+    }
+
     removePeer(roomId: string, peerId: string): PeerState | undefined {
         const room = this.rooms.get(roomId);
         if (!room) return undefined;
@@ -316,6 +360,8 @@ class RoomManager {
             room.spotlightPeerId = null;
             this.broadcast(roomId, 'spotlightChanged', { peerId: null });
         }
+
+        if (room.e2eeKeyHolderPeerId === peerId) this.electE2EEKeyHolder(roomId, peerId);
 
         // Host left. Owned meetings keep running (like Google Meet) and only a co-host takes over;
         // nobody else is promoted. Ad-hoc rooms without an owner hand over to the longest-present peer.
@@ -354,7 +400,7 @@ class RoomManager {
             room.hostStarted = false;
             for (const waiting of room.waitingRoom.values()) {
                 waiting.awaitingHost = true;
-                if (waiting.ws?.readyState === 1) waiting.ws.send(JSON.stringify({ jsonrpc: '2.0', method: 'waitingStatus', params: { status: 'waitingForHost' } }));
+                this.sendToSocket(waiting.ws, 'waitingStatus', { status: 'waitingForHost' }, waiting.id);
             }
         }
         return peer;
@@ -420,19 +466,32 @@ class RoomManager {
 
         for (const [peerId, peer] of room.peers) {
             if (peerId === excludePeerId) continue;
-            try {
-                if (peer.ws && peer.ws.readyState === 1) {
-                    if (peer.ws.bufferedAmount > 1_048_576) {
-                        logger.warn(`Closing slow signaling peer ${peerId} after its send buffer exceeded 1 MiB`);
-                        peer.ws.terminate?.();
-                        continue;
-                    }
-                    peer.ws.send(message);
-                }
-            } catch (err) {
-                logger.error(err, `Failed to broadcast to peer ${peerId}`);
-            }
+            this.sendSerialized(peer.ws, message, peerId);
         }
+    }
+
+    /** Send a bounded notification to an active or waiting-room socket. */
+    sendToSocket(ws: any, method: string, params: any, peerId = 'unknown'): void {
+        this.sendPayload(ws, { jsonrpc: '2.0', method, params }, peerId);
+    }
+
+    /** Send any bounded JSON-RPC message through the same slow-client guard. */
+    sendPayload(ws: any, payload: unknown, peerId = 'unknown'): void {
+        let message: string;
+        try { message = JSON.stringify(payload); }
+        catch (err) { logger.error(err, `Could not serialize signaling message for peer ${peerId}`); return; }
+        this.sendSerialized(ws, message, peerId);
+    }
+
+    private sendSerialized(ws: any, message: string, peerId: string): void {
+        if (!ws || ws.readyState !== 1) return;
+        if (ws.bufferedAmount + Buffer.byteLength(message) > 1_048_576) {
+            logger.warn(`Closing slow signaling peer ${peerId} after its send buffer exceeded 1 MiB`);
+            ws.terminate?.();
+            return;
+        }
+        try { ws.send(message); }
+        catch (err) { logger.error(err, `Failed to send signaling message to peer ${peerId}`); }
     }
 
     /** Send a JSON-RPC notification to a specific peer. */
@@ -441,13 +500,7 @@ class RoomManager {
         if (!room) return;
 
         const peer = room.peers.get(peerId);
-        if (!peer || !peer.ws || peer.ws.readyState !== 1) return;
-        if (peer.ws.bufferedAmount > 1_048_576) {
-            logger.warn(`Closing slow signaling peer ${peerId} after its send buffer exceeded 1 MiB`);
-            peer.ws.terminate?.();
-            return;
-        }
-        peer.ws.send(JSON.stringify({ jsonrpc: '2.0', method, params }));
+        this.sendToSocket(peer?.ws, method, params, peerId);
     }
 
     getRoomCount(): number {

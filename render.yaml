@@ -7,7 +7,7 @@ databases:
     plan: free
     databaseName: qsvc
     user: qsvc
-    ipAllowList: []  # Allow all (required for free tier)
+    ipAllowList: []  # Internal Render services only; no external database access.
 
 services:
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -19,25 +19,23 @@ services:
     plan: free
     autoDeploy: true
     dockerfilePath: ./services/auth/Dockerfile
-    dockerContext: ./services/auth
+    dockerContext: .
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
-      - key: DATABASE_URL
-        fromDatabase:
-          name: qsvc-db
-          property: connectionString
+      - key: AUTH_DATABASE_URL
+        sync: false # Set to the qs_auth_app connection string, never the migration/admin URL.
       - key: JWT_SECRET
         generateValue: true
       - key: JWT_EXPIRY
         value: "24h"
       - key: TURN_SECRET
-        value: demo-turn-secret
+        sync: false
       - key: TURN_SERVERS
         value: "stun:stun.l.google.com:19302"
       - key: CORS_ORIGINS
-        value: "https://qs-vc.vercel.app,https://dist-puce-one-68.vercel.app,http://localhost:5173"
+        value: "https://qs-vc.vercel.app,https://dist-puce-one-68.vercel.app"
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # SIGNALING SERVICE
@@ -48,17 +46,25 @@ services:
     plan: free
     autoDeploy: true
     dockerfilePath: ./services/signaling/Dockerfile
-    dockerContext: ./services/signaling
+    dockerContext: .
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
+      - key: WS_TRUST_PROXY_HEADER
+        value: x-forwarded-for
       - key: JWT_SECRET
         sync: false  # Must match auth service
+      - key: AUTH_INTERNAL_URL
+        value: "http://qsvc-auth:4002"
+      - key: MEETING_INTERNAL_URL
+        value: "http://qsvc-meeting:4003"
+      - key: WS_TICKET_STORE
+        value: memory # Signaling room state is process-local; keep this service at one instance unless Redis is configured.
       - key: WEB_URL
         value: "https://qs-vc.vercel.app"
       - key: CORS_ORIGINS
-        value: "https://qs-vc.vercel.app,https://dist-puce-one-68.vercel.app,http://localhost:5173"
+        value: "https://qs-vc.vercel.app,https://dist-puce-one-68.vercel.app"
 
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # MEETING SERVICE
@@ -74,13 +80,13 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: DATABASE_URL
-        fromDatabase:
-          name: qsvc-db
-          property: connectionString
+      - key: MEETING_DATABASE_URL
+        sync: false # Set to the qs_meeting_app connection string, never the migration/admin URL.
       - key: JWT_SECRET
         sync: false  # Must match auth service
+      - key: AUTH_INTERNAL_URL
+        value: "http://qsvc-auth:4002"
       - key: WEB_URL
         value: "https://qs-vc.vercel.app"
       - key: CORS_ORIGINS
-        value: "https://qs-vc.vercel.app,https://dist-puce-one-68.vercel.app,http://localhost:5173"
+        value: "https://qs-vc.vercel.app,https://dist-puce-one-68.vercel.app"

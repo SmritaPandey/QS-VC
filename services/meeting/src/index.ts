@@ -12,6 +12,7 @@ import { databaseConfig } from '../../../shared/database.cjs';
 import { tenantDatabase } from '../../../shared/tenant-database.cjs';
 import { meetingRange } from './meeting-range.js';
 import { v4 as uuidv4 } from 'uuid';
+import { generateMeetingCode, insertWithUniqueMeetingCodes } from './meeting-code.js';
 import dotenv from 'dotenv';
 import pino from 'pino';
 import { attachSignalingIfAvailable } from './signaling-bridge.js';
@@ -48,7 +49,7 @@ const createMeetingBody = z.object({
         waitingRoom: z.boolean().default(true),
         webinar: z.boolean().default(false),
         meetingKind: z.enum(['conference', 'team', 'town_hall']).optional(),
-        e2eeRequired: z.boolean().default(false),
+        e2eeRequired: z.boolean().default(true),
         recordingAllowed: z.boolean().default(true),
         chatEnabled: z.boolean().default(true),
         screenShareEnabled: z.boolean().default(true),
@@ -96,6 +97,7 @@ function validateBody<T>(schema: z.ZodSchema<T>) {
 
 const app = express();
 app.disable('x-powered-by'); // Do not advertise the framework (OWASP A05).
+app.set('trust proxy', 1);
 
 // CORS: merge env with production defaults so stale Render env can't lock out Vercel
 const DEFAULT_CORS_ORIGINS = [
@@ -116,8 +118,14 @@ app.use(cors({
     methods: ['GET', 'POST', 'PATCH', 'DELETE'],
     credentials: true,
 }));
-app.use(express.json());
+app.use((req, res, next) => {
+    const parser = /^\/api\/internal\/meetings\/[^/]+\/transcript$/.test(req.path)
+        ? express.json({ limit: '2mb' })
+        : express.json({ limit: '100kb' });
+    parser(req, res, next);
+});
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, skip: req => { if (!req.path.startsWith('/api/internal/meetings/')) return false; try { jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal' }); return true; } catch { return false; } }, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } }));
+const meetingCodeLookupLimit = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many meeting-code lookup attempts' } });
 
 const PORT = parseInt(process.env.PORT || process.env.MEETING_PORT || '4003', 10);
 const AUTH_URL = process.env.AUTH_INTERNAL_URL || 'http://localhost:4002';
@@ -137,19 +145,6 @@ const scheduleFeature = requireFeature(AUTH_URL, 'meeting_scheduling');
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MEETING CODE GENERATOR
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-function generateMeetingCode(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    const segments = [];
-    for (let s = 0; s < 3; s++) {
-        let seg = '';
-        for (let i = 0; i < 4; i++) {
-            seg += chars[Math.floor(Math.random() * chars.length)];
-        }
-        segments.push(seg);
-    }
-    return `QS-${segments.join('-')}`;
-}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ROUTES
@@ -171,21 +166,24 @@ app.get('/ready', async (_req, res) => {
 // Quick meeting creation (no auth required — for demo/guest access)
 app.post('/api/meetings/create', async (_req, res) => {
     try {
-        const meetingCode = generateMeetingCode();
-        const inviteToken = createMeetingInviteToken(meetingCode);
+        let meetingCode: string;
         const WEB_URL = (process.env.WEB_URL || 'https://qs-vc.vercel.app').replace(/\/$/, '');
 
-        // Try to persist to DB, fall back to in-memory if DB isn't ready
+        // The database's unique constraint is the final collision guard. Only dev/demo
+        // mode may continue without persistence when PostgreSQL is unavailable.
         try {
-            const id = uuidv4();
-            await pool.runWithTenant('00000000-0000-0000-0000-000000000001', () => pool.query(
+            const created = await insertWithUniqueMeetingCodes(1, ([code]) => pool.runWithTenant('00000000-0000-0000-0000-000000000001', () => pool.query(
                 `INSERT INTO meetings (id, tenant_id, meeting_code, title, host_id, type, status, settings)
                  VALUES ($1, '00000000-0000-0000-0000-000000000001', $2, 'Quick Meeting', NULL, 'instant', 'waiting', '{}')`,
-                [id, meetingCode]
-            ));
+                [uuidv4(), code]
+            )));
+            meetingCode = created.codes[0];
         } catch (dbErr: any) {
+            if (process.env.NODE_ENV === 'production' || dbErr?.name === 'MeetingCodeCollisionError') throw dbErr;
             logger.warn('DB insert skipped (demo mode): ' + dbErr.message);
+            meetingCode = generateMeetingCode();
         }
+        const inviteToken = createMeetingInviteToken(meetingCode);
 
         res.json({
             meetingCode,
@@ -203,15 +201,15 @@ app.post('/api/meetings', authMiddleware, validateBody(createMeetingBody), async
     try {
         const user = (req as any).user as AuthPayload;
         const { title, settings } = req.body;
-        const meetingCode = generateMeetingCode();
-        const inviteToken = createMeetingInviteToken(meetingCode);
         const id = uuidv4();
 
-        await pool.query(
+        const created = await insertWithUniqueMeetingCodes(1, ([code]) => pool.query(
             `INSERT INTO meetings (id, tenant_id, meeting_code, title, host_id, type, status, settings)
        VALUES ($1, $2, $3, $4, $5, 'instant', 'waiting', $6)`,
-            [id, user.tenantId, meetingCode, title || 'Instant Meeting', user.sub, JSON.stringify(normalizeMeetingSettings(settings))]
-        );
+            [id, user.tenantId, code, title || 'Instant Meeting', user.sub, JSON.stringify(normalizeMeetingSettings(settings))]
+        ));
+        const meetingCode = created.codes[0];
+        const inviteToken = createMeetingInviteToken(meetingCode);
 
         logger.info(`Meeting created: ${meetingCode} by ${user.displayName}`);
         res.status(201).json({
@@ -237,10 +235,14 @@ app.post('/api/meetings/schedule', scheduleFeature, authMiddleware, validateBody
         if (!times) return res.status(400).json({ error: 'Provide a meeting start and an end after the start.' });
 
         const seriesId = recurrence ? uuidv4() : undefined;
-        const occurrences = times.map(time => ({ ...time, id: uuidv4(), meetingCode: generateMeetingCode() }));
+        const inserted = await insertWithUniqueMeetingCodes(times.length, async codes => {
+            const occurrences = times.map((time, index) => ({ ...time, id: uuidv4(), meetingCode: codes[index] }));
+            await insertSchedule(pool, user.tenantId, title || 'Scheduled Meeting', user.sub,
+                recurrence ? 'recurring' : 'scheduled', { ...normalizeMeetingSettings(settings), seriesId }, occurrences);
+            return occurrences;
+        });
+        const occurrences = inserted.result;
         const occurrencesWithInvites = occurrences.map(occurrence => ({ ...occurrence, inviteToken: createMeetingInviteToken(occurrence.meetingCode) }));
-        await insertSchedule(pool, user.tenantId, title || 'Scheduled Meeting', user.sub,
-            recurrence ? 'recurring' : 'scheduled', { ...normalizeMeetingSettings(settings), seriesId }, occurrences);
 
         const first = occurrences[0];
         const inviteToken = createMeetingInviteToken(first.meetingCode);
@@ -351,7 +353,7 @@ app.post('/api/internal/meetings/:code/transcript', express.json({ limit: '2mb' 
 });
 
 // The meeting's host downloads saved transcripts and minutes: ?format=json (default) | txt | srt
-app.get('/api/meetings/code/:code/transcript', authMiddleware, async (req, res) => {
+app.get('/api/meetings/code/:code/transcript', meetingCodeLookupLimit, authMiddleware, async (req, res) => {
     const user = (req as any).user as AuthPayload;
     const code = String(req.params.code).toUpperCase().slice(0, 30);
     try {
@@ -371,16 +373,19 @@ app.get('/api/meetings/code/:code/transcript', authMiddleware, async (req, res) 
         const [sessions, rows] = await Promise.all([
             pool.query('SELECT started_at, minutes FROM meeting_transcripts WHERE meeting_code = $1 AND started_at >= NOW() - INTERVAL \'90 days\' ORDER BY started_at DESC LIMIT 100', [code]),
             cursor
-                ? pool.query('SELECT segment_id, speaker, language, text, spoken_at FROM meeting_transcript_segments WHERE meeting_code = $1 AND (spoken_at, segment_id) > ($2::timestamptz, $3::text) ORDER BY spoken_at, segment_id LIMIT $4', [code, cursor.at, cursor.id, limit + 1])
-                : pool.query('SELECT segment_id, speaker, language, text, spoken_at FROM meeting_transcript_segments WHERE meeting_code = $1 ORDER BY spoken_at, segment_id LIMIT $2', [code, limit + 1]),
+                ? pool.query("SELECT segment_id, speaker, language, text, spoken_at FROM meeting_transcript_segments WHERE meeting_code = $1 AND spoken_at >= NOW() - INTERVAL '90 days' AND (spoken_at, segment_id) > ($2::timestamptz, $3::text) ORDER BY spoken_at, segment_id LIMIT $4", [code, cursor.at, cursor.id, limit + 1])
+                : pool.query("SELECT segment_id, speaker, language, text, spoken_at FROM meeting_transcript_segments WHERE meeting_code = $1 AND spoken_at >= NOW() - INTERVAL '90 days' ORDER BY spoken_at, segment_id LIMIT $2", [code, limit + 1]),
         ]);
         const segments = rows.rows.slice(0, limit);
         const recentMinutes = sessions.rows.find((row: any) => row.minutes)?.minutes || null;
-        const jsonPage = () => ({ meetingCode: code, minutes: recentMinutes, sessions: sessions.rows.map((row: any) => ({ startedAt: row.started_at })), segments: segments.map((row: any) => ({ id: row.segment_id, speaker: row.speaker, language: row.language, text: row.text, spokenAt: row.spoken_at })) });
+        const jsonPage = (nextCursor: string | null = null) => ({ meetingCode: code, minutes: recentMinutes, sessions: sessions.rows.map((row: any) => ({ startedAt: row.started_at })), segments: segments.map((row: any) => ({ id: row.segment_id, speaker: row.speaker, language: row.language, text: row.text, spokenAt: row.spoken_at })), nextCursor });
         const responseBytes = () => {
             if (req.query.format === 'txt') return Buffer.byteLength(transcriptAsText(segments, recentMinutes));
             if (req.query.format === 'srt') return Buffer.byteLength(transcriptAsSrt(segments));
-            return Buffer.byteLength(JSON.stringify(jsonPage()));
+            const hasMore = rows.rows.length > segments.length;
+            const last = segments[segments.length - 1];
+            const nextCursor = hasMore && last ? Buffer.from(JSON.stringify({ at: new Date(last.spoken_at).toISOString(), id: last.segment_id })).toString('base64url') : null;
+            return Buffer.byteLength(JSON.stringify(jsonPage(nextCursor)));
         };
         while (segments.length > 1 && responseBytes() > 1_048_576) segments.pop();
         if (responseBytes() > 1_048_576) return res.status(413).json({ error: 'Transcript page exceeds the 1 MiB export limit. Request a smaller page.' });
@@ -393,14 +398,14 @@ app.get('/api/meetings/code/:code/transcript', authMiddleware, async (req, res) 
         const format = String(req.query.format || 'json');
         if (format === 'txt') { res.type('text/plain; charset=utf-8').setHeader('Content-Disposition', `attachment; filename="${code}-transcript.txt"`); return res.send(transcriptAsText(segments, recentMinutes)); }
         if (format === 'srt') { res.type('application/x-subrip; charset=utf-8').setHeader('Content-Disposition', `attachment; filename="${code}.srt"`); return res.send(transcriptAsSrt(segments)); }
-        res.json({ ...jsonPage(), nextCursor });
+        res.json(jsonPage(nextCursor));
     } catch (err: any) {
         logger.warn('Transcript not read: ' + err.message);
         res.status(503).json({ error: 'Transcript storage unavailable' });
     }
 });
 
-app.get('/api/meetings/code/:code', async (req, res) => {
+app.get('/api/meetings/code/:code', meetingCodeLookupLimit, async (req, res) => {
     try {
         const result = await pool.query(
             `SELECT * FROM public.qsvc_meeting_by_code($1)`,

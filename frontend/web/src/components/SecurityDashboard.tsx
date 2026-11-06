@@ -2,11 +2,11 @@
  * SecurityDashboard — Quantum-Safe Security Status Panel for QS-VC.
  *
  * Displays real-time PQC security indicators:
- * - Active encryption algorithms (Kyber / Dilithium)
- * - NIST compliance level
+ * - Active encryption algorithms (ML-KEM-1024 / ML-DSA-87)
+ * - NIST algorithm compliance (FIPS 203 / FIPS 204)
  * - Key rotation status
  * - Cipher suite details
- * - Standards compliance badges
+ * - Standards badges
  */
 import React, { useState, useEffect } from 'react';
 
@@ -47,8 +47,8 @@ const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
 
     if (!isOpen) return null;
 
-    const securityLevel = status.wasmAvailable ? 'Maximum (PQC Native)' : 'High (PQC Hybrid)';
-    const securityColor = status.wasmAvailable ? '#22c55e' : '#eab308';
+    const securityLevel = e2eeActive ? 'Maximum (PQC end-to-end)' : 'Transport (DTLS-SRTP)';
+    const securityColor = e2eeActive ? '#22c55e' : '#94a3b8';
 
     return (
         <div style={{
@@ -87,7 +87,7 @@ const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
                     </div>
                     <div>
                         <div style={{ fontWeight: 700, color: '#fff', fontSize: '14px' }}>
-                            Quantum-Safe Security
+                            Media security status
                         </div>
                         <div style={{ fontSize: '11px', color: securityColor, fontWeight: 600 }}>
                             {securityLevel}
@@ -122,10 +122,12 @@ const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
                     </span>
                     <div>
                         <div style={{ fontWeight: 600, color: '#fff', fontSize: '13px' }}>
-                            End-to-End Encryption: {e2eeActive ? 'ACTIVE' : 'INACTIVE'}
+                            End-to-End Encryption: {e2eeActive ? 'ACTIVE' : 'OFF FOR THIS MEETING'}
                         </div>
                         <div style={{ fontSize: '11px', color: 'rgba(255,255,255,0.4)' }}>
-                            Zero-knowledge SFU — server cannot read media
+                            {e2eeActive
+                                ? 'The media server forwards encrypted frames it cannot read. Compare the security code to confirm nobody intercepted the keys.'
+                                : 'The organiser turned off end-to-end encryption. Media is protected in transit with DTLS-SRTP.'}
                         </div>
                     </div>
                 </div>
@@ -133,37 +135,37 @@ const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
                 {/* Crypto Algorithms */}
                 <div style={{ marginBottom: '14px' }}>
                     <div style={{ fontSize: '11px', fontWeight: 700, color: '#8b5cf6', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
-                        Active Algorithms
+                        Algorithm suite
                     </div>
 
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                         <AlgoCard
                             label="Key Exchange"
-                            algo={status.kemAlgorithm.replace('kyber', 'Kyber-')}
+                            algo={status.kemAlgorithm}
                             level={status.kemLevel}
                             icon="🔑"
-                            standard="FIPS 203"
+                            standard="NIST FIPS 203"
                         />
                         <AlgoCard
                             label="Signatures"
-                            algo={status.sigAlgorithm.replace('dilithium', 'Dilithium-')}
+                            algo={status.sigAlgorithm}
                             level={status.sigLevel}
                             icon="✍️"
-                            standard="FIPS 204"
+                            standard="NIST FIPS 204"
                         />
                         <AlgoCard
                             label="Symmetric"
                             algo="AES-256-GCM"
                             level="256-bit"
                             icon="🔒"
-                            standard="FIPS 197"
+                            standard="AES standard: FIPS 197"
                         />
                         <AlgoCard
                             label="Key Derivation"
-                            algo="HKDF-SHA256"
+                            algo="SP 800-108 Counter/HMAC-SHA-256"
                             level="256-bit"
                             icon="🗝️"
-                            standard="SP 800-56C"
+                            standard="KDF construction: SP 800-108 Rev. 1"
                         />
                     </div>
                 </div>
@@ -196,7 +198,7 @@ const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
                         }} />
                     </div>
                     <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginTop: '4px' }}>
-                        Auto-rotates every 60 seconds (forward secrecy)
+                        Media frame keys use 60-second epochs. This is not a forward-secrecy guarantee.
                     </div>
                 </div>
 
@@ -214,24 +216,27 @@ const SecurityDashboard: React.FC<SecurityDashboardProps> = ({
                     </div>
                 </div>
 
-                {/* Standards Compliance */}
+                {/* Algorithm references and validation state */}
                 <div>
                     <div style={{ fontSize: '11px', fontWeight: 700, color: '#8b5cf6', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>
-                        Compliance Standards
+                        Standards Compliance
                     </div>
+                    <p style={{ fontSize: '10px', lineHeight: 1.5, color: 'rgba(255,255,255,0.48)', margin: '8px 0 0' }}>
+                        NIST-standardized post-quantum algorithms with their standard parameter sets. FIPS 140-3 (CMVP) module validation is a separate certification.
+                    </p>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                         {status.standards.map((std, i) => (
                             <span key={i} style={{
                                 padding: '4px 8px',
                                 borderRadius: '6px',
-                                background: 'rgba(34,197,94,0.08)',
-                                border: '1px solid rgba(34,197,94,0.15)',
-                                color: '#22c55e',
+                                background: 'rgba(148,163,184,0.08)',
+                                border: '1px solid rgba(148,163,184,0.18)',
+                                color: '#cbd5e1',
                                 fontSize: '10px',
                                 fontWeight: 600,
                                 whiteSpace: 'nowrap',
                             }}>
-                                ✓ {std}
+                                • {std}
                             </span>
                         ))}
                     </div>
@@ -255,7 +260,7 @@ const AlgoCard: React.FC<{
             <span style={{ fontSize: '10px', color: 'rgba(255,255,255,0.4)' }}>{label}</span>
         </div>
         <div style={{ fontSize: '12px', color: '#fff', fontWeight: 600 }}>{algo}</div>
-        <div style={{ fontSize: '10px', color: '#22c55e', marginTop: '2px' }}>{level}</div>
+        <div style={{ fontSize: '10px', color: '#cbd5e1', marginTop: '2px' }}>{level}</div>
         <div style={{ fontSize: '9px', color: 'rgba(255,255,255,0.25)', marginTop: '2px' }}>{standard}</div>
     </div>
 );

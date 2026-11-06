@@ -13,10 +13,10 @@ export async function loadMeetingPolicy(code: string) {
     const policy = policySchema.parse(await response.json());
     // An ended meeting can be started again by its host (same link, like Google Meet); cancelled ones cannot.
     if (policy.status === 'cancelled') throw new Error('This meeting was cancelled.');
-    if (policy.settings.e2eeRequired) throw new Error('This meeting requires end-to-end encryption that this client cannot yet verify.');
     const { waitingRoom, chatEnabled, screenShareEnabled, recording_allowed, e2eeRequired, ...settings } = policy.settings;
     return { ...policy, settings: {
         ...settings,
+        ...(typeof e2eeRequired === 'boolean' ? { e2eeRequired } : {}),
         meetingKind: settings.meetingKind ?? (settings.webinar ? 'town_hall' : 'conference'),
         waitingRoomEnabled: true,
         allowChat: settings.allowChat ?? chatEnabled ?? true,

@@ -70,7 +70,7 @@
 
     <div class="hero">
       <h2>Next-Generation Video Conferencing with Post-Quantum Encryption</h2>
-      <p>QS-VC is a quantum-safe video conferencing platform engineered with NIST-approved post-quantum cryptography (PQC). It delivers crystal-clear HD/4K video and audio, real-time AI-powered captions and translation, and end-to-end encrypted media streams — ensuring your calls are secure against both today's and tomorrow's quantum computing threats.</p>
+      <p>QS-VC is a quantum-safe video conferencing platform built on NIST-standardized post-quantum cryptography. Every meeting is end-to-end encrypted by default: ML-KEM-1024 (FIPS 203) delivers the meeting key, ML-DSA-87 (FIPS 204) signs it, and AES-256-GCM encrypts audio, video and screen sharing on each device. Our media servers forward packets they cannot decrypt.</p>
     </div>
 
     <div class="stats">
@@ -85,11 +85,11 @@
       <div class="feature">
         <h4><span class="icon">🔐</span> Quantum-Safe Encryption</h4>
         <ul>
-          <li>CRYSTALS-Kyber-1024 + X25519 hybrid key exchange</li>
-          <li>CRYSTALS-Dilithium-5 + Ed25519 hybrid signatures</li>
-          <li>End-to-end encrypted media (SFrame, zero-knowledge SFU)</li>
-          <li>AES-256-GCM with 60-second key rotation</li>
-          <li>TLS 1.3 with PQC extensions for signaling</li>
+          <li>ML-KEM-1024 key exchange (NIST FIPS 203)</li>
+          <li>ML-DSA-87 signed key distribution (NIST FIPS 204)</li>
+          <li>End-to-end encrypted media, on by default (AES-256-GCM)</li>
+          <li>New key whenever someone leaves + 60-second epochs</li>
+          <li>Verifiable meeting security code for every participant</li>
         </ul>
       </div>
       <div class="feature">
@@ -127,7 +127,7 @@
     <div class="section-title">Technical Specifications</div>
     <table class="specs-table">
       <tr><th width="35%">Specification</th><th>Details</th></tr>
-      <tr><td class="highlight">Media Transport</td><td>SRTP/DTLS 1.3 + Quantum-TLS, VP9/AV1 + Opus 48kHz stereo</td></tr>
+      <tr><td class="highlight">Media Transport</td><td>WebRTC DTLS-SRTP + end-to-end AES-256-GCM frame encryption (ML-KEM-1024 keys)</td></tr>
       <tr><td class="highlight">Signaling</td><td>WebSocket + JSON-RPC 2.0, &lt;3s join time (P95)</td></tr>
       <tr><td class="highlight">SFU Engine</td><td>mediasoup with simulcast, SVC, cascade (multi-node mesh)</td></tr>
       <tr><td class="highlight">Client Platforms</td><td>Web (React 18), Desktop (Electron 28), Mobile (React Native)</td></tr>
@@ -146,11 +146,11 @@
     <div class="section-title">Security Standards</div>
     <div class="badges">
       <div class="badge">NIST PQC Level 5</div>
-      <div class="badge">Zero-Knowledge SFU</div>
-      <div class="badge">E2EE (SFrame)</div>
-      <div class="badge">HSM Key Management</div>
-      <div class="badge">Tamper-Proof Audit Logs</div>
-      <div class="badge">60s Key Rotation</div>
+      <div class="badge">FIPS 203 ML-KEM-1024</div>
+      <div class="badge">FIPS 204 ML-DSA-87</div>
+      <div class="badge">End-to-End Encrypted by Default</div>
+      <div class="badge">Server Cannot Decrypt Media</div>
+      <div class="badge">Key Rotation on Leave</div>
     </div>
   </div>
   <div class="footer">

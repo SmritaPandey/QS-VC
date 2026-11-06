@@ -1,5 +1,10 @@
 # QSVC source and infrastructure audit
 
+> Historical baseline from 4 November 2026 at revision a8514e8. Its findings
+> describe the pre-remediation source snapshot; use
+> [current remediation status](SECURITY_REMEDIATION_STATUS.md) for the working
+> tree. This document is retained as audit history, not as a current VAPT result.
+
 4 November 2026 · Read-only source assessment · Independent engineering audit
 
 What this repo does: QSVC provides browser and desktop meetings using React, Express, WebSocket signaling and mediasoup. Its AWS deployment connects PostgreSQL and S3; other launchers describe local/intranet and MinIO deployments. This audit assumes small pilot meetings, including 10 participants; production capacity has not been measured.

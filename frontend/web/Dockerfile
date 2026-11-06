@@ -2,7 +2,8 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 COPY frontend/web/package.json ./
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+COPY frontend/web/package-lock.json ./package-lock.json
+RUN npm ci
 RUN ln -s /app/node_modules /node_modules
 COPY frontend/web/tsconfig.json ./
 COPY frontend/web/vite.config.ts ./
