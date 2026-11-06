@@ -76,7 +76,7 @@ jobs:
       - name: Build SFU image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: services/sfu
           file: services/sfu/Dockerfile
           push: false
           tags: qsvc-sfu:latest
