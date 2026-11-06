@@ -379,7 +379,11 @@ def create_app(engine_factory: Optional[Callable[[], Engine]] = None) -> FastAPI
             async with gpu:
                 started = time.perf_counter()
                 use = language or (detected if not final else None)
-                text, lang = await loop.run_in_executor(None, engine.transcribe, audio, use, final, prompt)
+                try:
+                    text, lang = await loop.run_in_executor(None, engine.transcribe, audio, use, final, prompt)
+                except Exception as error:  # one failed line (e.g. remote API timeout) must not end the session
+                    print(f"recognition failed for one segment: {type(error).__name__}: {error}", flush=True)
+                    return
             text = clean(text)
             lang = language or lang or detected or "en"
             if final:

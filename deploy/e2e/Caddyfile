@@ -1,0 +1,20 @@
+# HTTPS certificate is issued automatically (port 80 must be reachable for Let's Encrypt).
+# `route` keeps the order exactly as written: the IP check runs before anything is proxied.
+{$AI_DOMAIN} {
+	route {
+		# Only the QS-VC backend may use the AI services.
+		@outsider not remote_ip {$ALLOWED_IPS}
+		respond @outsider "Forbidden" 403
+
+		handle_path /asr/* {
+			reverse_proxy asr:8000
+		}
+		handle_path /mt/* {
+			reverse_proxy mt:5000
+		}
+		handle_path /llm/* {
+			reverse_proxy ollama:11434
+		}
+		respond 404
+	}
+}
