@@ -1,0 +1,75 @@
+# QS-VC AI host on an E2E Networks GPU node (India). Speech recognition + translation on the GPU,
+# behind Caddy with automatic HTTPS. Only the QS-VC backend's IP address is let through, and both
+# services also require their API keys.
+#
+#   docker compose -f deploy/e2e/compose.yml --env-file deploy/e2e/.env up -d --build
+#   Backend settings:  ASR_URL=https://<AI_DOMAIN>/asr   LIBRETRANSLATE_URL=https://<AI_DOMAIN>/mt
+x-gpu: &gpu
+  deploy:
+    resources:
+      reservations:
+        devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options: { max-size: 10m, max-file: '3' }
+services:
+  asr:
+    <<: *gpu
+    container_name: qsvc-asr
+    build:
+      context: ../../services/asr
+      args:
+        BASE: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+        ONNX_RUNTIME: onnxruntime-gpu==1.20.1
+    environment:
+      ASR_ENGINE: ${ASR_ENGINE:-hybrid}
+      ASR_MODEL: ${ASR_MODEL:-large-v3-turbo}
+      ASR_LANGUAGES: ${ASR_LANGUAGES:-}
+      ASR_INDIC_LANGUAGES: ${ASR_INDIC_LANGUAGES:-}
+      ASR_PROMPT: ${ASR_PROMPT:-QS-VC, UPSWAN, UPDESCO}
+      ASR_MAX_PARALLEL: ${ASR_MAX_PARALLEL:-4}
+      ASR_API_KEY: ${ASR_API_KEY:?Set the same ASR_API_KEY as the backend}
+      HF_TOKEN: ${HF_TOKEN:-}
+    expose: ["8000"]
+    volumes: [asr_models:/models]
+  mt:
+    <<: *gpu
+    container_name: qsvc-mt
+    build:
+      context: ../../services/mt
+      args:
+        BASE: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+    environment:
+      MT_LANGUAGES: ${MT_LANGUAGES:-}
+      MT_API_KEY: ${MT_API_KEY:?Set the same value as LIBRETRANSLATE_API_KEY on the backend}
+      MT_GLOSSARY_FILE: /app/glossary.example.json
+      MT_BEAMS: ${MT_BEAMS:-3}
+    expose: ["5000"]
+    volumes: [mt_models:/models]
+  ollama:
+    <<: *gpu
+    profiles: [llm]
+    container_name: qsvc-ollama
+    image: ollama/ollama:0.5.4
+    expose: ["11434"]
+    volumes: [ollama_models:/root/.ollama]
+  proxy:
+    image: caddy:2.8.4-alpine
+    container_name: qsvc-ai-proxy
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      AI_DOMAIN: ${AI_DOMAIN:?Set the AI host name, e.g. ai.qsvcmeet.com}
+      ALLOWED_IPS: ${ALLOWED_IPS:?Set the QS-VC backend public IP(s), space separated}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [asr, mt]
+volumes:
+  asr_models:
+  mt_models:
+  ollama_models:
+  caddy_data:
+  caddy_config:

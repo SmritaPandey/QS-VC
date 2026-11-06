@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Local development launcher. Production intranet uses a trusted HTTPS
 // gateway, private services and organisation-managed access.
-const { spawn } = require('child_process');
+const { spawn, execSync, execFileSync } = require('child_process');
 const path = require('path');
 const net = require('net');
 const os = require('os');
@@ -16,6 +16,88 @@ const procs = [];
 function log(service, msg) {
     const ts = new Date().toLocaleTimeString();
     console.log(`[${ts}] [${service}] ${msg}`);
+}
+
+function openBrowser(url) {
+    if (process.env.QSVC_NO_OPEN === 'true') return;
+    const cmd = process.platform === 'darwin' ? 'open'
+              : process.platform === 'win32' ? 'start ""'
+              : 'xdg-open';
+    log('Launcher', `Opening web app in default browser: ${url}`);
+    try {
+        const { exec } = require('child_process');
+        exec(`${cmd} "${url}"`, () => {});
+    } catch {}
+}
+
+async function ensureDatabase() {
+    const pgPort = Number(process.env.POSTGRES_PORT || 5434);
+    const pgHost = process.env.POSTGRES_HOST || '127.0.0.1';
+
+    // Check if PG is listening
+    const connected = await canConnect(pgHost, pgPort, 1000);
+    if (!connected) {
+        log('Database', `PostgreSQL is not listening on ${pgHost}:${pgPort}. Checking Docker...`);
+        try {
+            try {
+                execSync('docker start qsvc-pg', { stdio: 'ignore' });
+                log('Database', 'Started existing qsvc-pg container');
+            } catch {
+                log('Database', 'Creating and starting new qsvc-pg container...');
+                execSync(`docker run -d --name qsvc-pg -e POSTGRES_DB=qsvc -e POSTGRES_USER=qsvc -e POSTGRES_PASSWORD=qsvc_dev_2025 -p ${pgPort}:5432 postgres:16-alpine`, { stdio: 'ignore' });
+            }
+            await waitForPort(pgPort, 15000);
+            log('Database', '✓ PostgreSQL container is ready');
+        } catch (err) {
+            log('Database', `Notice: Docker auto-start skipped (${err.message}). Using configured database credentials.`);
+        }
+    } else {
+        log('Database', `✓ PostgreSQL is connected on ${pgHost}:${pgPort}`);
+    }
+
+    // Run database migrations automatically so schema is always ready
+    try {
+        log('Database', 'Running database migrations to ensure schema is current...');
+        execFileSync(process.execPath, [path.join(ROOT, 'db', 'migrate.js')], { stdio: 'inherit' });
+    } catch (err) {
+        log('Database', `⚠ Migration notice: ${err.message}`);
+    }
+}
+
+async function ensureAIServices() {
+    // 1. Check/auto-start MT (Translation)
+    const mtPort = 5005;
+    const mtListening = await canConnect('127.0.0.1', mtPort, 500);
+    if (!mtListening) {
+        const librePython = fs.existsSync('/tmp/qsvc-libretranslate/bin/libretranslate')
+            ? '/tmp/qsvc-libretranslate/bin/libretranslate'
+            : null;
+        if (librePython) {
+            log('MT', `Auto-starting local LibreTranslate on port ${mtPort}...`);
+            procs.push(startService('LibreTranslate', librePython, [
+                '--host', '127.0.0.1', '--port', String(mtPort), '--load-only', 'en,hi', '--disable-files-translation', '--disable-web-ui'
+            ], ROOT, {
+                XDG_DATA_HOME: '/tmp/qsvc-libretranslate-data',
+                XDG_CACHE_HOME: '/tmp/qsvc-libretranslate-cache',
+                XDG_CONFIG_HOME: '/tmp/qsvc-libretranslate-config',
+            }));
+            await waitForPort(mtPort, 8000).then(() => {
+                log('MT', '✓ Local translation service is ready');
+                process.env.LIBRETRANSLATE_URL = `http://127.0.0.1:${mtPort}`;
+            }).catch(() => log('MT', '⚠ Local translation start timed out (will retry in background)'));
+        }
+    } else {
+        log('MT', `✓ Local translation service detected on port ${mtPort}`);
+        process.env.LIBRETRANSLATE_URL = `http://127.0.0.1:${mtPort}`;
+    }
+
+    // 2. Check/auto-start ASR (Speech Recognition)
+    const asrPort = 8000;
+    const asrListening = await canConnect('127.0.0.1', asrPort, 500);
+    if (asrListening) {
+        log('ASR', `✓ Local speech recognition service detected on port ${asrPort}`);
+        process.env.ASR_URL = `http://127.0.0.1:${asrPort}`;
+    }
 }
 
 function startService(name, cmd, args, cwd, env = {}) {
@@ -123,6 +205,10 @@ async function main() {
         ? 'Poly/FreeSWITCH bridge mounted. Verify media for each call; service startup does not prove interoperability.'
         : 'Browser meeting mode. Room-device bridge disabled. Set MCU_ENABLED=true after configuring its dependencies to enable it.');
 
+    // ── 0. Auto-ensure Database & AI services ──
+    await ensureDatabase();
+    await ensureAIServices();
+
     const tsxPath = path.join(ROOT, 'node_modules', 'tsx', 'dist', 'cli.mjs');
     for (const [service, port] of [['sfu', 4000], ['auth', 4002], ['meeting', 4003], ['recording', 4004]]) {
         const cwd = path.join(ROOT, 'services', service);
@@ -180,6 +266,9 @@ async function main() {
     log('Vite', `Waiting for port ${WEB_PORT}...`);
     await waitForPort(WEB_PORT);
     log('Vite', '✓ Vite dev server is ready');
+
+    // ── Auto-open browser ──
+    openBrowser(`http://localhost:${WEB_PORT}`);
 
     // ── 4. Get LAN IPs ──
     const lanIPs = getLanIPs();

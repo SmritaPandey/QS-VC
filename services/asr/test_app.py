@@ -231,3 +231,30 @@ def test_empty_settings_from_compose_use_defaults():
         assert asr.build_engine(lambda: FakeWhisper(), lambda: FakeIndic(), print).indic is not None
     finally:
         os.environ.pop("ASR_ENGINE", None)
+
+
+
+def test_failed_segment_does_not_end_the_session():
+    class Flaky(FakeEngine):
+        def __init__(self):
+            super().__init__()
+            self.fail_next_final = True
+
+        def transcribe(self, audio, language, final, prompt):
+            if final and self.fail_next_final:
+                self.fail_next_final = False
+                raise TimeoutError("model timeout")
+            return super().transcribe(audio, language, final, prompt)
+
+    engine = Flaky()
+    with TestClient(asr.create_app(lambda: engine)) as client:
+        with client.websocket_connect("/v1/stream?language=hi") as ws:
+            assert json.loads(ws.receive_text())["type"] == "ready"
+            audio = np.concatenate([silence(0.3), tone(1.2), silence(0.9), tone(1.2), silence(0.9)])
+            for start in range(0, len(audio), 4000):
+                ws.send_bytes(pcm(audio[start:start + 4000]))
+            while True:
+                message = json.loads(ws.receive_text())
+                if message["type"] == "final":
+                    break
+            assert message["segment"] == 1 and message["text"] == "नमस्ते सबको"

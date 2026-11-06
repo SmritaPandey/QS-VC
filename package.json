@@ -13,6 +13,7 @@
     "frontend/web"
   ],
   "scripts": {
+    "start": "node start-intranet.js",
     "dev": "concurrently \"npm run dev:sfu\" \"npm run dev:signaling\" \"npm run dev:auth\" \"npm run dev:meeting\" \"npm run dev:recording\" \"npm run dev:web\"",
     "dev:sfu": "npm -w services/sfu run dev",
     "dev:signaling": "npm -w services/signaling run dev",

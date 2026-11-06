@@ -33,6 +33,16 @@ speaker mic (meeting track) ──16 kHz PCM──► signaling ──► servic
 - **Minutes**: with `MINUTES_LLM_URL` + `MINUTES_LLM_MODEL` (any OpenAI-compatible endpoint — vLLM,
   Ollama, Azure OpenAI…), the host clicks *Create minutes*: summary, decisions, action items, open questions.
 
+## Where the AI runs (choose one)
+
+| Option | Speech (`ASR_URL`) | Translation | Guide |
+|---|---|---|---|
+| India production | E2E Networks GPU (`https://ai.<domain>/asr`) | IndicTrans2 (`https://ai.<domain>/mt`) | `deploy/e2e/README.md` |
+| AWS GPU | g6/g5 in the same VPC | IndicTrans2 | `deploy/aws/gpu/README.md` |
+| Intranet | Customer GPU server | IndicTrans2 | `docs/INTRANET_AI_PREREQUISITES.md` |
+
+With no speech server configured (`ASR_URL` empty), captions use browser recognition (Chrome/Edge).
+
 ## Turn it on
 
 1. `node db/migrate.js` (adds `014_meeting_transcripts.sql`).
