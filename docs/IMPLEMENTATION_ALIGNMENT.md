@@ -1,6 +1,6 @@
 # QS-VC implementation alignment
 
-Reviewed 2 November 2026. Domain: qsvcmeet.com. Proposed deployment region:
+Reviewed 6 November 2026. Domain: qsvcmeet.com. Proposed deployment region:
 AWS Mumbai. Budget: $100/month. This is an implementation brief and source
 assessment, not proof of deployed features, security certification or capacity.
 
@@ -50,8 +50,8 @@ Pause transcription on microphone mute, leave, revoked session or explicit disab
 | Translation | Room-bound configured LibreTranslate RPCs connected; Google adapter uncalled | Configure real models/server, validate actual pairs and measure latency |
 | Translated speech | Device voices connected with matching-language checks and original audio ducking | Actual device playback/autoplay/echo/quality evaluation |
 | Captions | CaptionOverlay connected to final room notifications; stable IDs and per-listener language | Real two-device speech and complete rendered/accessibility evaluation |
-| PQC | Experimental helper; missing runtime asset and classical fallback | Reviewed exact ML-KEM implementation, identities, vectors and interoperability |
-| Participant E2EE | Dormant unsafe transform helper, absent active media hooks | Reviewed frame protocol, sender keys/nonces, epochs, replay checks, fail-closed clients |
+| PQC | Bundled ML-KEM-1024 and ML-DSA-87 implementations with SP 800-108 Rev. 1 Counter/HMAC-SHA-256 KDF; no classical fallback | Independent implementation review, validation vectors/interoperability, and suitable validated crypto module |
+| Participant E2EE | Optional host-required browser sender/receiver transforms, fail-closed, custom frame format, key rotation and replay checks | Independent protocol review, authenticated peer-key verification, supported-browser/two-device testing, and FIPS 140 validation if making that claim |
 | Stored recordings | Currently disabled safely | Auth/ownership, upload/commit states, private S3 and DB metadata, library/delete/retention |
 | MCU | State/control scaffold | Actual media mixing/gateway engine and independently verified interoperability |
 
@@ -74,11 +74,24 @@ Choose explicit modes in implementation:
    inference feasibility is not yet measured.
 
 PQC does not itself provide captions, anonymization, permissions or protection from
-an authorized recipient. NIST FIPS203 specifies ML-KEM; FIPS204 specifies ML-DSA.
-Old Kyber/Dilithium names do not establish final-standard conformance. Do not wire
-in current e2ee.ts unchanged: shared-key nonce reuse, async counter races, epoch
-rollover and missing-key pass-through must be replaced/reviewed first. Do not use
-the unconditional E2EE badge or nistCompliant flag as verification evidence.
+an authorized recipient. The browser mode now has an active transform path and no
+classical fallback. Its custom frame protocol is not RFC 9605 SFrame. Key identities
+are distributed by signaling and self-signatures do not independently bind them to
+the displayed people. Tests cover key exchange, envelope integrity, meeting binding,
+same-epoch rekey invalidation and SP 800-108 KDF formatting, but not a full browser
+media session. NIST algorithm names are not a claim of NIST product compliance or
+FIPS 140 validation. Do not use a green badge or `nistCompliant` as verification
+evidence. The mode is a limited preview until an independent cryptographic review,
+identity-verification design and physical two-device validation are complete.
+
+NIST SP 800-227 recommends that KEM use rely on an approved implementation in a
+validated cryptographic module, protect the key-establishment channel, establish
+ownership of static encapsulation keys, destroy secrets when no longer needed, and
+use key confirmation where appropriate. The code uses a context-bound SP 800-108
+Rev. 1 Counter/HMAC-SHA-256 derivation and authenticated encryption, but the current
+signaling-distributed client keys and unvalidated JavaScript module do not satisfy
+the complete deployment/validation expectations. Do not claim full SP 800-227
+conformance.
 
 ## Build order and dependencies
 
@@ -97,9 +110,10 @@ the unconditional E2EE badge or nistCompliant flag as verification evidence.
    stale requests/queued speech after language switch, stop, leave or interruption.
 6. Restore stored recording with authenticated host policy, all-participant notice,
    S3 object storage, DB metadata, upload recovery and authorized library actions.
-7. Implement and independently review crypto protocol before enabling protected
-   media claims. Test simultaneous senders, malformed/replayed frames, joins/leaves,
-   epoch rollover, unsupported browser refusal and missing-key refusal.
+7. Independently review the optional crypto protocol and add authenticated peer-key
+   verification before expanding its release claims. Test simultaneous senders,
+   malformed/replayed frames, joins/leaves, epoch rollover, unsupported browser
+   refusal and missing-key refusal in actual supported browsers.
 8. Verify Hindi→English and English→Hindi on two physical devices. Measure speech-end
    to caption/audio latency; test accents, overlap, silence, names, numbers, mute,
    tab switches, language changes, reconnect and provider outage. No untested
@@ -132,3 +146,5 @@ account/billing changes or cryptographic validation performed in this review.
 - https://docs.cloud.google.com/translate/docs/setup
 - https://csrc.nist.gov/pubs/fips/203/final
 - https://csrc.nist.gov/pubs/fips/204/final
+- https://csrc.nist.gov/pubs/sp/800/227/final
+- https://csrc.nist.gov/pubs/ir/8547/final

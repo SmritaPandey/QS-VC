@@ -18,8 +18,9 @@ import { sfuClient } from '../sfu-client.js';
 import meetingInvitation from '../../../../shared/meeting-invitation.cjs';
 
 const socket = () => ({ readyState: 1, send: vi.fn(), close: vi.fn() });
+// Test browsers support encrypted media unless a test says otherwise (end-to-end encryption is on by default).
 const rpc = (ws: any, state: any, method: string, params: any = {}) =>
-    handleRpcMessage(ws, { jsonrpc: '2.0', id: 1, method, params }, state);
+    handleRpcMessage(ws, { jsonrpc: '2.0', id: 1, method, params: method === 'joinRoom' ? { supportsE2EE: true, ...params } : params }, state);
 
 describe('production meeting permissions', () => {
     it('notifies queued guests when the host ends the meeting', async () => {

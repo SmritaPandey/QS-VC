@@ -1,6 +1,6 @@
-# QS-VC: Quantum-Safe Video Conferencing Platform
+# QS-VC: Quantum-Safe Video Conferencing
 
-> Enterprise-grade video conferencing with quantum-safe cryptography, AI-powered features, and multi-tenant SaaS architecture.
+> Quantum-safe, end-to-end encrypted video meetings built on NIST-standardized post-quantum cryptography: ML-KEM-1024 (NIST FIPS 203) key exchange, ML-DSA-87 (NIST FIPS 204) signed key distribution and AES-256-GCM per-frame media encryption, on by default in Chrome, Edge, Safari and Firefox. The media server forwards packets it cannot decrypt; keys rotate whenever someone leaves, and every participant can compare a meeting security code.
 
 ---
 
@@ -36,7 +36,7 @@
 | **Database** | PostgreSQL 16 + Redis 7 |
 | **Storage** | MinIO (S3-compatible) |
 | **TURN/STUN** | coturn |
-| **Reverse Proxy** | Nginx (TLS 1.2/1.3) |
+| **Reverse Proxy** | Caddy (managed internal TLS for intranet; automatic public certificates for AWS) |
 | **CI/CD** | GitHub Actions |
 | **Containerization** | Docker Compose |
 
@@ -106,9 +106,13 @@ Visit **http://localhost:5173**
 # Development
 docker compose up
 
-# Production (requires SSL certs in ./certs/)
+# Production intranet (Caddy issues a private internal CA certificate)
 docker compose -f docker-compose.prod.yml up -d
 ```
+
+For a Linux intranet deployment, use the [production intranet runbook](docs/PRODUCTION_INTRANET.md).
+The production Compose profile is a single-signaling-instance deployment; the
+local `start-intranet.js` launcher remains a development tool.
 
 ## Testing
 

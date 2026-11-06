@@ -34,17 +34,17 @@ const T=8;
 // SLIDE 1: TITLE
 {const s=pptx.addSlide();bg(s);sn(s,1,T);
 s.addImage({data:logoData,x:5.9,y:0.6,w:1.1,h:1.1,rounding:true});
-s.addText([{text:'Quantum-Safe\n',options:{fontSize:44,bold:true,color:W}},{text:'Video Conferencing',options:{fontSize:44,bold:true,color:ACC}}],{x:1.5,y:2.0,w:10,h:2,align:'center',fontFace:'Segoe UI'});
-s.addText('Secure HD/4K video calls with NIST-approved post-quantum\ncryptography, real-time AI captions & translation.',{x:2,y:4.0,w:9,h:0.8,align:'center',fontSize:14,color:M,fontFace:'Segoe UI'});
-[['PQC L5','NIST Security Level'],['10K+','Participants/Call'],['99+','Languages STT'],['99.995%','Uptime SLA']].forEach(([v,l],i)=>{const sx=2.2+i*2.4;s.addText(v,{x:sx,y:5.1,w:2,fontSize:26,bold:true,color:ACC,fontFace:'Segoe UI',align:'center'});s.addText(l,{x:sx,y:5.7,w:2,fontSize:9,color:M,fontFace:'Segoe UI',align:'center'})});
-['E2E Encrypted','Zero-Knowledge SFU','AI Captions','Air-Gap Ready','HSM Keys'].forEach((b,i)=>badge(s,1.5+i*2.2,6.3,b,2.0))}
+s.addText([{text:'QS-VC\n',options:{fontSize:44,bold:true,color:W}},{text:'Video Conferencing',options:{fontSize:44,bold:true,color:ACC}}],{x:1.5,y:2.0,w:10,h:2,align:'center',fontFace:'Segoe UI'});
+s.addText('End-to-end encrypted meetings secured with NIST-standardized\npost-quantum cryptography (ML-KEM-1024 · ML-DSA-87).',{x:2,y:4.0,w:9,h:0.8,align:'center',fontSize:14,color:M,fontFace:'Segoe UI'});
+[['E2EE','On by default'],['FIPS 203','ML-KEM-1024'],['FIPS 204','ML-DSA-87'],['AES-256','GCM media']].forEach(([v,l],i)=>{const sx=2.2+i*2.4;s.addText(v,{x:sx,y:5.1,w:2,fontSize:22,bold:true,color:ACC,fontFace:'Segoe UI',align:'center'});s.addText(l,{x:sx,y:5.7,w:2,fontSize:9,color:M,fontFace:'Segoe UI',align:'center'})});
+['Quantum-Safe','NIST PQC Level 5','End-to-End Encrypted','Key Rotation on Leave','Security Code'].forEach((b,i)=>badge(s,1.5+i*2.2,6.3,b,2.0))}
 
 // SLIDE 2: QUANTUM THREAT
 {const s=pptx.addSlide();bg(s);logo(s);div(s);sn(s,2,T);
-s.addText('The Quantum Threat to Video Calls',{x:0.4,y:1.15,w:10,fontSize:30,bold:true,color:W,fontFace:'Segoe UI'});
-s.addText('Adversaries harvest encrypted call traffic today, waiting for quantum computers to break it.',{x:0.4,y:1.85,w:9,fontSize:13,color:M,fontFace:'Segoe UI'});
-card(s,0.4,2.6,5.8,3.8,"The Risk",['RSA-2048 & ECC vulnerable to Shor\'s algorithm','Quantum computers expected by 2030','Nation-states harvesting encrypted call traffic','Video calls contain the most sensitive discussions','Once broken, all recorded calls exposed forever'],'EF5350');
-card(s,6.6,2.6,6.2,3.8,'QS-VC Solution',['Hybrid Kyber-1024 + X25519 for every call','Dilithium-5 + Ed25519 for all signaling','E2EE media — SFU never sees plaintext','Crypto-agility: dual-layer protection','60-second media key rotation'],ACC)}
+s.addText('Quantum-Safe End-to-End Encryption',{x:0.4,y:1.15,w:10,fontSize:30,bold:true,color:W,fontFace:'Segoe UI'});
+s.addText('Every meeting is encrypted on each device; the media server forwards frames it cannot read.',{x:0.4,y:1.85,w:9,fontSize:13,color:M,fontFace:'Segoe UI'});
+card(s,0.4,2.6,5.8,3.8,'How it works',['Audio, video and screen share encrypted on-device','ML-KEM-1024 (FIPS 203) key exchange','ML-DSA-87 (FIPS 204) signed key distribution','AES-256-GCM per-frame encryption','Chrome, Edge, Safari and Firefox'],'1565C0');
+card(s,6.6,2.6,6.2,3.8,'Why it matters',['Defeats harvest-now, decrypt-later attacks','Servers cannot decrypt meeting media','New key whenever someone leaves','Replay-protected, 60-second key epochs','Security code lets everyone verify the keys'],ACC)}
 
 // SLIDE 3: VC FEATURES
 {const s=pptx.addSlide();bg(s);logo(s);div(s);sn(s,3,T);
@@ -64,9 +64,9 @@ s.addText('Post-Meeting AI (Async)',{x:0.4,y:3.9,w:6,fontSize:14,bold:true,color
 // SLIDE 5: SECURITY
 {const s=pptx.addSlide();bg(s);logo(s);div(s);sn(s,5,T);
 s.addText('Quantum-Safe Security Architecture',{x:0.4,y:1.15,w:10,fontSize:30,bold:true,color:W,fontFace:'Segoe UI'});
-s.addText('Every layer of the media pipeline is protected with PQC.',{x:0.4,y:1.85,w:9,fontSize:13,color:M,fontFace:'Segoe UI'});
-[['Signaling (Quantum-TLS)','Kyber-1024+X25519, Dilithium-5+Ed25519, TLS 1.3+PQC'],['Media E2EE','SFrame via Insertable Streams, per-participant Kyber keys, AES-256-GCM'],['Key Management','HSM-backed (Shamir 5-of-8), 60s media key rotation, hourly TURN rotation'],['Recording Encryption','Kyber-wrapped DEK, encrypted MinIO/S3, tamper-proof metadata'],['Audit Trail','Merkle-tree hash chains, Dilithium-signed entries, configurable retention']].forEach(([t,d],i)=>{const ly=2.4+i*0.95;s.addShape(pptx.ShapeType.roundRect,{x:0.4,y:ly,w:12.4,h:0.8,rectRadius:0.08,fill:{color:CD},line:{color:'1A3A5C',width:1}});s.addShape(pptx.ShapeType.ellipse,{x:0.6,y:ly+0.14,w:0.48,h:0.48,fill:{color:ACC2}});s.addText(''+(i+1),{x:0.6,y:ly+0.14,w:0.48,h:0.48,fontSize:14,bold:true,color:W,fontFace:'Segoe UI',align:'center',valign:'middle'});s.addText(t,{x:1.3,y:ly+0.08,w:5,fontSize:13,bold:true,color:W,fontFace:'Segoe UI'});s.addText(d,{x:1.3,y:ly+0.38,w:11,fontSize:10.5,color:M,fontFace:'Segoe UI'})});
-['NIST PQC Level 5','HSM-Backed','60s Key Rotation','Zero-Knowledge SFU'].forEach((b,i)=>badge(s,1.5+i*2.8,7.0,b,2.4))}
+s.addText('Algorithm names refer to standardized algorithms; implementation and protocol review remain open.',{x:0.4,y:1.85,w:11,fontSize:13,color:M,fontFace:'Segoe UI'});
+[['Post-quantum key exchange','ML-KEM-1024 (NIST FIPS 203, category 5); no classical fallback'],['Post-quantum signatures','ML-DSA-87 (NIST FIPS 204) on every identity and key envelope'],['Key derivation','SP 800-108 Rev. 1 Counter/HMAC-SHA-256 bound to meeting, sender and key epoch'],['Media frames','AES-256-GCM end-to-end, on by default; servers forward ciphertext only'],['Verification','Meeting security code from all identity keys; key rotated when anyone leaves']].forEach(([t,d],i)=>{const ly=2.4+i*0.95;s.addShape(pptx.ShapeType.roundRect,{x:0.4,y:ly,w:12.4,h:0.8,rectRadius:0.08,fill:{color:CD},line:{color:'1A3A5C',width:1}});s.addShape(pptx.ShapeType.ellipse,{x:0.6,y:ly+0.14,w:0.48,h:0.48,fill:{color:ACC2}});s.addText(''+(i+1),{x:0.6,y:ly+0.14,w:0.48,h:0.48,fontSize:14,bold:true,color:W,fontFace:'Segoe UI',align:'center',valign:'middle'});s.addText(t,{x:1.3,y:ly+0.08,w:5,fontSize:13,bold:true,color:W,fontFace:'Segoe UI'});s.addText(d,{x:1.3,y:ly+0.38,w:11,fontSize:10.5,color:M,fontFace:'Segoe UI'})});
+['NIST FIPS 203','NIST FIPS 204','End-to-End Encrypted','Server Cannot Decrypt'].forEach((b,i)=>badge(s,1.0+i*3.0,7.0,b,2.7))}
 
 // SLIDE 6: DEPLOYMENT + SCALE
 {const s=pptx.addSlide();bg(s);logo(s);div(s);sn(s,6,T);
@@ -81,15 +81,15 @@ card(s,8.8,1.9,3.9,3.0,'Hybrid',['Edge media+cloud control','Media stays local',
 {const s=pptx.addSlide();bg(s);logo(s);div(s);sn(s,7,T);
 s.addText('Choose Your Plan',{x:0.4,y:1.15,w:10,fontSize:30,bold:true,color:W,fontFace:'Segoe UI'});
 [['Business','SaaS | Per-user/month',['Up to 300 participants','HD 1080p video & audio','Screen sharing & recording','AI captions (English)','Basic noise suppression','SSO (SAML 2.0 / OIDC)','Email support']],
-['Enterprise','SaaS/Hybrid | Custom',['Up to 10,000 participants','4K video + live streaming','99+ language STT & translation','Quantum-safe E2EE (PQC)','Summarization & actions','SIP/H.323 gateway','24/7 support + CSM']],
+['Enterprise','SaaS/Hybrid | Custom',['Participant limits subject to deployment testing','Media options depend on configuration','Languages depend on configured providers','Post-quantum end-to-end encryption','Other capabilities require verification','Contact team for enterprise requirements']],
 ['Sovereign','On-Premise | Perpetual+AMC',['Air-gapped deployment','HSM key management','All AI (local GPU)','Full data sovereignty','Custom branding','LDAP/Active Directory','On-site deployment']]
 ].forEach(([t,sub,items],i)=>{const px=0.4+i*4.2,f=i===1;s.addShape(pptx.ShapeType.roundRect,{x:px,y:2.2,w:3.9,h:4.6,rectRadius:0.1,fill:{color:CD},line:{color:f?ACC:'1A3A5C',width:f?2:1}});s.addText(t,{x:px,y:2.3,w:3.9,fontSize:17,bold:true,color:W,fontFace:'Segoe UI',align:'center'});s.addText(sub,{x:px,y:2.7,w:3.9,fontSize:10,bold:true,color:ACC,fontFace:'Segoe UI',align:'center'});const bullets=items.map(txt=>({text:txt,options:{bullet:true,fontSize:10.5,color:M,fontFace:'Segoe UI',paraSpaceBefore:3}}));s.addText(bullets,{x:px+0.3,y:3.2,w:3.3,h:3.4,valign:'top'})})}
 
 // SLIDE 8: CTA
 {const s=pptx.addSlide();bg(s);logo(s);sn(s,8,T);
 s.addImage({data:logoData,x:5.9,y:1.2,w:0.9,h:0.9,rounding:true});
-s.addText([{text:'Secure Calls Today.\n',options:{fontSize:38,bold:true,color:W}},{text:'Quantum-Safe Tomorrow.',options:{fontSize:38,bold:true,color:ACC}}],{x:2,y:2.3,w:9,h:1.5,align:'center',fontFace:'Segoe UI'});
-s.addText('Schedule a demo and experience quantum-safe video\nconferencing — HD/4K with post-quantum encryption.',{x:2.5,y:3.9,w:8,fontSize:13,color:M,fontFace:'Segoe UI',align:'center'});
+s.addText([{text:'Meet securely today.\n',options:{fontSize:38,bold:true,color:W}},{text:'Stay quantum-safe.',options:{fontSize:38,bold:true,color:ACC}}],{x:2,y:2.3,w:9,h:1.5,align:'center',fontFace:'Segoe UI'});
+s.addText('Request a walkthrough of quantum-safe,\nend-to-end encrypted meetings.',{x:2.5,y:3.9,w:8,fontSize:13,color:M,fontFace:'Segoe UI',align:'center'});
 s.addShape(pptx.ShapeType.roundRect,{x:3.5,y:4.9,w:6,h:1.8,rectRadius:0.15,fill:{color:CD},line:{color:'1A3A5C',width:1}});
 s.addText('Get Started',{x:3.5,y:5.0,w:6,fontSize:18,bold:true,color:W,fontFace:'Segoe UI',align:'center'});
 ['www.qsvc.io','sales@qsvc.io','+91-XXXX-XXXXXX','Bengaluru, India'].forEach((c,i)=>s.addText(c,{x:3.5,y:5.45+i*0.28,w:6,fontSize:12,color:ACC,fontFace:'Segoe UI',align:'center'}));

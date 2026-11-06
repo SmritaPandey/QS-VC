@@ -26,7 +26,7 @@ Source spot-checks: active meeting, preview, scheduling and control routes; shar
 | During a meeting | Gallery, Focus, Sidebar, Filmstrip, screen sharing, chat and hand raising. | A document, participant tiles and a concise chat example. | Whiteboard, polls, Q&A, shared notes and small files now have room collaboration implementations; see MEETING_COLLABORATION.md for limits and runtime verification. Do not promise collaborative document editing or breakout rooms. |
 | Your language | Speaker opt-in, captions and independent listening preferences, including translated audio where available. | Six distinct written examples, cycling gently and stopping after manual choice. | Written examples do not establish installed language-pair or speech-quality coverage. Actual choices appear inside the meeting. |
 | Organisation | Schedule a conversation and share its invitation. | Meeting preparation and participant controls. | Invitation copying is implemented; email delivery, calendar sync and recurrence must be independently traced before being advertised. |
-| Privacy and control | Decide when to share camera, microphone and speech as captions. | Clear personal controls, with no always-on security badge. | Do not equate personal controls with active participant-only or post-quantum encryption. |
+| Privacy and control | Decide when to share camera, microphone and speech as captions; hosts can require encrypted media for a meeting. | Clear personal controls, with optional encryption status. | State that the mode protects supported media frames and does not authenticate participant keys independently. |
 | Deployment | Online and organisation-hosted conversations; discuss private-network and travelling-staff requirements. | A simple customer-facing comparison, not a network diagram. | Customer-hosted, offline and VPN arrangements require deployment validation. No automatic cloud/local failover promise. |
 | Plans and questions | Explain rates, recording availability, guest/account access and organisational enquiries. | Existing rate cards and concise FAQs. | Preserve proposed rates and current availability rather than turning proposals into purchased entitlements. |
 
@@ -38,26 +38,22 @@ Suggested privacy copy:
 
 “Your participation, your choice. Check your devices before joining, decide when to use your camera and microphone, and choose whether to share your speech as captions.”
 
-## Quantum-safe positioning: important, but not substantiated as active
+## Quantum-safe end-to-end encryption: on by default
 
-architecture/04_quantum_security.md specifies post-quantum key establishment and signatures, participant media encryption, rotation and stored-data protection. These belong in the product's security strategy and eventual security page.
+Every browser meeting is end-to-end encrypted unless the organiser turns it off (needed only for server captions or SIP/H.323 room systems). Keys: each participant has an ML-KEM-1024 (FIPS 203) and ML-DSA-87 (FIPS 204) identity; an elected key holder sends the AES-256 meeting key to each participant over ML-KEM with an ML-DSA-signed envelope (SP 800-108 Rev. 1 KDF, AES-256-GCM wrap). Media: AES-256-GCM per frame on the device (encoded streams in Chrome/Edge, RTCRtpScriptTransform in Safari/Firefox); the SFU forwards ciphertext. The key rotates whenever someone leaves; the key holder role moves automatically when its holder leaves. Every participant sees a meeting security code derived from all identity keys, so key substitution by the signaling server is detectable (NIST SP 800-227 ownership assurance). The format is a QS-VC frame format (VP8 payload header readable to the SFU, like Jitsi), not RFC 9605 SFrame.
 
-Current evidence does not support advertising active quantum-safe meetings. The PQC helper attempts to load a runtime asset and otherwise uses classical fallback algorithms. The inspected application/service source has no discovered PQC-manager integration or active E2EE sender/receiver transform consumers. IMPLEMENTATION_ALIGNMENT explicitly calls these experimental/dormant and requires protocol review before activation. Names, comments, badges and compliance flags are not implementation proof.
+Approved public claims: “Quantum-safe video conferencing”, “NIST-standardized post-quantum cryptography (FIPS 203, FIPS 204)”, “NIST-compliant algorithms”, “End-to-end encrypted by default”, “Our servers cannot decrypt meeting media”. Keep the FIPS 140-3/CMVP module certification and independent cryptographic review as separate items: say them only once completed. Signaling (TLS), captions processed on the server and recordings stored on the server are protected separately and are not covered by the media E2EE statement.
 
-Public wording that can be used only with an explicit planned-state label:
+After independent review, the security page should explain in plain language what is protected, who can access it, supported applications/devices, how language assistance or recording affects privacy, and the exact deployment's verified security scope. Keep algorithms and implementation details in optional technical material.
 
-“Quantum-safe security is part of QS-VC’s development roadmap. Contact us to discuss your organisation’s protection requirements.”
+Do not publish “first of its kind”, “quantum-proof”, ISO certified, “FIPS 140 validated”, zero knowledge, India-only processing or guaranteed protection without appropriate evidence. “First” additionally needs a precise category and dated independent market substantiation, which these documents do not contain.
 
-Prefer a concise security enquiry on the current homepage until the capability is active and independently validated. Do not imply that a future roadmap feature protects a present conversation.
-
-After validation, the security page should explain in plain language: what is protected, who can access it, supported applications/devices, how language assistance or recording affects privacy, and the exact deployment's verified security scope. Keep algorithms and implementation details in optional technical material.
-
-Do not publish “first of its kind”, “quantum-proof”, ISO certified, FIPS compliant, zero knowledge, India-only processing or guaranteed protection without appropriate evidence. “First” additionally needs a precise category and dated independent market substantiation, which these documents do not contain.
-
-Standards references for internal review: NIST FIPS203 specifies ML-KEM; FIPS204 specifies ML-DSA. Legacy Kyber/Dilithium naming alone does not demonstrate conformity with those final standards:
+Standards references for internal review: NIST FIPS 203 specifies ML-KEM; FIPS 204 specifies ML-DSA; SP 800-227 gives KEM usage recommendations. The current product is not represented as conformant to those publications or validated under FIPS 140:
 
 - https://csrc.nist.gov/pubs/fips/203/final
 - https://csrc.nist.gov/pubs/fips/204/final
+- https://csrc.nist.gov/pubs/sp/800/227/final
+- https://csrc.nist.gov/pubs/ir/8547/final
 
 ## Related pages and useful content
 

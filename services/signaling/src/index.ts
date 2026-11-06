@@ -2,17 +2,14 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import http from 'http';
-import { randomInt } from 'node:crypto';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { roomManager } from './room-manager.js';
 import { attachSignalingWebSocket, InvalidAuthentication, verifySession } from './ws-attach.js';
 import { createWebSocketTicket } from './ws-tickets.js';
-import meetingInvitation from '../../../shared/meeting-invitation.cjs';
 
-const { createMeetingInviteToken } = meetingInvitation;
-
-const WEB_URL = (process.env.WEB_URL || 'https://qs-vc.vercel.app').replace(/\/$/, '');
+const AUTH_INTERNAL_URL = (process.env.AUTH_INTERNAL_URL || 'http://localhost:4002').replace(/\/$/, '');
+const MEETING_INTERNAL_URL = (process.env.MEETING_INTERNAL_URL || 'http://localhost:4003').replace(/\/$/, '');
 
 const app = express();
 app.set('trust proxy', 1);  // Trust first proxy (Cloudflare tunnel)
@@ -53,16 +50,34 @@ app.get('/health', (_req, res) => {
     });
 });
 
-// Generate a simple meeting code
-app.post('/api/meetings/create', (_req, res) => {
-    const code = generateMeetingCode();
-    const inviteToken = createMeetingInviteToken(code);
-    res.json({ meetingCode: code, inviteToken, joinUrl: `${WEB_URL}/meeting/${code}/preview?invite=${encodeURIComponent(inviteToken)}` });
+// Keep the legacy fallback URL, but route creation through the meeting service so every
+// returned code is persisted and protected by PostgreSQL's unique meeting_code constraint.
+app.post('/api/meetings/create', async (_req, res) => {
+    try {
+        const response = await fetch(`${MEETING_INTERNAL_URL}/api/meetings/create`, { method: 'POST', signal: AbortSignal.timeout(5000) });
+        const body = await response.json().catch(() => ({ error: 'Meeting service returned an invalid response.' }));
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(response.status).json(body);
+    } catch (error) {
+        logger.warn({ error }, 'Could not create meeting through meeting service');
+        return res.status(503).json({ error: 'Meeting creation is temporarily unavailable.' });
+    }
 });
 
-// Return ICE servers (STUN + TURN) for WebRTC NAT traversal
-app.get('/api/ice-servers', (_req, res) => {
-    res.json({ iceServers: config.iceServers });
+// Return STUN and short-lived TURN credentials from Auth. TURN's shared secret
+// stays server-side and is never included in the client response.
+app.get('/api/ice-servers', async (_req, res) => {
+    try {
+        const response = await fetch(`${AUTH_INTERNAL_URL}/api/auth/turn-credentials`, { signal: AbortSignal.timeout(3000) });
+        if (!response.ok) throw new Error(`Auth returned ${response.status}`);
+        const body = await response.json() as { iceServers?: { urls: string | string[]; username?: string; credential?: string }[]; ttl?: number };
+        if (!Array.isArray(body.iceServers) || !body.iceServers.length) throw new Error('Auth returned no ICE servers');
+        res.setHeader('Cache-Control', 'no-store');
+        return res.json({ iceServers: body.iceServers, ttl: body.ttl });
+    } catch (error) {
+        logger.warn({ error }, 'ICE server credentials are temporarily unavailable');
+        return res.status(503).json({ error: 'ICE server configuration is temporarily unavailable.' });
+    }
 });
 
 // Exchange a verified login session for a 30-second, single-use WebSocket ticket. The
@@ -86,30 +101,22 @@ app.post('/api/signaling-ticket', rateLimit({ windowMs: 15 * 60 * 1000, max: 30,
     }
 });
 
-// Schedule or create a meeting (handles the meeting-service API contract)
-app.post('/api/meetings', express.json(), (req, res) => {
-    const code = generateMeetingCode();
-    const { title, type, scheduledStart, scheduledEnd, settings } = req.body || {};
-    const inviteToken = createMeetingInviteToken(code);
-
-    // Store in-memory for the session (production would persist to DB)
-    const meeting = {
-        id: `mtg-${Date.now()}`,
-        meetingCode: code,
-        code,
-        title: title || 'Meeting',
-        type: type || 'instant',
-        scheduledStart: scheduledStart || null,
-        scheduledEnd: scheduledEnd || null,
-        settings: settings || {},
-        status: type === 'scheduled' ? 'waiting' : 'active',
-        createdAt: new Date().toISOString(),
-        inviteToken,
-        joinUrl: `${WEB_URL}/meeting/${code}/preview?invite=${encodeURIComponent(inviteToken)}`,
-    };
-
-    logger.info(`Meeting created: ${code} (${meeting.type})`);
-    res.json(meeting);
+// Preserve the previous meeting-service URL for clients, without creating unpersisted rooms.
+app.post('/api/meetings', async (req, res) => {
+    try {
+        const response = await fetch(`${MEETING_INTERNAL_URL}/api/meetings`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(req.headers.authorization ? { Authorization: req.headers.authorization } : {}) },
+            body: JSON.stringify(req.body || {}),
+            signal: AbortSignal.timeout(5000),
+        });
+        const body = await response.json().catch(() => ({ error: 'Meeting service returned an invalid response.' }));
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(response.status).json(body);
+    } catch (error) {
+        logger.warn({ error }, 'Could not create meeting through meeting service');
+        return res.status(503).json({ error: 'Meeting creation is temporarily unavailable.' });
+    }
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -122,19 +129,6 @@ const wss = attachSignalingWebSocket(server);
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // HELPERS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-function generateMeetingCode(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    const segments = [];
-    for (let s = 0; s < 3; s++) {
-        let seg = '';
-        for (let i = 0; i < 4; i++) {
-            seg += chars[randomInt(chars.length)];
-        }
-        segments.push(seg);
-    }
-    return `QS-${segments.join('-')}`;
-}
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GLOBAL ERROR HANDLING (prevent crashes)

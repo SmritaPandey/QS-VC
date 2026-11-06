@@ -74,7 +74,7 @@ const ScheduleMeeting: React.FC = () => {
         meetingKind: schedulingKind,
         repeat: 'none',
         repeatCount: 2,
-        enableE2EE: false,
+        enableE2EE: true,
         enableRecording: true,
         maxParticipants: 100,
         password: '',
@@ -109,7 +109,7 @@ const ScheduleMeeting: React.FC = () => {
                         meetingKind: form.meetingKind,
                         waitingRoom: true,
                         webinar: form.meetingKind === 'town_hall',
-                        e2eeRequired: false,
+                        e2eeRequired: form.enableE2EE,
                         recordingAllowed: false,
                         chatEnabled: true,
                         screenShareEnabled: true,
@@ -390,11 +390,10 @@ const ScheduleMeeting: React.FC = () => {
                             <label className="toggle-label">
                                 <input
                                     type="checkbox"
-                                    checked={false}
-                                    disabled
+                                    checked={form.enableE2EE}
                                     onChange={e => updateField('enableE2EE', e.target.checked)}
                                 />
-                                <span className="toggle-text">End-to-end encryption unavailable in demo</span>
+                                <span className="toggle-text">Post-quantum end-to-end encryption (ML-KEM-1024 / ML-DSA-87)</span>
                             </label>
                             <label className="toggle-label">
                                 <input

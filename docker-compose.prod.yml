@@ -1,6 +1,6 @@
 # QS-VC Production Docker Compose
 # Usage: docker compose -f docker-compose.prod.yml up -d
-# Requires: SSL certificates in ./certs/ (fullchain.pem, privkey.pem)
+# Caddy provisions internal TLS certificates for intranet deployments.
 
 version: "3.9"
 
@@ -9,15 +9,24 @@ services:
   # REVERSE PROXY (TLS Termination)
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-  nginx:
-    image: nginx:alpine
-    container_name: qsvc-nginx
+  caddy:
+    image: caddy:2-alpine
+    container_name: qsvc-caddy
     ports:
       - "443:443"
       - "80:80"
     volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./certs:/etc/nginx/certs:ro
+      - ./config/Caddyfile.template:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      QSVC_DOMAIN: ${DOMAIN:-meet.internal}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
     depends_on:
       - web
       - signaling
@@ -34,9 +43,9 @@ services:
     image: postgres:16-alpine
     container_name: qsvc-postgres
     environment:
-      POSTGRES_DB: ${POSTGRES_DB}
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Set a database administration role}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set the database administration password}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/migrations:/docker-entrypoint-initdb.d
@@ -50,7 +59,7 @@ services:
   redis:
     image: redis:7-alpine
     container_name: qsvc-redis
-    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:?Set a unique REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     healthcheck:
@@ -77,10 +86,10 @@ services:
     restart: always
 
   coturn:
-    image: coturn/coturn:latest
+    image: coturn/coturn:4.6.3
     container_name: qsvc-coturn
     command: >
-      -n --lt-cred-mech --use-auth-secret --static-auth-secret=${TURN_SECRET} --realm=${DOMAIN} --listening-port=3478 --min-port=49152 --max-port=49200 --log-file=stdout
+      -n --lt-cred-mech --use-auth-secret --static-auth-secret=${TURN_SECRET:?Set a unique shared TURN_SECRET} --realm=${DOMAIN} --listening-port=3478 --min-port=49152 --max-port=49200 --log-file=stdout
     ports:
       - "3478:3478"
       - "3478:3478/udp"
@@ -92,6 +101,7 @@ services:
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   sfu:
+    image: qsvc-sfu:intranet
     build:
       context: ./services/sfu
       dockerfile: Dockerfile
@@ -102,7 +112,7 @@ services:
       - SFU_CONTROL_TOKEN=${SFU_CONTROL_TOKEN:?Set a shared SFU control token}
       - NODE_ENV=production
       - SFU_PORT=4000
-      - SFU_ANNOUNCED_IP=${SFU_ANNOUNCED_IP}
+      - SFU_ANNOUNCED_IP=${SFU_ANNOUNCED_IP:?Set the SFU address reachable by meeting clients}
       - SFU_MIN_PORT=40000
       - SFU_MAX_PORT=40100
       - SFU_NUM_WORKERS=4
@@ -114,13 +124,14 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: [ "CMD", "wget", "--spider", "-q", "http://localhost:4000/health" ]
+      test: [ "CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" ]
       interval: 30s
       timeout: 5s
       retries: 3
     restart: always
 
   signaling:
+    image: qsvc-signaling:intranet
     build:
       context: .
       dockerfile: services/signaling/Dockerfile
@@ -130,11 +141,13 @@ services:
       - SFU_CONTROL_TOKEN=${SFU_CONTROL_TOKEN:?Set a shared SFU control token}
       - NODE_ENV=production
       - SIGNALING_PORT=4001
+      - WS_TRUST_PROXY_HEADER=x-qsvc-client-ip
       - SFU_INTERNAL_URL=http://sfu:4000
+      - AUTH_INTERNAL_URL=http://auth:4002
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - JWT_SECRET=${JWT_SECRET}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:?Set a unique REDIS_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET:?Set a random JWT_SECRET}
       - CORS_ORIGINS=https://${DOMAIN}
       - LIBRETRANSLATE_URL=${LIBRETRANSLATE_URL:-}
       - LIBRETRANSLATE_API_KEY=${LIBRETRANSLATE_API_KEY:-}
@@ -157,6 +170,7 @@ services:
     restart: always
 
   auth:
+    image: qsvc-auth:intranet
     build:
       context: .
       dockerfile: services/auth/Dockerfile
@@ -169,10 +183,10 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${AUTH_DB_USER:-qs_auth_app}
       - POSTGRES_PASSWORD=${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD for the restricted auth database role}
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=${JWT_SECRET:?Set a random JWT_SECRET}
       - JWT_EXPIRY=24h
-      - TURN_SECRET=${TURN_SECRET}
-      - TURN_SERVERS=turn:coturn:3478
+      - TURN_SECRET=${TURN_SECRET:?Set a unique shared TURN_SECRET}
+      - TURN_SERVERS=turn:${DOMAIN}:3478?transport=udp,turn:${DOMAIN}:3478?transport=tcp
       - CORS_ORIGINS=https://${DOMAIN}
     depends_on:
       postgres:
@@ -185,6 +199,7 @@ services:
     restart: always
 
   meeting:
+    image: qsvc-meeting:intranet
     build:
       context: .
       dockerfile: services/meeting/Dockerfile
@@ -196,7 +211,7 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${MEETING_DB_USER:-qs_meeting_app}
       - POSTGRES_PASSWORD=${MEETING_DB_PASSWORD:?Set MEETING_DB_PASSWORD for the restricted meeting database role}
-      - JWT_SECRET=${JWT_SECRET}
+      - JWT_SECRET=${JWT_SECRET:?Set a random JWT_SECRET}
       - WEB_URL=https://${DOMAIN}
       - CORS_ORIGINS=https://${DOMAIN}
     depends_on:
@@ -210,9 +225,10 @@ services:
     restart: always
 
   recording:
+    image: qsvc-recording:intranet
     build:
-      context: ./services/recording
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/recording/Dockerfile
     container_name: qsvc-recording
     environment:
       - NODE_ENV=production
@@ -234,9 +250,10 @@ services:
     restart: always
 
   web:
+    image: qsvc-web:intranet
     build:
-      context: ./frontend/web
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: frontend/web/Dockerfile
     container_name: qsvc-web
     environment:
       - VITE_SIGNALING_URL=wss://${DOMAIN}/ws
@@ -286,6 +303,8 @@ services:
     # deploy: { resources: { reservations: { devices: [ { driver: nvidia, count: 1, capabilities: [gpu] } ] } } }
 
 volumes:
+  caddy_data:
+  caddy_config:
   asr_models:
   mt_models:
   postgres_data:

@@ -23,6 +23,9 @@ import { FEATURE_MIN_PLAN, getEntitlements, getPrivateConversationLimitMs } from
 dotenv.config({ path: '../../.env' });
 assertJwtSecret();
 assertPlatformAdminConfig();
+if (process.env.NODE_ENV === 'production' && (!process.env.TURN_SECRET || process.env.TURN_SECRET === 'dev-turn-secret')) {
+    throw new Error('Production TURN_SECRET must be set to a unique secret shared with the TURN server.');
+}
 
 const logger = pino({
     transport: process.env.NODE_ENV === 'development'
@@ -507,9 +510,11 @@ app.patch('/api/auth/me', validateBody(updateProfileBody), async (req, res) => {
 
 // Generate TURN credentials (time-limited)
 app.get('/api/auth/turn-credentials', (req, res) => {
-    const turnSecret = process.env.TURN_SECRET || 'dev-turn-secret';
-    const turnServers = process.env.TURN_SERVERS || 'turn:localhost:3478';
-    const ttl = 86400; // 24 hours
+    // Production never signs TURN credentials with a built-in development secret.
+    const turnSecret = process.env.TURN_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'dev-turn-secret');
+    const turnServers = turnSecret ? (process.env.TURN_SERVERS || '').split(',').map((value: string) => value.trim()).filter((value: string) => /^turns?:/i.test(value)) : [];
+    const stunServers = (process.env.STUN_SERVERS || 'stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302').split(',').map((value: string) => value.trim()).filter(Boolean);
+    const ttl = 3600; // 1 hour
     const timestamp = Math.floor(Date.now() / 1000) + ttl;
     const username = `${timestamp}:qsvc`;
 
@@ -519,17 +524,14 @@ app.get('/api/auth/turn-credentials', (req, res) => {
         .update(username)
         .digest('base64');
 
-    res.json({
-        iceServers: [
-            { urls: ['stun:stun.l.google.com:19302', 'stun:stun1.l.google.com:19302'] },
-            {
-                urls: turnServers.split(',').map((s: string) => s.trim()),
+    const iceServers: Array<{ urls: string[]; username?: string; credential?: string }> = [{ urls: stunServers }];
+    if (turnServers.length) iceServers.push({
+                urls: turnServers,
                 username,
                 credential,
-            },
-        ],
-        ttl,
-    });
+            });
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ iceServers, ttl });
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

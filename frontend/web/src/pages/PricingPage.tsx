@@ -71,8 +71,8 @@ export const plans = [
         features: [
             { text: '1000+ participants', included: true },
             { text: 'Unlimited everything', included: true },
-            { text: 'Post-Quantum Encryption (PQC)', included: true },
-            { text: 'End-to-End Encryption (E2EE)', included: true },
+            { text: 'Post-Quantum Encryption (PQC): ML-KEM-1024 + ML-DSA-87', included: true },
+            { text: 'End-to-End Encryption (E2EE), on by default', included: true },
             { text: 'On-Premise / Air-Gapped', included: true },
             { text: 'LDAP / Active Directory', included: true },
             { text: 'SIP/H.323 interop', included: true },

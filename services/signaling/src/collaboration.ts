@@ -83,7 +83,7 @@ export function collaborationRpc(ws:any,roomId:string,peerId:string,method:strin
  // Each person gets their own view, so hidden poll results never reach participants.
  for(const viewer of room.peers.values()){
   if(viewer.id===peerId||viewer.ws?.readyState!==1)continue;
-  viewer.ws.send(JSON.stringify({jsonrpc:'2.0',method:'collaborationUpdated',params:snapshot(state,viewer)}));
+  roomManager.sendToSocket(viewer.ws,'collaborationUpdated',snapshot(state,viewer),viewer.id);
  }
  return snapshot(state,peer);
 }

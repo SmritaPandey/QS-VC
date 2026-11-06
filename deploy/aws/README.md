@@ -42,7 +42,7 @@ or EC2 user data. The stack creates an IAM role and needs `CAPABILITY_IAM`.
 5. Enter the two restricted application URLs privately in /opt/qsvc/deploy/aws/.env (mode 0600).
    Use qs_auth_app for AUTH_DATABASE_URL and qs_meeting_app for MEETING_DATABASE_URL.
    Use qsvcadmin only in MIGRATION_DATABASE_URL while running maintenance.
-   Use .env.example for nonsecret settings. Generate JWT_SECRET and TURN_PASSWORD
+   Use .env.example for nonsecret settings. Generate JWT_SECRET and TURN_SECRET
    on the server. Set SFU_ANNOUNCED_IP to the Elastic IP.
 6. Build: docker compose -f deploy/aws/compose.yml --env-file deploy/aws/.env build
 7. Migrate before starting traffic:
@@ -75,3 +75,17 @@ WSL2/Docker Desktop (organisation licensing permitting) or a supported Linux VM.
 clients connect over LAN; remote staff connect through the organisation's VPN. Local DNS,
 trusted HTTPS, identity, storage and language models must be available locally for offline use.
 There is no database synchronisation or automatic AWS failover.
+
+## Deployment smoke check
+
+After every install or upgrade, run from a computer on the users' network:
+
+```bash
+npm run smoke:deploy -- https://<your-meeting-domain> [--ca <internal-ca.crt>] [--token <session token>]
+```
+
+It verifies TLS, the gateway, signaling → SFU service discovery, every published TURN server
+(STUN answer plus an authenticated relay allocation) and the SFU's announced UDP media address
+(a real ICE connectivity check, the same one browsers send). Exit code 0 means users can connect
+and carry audio/video; any FAIL line names the setting to fix.
+

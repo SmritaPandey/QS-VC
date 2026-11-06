@@ -5,7 +5,7 @@ FROM node:20-bookworm-slim AS builder
 
 WORKDIR /app
 COPY package*.json ./
-RUN npm install --ignore-scripts
+RUN npm ci --ignore-scripts
 COPY tsconfig.json ./
 COPY src/ ./src/
 RUN npm run build
@@ -17,7 +17,7 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY package*.json ./
-RUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi
+RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 
 EXPOSE 4000

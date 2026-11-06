@@ -36,7 +36,9 @@ import HostMeetingTools, { type RoomHostSettings } from '../components/HostMeeti
 import { WaitingAdmission, type WaitingMode } from '../components/WaitingRoom';
 import { openMicrophone, startCameraWithFallback, microphoneMessage, deviceLabel } from '../lib/device-access';
 import { initialMeetingLanguage, detectLanguage, setMeetingLanguage, clearSavedLanguage, findLanguage, LANGUAGE_EVENT, type MeetingLanguage } from '../lib/meeting-language';
-import { E2EEManager, type E2EEKeyBundle, type E2EEKeyEnvelope } from '../lib/e2ee';
+import { E2EEManager, encodedTransformsSupported, type E2EEKeyBundle, type E2EEKeyEnvelope } from '../lib/e2ee';
+import { meetingSecurityCode } from '../lib/e2ee-safety';
+import EncryptionBadge from '../components/EncryptionBadge';
 
 const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
 
@@ -183,8 +185,13 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const myPeerIdRef = useRef('');
     const e2eeRef = useRef<E2EEManager | null>(null);
     const e2eeBundlesRef = useRef(new Map<string, E2EEKeyBundle>());
-    const hostE2EEBundleRef = useRef<E2EEKeyBundle | null>(null);
+    const e2eeKeyHolderRef = useRef<string | null>(null);
+    const lastHolderHandoverFrom = useRef<string | null>(null);
     const [e2eeActive, setE2EEActive] = useState(false);
+    const [e2eeEnabled, setE2EEEnabled] = useState(false);
+    const [e2eeIdentities, setE2EEIdentities] = useState(0);
+    const [securityCode, setSecurityCode] = useState<string | null>(null);
+    const bumpE2EEIdentities = useCallback(() => setE2EEIdentities(v => v + 1), []);
     const [myRole, setMyRole] = useState<string>('member');
     const [displayName] = useState(state.displayName || 'Guest');
     const [peers, setPeers] = useState<Map<string, PeerData>>(new Map());
@@ -601,6 +608,14 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         privateInviteRef.current = null;
         sessionActive.current = false;
         sessionRevision.current++;
+        e2eeRef.current?.destroy();
+        e2eeRef.current = null;
+        e2eeBundlesRef.current.clear();
+        e2eeKeyHolderRef.current = null;
+        setE2EEEnabled(false);
+        setSecurityCode(null);
+        media.setE2EEManager(null);
+        setE2EEActive(false);
         cameraCapture.current.stop();
         localStreamRef.current?.getTracks().forEach((t) => t.stop());
         localStreamRef.current = null;
@@ -704,6 +719,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             try {
                 const stream = new MediaStream();
                 localStreamRef.current = stream;
+                if (!meetingCode) throw new Error('The meeting code is missing. Return to meetings and open the invite again.');
                 await signaling.connect(meetingCode);
                 if (!alive()) return;
                 waitingStatusRef.current = null;
@@ -719,6 +735,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 unsubscribe.push(stopAdmitted, stopRejected, stopWaitingStatus);
                 let joinResult = await signaling.request('joinRoom', {
                     meetingCode, displayName, inviteToken: initialInviteToken || undefined,
+                    supportsE2EE: encodedTransformsSupported(),
                 });
                 if (joinResult.status === 'waiting' || joinResult.status === 'waitingForHost' || joinResult.status === 'keptWaiting') {
                     if (alive()) {
@@ -749,6 +766,28 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     showNotice('The host mutes participants on entry. Unmute when you are ready.');
                 }
 
+                /** Key holder: wrap the current group key for one participant (ML-KEM-1024 + ML-DSA-87). */
+                const sendGroupKey = async (targetPeerId: string) => {
+                    const manager = e2eeRef.current;
+                    const bundle = e2eeBundlesRef.current.get(targetPeerId);
+                    if (!manager?.isActive() || !bundle || targetPeerId === myPeerIdRef.current) return;
+                    const envelope = await manager.wrapMeetingKeyForPeer(targetPeerId, bundle.kemPublicKey);
+                    await signaling.request('distributeEpochKey', { targetPeerId, envelope });
+                };
+                /** Key holder: rotate the group key and send it to everyone still in the meeting. */
+                let rotation: Promise<void> = Promise.resolve();
+                const rotateAndDistribute = (reason: string) => {
+                    rotation = rotation.then(async () => {
+                        const manager = e2eeRef.current;
+                        if (!manager || e2eeKeyHolderRef.current !== myPeerIdRef.current) return;
+                        manager.rekey();
+                        const targets = [...e2eeBundlesRef.current.keys()].filter(peerId => peerId !== myPeerIdRef.current);
+                        await Promise.all(targets.map(peerId => sendGroupKey(peerId).catch(error => console.warn('[E2EE] Could not send key to', peerId, error))));
+                        await signaling.request('e2eeRekey', {}).catch(() => undefined);
+                        console.info(`[E2EE] Group key rotated (${reason})`);
+                    }).catch(error => { console.error('[E2EE] Rekey failed:', error); showNotice('Encryption could not rotate. Please rejoin the meeting.'); });
+                    return rotation;
+                };
                 // Listeners first, so nothing sent while we set up media is missed.
                 unsubscribe.push(
                     signaling.on('recordingStateChanged', ({ recording }) => {
@@ -797,19 +836,12 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     }),
                     signaling.on('peerLeft', ({ peerId }: any) => {
                         notifiedKnocks.current.delete(peerId);
-                        e2eeBundlesRef.current.delete(peerId);
+                        if (e2eeBundlesRef.current.delete(peerId)) bumpE2EEIdentities();
                         setKnocks(current => current.filter(k => k.peerId !== peerId));
                         setPeers(prev => { const next = new Map(prev); next.delete(peerId); return next; });
-                        if (myRoleRef.current === 'host' && e2eeRef.current?.isActive()) void (async () => {
-                            const manager = e2eeRef.current!;
-                            manager.rekey();
-                            for (const [targetPeerId, bundle] of e2eeBundlesRef.current) {
-                                if (targetPeerId === myPeerIdRef.current) continue;
-                                const envelope = await manager.wrapMeetingKeyForPeer(targetPeerId, bundle.kemPublicKey);
-                                await signaling.request('distributeEpochKey', { targetPeerId, envelope });
-                            }
-                            await signaling.request('e2eeRekey', {});
-                        })().catch(error => { console.error('[E2EE] Rekey failed:', error); showNotice('Encryption could not rotate after a participant left. Please end and restart the meeting.'); });
+                        // Forward secrecy: the key holder rotates the group key whenever someone leaves.
+                        if (e2eeKeyHolderRef.current === myPeerIdRef.current && e2eeRef.current?.isActive() && peerId !== lastHolderHandoverFrom.current) void rotateAndDistribute('participant left');
+                        if (peerId === lastHolderHandoverFrom.current) lastHolderHandoverFrom.current = null;
                     }),
                     signaling.on('peerKicked', ({ peerId }: any) => setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; })),
                     signaling.on('peerMuteChanged', ({ peerId, kind, muted }: any) => {
@@ -846,49 +878,77 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         void (async () => {
                             const manager = e2eeRef.current;
                             if (!manager || typeof payload?.peerId !== 'string') return;
-                            const bundle: E2EEKeyBundle = { kemPublicKey: payload.kemPublicKey, signingPublicKey: payload.signingPublicKey, signature: payload.signature };
-                            if (!await manager.verifyKeyBundle(bundle)) { showNotice('A participant sent an invalid encryption key. Their media will stay blocked.'); return; }
+                            const bundle: E2EEKeyBundle = { peerId: payload.peerId, kemPublicKey: payload.kemPublicKey, signingPublicKey: payload.signingPublicKey, signature: payload.signature };
+                            if (!await manager.verifyKeyBundle(bundle, payload.peerId)) { showNotice('A participant sent an invalid encryption key. Their media will stay blocked.'); return; }
                             e2eeBundlesRef.current.set(payload.peerId, bundle);
-                            if (payload.role === 'host') hostE2EEBundleRef.current = bundle;
-                            if (myRoleRef.current === 'host' && payload.peerId !== myPeerIdRef.current) {
-                                const envelope = await manager.wrapMeetingKeyForPeer(payload.peerId, bundle.kemPublicKey);
-                                await signaling.request('distributeEpochKey', { targetPeerId: payload.peerId, envelope });
-                            }
-                        })().catch(error => { console.error('[E2EE] Key exchange failed:', error); showNotice('End-to-end encryption setup failed. Media remains blocked.'); });
+                            bumpE2EEIdentities();
+                            if (typeof payload.keyHolderPeerId === 'string') e2eeKeyHolderRef.current = payload.keyHolderPeerId;
+                            // The key holder sends the current group key to each newly registered participant.
+                            if (e2eeKeyHolderRef.current === myPeerIdRef.current && manager.isActive() && payload.peerId !== myPeerIdRef.current) await sendGroupKey(payload.peerId);
+                        })().catch(error => { console.error('[E2EE] Key exchange failed:', error); showNotice('End-to-end encryption setup failed for a participant. Their media stays blocked.'); });
                     }),
                     signaling.on('e2eeEpochKey', (payload: any) => {
                         void (async () => {
                             const manager = e2eeRef.current;
-                            const hostBundle = hostE2EEBundleRef.current;
-                            if (!manager || !hostBundle || typeof payload?.hostPeerId !== 'string') throw new Error('The meeting host encryption identity is unavailable');
-                            if (payload.hostSigningPublicKey !== hostBundle.signingPublicKey) throw new Error('The meeting host encryption identity changed');
-                            await manager.acceptMeetingKey(payload.envelope as E2EEKeyEnvelope, payload.hostPeerId, hostBundle.signingPublicKey, myPeerIdRef.current);
+                            const holderPeerId = typeof payload?.keyHolderPeerId === 'string' ? payload.keyHolderPeerId : payload?.hostPeerId;
+                            if (!manager || typeof holderPeerId !== 'string') return;
+                            if (holderPeerId !== e2eeKeyHolderRef.current) throw new Error('The meeting key came from a participant who is not the key holder');
+                            const holderBundle = e2eeBundlesRef.current.get(holderPeerId);
+                            if (!holderBundle || payload.hostSigningPublicKey !== holderBundle.signingPublicKey) throw new Error('The key holder encryption identity is unknown or changed');
+                            await manager.acceptMeetingKey(payload.envelope as E2EEKeyEnvelope, holderPeerId, holderBundle.signingPublicKey, myPeerIdRef.current);
                             setE2EEActive(true);
-                        })().catch(error => { console.error('[E2EE] Group key rejected:', error); showNotice('The host could not establish end-to-end encryption. Media remains blocked.'); });
+                            await signaling.request('e2eeKeyReceived', {}).catch(() => undefined);
+                        })().catch(error => { console.error('[E2EE] Group key rejected:', error); showNotice('An encryption key could not be verified, so it was rejected. Media stays protected.'); });
+                    }),
+                    signaling.on('e2eeKeyHolderChanged', (payload: any) => {
+                        void (async () => {
+                            const manager = e2eeRef.current;
+                            if (!manager || typeof payload?.peerId !== 'string') return;
+                            e2eeKeyHolderRef.current = payload.peerId;
+                            lastHolderHandoverFrom.current = typeof payload.previousHolderPeerId === 'string' ? payload.previousHolderPeerId : null;
+                            // The previous holder has left: never send it the rotated key.
+                            if (lastHolderHandoverFrom.current && e2eeBundlesRef.current.delete(lastHolderHandoverFrom.current)) bumpE2EEIdentities();
+                            if (payload.peerId !== myPeerIdRef.current) return;
+                            // We now hold the meeting key: rotate (or create) it, then send it to everyone.
+                            await rotateAndDistribute(payload.generate ? 'first key' : 'key holder left');
+                            setE2EEActive(true);
+                        })().catch(error => { console.error('[E2EE] Key holder handover failed:', error); showNotice('Encryption could not be handed over. Please rejoin the meeting.'); });
                     }),
                 );
 
-                const e2eeManager = new E2EEManager(meetingCode || '');
-                e2eeRef.current = e2eeManager;
-                media.setE2EEManager(e2eeManager);
-                const localKeyBundle = joinResult.role === 'host'
-                    ? await e2eeManager.initAsHost()
-                    : await e2eeManager.initAsParticipant();
-                if (!alive()) return;
-                if (joinResult.role === 'host') setE2EEActive(true);
-                if (joinResult.role === 'host') hostE2EEBundleRef.current = localKeyBundle;
-                e2eeBundlesRef.current.set(myPeerIdRef.current, localKeyBundle);
-                await signaling.request('exchangeE2EEKeys', localKeyBundle);
-                for (const peer of joinResult.existingPeers || []) {
-                    if (!peer.e2eeKeyBundle) continue;
-                    const bundle = peer.e2eeKeyBundle as E2EEKeyBundle;
-                    if (!await e2eeManager.verifyKeyBundle(bundle)) throw new Error(`Invalid encryption identity for ${peer.displayName || 'participant'}`);
-                    e2eeBundlesRef.current.set(peer.peerId, bundle);
-                    if (peer.role === 'host') hostE2EEBundleRef.current = bundle;
-                    if (joinResult.role === 'host') {
-                        const envelope = await e2eeManager.wrapMeetingKeyForPeer(peer.peerId, bundle.kemPublicKey);
-                        await signaling.request('distributeEpochKey', { targetPeerId: peer.peerId, envelope });
+                const e2eeRequired = joinResult.settings?.e2eeRequired === true;
+                setE2EEActive(false);
+                media.setE2EEManager(null);
+                if (e2eeRequired) {
+                    if (!encodedTransformsSupported()) throw new Error('This meeting uses end-to-end encrypted media. Use a current version of Chrome, Edge, Safari or Firefox.');
+                    const e2eeManager = new E2EEManager(meetingCode || '');
+                    e2eeRef.current = e2eeManager;
+                    media.setE2EEManager(e2eeManager);
+                    e2eeKeyHolderRef.current = typeof joinResult.e2eeKeyHolderPeerId === 'string' ? joinResult.e2eeKeyHolderPeerId : null;
+                    const localKeyBundle = await e2eeManager.init(myPeerIdRef.current);
+                    if (!alive()) return;
+                    e2eeBundlesRef.current.set(myPeerIdRef.current, localKeyBundle);
+                    // Learn everyone's verified identities before registering, so the holder's key can be checked.
+                    for (const peer of joinResult.existingPeers || []) {
+                        if (!peer.e2eeKeyBundle) continue;
+                        const bundle = peer.e2eeKeyBundle as E2EEKeyBundle;
+                        if (!await e2eeManager.verifyKeyBundle(bundle, peer.peerId)) { showNotice(`${peer.displayName || 'A participant'} has an invalid encryption identity. Their media stays blocked.`); continue; }
+                        e2eeBundlesRef.current.set(peer.peerId, bundle);
                     }
+                    setE2EEEnabled(true);
+                    bumpE2EEIdentities();
+                    const registration = await signaling.request('exchangeE2EEKeys', localKeyBundle);
+                    if (!alive()) return;
+                    e2eeKeyHolderRef.current = registration.keyHolderPeerId;
+                    if (registration.generate) {
+                        // First participant with encryption: create the meeting key and send it to anyone already registered.
+                        e2eeManager.generateGroupKey();
+                        setE2EEActive(true);
+                        for (const peerId of e2eeBundlesRef.current.keys()) if (peerId !== myPeerIdRef.current) await sendGroupKey(peerId).catch(() => undefined);
+                    }
+                } else {
+                    setE2EEEnabled(false);
+                    showNotice('The organiser turned off end-to-end encryption for this meeting. Media is still protected in transit with DTLS-SRTP.');
                 }
 
                 // People already in the room, with their mic / camera / hand state.
@@ -961,6 +1021,17 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         if (!alive()) return;
                         if (videoTrack?.readyState === 'live' && !videoOffRef.current) await media.produce(videoTrack, { source: 'camera' });
                         if (!alive()) return;
+                        // Fail closed: if this browser accepted the encryptor but routes media around it,
+                        // stop publishing rather than risk sending unencrypted audio or video.
+                        const encryptor = e2eeRef.current;
+                        if (encryptor && (media.hasProducer('audio', 'mic') || media.hasProducer('video', 'camera'))) {
+                            const watchdog = setTimeout(() => {
+                                if (!alive() || e2eeRef.current !== encryptor || encryptor.getSenderFramesSeen() > 0) return;
+                                void media.closeProducerBySource('mic'); void media.closeProducerBySource('camera');
+                                showNotice('Your browser did not route media through end-to-end encryption, so your microphone and camera were stopped. Update your browser or try Chrome, Edge, Safari or Firefox.');
+                            }, 8000);
+                            unsubscribe.push(() => clearTimeout(watchdog));
+                        }
                         // Producers start live; match them to the current (possibly muted) state.
                         media.setPaused('audio', audioMutedRef.current, 'mic');
                         media.setPaused('video', videoOffRef.current, 'camera');
@@ -1636,6 +1707,15 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         return new MediaStream([processedTrack, ...localStream.getAudioTracks()]);
     }, [processedTrack, localStream]);
 
+    // Security code from everyone's ML-DSA-87 identity keys, recomputed as people join and leave.
+    useEffect(() => {
+        if (!e2eeEnabled) { setSecurityCode(null); return; }
+        let cancelled = false;
+        const identities = [...e2eeBundlesRef.current.values()].map(({ peerId, signingPublicKey }) => ({ peerId, signingPublicKey }));
+        void meetingSecurityCode(meetingCode || '', identities).then(code => { if (!cancelled) setSecurityCode(code); }).catch(() => undefined);
+        return () => { cancelled = true; };
+    }, [e2eeEnabled, e2eeIdentities, meetingCode]);
+
     const effectPreview = useMemo(() => processedTrack ? new MediaStream([processedTrack]) : localStream, [processedTrack, localStream]);
 
     // ── Captions (CC button) ──
@@ -1760,6 +1840,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     })()}
                 </div>
                 <div className="top-bar-right">
+                    {e2eeEnabled && <EncryptionBadge active={e2eeActive} securityCode={securityCode} participants={peers.size + 1} mode={e2eeRef.current?.getMode() ?? null} />}
                     <span className="participant-count"><span className="mi mi-sm">group</span> {peers.size + 1}</span>
                 </div>
             </div>

@@ -23,4 +23,4 @@ Whiteboard limits: 500 strokes, 20,000 points total, 1,000 points per stroke. No
 
 ## Verification boundary
 
-Automated source/service tests and builds are recorded in task handoffs. Actual two-device media, waiting-room admission, simultaneous drawing, mobile panel fit and accessibility require browser/device verification. These additions do not establish active post-quantum media encryption, enabled recording, breakout rooms, large-file storage, automatic transcripts, or AI meeting summaries.
+Automated source/service tests and builds are recorded in task handoffs. Actual two-device media, waiting-room admission, simultaneous drawing, mobile panel fit and accessibility require browser/device verification. The optional post-quantum encrypted-media path was connected after this note; it still lacks independent cryptographic review, authenticated peer identity, FIPS 140 validation and physical two-device verification. Recording, breakout rooms, large-file storage, automatic transcripts, and AI meeting summaries still require separate implementation evidence.

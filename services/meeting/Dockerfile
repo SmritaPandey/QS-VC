@@ -4,7 +4,8 @@
 FROM node:20-alpine AS signaling-build
 WORKDIR /signaling
 COPY services/signaling/package.json ./
-RUN npm install
+COPY services/signaling/package-lock.json ./package-lock.json
+RUN npm ci
 COPY services/signaling/tsconfig.json ./
 COPY services/signaling/src ./src
 COPY shared/ /shared/
@@ -13,7 +14,8 @@ RUN npm run build
 FROM node:20-alpine AS meeting-build
 WORKDIR /meeting
 COPY services/meeting/package.json ./
-RUN npm install
+COPY services/meeting/package-lock.json ./package-lock.json
+RUN npm ci
 COPY services/meeting/tsconfig.json ./
 COPY services/meeting/src ./src
 COPY shared/ /shared/
@@ -23,10 +25,12 @@ FROM node:20-alpine
 WORKDIR /app
 
 COPY services/meeting/package.json ./package.json
-RUN npm install --omit=dev
+COPY services/meeting/package-lock.json ./package-lock.json
+RUN npm ci --omit=dev
 
 COPY services/signaling/package.json ./signaling/package.json
-RUN cd signaling && npm install --omit=dev
+COPY services/signaling/package-lock.json ./signaling/package-lock.json
+RUN cd signaling && npm ci --omit=dev
 
 COPY --from=meeting-build /meeting/dist ./dist
 COPY --from=signaling-build /signaling/dist ./signaling/dist

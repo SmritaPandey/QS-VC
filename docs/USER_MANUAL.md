@@ -1,6 +1,6 @@
 # QS-VC — User & Operations Manual
 
-**Quantum-Safe Video Conferencing Platform**
+**Quantum-Safe Video Conferencing**
 Version 0.1.0 | Last Updated: Feb 2026
 
 ---
@@ -34,7 +34,7 @@ QS-VC is a full-featured video conferencing platform built for security, scalabi
 | **Noise Suppression** | RNNoise WASM via AudioWorklet |
 | **Live Captions** | Web Speech API real-time transcription |
 | **Screen Sharing** | Full screen, window, or tab sharing |
-| **End-to-End Encryption** | Insertable Streams + SFrame with Kyber-1024 |
+| **Quantum-safe end-to-end encryption** | On by default. ML-KEM-1024 (NIST FIPS 203) key exchange, ML-DSA-87 (NIST FIPS 204) signed key distribution and AES-256-GCM per-frame media encryption, on by default in Chrome, Edge, Safari and Firefox. The media server forwards packets it cannot decrypt; keys rotate whenever someone leaves, and every participant can compare a meeting security code. |
 | **Meeting Recording** | Server-side MediaRecorder with S3 storage |
 | **Chat & Reactions** | Real-time chat with emoji reactions |
 | **Waiting Room** | Host-controlled participant admission |
@@ -499,10 +499,10 @@ Simply stop (Ctrl+C) and restart the command in that terminal.
 |---------|---------------|
 | **Input Validation** | Zod schemas on all 20+ API endpoints |
 | **JWT Authentication** | bcrypt password hashing + JWT tokens |
-| **WebSocket Auth** | Token from `?token=` query or `Authorization` header |
+| **WebSocket Auth** | Short-lived, single-use ticket in the first WebSocket message; session bearer stays out of the URL |
 | **CORS** | Configurable origin allowlist via `CORS_ORIGINS` |
 | **Rate Limiting** | express-rate-limit on all services (Auth: 10 req/15min for login) |
-| **E2EE** | Insertable Streams + SFrame with Kyber-1024 PQC key exchange |
+| **E2EE** | On by default for browser meetings. ML-KEM-1024 (NIST FIPS 203) key exchange, ML-DSA-87 (NIST FIPS 204) signed key distribution and AES-256-GCM per-frame media encryption, on by default in Chrome, Edge, Safari and Firefox. The media server forwards packets it cannot decrypt; keys rotate whenever someone leaves, and every participant can compare a meeting security code. Organisers can turn it off for a meeting (for example to use server captions or SIP room systems); those meetings stay protected in transit with DTLS-SRTP. |
 | **XSS Prevention** | HTML tag stripping on user inputs |
 | **Error Handling** | Global Express error handler prevents stack trace leaks |
 | **Env Validation** | Services crash on missing required vars |
@@ -536,5 +536,5 @@ start http://localhost:5173
 
 ---
 
-*QS-VC — Quantum-Safe Video Conferencing Platform*
+*QS-VC — Quantum-safe video conferencing*
 *Built with ❤️ using React, TypeScript, mediasoup, and WebRTC*

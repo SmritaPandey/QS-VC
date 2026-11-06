@@ -19,19 +19,6 @@ const SIGNALING_HTTP = (import.meta.env.VITE_SIGNALING_URL || '')
     .replace(/^ws:/i, 'http:')
     .replace(/\/ws\/?$/i, '');
 
-function generateMeetingCode(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    const segments = [];
-    for (let s = 0; s < 3; s++) {
-        let seg = '';
-        for (let i = 0; i < 4; i++) {
-            seg += chars[Math.floor(Math.random() * chars.length)];
-        }
-        segments.push(seg);
-    }
-    return `QS-${segments.join('-')}`;
-}
-
 async function createMeetingCode(): Promise<{ meetingCode: string; inviteToken?: string }> {
     // Prefer same-origin Vercel serverless (always available in prod), then backends
     const endpoints = [
@@ -54,8 +41,8 @@ async function createMeetingCode(): Promise<{ meetingCode: string; inviteToken?:
         }
     }
 
-    // Room is created on first WebSocket joinRoom — local code unblocks the share UI
-    return { meetingCode: generateMeetingCode() };
+    // Meeting identifiers are issued by the service so the database can enforce uniqueness.
+    throw new Error('Meeting creation is temporarily unavailable. Please try again shortly.');
 }
 
 export default function Landing() {

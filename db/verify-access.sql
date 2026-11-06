@@ -8,6 +8,12 @@ INSERT INTO users(id,tenant_id,email,display_name,password_hash) VALUES
 INSERT INTO meetings(tenant_id,meeting_code,title) VALUES
  ('aaaaaaaa-0000-0000-0000-000000000001','DB-CHECK-A','Synthetic meeting A'),
  ('bbbbbbbb-0000-0000-0000-000000000001','DB-CHECK-B','Synthetic meeting B');
+INSERT INTO room_numbers(number,tenant_id,meeting_code,display_name) VALUES
+ ('9901','aaaaaaaa-0000-0000-0000-000000000001','DB-CHECK-A','Synthetic room A'),
+ ('9902','bbbbbbbb-0000-0000-0000-000000000001','DB-CHECK-B','Synthetic room B');
+INSERT INTO room_devices(tenant_id,name,extension) VALUES
+ ('aaaaaaaa-0000-0000-0000-000000000001','Synthetic device A','9903'),
+ ('bbbbbbbb-0000-0000-0000-000000000001','Synthetic device B','9904');
 SET LOCAL ROLE qsvc_auth_service;
 DO $$ BEGIN
  IF NOT EXISTS(SELECT 1 FROM users WHERE email='db-check@example.test' AND password_hash=crypt('synthetic-test-only',password_hash)) THEN RAISE EXCEPTION 'Authentication lookup failed'; END IF;
@@ -33,11 +39,15 @@ SET LOCAL ROLE qsvc_meeting_service;
 SELECT set_config('app.current_tenant','aaaaaaaa-0000-0000-0000-000000000001',true);
 DO $$ BEGIN
  IF (SELECT count(*) FROM meetings WHERE meeting_code IN ('DB-CHECK-A','DB-CHECK-B')) <> 1 THEN RAISE EXCEPTION 'Tenant isolation failed'; END IF;
+ IF (SELECT count(*) FROM room_numbers WHERE number IN ('9901','9902')) <> 1 THEN RAISE EXCEPTION 'Room-number tenant isolation failed'; END IF;
+ IF (SELECT count(*) FROM room_devices WHERE extension IN ('9903','9904')) <> 1 THEN RAISE EXCEPTION 'Room-device tenant isolation failed'; END IF;
  IF has_table_privilege(current_user,'public.users','UPDATE') OR has_schema_privilege(current_user,'public','CREATE') THEN RAISE EXCEPTION 'Meeting service has excessive privileges'; END IF;
+ IF (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN RAISE EXCEPTION 'Meeting service role can bypass row-level security'; END IF;
 END $$;
 SELECT set_config('app.current_tenant','',true);
 DO $$ BEGIN
  IF EXISTS(SELECT 1 FROM meetings) THEN RAISE EXCEPTION 'Unscoped tenant read succeeded'; END IF;
+ IF EXISTS(SELECT 1 FROM room_numbers) OR EXISTS(SELECT 1 FROM room_devices) THEN RAISE EXCEPTION 'Unscoped room-registry read succeeded'; END IF;
  IF NOT EXISTS(SELECT 1 FROM public.qsvc_meeting_by_code('DB-CHECK-A')) THEN RAISE EXCEPTION 'Join code preview failed'; END IF;
 END $$;
 RESET ROLE;
