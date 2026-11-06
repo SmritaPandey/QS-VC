@@ -1,0 +1,47 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# QS-VC Caddy Reverse Proxy Configuration Template
+# Supports automatic HTTPS (internal CA or Let's Encrypt), WebSockets, and API routing
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+{$QSVC_DOMAIN:meet.internal} {
+    # Internal TLS (self-signed / internal CA for intranet air-gapped environments)
+    tls internal
+
+    # Security Headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "SAMEORIGIN"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+
+    # Auth Service API
+    handle /api/auth/* {
+        reverse_proxy auth:4002
+    }
+
+    # Meeting Service API
+    handle /api/meetings/* {
+        reverse_proxy meeting:4003
+    }
+
+    # Recording Service API
+    handle /api/recordings/* {
+        reverse_proxy recording:4004
+    }
+
+    # Signaling WebSocket
+    handle /ws {
+        reverse_proxy signaling:4001
+    }
+
+    # Signaling HTTP fallback / ICE servers
+    handle /api/ice-servers {
+        reverse_proxy signaling:4001
+    }
+
+    # Frontend Static Web App (Served via Nginx)
+    handle {
+        reverse_proxy web:80
+    }
+}

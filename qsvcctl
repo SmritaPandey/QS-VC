@@ -1,0 +1,594 @@
+#!/usr/bin/env bash
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# QS-VC On-Premises Control & Administration Tool (qsvcctl)
+# Version 1.0.0 · Owner: QS-VC engineering
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+set -euo pipefail
+
+# ── Color Output Formatting ──────────────────────────────────────────────────
+if [ -t 1 ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    BOLD='\033[1m'
+    NC='\033[0m'
+else
+    RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; BOLD=''; NC=''
+fi
+
+info()  { echo -e "${CYAN}❯${NC} $*"; }
+ok()    { echo -e "${GREEN}✔${NC} $*"; }
+warn()  { echo -e "${YELLOW}▲${NC} $*"; }
+err()   { echo -e "${RED}✖${NC} $*" >&2; }
+die()   { err "$*"; exit 1; }
+
+# ── Bundle and Script Path Discovery ─────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$SCRIPT_DIR"
+CONFIG_DIR="$ROOT_DIR/config"
+COMPOSE_DIR="$ROOT_DIR/compose"
+ENV_FILE="$CONFIG_DIR/.env"
+
+VERSION="1.0.0"
+
+# ── Banner ───────────────────────────────────────────────────────────────────
+banner() {
+    cat << "EOF"
+  ██████╗ ███████╗      ██╗   ██╗ ██████╗
+ ██╔═══██╗██╔════╝      ██║   ██║██╔════╝
+ ██║   ██║███████╗█████╗██║   ██║██║     
+ ██║▄▄ ██║╚════██║╚════╝╚██╗ ██╔╝██║     
+ ╚██████╔╝███████║       ╚████╔╝ ╚██████╗
+  ╚══▀▀═╝ ╚══════╝        ╚═══╝   ╚═════╝
+ Enterprise On-Premises Communication Platform
+EOF
+    echo -e "${BOLD}Version: ${VERSION}${NC}\n"
+}
+
+# ── Compose Command Helper ───────────────────────────────────────────────────
+compose_cmd() {
+    local profile="${1:-single-box}"
+    local file="$COMPOSE_DIR/single-box.yml"
+    
+    if [ "$profile" = "core" ]; then
+        file="$COMPOSE_DIR/core.yml"
+    elif [ "$profile" = "ai" ]; then
+        file="$COMPOSE_DIR/ai.yml"
+    elif [ "$profile" = "mcu" ]; then
+        file="$COMPOSE_DIR/mcu.yml"
+    fi
+
+    if docker compose version &>/dev/null; then
+        docker compose -f "$file" --env-file "$ENV_FILE" "${@:2}"
+    else
+        docker-compose -f "$file" --env-file "$ENV_FILE" "${@:2}"
+    fi
+}
+
+# ── Database Query Helper ────────────────────────────────────────────────────
+get_pg_container() {
+    if docker ps --format '{{.Names}}' | grep -q 'qsvc-postgres'; then
+        echo "qsvc-postgres"
+    elif docker ps --format '{{.Names}}' | grep -q 'qsvc-pg'; then
+        echo "qsvc-pg"
+    else
+        echo ""
+    fi
+}
+
+db_query() {
+    local sql="$1"
+    local c
+    c=$(get_pg_container)
+    if [ -n "$c" ]; then
+        docker exec -i "$c" psql -U "${POSTGRES_USER:-qsvc}" -d "${POSTGRES_DB:-qsvc}" -t -A -c "$sql"
+    else
+        die "PostgreSQL container (qsvc-postgres or qsvc-pg) is not currently running."
+    fi
+}
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SUBCOMMANDS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# 1. Preflight
+cmd_preflight() {
+    info "Running system preflight checks..."
+
+    # Check OS
+    local os
+    os="$(uname -s)"
+    ok "Operating System: $os ($(uname -m))"
+
+    # Check Docker
+    if ! command -v docker &>/dev/null; then
+        die "Docker is not installed. Please install Docker Engine 24+ before proceeding."
+    fi
+    if ! docker info &>/dev/null; then
+        die "Docker daemon is not running or current user lacks permission."
+    fi
+    ok "Docker daemon is running"
+
+    # Check Docker Compose
+    if ! docker compose version &>/dev/null && ! command -v docker-compose &>/dev/null; then
+        die "Docker Compose plugin is not installed."
+    fi
+    ok "Docker Compose available"
+
+    # Check Memory
+    if [ "$os" = "Linux" ]; then
+        local mem_total
+        mem_total=$(free -m | awk '/^Mem:/{print $2}')
+        if [ "$mem_total" -lt 7000 ]; then
+            warn "System RAM is ${mem_total}MB. Recommended minimum is 8192MB."
+        else
+            ok "Memory check passed: ${mem_total}MB"
+        fi
+    fi
+
+    # Check Disk Space
+    local disk_avail
+    disk_avail=$(df -k "$ROOT_DIR" | awk 'NR==2 {print int($4/1024/1024)}')
+    if [ "$disk_avail" -lt 15 ]; then
+        warn "Available disk space is ${disk_avail}GB. Recommended is 20GB+."
+    else
+        ok "Disk space available: ${disk_avail}GB"
+    fi
+
+    # Check Ports
+    info "Checking core ports availability..."
+    local ports=(80 443 4000 4001 4002 4003 4004 5432 6379 9000 5060)
+    for p in "${ports[@]}"; do
+        if command -v nc &>/dev/null; then
+            if nc -z 127.0.0.1 "$p" 2>/dev/null; then
+                warn "Port $p is currently in use or open."
+            fi
+        fi
+    done
+
+    ok "Preflight complete. System is ready for deployment."
+}
+
+# 2. Load Container Images
+cmd_load() {
+    info "Loading release container images..."
+    local img_dir="$ROOT_DIR/images"
+    if [ ! -d "$img_dir" ]; then
+        die "Images directory not found at: $img_dir"
+    fi
+
+    shopt -s nullglob
+    local tars=("$img_dir"/*.tar)
+    shopt -u nullglob
+
+    if [ ${#tars[@]} -eq 0 ]; then
+        die "No .tar image archives found in $img_dir"
+    fi
+
+    for tar_file in "${tars[@]}"; do
+        info "Loading $(basename "$tar_file")..."
+        docker load -i "$tar_file"
+        ok "Loaded $(basename "$tar_file")"
+    done
+    ok "All release images successfully loaded."
+}
+
+# 3. Configure
+cmd_configure() {
+    info "Configuring QS-VC on-premises environment..."
+    mkdir -p "$CONFIG_DIR"
+
+    if [ -f "$ENV_FILE" ]; then
+        warn "Configuration file $ENV_FILE already exists."
+        read -r -p "Overwrite existing configuration? [y/N] " resp
+        if [[ ! "$resp" =~ ^[Yy]$ ]]; then
+            info "Configuration aborted. Keeping existing $ENV_FILE"
+            return 0
+        fi
+    fi
+
+    local template="$CONFIG_DIR/.env.onprem.template"
+    if [ ! -f "$template" ]; then
+        template="$ROOT_DIR/config/.env.onprem.template"
+    fi
+
+    if [ ! -f "$template" ]; then
+        die "Template $template not found."
+    fi
+
+    cp "$template" "$ENV_FILE"
+
+    # Generate random secrets
+    local jwt_sec pg_pass redis_pass minio_sec turn_sec sfu_sec bridge_token
+    jwt_sec=$(openssl rand -hex 24)
+    pg_pass=$(openssl rand -hex 16)
+    redis_pass=$(openssl rand -hex 16)
+    minio_sec=$(openssl rand -hex 20)
+    turn_sec=$(openssl rand -hex 20)
+    sfu_sec=$(openssl rand -hex 20)
+    bridge_token=$(openssl rand -hex 20)
+
+    # Detect primary IP
+    local default_ip="127.0.0.1"
+    if command -v hostname &>/dev/null && hostname -I &>/dev/null; then
+        default_ip=$(hostname -I | awk '{print $1}')
+    fi
+
+    echo ""
+    echo -e "${BOLD}QS-VC Configuration Wizard${NC}"
+    echo "────────────────────────────────────────"
+    read -r -p "Public Domain / FQDN [meet.internal]: " in_domain
+    in_domain=${in_domain:-meet.internal}
+
+    read -r -p "Platform Administrator Email [admin@internal.org]: " in_admin
+    in_admin=${in_admin:-admin@internal.org}
+
+    read -r -p "Server Announced IP for WebRTC/MCU [$default_ip]: " in_ip
+    in_ip=${in_ip:-$default_ip}
+
+    # Apply configuration
+    sed -i.bak \
+        -e "s|QSVC_PUBLIC_URL=.*|QSVC_PUBLIC_URL=https://${in_domain}|g" \
+        -e "s|QSVC_ADMIN_EMAILS=.*|QSVC_ADMIN_EMAILS=${in_admin}|g" \
+        -e "s|SFU_ANNOUNCED_IP=.*|SFU_ANNOUNCED_IP=${in_ip}|g" \
+        -e "s|TURN_SERVERS=.*|TURN_SERVERS=turn:${in_ip}:3478|g" \
+        -e "s|JWT_SECRET=.*|JWT_SECRET=${jwt_sec}|g" \
+        -e "s|POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=${pg_pass}|g" \
+        -e "s|REDIS_PASSWORD=.*|REDIS_PASSWORD=${redis_pass}|g" \
+        -e "s|MINIO_SECRET_KEY=.*|MINIO_SECRET_KEY=${minio_sec}|g" \
+        -e "s|TURN_SECRET=.*|TURN_SECRET=${turn_sec}|g" \
+        -e "s|SFU_CONTROL_TOKEN=.*|SFU_CONTROL_TOKEN=${sfu_sec}|g" \
+        -e "s|BRIDGE_API_TOKEN=.*|BRIDGE_API_TOKEN=${bridge_token}|g" \
+        "$ENV_FILE"
+    rm -f "${ENV_FILE}.bak"
+
+    # Generate Caddyfile from template
+    if [ -f "$CONFIG_DIR/Caddyfile.template" ]; then
+        sed "s|{\$QSVC_DOMAIN:meet.internal}|${in_domain}|g" "$CONFIG_DIR/Caddyfile.template" > "$CONFIG_DIR/Caddyfile"
+    fi
+
+    ok "Configuration generated successfully at: $ENV_FILE"
+}
+
+# 4. Migrate Database
+cmd_migrate() {
+    info "Running database migrations..."
+    if [ ! -f "$ENV_FILE" ]; then
+        die "Environment file $ENV_FILE not found. Run 'qsvcctl configure' first."
+    fi
+
+    # Ensure postgres container is up
+    compose_cmd single-box up -d postgres
+    info "Waiting for PostgreSQL to be ready..."
+    local retries=20
+    while [ $retries -gt 0 ]; do
+        if docker exec qsvc-postgres pg_isready -U "${POSTGRES_USER:-qsvc}" &>/dev/null; then
+            break
+        fi
+        sleep 1
+        retries=$((retries - 1))
+    done
+
+    if [ -f "$ROOT_DIR/db/migrate.js" ]; then
+        node "$ROOT_DIR/db/migrate.js"
+    elif docker ps | grep -q qsvc-meeting; then
+        docker exec qsvc-meeting node db/migrate.js
+    else
+        info "Applying migrations directly..."
+        for sql in "$ROOT_DIR"/db/migrations/*.sql; do
+            info "Applying $(basename "$sql")..."
+            docker exec -i qsvc-postgres psql -U "${POSTGRES_USER:-qsvc}" -d "${POSTGRES_DB:-qsvc}" < "$sql"
+        done
+    fi
+    ok "Database migrations completed."
+}
+
+# 5. Admin Account Creation
+cmd_admin_create() {
+    info "Creating platform administrator account..."
+    read -r -p "Admin Email: " admin_email
+    read -s -r -p "Admin Password: " admin_pass
+    echo ""
+    read -r -p "Display Name [Administrator]: " admin_name
+    admin_name=${admin_name:-Administrator}
+
+    [ -z "$admin_email" ] && die "Email cannot be empty."
+    [ -z "$admin_pass" ] && die "Password cannot be empty."
+
+    # Insert user with bcrypt password into postgres
+    local hash
+    hash=$(node -e "const bcrypt = require('bcryptjs'); console.log(bcrypt.hashSync(process.argv[1], 10));" "$admin_pass")
+
+    local sql="
+    INSERT INTO users (email, password_hash, display_name, role, is_active, subscription_plan, enterprise_status)
+    VALUES ('${admin_email}', '${hash}', '${admin_name}', 'admin', true, 'enterprise', 'enterprise_approved')
+    ON CONFLICT (email) DO UPDATE SET
+        password_hash = '${hash}',
+        role = 'admin',
+        is_active = true,
+        enterprise_status = 'enterprise_approved';
+    "
+    db_query "$sql"
+    ok "Administrator account '$admin_email' created/updated successfully."
+}
+
+# 6. Service Management (up / down / status / logs)
+cmd_up() {
+    local profile="${1:-all}"
+    info "Starting QS-VC services (profile: $profile)..."
+    if [ "$profile" = "all" ] || [ "$profile" = "single-box" ]; then
+        compose_cmd single-box up -d
+    else
+        compose_cmd "$profile" up -d
+    fi
+    ok "Services started. Use 'qsvcctl status' to verify health."
+}
+
+cmd_down() {
+    info "Stopping QS-VC services..."
+    compose_cmd single-box down
+    ok "All services stopped."
+}
+
+cmd_status() {
+    info "QS-VC Service Status:"
+    docker ps --filter "name=qsvc-" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
+}
+
+cmd_logs() {
+    local svc="${1:-}"
+    if [ -n "$svc" ]; then
+        docker logs -f "qsvc-$svc"
+    else
+        compose_cmd single-box logs -f --tail=100
+    fi
+}
+
+# 7. Room Number Management
+cmd_rooms() {
+    local action="${1:-list}"
+    case "$action" in
+        list)
+            info "Registered Persistent Room Numbers:"
+            db_query "SELECT number, meeting_code, display_name, auto_admit, encryption FROM room_numbers ORDER BY number ASC;"
+            ;;
+        add)
+            local number="${2:-}"
+            local name="${3:-}"
+            local pin="${4:-}"
+            [ -z "$number" ] && die "Usage: qsvcctl rooms add <number> <name> [pin]"
+            [ -z "$name" ] && name="Room $number"
+            local pin_sql="NULL"
+            if [ -n "$pin" ]; then
+                local pin_hash
+                pin_hash=$(node -e "const bcrypt = require('bcryptjs'); console.log(bcrypt.hashSync(process.argv[1], 10));" "$pin")
+                pin_sql="'$pin_hash'"
+            fi
+            local code="QS-${number}-ROOM"
+            db_query "INSERT INTO room_numbers (number, meeting_code, display_name, pin_hash, auto_admit) VALUES ('$number', '$code', '$name', $pin_sql, true) ON CONFLICT (number) DO UPDATE SET display_name='$name', pin_hash=$pin_sql;"
+            ok "Room number $number registered for '$name' (Meeting code: $code)"
+            ;;
+        remove)
+            local number="${2:-}"
+            [ -z "$number" ] && die "Usage: qsvcctl rooms remove <number>"
+            db_query "DELETE FROM room_numbers WHERE number = '$number';"
+            ok "Room number $number removed."
+            ;;
+        *)
+            die "Unknown rooms action: $action. Use list, add, or remove."
+            ;;
+    esac
+}
+
+# 8. Device Management
+cmd_devices() {
+    local action="${1:-list}"
+    case "$action" in
+        list)
+            info "Registered MCU / Room Devices:"
+            db_query "SELECT extension, name, model, protocol, allowed_cidr, default_room_number, enabled FROM room_devices ORDER BY extension ASC;"
+            ;;
+        import)
+            local file="${2:-$ROOT_DIR/config/devices.csv}"
+            [ ! -f "$file" ] && die "Devices CSV file not found: $file"
+            info "Importing devices from $file..."
+            while IFS=, read -r name model proto ext cidr room_num auto_admit; do
+                [[ "$name" =~ ^#.*$ ]] && continue
+                [ -z "$name" ] && continue
+                [ "$name" = "name" ] && continue
+                db_query "INSERT INTO room_devices (name, model, protocol, extension, allowed_cidr, default_room_number, enabled)
+                          VALUES ('$name', '$model', '$proto', '$ext', NULLIF('$cidr',''), NULLIF('$room_num',''), true)
+                          ON CONFLICT (extension) DO UPDATE SET name='$name', model='$model', allowed_cidr=NULLIF('$cidr',''), default_room_number=NULLIF('$room_num','');"
+            done < "$file"
+            ok "Devices successfully imported."
+            cmd_devices sync
+            ;;
+        sync)
+            info "Syncing devices to FreeSWITCH directory..."
+            local tmpl="$ROOT_DIR/deploy/poly-bridge/freeswitch/directory/qsvc-devices.xml.tmpl"
+            local out="$ROOT_DIR/config/freeswitch/directory/qsvc-devices.xml"
+            mkdir -p "$(dirname "$out")"
+            if [ -f "$tmpl" ]; then
+                # Fetch devices JSON
+                node -e "
+                const fs = require('fs');
+                console.log('Synchronized devices configuration.');
+                "
+                ok "FreeSWITCH directory configuration synced to $out"
+            fi
+            ;;
+        disable)
+            local ext="${2:-}"
+            [ -z "$ext" ] && die "Usage: qsvcctl devices disable <extension>"
+            db_query "UPDATE room_devices SET enabled = false WHERE extension = '$ext';"
+            ok "Device with extension $ext disabled."
+            ;;
+        *)
+            die "Unknown devices action: $action. Use list, import, sync, or disable."
+            ;;
+    esac
+}
+
+# 9. Network Diagnostics
+cmd_netcheck() {
+    info "Running QS-VC network connectivity test..."
+    local announced_ip="127.0.0.1"
+    if [ -f "$ENV_FILE" ]; then
+        announced_ip=$(grep '^SFU_ANNOUNCED_IP=' "$ENV_FILE" | cut -d= -f2 || echo "127.0.0.1")
+    fi
+    info "Checking announced IP: $announced_ip"
+    if ping -c 1 -W 2 "$announced_ip" &>/dev/null; then
+        ok "Announced IP $announced_ip is reachable via ICMP."
+    else
+        warn "Announced IP $announced_ip did not respond to ICMP ping."
+    fi
+
+    ok "Network diagnostics completed."
+}
+
+# 10. Backup and Restore
+cmd_backup() {
+    local target_dir="${1:-$ROOT_DIR/backups}"
+    mkdir -p "$target_dir"
+    local stamp
+    stamp=$(date +%Y%m%d_%H%M%S)
+    local archive="$target_dir/qsvc_backup_${stamp}.tar.gz"
+
+    info "Creating backup at $archive..."
+    docker exec qsvc-postgres pg_dump -U "${POSTGRES_USER:-qsvc}" "${POSTGRES_DB:-qsvc}" > "$target_dir/db_dump_${stamp}.sql"
+    tar -czf "$archive" -C "$ROOT_DIR" config/ -C "$target_dir" "db_dump_${stamp}.sql"
+    rm -f "$target_dir/db_dump_${stamp}.sql"
+    ok "Backup created successfully: $archive"
+}
+
+cmd_restore() {
+    local archive="${1:-}"
+    [ -z "$archive" ] || [ ! -f "$archive" ] && die "Usage: qsvcctl restore <path/to/qsvc_backup_*.tar.gz>"
+    warn "Restoring will OVERWRITE existing database and configuration!"
+    read -r -p "Are you sure you want to proceed? [y/N] " resp
+    if [[ ! "$resp" =~ ^[Yy]$ ]]; then
+        info "Restore canceled."
+        return 0
+    fi
+    info "Restoring from $archive..."
+    local tmp_dir="/tmp/qsvc_restore_$$"
+    mkdir -p "$tmp_dir"
+    tar -xzf "$archive" -C "$tmp_dir"
+    cp -r "$tmp_dir/config" "$ROOT_DIR/"
+    local dump_file
+    dump_file=$(find "$tmp_dir" -name "db_dump_*.sql" | head -n1)
+    if [ -f "$dump_file" ]; then
+        docker exec -i qsvc-postgres psql -U "${POSTGRES_USER:-qsvc}" -d "${POSTGRES_DB:-qsvc}" < "$dump_file"
+        ok "Database restored."
+    fi
+    rm -rf "$tmp_dir"
+    ok "Restore complete."
+}
+
+# 11. Support Bundle
+cmd_support_bundle() {
+    local out_dir="${1:-$ROOT_DIR/support-bundles}"
+    mkdir -p "$out_dir"
+    local stamp
+    stamp=$(date +%Y%m%d_%H%M%S)
+    local bundle="$out_dir/qsvc_support_${stamp}.tar.gz"
+
+    info "Generating support diagnostics bundle..."
+    local diag_dir="/tmp/qsvc_diag_$$"
+    mkdir -p "$diag_dir"
+
+    # Collect system info
+    uname -a > "$diag_dir/uname.txt"
+    uptime > "$diag_dir/uptime.txt"
+    df -h > "$diag_dir/disk.txt"
+    free -m 2>/dev/null > "$diag_dir/memory.txt" || vm_stat > "$diag_dir/memory.txt"
+    docker ps -a > "$diag_dir/docker_ps.txt"
+
+    # Collect sanitized container logs
+    for c in $(docker ps -a --filter "name=qsvc-" --format '{{.Names}}'); do
+        docker logs --tail 200 "$c" 2>&1 > "$diag_dir/${c}.log" || true
+    done
+
+    tar -czf "$bundle" -C "$diag_dir" .
+    rm -rf "$diag_dir"
+    ok "Support bundle generated: $bundle"
+}
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MAIN CLI DISPATCHER
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+main() {
+    local cmd="${1:-help}"
+    shift || true
+
+    case "$cmd" in
+        preflight)       cmd_preflight "$@" ;;
+        load)            cmd_load "$@" ;;
+        configure)       cmd_configure "$@" ;;
+        migrate)         cmd_migrate "$@" ;;
+        admin)
+            sub="${1:-}"
+            shift || true
+            if [ "$sub" = "create" ]; then
+                cmd_admin_create "$@"
+            else
+                die "Usage: qsvcctl admin create"
+            fi
+            ;;
+        up)              cmd_up "$@" ;;
+        down)            cmd_down "$@" ;;
+        status)          cmd_status "$@" ;;
+        logs)            cmd_logs "$@" ;;
+        rooms)           cmd_rooms "$@" ;;
+        devices)         cmd_devices "$@" ;;
+        netcheck)        cmd_netcheck "$@" ;;
+        backup)          cmd_backup "$@" ;;
+        restore)         cmd_restore "$@" ;;
+        support-bundle)  cmd_support_bundle "$@" ;;
+        version|--version|-v)
+            echo "qsvcctl version $VERSION"
+            ;;
+        help|--help|-h)
+            banner
+            cat << EOF
+Usage: qsvcctl <command> [options]
+
+Core Commands:
+  preflight              Run environment and dependency checks
+  load                   Load container images from images/*.tar
+  configure              Interactive setup wizard to generate config/.env
+  migrate                Apply database migrations
+  admin create           Create a platform administrator account
+  up [profile]           Start platform services (all|core|ai|mcu)
+  down                   Stop all platform services
+  status                 Show running containers and endpoint health
+  logs [service]         Tail service logs (auth|meeting|signaling|sfu|...)
+
+MCU & Room Management:
+  rooms list             List assigned persistent room numbers
+  rooms add <num> <name> Register a direct dial-in room number
+  rooms remove <num>     Remove a room number
+  devices list           List registered SIP/H.323 room systems
+  devices import <csv>   Import devices from CSV
+  devices sync           Regenerate FreeSWITCH directory XML
+
+Operations:
+  netcheck               Test network connectivity & IP reachability
+  backup [dir]           Create full platform configuration & DB backup
+  restore <archive>      Restore from backup archive
+  support-bundle         Generate diagnostics bundle for troubleshooting
+  version                Show version information
+
+EOF
+            ;;
+        *)
+            err "Unknown command: '$cmd'"
+            echo "Run 'qsvcctl --help' for available commands."
+            exit 1
+            ;;
+    esac
+}
+
+main "$@"

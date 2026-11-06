@@ -1,0 +1,114 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# QS-VC AI Services — Docker Compose
+# Includes: Speech-to-Text (ASR), Machine Translation (MT), and Local LLM (Ollama)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+version: '3.8'
+
+services:
+  # GPU-accelerated ASR (Whisper + IndicConformer)
+  asr-gpu:
+    image: qsvc-ai-gpu:${QSVC_VERSION:-latest}
+    container_name: qsvc-asr-gpu
+    restart: unless-stopped
+    command: ["python3", "services/asr/server.py"]
+    profiles: ["gpu"]
+    env_file:
+      - ${QSVC_CONFIG_FILE:-../config/.env}
+    environment:
+      DEVICE: cuda
+      PORT: 5001
+      ASR_ENGINE: hybrid
+    volumes:
+      - ../models/asr:/models:ro
+    ports:
+      - "5001:5001"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - qsvc-net
+
+  # GPU-accelerated MT (IndicTrans2)
+  mt-gpu:
+    image: qsvc-ai-gpu:${QSVC_VERSION:-latest}
+    container_name: qsvc-mt-gpu
+    restart: unless-stopped
+    command: ["python3", "services/mt/server.py"]
+    profiles: ["gpu"]
+    env_file:
+      - ${QSVC_CONFIG_FILE:-../config/.env}
+    environment:
+      DEVICE: cuda
+      PORT: 5000
+    volumes:
+      - ../models/mt:/models:ro
+    ports:
+      - "5000:5000"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    networks:
+      - qsvc-net
+
+  # CPU Fallback ASR
+  asr-cpu:
+    image: qsvc-ai-cpu:${QSVC_VERSION:-latest}
+    container_name: qsvc-asr-cpu
+    restart: unless-stopped
+    command: ["python3", "services/asr/server.py"]
+    profiles: ["cpu", "all"]
+    env_file:
+      - ${QSVC_CONFIG_FILE:-../config/.env}
+    environment:
+      DEVICE: cpu
+      PORT: 5001
+      ASR_MODEL: tiny
+    ports:
+      - "5001:5001"
+    networks:
+      - qsvc-net
+
+  # CPU Fallback MT
+  mt-cpu:
+    image: qsvc-ai-cpu:${QSVC_VERSION:-latest}
+    container_name: qsvc-mt-cpu
+    restart: unless-stopped
+    command: ["python3", "services/mt/server.py"]
+    profiles: ["cpu", "all"]
+    env_file:
+      - ${QSVC_CONFIG_FILE:-../config/.env}
+    environment:
+      DEVICE: cpu
+      PORT: 5000
+    ports:
+      - "5000:5000"
+    networks:
+      - qsvc-net
+
+  # Local LLM for meeting minutes (Ollama)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: qsvc-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama-models:/root/.ollama
+    ports:
+      - "11434:11434"
+    networks:
+      - qsvc-net
+
+volumes:
+  ollama-models:
+
+networks:
+  qsvc-net:
+    external: true
+    name: compose_qsvc-net
