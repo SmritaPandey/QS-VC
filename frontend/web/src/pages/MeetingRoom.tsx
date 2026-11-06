@@ -244,6 +244,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [reactionsOpen, setReactionsOpen] = useState(false);
     // Speaking language for voice-to-text: saved choice, else the user's location.
     const [speechLanguage, setSpeechLanguage] = useState<MeetingLanguage>(() => initialMeetingLanguage());
+    /** Guests read captions in the language of their location (time zone / region), fixed for the meeting. */
+    const guestCaptionLanguage = useMemo(() => detectLanguage().code, []);
     const [translatedSpeaking, setTranslatedSpeaking] = useState(false);
     const getMyPeerId = useCallback(() => myPeerIdRef.current, []);
     /** Captions use the same microphone the meeting sends (noise-suppressed when that is on). */
@@ -1556,13 +1558,17 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const toggleCaptions = useCallback(() => {
         if (captionsOn) { setCaptionsOn(false); setShareSpeech(false); stopSpeechRecognition.current(); return; }
         setCaptionsOn(true);
+        if (!signedIn) {
+            showNotice(`Captions are on in ${findLanguage(guestCaptionLanguage)?.name || 'your language'}, chosen from your location. Sign in to change the language or hear translated speech.`);
+            return;
+        }
         // Server recognition (any modern browser) or the browser's own recognizer.
         const supported = SpeechToTextEngine.isSupported() || ServerSpeechEngine.isSupported();
         if (!canPublishRef.current) { showNotice('Captions are on. You’ll see what the speakers say.'); return; }
         if (supported && hasCaptionConsent()) { setShareSpeech(true); showNotice('Captions are on, including your own speech.'); }
         else if (supported) { setLanguageOpen(true); setReactionsOpen(false); showNotice('Captions are on. To let others read what you say, turn on “Share my speech as captions”.'); }
         else showNotice('Captions are on. This browser can’t caption your own speech, but you’ll see what others say.');
-    }, [captionsOn, showNotice]);
+    }, [captionsOn, showNotice, signedIn, guestCaptionLanguage]);
     const closePanels = useCallback(() => {
         setChatOpen(false); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false);
     }, []);
@@ -1728,7 +1734,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     <ReactionsOverlay reactions={reactions} pickerOpen={reactionsOpen} onSendReaction={handleSendReaction} onClosePicker={closeReactions} onExpire={expireReaction} />
                     <MeetingCaptions translatedSpeaking={translatedSpeaking} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
                         showCaptions={captionsOn} onShowCaptionsChange={setCaptionsOn} shareSpeech={shareSpeech} onShareSpeechChange={setShareSpeech}
-                        getMicTrack={getCaptionMicTrack} isHost={manager} meetingCode={meetingCode} />
+                        getMicTrack={getCaptionMicTrack} isHost={manager} meetingCode={meetingCode}
+                        viewOnly={!signedIn} viewerLanguage={guestCaptionLanguage} />
                 </div>
 
                 {chatOpen && <MeetingChat messages={chatMessages} onSend={handleSendChat} onClose={closeChat} />}
@@ -1753,7 +1760,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             <ControlBar
                 assistant={signedIn ? <AIChatBot onOpen={() => { setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen || informationOpen} /> : undefined}
                 signedIn={signedIn}
-                captionsLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_captions'))}
+                captionsLocked={signedIn && !isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_captions'))}
                 effectsLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'background_effects'))}
                 noiseMode={noiseMode}
                 aiNoiseSuppressionLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_noise_suppression'))}
@@ -1766,7 +1773,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 viewMode={viewMode} onChangeView={changeView} tilesPerPage={tilesPerPage} onChangeTilesPerPage={changeTiles} activitySignal={mutedSpeechPulse} keepSideVisible={mutedSpeechNotice}
                 audioOutputId={audioOutputId} audioOutputDevices={audioOutputDevices} audioOutputSupported={audioOutputSupported}
                 onAudioOutputChange={setAudioOutputId} onChooseAudioOutput={audioOutputPickerSupported ? chooseAudioOutput : undefined}
-                captionsOn={captionsOn} onToggleCaptions={signedIn ? toggleCaptions : undefined}
+                captionsOn={captionsOn} onToggleCaptions={toggleCaptions}
                 fullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen}
                 effectsOn={effect.kind !== 'none'} onOpenEffects={() => { closePanels(); setEffectsOpen(true); setLanguageOpen(false); setReactionsOpen(false); }}
                 onReportProblem={() => setReportOpen(true)}
@@ -1774,7 +1781,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 isRecording={isRecording} canRecord={myRole === 'host' && !!getToken()} recordingLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'cloud_recording'))} chatOpen={chatOpen} participantsOpen={participantsOpen}
                 handRaised={handRaised} reactionsOpen={reactionsOpen}
                 onToggleReactions={() => { setReactionsOpen((open) => !open); setLanguageOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }}
-                languageOpen={languageOpen} languageLabel={findLanguage(speechLanguage.code)?.name} languageCode={speechLanguage.code.split('-')[0].toUpperCase()}
+                languageOpen={languageOpen} languageLabel={findLanguage(signedIn ? speechLanguage.code : guestCaptionLanguage)?.name} languageCode={(signedIn ? speechLanguage.code : guestCaptionLanguage).split('-')[0].toUpperCase()}
                 onToggleLanguage={signedIn ? () => { setLanguageOpen((open) => !open); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); } : undefined}
                 onToggleAudio={handleToggleAudio} onToggleVideo={handleToggleVideo}
                 onToggleScreen={handleScreenShare} onToggleRecording={handleToggleRecording}

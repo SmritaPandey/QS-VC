@@ -138,7 +138,9 @@ describe('room caption and configured translation owners', () => {
             expect(result?.error?.message).toBe('Not joined a room');
         }
         expect(request).not.toHaveBeenCalled();
-        const accepted = await handleRpcMessage(peer.ws, { jsonrpc: '2.0', id: 2, method: 'captionPublish', params: final }, { roomId: peer.roomId, peerId: peer.id });
+        const guest = await handleRpcMessage(peer.ws, { jsonrpc: '2.0', id: 2, method: 'captionPublish', params: final }, { roomId: peer.roomId, peerId: peer.id });
+        expect(guest?.error?.message).toContain('Sign in');
+        const accepted = await handleRpcMessage(peer.ws, { jsonrpc: '2.0', id: 3, method: 'captionPublish', params: final }, { roomId: peer.roomId, peerId: peer.id, authUser: { sub: 'u1', plan: 'starter', status: 'paid_active' } });
         expect(accepted?.result).toEqual({ accepted: true, id: `${peer.id}:segment-1` });
     });
     it('rejects malformed provider configuration without exposing it', async () => {

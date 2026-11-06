@@ -11,7 +11,7 @@ import { roomManager, PeerState, PeerRole, type PrivateConversation, type Verifi
 import { logger } from '../logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
-import { getPrivateConversationLimitMs } from '../../../../shared/entitlements.cjs';
+import { can, getPrivateConversationLimitMs } from '../../../../shared/entitlements.cjs';
 import meetingInvitation from '../../../../shared/meeting-invitation.cjs';
 import { publishCaption, publishInterim, subscribeCaptions, translationCapabilities, translateCaption, clearEmptyRoomCaptions, forgetPeerCaptions, setTranscriptSaving, transcriptEntries } from '../captions.js';
 import { asrCapabilities, pushAsrAudio, startAsr, stopAsr, stopAsrForPeer } from '../asr-relay.js';
@@ -183,6 +183,7 @@ interface RpcResponse {
 }
 
 const joiningSockets = new WeakSet<object>();
+const CAPTION_SPEAKER_PLAN_MESSAGE = 'Sign in with a plan that includes captions to share your speech';
 
 /**
  * Handle a JSON-RPC request from a WebSocket client.
@@ -238,15 +239,18 @@ export async function handleRpcMessage(
                 if (room?.settings.webinar && !canPublishInRoom(room.id, connectionState.peerId!, connectionState.authUser?.sub)) {
                     throw createError(-32005, 'Only the webinar organiser can publish captions');
                 }
+                if (!can(connectionState.authUser, 'ai_captions')) throw createError(-32005, CAPTION_SPEAKER_PLAN_MESSAGE);
                 return { jsonrpc: '2.0', id: id!, result: publishCaption(ws, connectionState.roomId!, connectionState.peerId!, params) };
             }
             case 'captionInterim':
             case 'asrStart':
             case 'asrAudio': {
+                // Sharing speech (and using the speech server) is a plan feature; guests can only read captions.
                 const room = roomManager.getRoom(connectionState.roomId!);
                 if (room?.settings.webinar && !canPublishInRoom(room.id, connectionState.peerId!, connectionState.authUser?.sub)) {
                     throw createError(-32005, 'Only the webinar organiser can publish captions');
                 }
+                if (!can(connectionState.authUser, 'ai_captions')) throw createError(-32005, CAPTION_SPEAKER_PLAN_MESSAGE);
                 const [roomId, peerId] = [connectionState.roomId!, connectionState.peerId!];
                 const result = method === 'captionInterim' ? publishInterim(ws, roomId, peerId, params)
                     : method === 'asrStart' ? await startAsr(ws, roomId, peerId, params)
@@ -255,8 +259,14 @@ export async function handleRpcMessage(
             }
             case 'asrStop':
                 return { jsonrpc: '2.0', id: id!, result: stopAsr(ws, connectionState.roomId!, connectionState.peerId!) };
-            case 'captionSubscribe':
+            case 'captionSubscribe': {
+                // Guests (and accounts without captions) read captions in ONE language and get no translated voice.
+                const targets = (params as { targets?: unknown })?.targets;
+                if (!can(connectionState.authUser, 'ai_captions') && Array.isArray(targets) && targets.filter(target => target !== 'original').length > 1) {
+                    throw createError(-32005, 'Guests can see captions in one language only');
+                }
                 return { jsonrpc: '2.0', id: id!, result: subscribeCaptions(ws, connectionState.roomId!, connectionState.peerId!, params) };
+            }
             case 'translationCapabilities': {
                 const [captions, asr] = await Promise.all([translationCapabilities(ws, connectionState.roomId!, connectionState.peerId!), asrCapabilities()]);
                 return { jsonrpc: '2.0', id: id!, result: { ...captions, asr, minutes: { configured: minutesConfigured() } } };

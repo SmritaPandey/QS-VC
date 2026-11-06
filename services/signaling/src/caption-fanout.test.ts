@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { roomManager, type PeerState } from './room-manager';
+import { handleRpcMessage } from './rpc/handler';
 import { clearEmptyRoomCaptions, publishCaption, publishInterim, publishServerCaption, setTranscriptSaving, subscribeCaptions, transcriptEntries } from './captions';
 
 const created: string[] = [];
@@ -117,5 +118,22 @@ describe('server speech captions and transcript', () => {
         expect(transcript.entries.map(entry => entry.text)).toEqual(['Saved line']);
         setTranscriptSaving(speaker.roomId, false);
         expect(transcriptEntries(speaker.roomId)).toEqual({ saving: false, entries: [] });
+    });
+});
+
+describe('guest caption rules (RPC)', () => {
+    it('lets guests read captions in one language but not hear voice or share speech', async () => {
+        const guest = participant();
+        const state = { roomId: guest.roomId, peerId: guest.id };
+        const call = (method: string, params: object, extra: object = {}) => handleRpcMessage(guest.ws, { jsonrpc: '2.0', id: 1, method, params }, { ...state, ...extra });
+        expect((await call('captionSubscribe', { targets: ['hi-IN'] }))?.result).toEqual({ targets: ['hi-IN'] });
+        expect((await call('captionSubscribe', { targets: ['hi-IN', 'ta'] }))?.error?.message).toContain('one language');
+        for (const method of ['captionInterim', 'asrStart', 'asrAudio']) {
+            expect((await call(method, { id: 'x', text: 'hi', language: 'en' }))?.error?.message).toContain('Sign in');
+        }
+        const paid = { authUser: { sub: 'u', plan: 'starter', status: 'paid_active' } };
+        expect((await call('captionSubscribe', { targets: ['hi-IN', 'ta'] }, paid))?.result).toEqual({ targets: ['hi-IN', 'ta'] });
+        const expired = { authUser: { sub: 'u', plan: 'starter_trial', status: 'trial_expired' } };
+        expect((await call('captionInterim', { id: 'x', text: 'hi', language: 'en' }, expired))?.error?.message).toContain('Sign in');
     });
 });
