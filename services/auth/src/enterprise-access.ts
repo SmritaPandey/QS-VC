@@ -205,7 +205,7 @@ export function enterpriseRouter(
             macIntel: process.env.ENTERPRISE_MACOS_X64_INSTALLER,
             linuxX64: process.env.ENTERPRISE_LINUX_X64_INSTALLER,
         };
-        const extensions = { windows: '.zip', macAppleSilicon: '.zip', macIntel: '.zip', linuxX64: '.tar.gz' } as const;
+        const extensions = { windows: '.zip', macAppleSilicon: '.zip', macIntel: '.zip', linuxX64: '.zip' } as const;
         const available = async (platform: keyof typeof configured) => {
             const file = configured[platform];
             if (!file || !path.isAbsolute(file) || !file.toLowerCase().endsWith(extensions[platform])) return false;
@@ -251,7 +251,7 @@ export function enterpriseRouter(
             windows: 'QS-VC-Windows-x64.zip',
             macAppleSilicon: 'QS-VC-macOS-arm64.zip',
             macIntel: 'QS-VC-macOS-x64.zip',
-            linuxX64: 'QS-VC-Linux-x64.tar.gz',
+            linuxX64: 'QS-VC-Linux-x64.zip',
         }[platform];
         res.download(file, filename, async error => {
             if (error) {

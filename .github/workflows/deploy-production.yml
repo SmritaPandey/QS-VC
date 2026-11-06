@@ -8,7 +8,6 @@ on:
       - 'services/**'
       - 'db/**'
       - 'deploy/aws/**'
-      - 'frontend/desktop/**'
   workflow_dispatch:
 
 permissions:
@@ -24,7 +23,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
-      desktop: ${{ steps.filter.outputs.desktop }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,147 +35,16 @@ jobs:
               - 'services/**'
               - 'db/**'
               - 'deploy/aws/**'
-            desktop:
-              - 'frontend/desktop/**'
 
   verify:
     name: Verify production revision
     uses: ./.github/workflows/ci.yml
 
-  build-installers:
-    name: Build Windows and Mac installers
-    needs: [verify, changes]
-    if: needs.changes.outputs.desktop == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: macos-latest
-    timeout-minutes: 45
-    steps:
-      - name: Checkout approved source
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: frontend/desktop/package-lock.json
-
-      - name: Install desktop dependencies
-        run: npm ci --prefix frontend/desktop
-
-      - name: Build Apple silicon app
-        run: npm --prefix frontend/desktop run package:mac:arm64
-
-      - name: Build Intel app
-        run: npm --prefix frontend/desktop run package:mac:x64
-
-      - name: Package the verified Windows installer as ZIP
-        shell: bash
-        run: |
-          set -euo pipefail
-          release=frontend/desktop/release
-          cat \
-            deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part00 \
-            deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part01 \
-            deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part02 \
-            deploy/aws/outgoing/QS-VC-Windows-Setup.exe.part03 \
-            > "$release/QS-VC-Windows-Setup.exe"
-          printf '%s  %s\n' \
-            '807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45' \
-            "$release/QS-VC-Windows-Setup.exe" \
-            | shasum -a 256 --check
-          printf '%s  %s\n' \
-            '807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45' \
-            'QS-VC-Windows-Setup.exe' \
-            > "$release/QS-VC-Windows-Setup.exe.sha256"
-          python3 - "$release" <<'PY'
-          from pathlib import Path
-          from zipfile import ZIP_DEFLATED, ZipFile
-          import sys
-
-          release = Path(sys.argv[1])
-          archive = release / 'QS-VC-Windows-x64.zip'
-          with ZipFile(archive, 'w', ZIP_DEFLATED) as bundle:
-              bundle.write(release / 'QS-VC-Windows-Setup.exe', 'QS-VC-Windows-Setup.exe')
-              bundle.write(release / 'QS-VC-Windows-Setup.exe.sha256', 'QS-VC-Windows-Setup.exe.sha256')
-          PY
-
-      - name: Verify and checksum installer archives
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd frontend/desktop/release
-          unzip -t QS-VC-Windows-x64.zip
-          unzip -t QS-VC-macOS-arm64.zip
-          unzip -t QS-VC-macOS-x64.zip
-          shasum -a 256 QS-VC-Windows-x64.zip > QS-VC-Windows-x64.zip.sha256
-          shasum -a 256 QS-VC-macOS-arm64.zip > QS-VC-macOS-arm64.zip.sha256
-          shasum -a 256 QS-VC-macOS-x64.zip > QS-VC-macOS-x64.zip.sha256
-
-      - name: Upload platform installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: qsvc-platform-installers
-          path: |
-            frontend/desktop/release/QS-VC-Windows-x64.zip
-            frontend/desktop/release/QS-VC-Windows-x64.zip.sha256
-            frontend/desktop/release/QS-VC-macOS-arm64.zip
-            frontend/desktop/release/QS-VC-macOS-arm64.zip.sha256
-            frontend/desktop/release/QS-VC-macOS-x64.zip
-            frontend/desktop/release/QS-VC-macOS-x64.zip.sha256
-          if-no-files-found: error
-          retention-days: 7
-
-  build-linux-installer:
-    name: Build Linux x64 desktop archive
-    needs: [verify, changes]
-    if: needs.changes.outputs.desktop == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - name: Checkout approved source
-        uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: frontend/desktop/package-lock.json
-
-      - name: Install desktop dependencies
-        run: npm ci --prefix frontend/desktop
-
-      - name: Build Linux x64 archive
-        run: npm --prefix frontend/desktop run package:linux:x64
-
-      - name: Verify and checksum Linux archive
-        run: |
-          set -euo pipefail
-          cd frontend/desktop/release
-          tar -tzf QS-VC-Linux-x64.tar.gz >/dev/null
-          sha256sum QS-VC-Linux-x64.tar.gz > QS-VC-Linux-x64.tar.gz.sha256
-
-      - name: Upload Linux installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: qsvc-linux-installer
-          path: |
-            frontend/desktop/release/QS-VC-Linux-x64.tar.gz
-            frontend/desktop/release/QS-VC-Linux-x64.tar.gz.sha256
-          if-no-files-found: error
-          retention-days: 7
-
   deploy:
-    needs: [verify, changes, build-installers, build-linux-installer]
+    needs: [verify, changes]
     if: >-
-      always() && needs.verify.result == 'success' &&
-      (needs.changes.outputs.backend == 'true' || needs.changes.outputs.desktop == 'true' || github.event_name == 'workflow_dispatch') &&
-      (needs.build-installers.result == 'success' || needs.build-installers.result == 'skipped') &&
-      (needs.build-linux-installer.result == 'success' || needs.build-linux-installer.result == 'skipped')
+      needs.verify.result == 'success' &&
+      (needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch')
     name: Deploy QSVC to AWS
     runs-on: ubuntu-latest
     environment: production
@@ -199,19 +66,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Download platform installers
-        if: needs.build-installers.result == 'success'
-        uses: actions/download-artifact@v4
-        with:
-          name: qsvc-platform-installers
-          path: /tmp/qsvc-platform-installers
-
-      - name: Download Linux installer
-        if: needs.build-linux-installer.result == 'success'
-        uses: actions/download-artifact@v4
-        with:
-          name: qsvc-linux-installer
-          path: /tmp/qsvc-platform-installers
+      # Desktop apps are plain ZIP downloads published by the separate "Desktop downloads"
+      # workflow to the GitHub release `desktop-latest`. Deployments never build them.
+      - name: Fetch desktop ZIP downloads
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/qsvc-desktop
+          if gh release download desktop-latest --repo "$GITHUB_REPOSITORY" --pattern 'QS-VC-*.zip*' --dir /tmp/qsvc-desktop --clobber; then
+            ls -l /tmp/qsvc-desktop
+          else
+            echo "No desktop-latest release yet; the server keeps any ZIPs it already has."
+          fi
 
       - name: Validate deployment files
         shell: bash
@@ -296,18 +164,9 @@ jobs:
           RELEASE_DIR="/tmp/qsvc-release-source"
           mkdir -p "$RELEASE_DIR/deploy/aws/installers"
           git archive --format=tar "$RELEASE_SHA" | tar -x -C "$RELEASE_DIR"
-          if [[ "${{ needs.build-installers.result }}" == success ]]; then
-            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Windows-x64.zip "$RELEASE_DIR/deploy/aws/installers/"
-            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Windows-x64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
-            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-arm64.zip "$RELEASE_DIR/deploy/aws/installers/"
-            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-arm64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
-            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-x64.zip "$RELEASE_DIR/deploy/aws/installers/"
-            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-macOS-x64.zip.sha256 "$RELEASE_DIR/deploy/aws/installers/"
-          fi
-          if [[ "${{ needs.build-linux-installer.result }}" == success ]]; then
-            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Linux-x64.tar.gz "$RELEASE_DIR/deploy/aws/installers/"
-            install -m 0644 /tmp/qsvc-platform-installers/QS-VC-Linux-x64.tar.gz.sha256 "$RELEASE_DIR/deploy/aws/installers/"
-          fi
+          for file in /tmp/qsvc-desktop/QS-VC-*.zip /tmp/qsvc-desktop/QS-VC-*.zip.sha256; do
+            if [[ -f "$file" ]]; then install -m 0644 "$file" "$RELEASE_DIR/deploy/aws/installers/"; fi
+          done
           tar -czf /tmp/qsvc-release.tar.gz -C "$RELEASE_DIR" .
 
           sha256sum /tmp/qsvc-release.tar.gz \
@@ -374,19 +233,20 @@ jobs:
           cp -p "$ROOT/deploy/aws/.env" "$STAGE/deploy/aws/.env"
           cp -p "$ROOT/certs/rds-ca.pem" "$STAGE/certs/rds-ca.pem"
 
-          # Backend-only changes skip installer builds. Carry forward the current
-          # verified packages in that case; desktop changes supply new artifacts.
+          # Desktop ZIPs come from the desktop-latest GitHub release when it exists;
+          # otherwise carry forward the ZIPs already on the server.
           for installer in \
             QS-VC-Windows-x64.zip QS-VC-Windows-x64.zip.sha256 \
             QS-VC-macOS-arm64.zip QS-VC-macOS-arm64.zip.sha256 \
             QS-VC-macOS-x64.zip QS-VC-macOS-x64.zip.sha256 \
-            QS-VC-Linux-x64.tar.gz QS-VC-Linux-x64.tar.gz.sha256; do
+            QS-VC-Linux-x64.zip QS-VC-Linux-x64.zip.sha256; do
             if [[ ! -s "$STAGE/deploy/aws/installers/$installer" ]]; then
               if [[ -s "$ROOT/deploy/aws/installers/$installer" ]]; then
                 cp -p "$ROOT/deploy/aws/installers/$installer" "$STAGE/deploy/aws/installers/$installer"
               else
-                echo "Installer is missing from release and server: $installer" >&2
-                exit 1
+                # A missing desktop package must not block a backend/web release;
+                # its download link reports "unavailable" until a desktop build publishes it.
+                echo "Warning: desktop package not available yet: $installer (run the Desktop downloads workflow to publish it)" >&2
               fi
             fi
           done

@@ -1,0 +1,88 @@
+name: Desktop downloads
+
+# Builds the QS-VC desktop app as plain ZIP archives (no installers) for Windows, Mac and
+# Linux and publishes them to the GitHub release "desktop-latest". The production deployment
+# picks them up from there; it never builds desktop apps itself.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'frontend/desktop/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: qsvc-desktop-downloads
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }} ZIP
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Windows x64, os: windows-latest, script: 'package:win:x64', file: QS-VC-Windows-x64.zip }
+          - { name: Mac Apple silicon, os: macos-latest, script: 'package:mac:arm64', file: QS-VC-macOS-arm64.zip }
+          - { name: Mac Intel, os: macos-latest, script: 'package:mac:x64', file: QS-VC-macOS-x64.zip }
+          - { name: Linux x64, os: ubuntu-latest, script: 'package:linux:x64', file: QS-VC-Linux-x64.zip }
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/desktop/package-lock.json
+      - name: Install desktop dependencies
+        run: npm ci --prefix frontend/desktop
+      - name: Build ZIP
+        run: npm --prefix frontend/desktop run ${{ matrix.script }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Verify ZIP and write checksum
+        shell: bash
+        working-directory: frontend/desktop/release
+        run: |
+          set -euo pipefail
+          test -s "${{ matrix.file }}"
+          python3 -c "import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); bad = z.testzip(); sys.exit(f'corrupt entry {bad}' if bad else 0)" "${{ matrix.file }}"
+          python3 -c "import hashlib, sys; f = sys.argv[1]; print(hashlib.sha256(open(f, 'rb').read()).hexdigest() + '  ' + f)" "${{ matrix.file }}" > "${{ matrix.file }}.sha256"
+          cat "${{ matrix.file }}.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.file }}
+          path: |
+            frontend/desktop/release/${{ matrix.file }}
+            frontend/desktop/release/${{ matrix.file }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to desktop-latest release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: zips
+          merge-multiple: true
+      - name: Upload ZIPs to the desktop-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ls -l zips
+          if ! gh release view desktop-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create desktop-latest --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+              --title "QS-VC desktop downloads" --notes "Plain ZIP archives of the QS-VC desktop app. Updated automatically." --latest=false
+          fi
+          gh release upload desktop-latest zips/QS-VC-*.zip zips/QS-VC-*.zip.sha256 --repo "$GITHUB_REPOSITORY" --clobber

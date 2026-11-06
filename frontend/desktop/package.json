@@ -8,12 +8,13 @@
         "build": "tsc",
         "start": "electron .",
         "dev": "tsc && electron .",
-        "package:win": "electron-builder --win",
+        "package:win": "npm run package:win:x64",
         "package:mac": "electron-builder --mac",
         "package:mac:arm64": "npm run build && electron-builder --mac zip --arm64",
         "package:mac:x64": "npm run build && electron-builder --mac zip --x64",
         "package:linux": "npm run package:linux:x64",
-        "package:linux:x64": "npm run build && electron-builder --linux tar.gz --x64"
+        "package:linux:x64": "npm run build && electron-builder --linux zip --x64",
+        "package:win:x64": "npm run build && electron-builder --win zip --x64"
     },
     "build": {
         "appId": "com.qsvc.desktop",
@@ -39,7 +40,7 @@
         "win": {
             "target": [
                 {
-                    "target": "nsis",
+                    "target": "zip",
                     "arch": [
                         "x64"
                     ]
@@ -47,29 +48,20 @@
             ],
             "icon": "assets/icon.ico",
             "signAndEditExecutable": false,
-            "artifactName": "QS-VC-Windows-Setup.exe"
-        },
-        "nsis": {
-            "oneClick": false,
-            "perMachine": false,
-            "allowToChangeInstallationDirectory": true,
-            "createDesktopShortcut": true,
-            "createStartMenuShortcut": true,
-            "shortcutName": "QS-VC",
-            "installerIcon": "assets/icon.ico",
-            "uninstallerIcon": "assets/icon.ico",
-            "uninstallDisplayName": "QS-VC"
+            "artifactName": "QS-VC-Windows-${arch}.zip"
         },
         "linux": {
             "target": [
                 {
-                    "target": "tar.gz",
-                    "arch": ["x64"]
+                    "target": "zip",
+                    "arch": [
+                        "x64"
+                    ]
                 }
             ],
             "icon": "assets/icon.png",
             "category": "Network",
-            "artifactName": "QS-VC-Linux-${arch}.tar.gz"
+            "artifactName": "QS-VC-Linux-${arch}.zip"
         },
         "mac": {
             "target": [

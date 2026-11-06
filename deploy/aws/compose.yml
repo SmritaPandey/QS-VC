@@ -42,7 +42,7 @@ services:
       ENTERPRISE_WINDOWS_INSTALLER: /opt/qsvc/installers/QS-VC-Windows-x64.zip
       ENTERPRISE_MACOS_ARM64_INSTALLER: /opt/qsvc/installers/QS-VC-macOS-arm64.zip
       ENTERPRISE_MACOS_X64_INSTALLER: /opt/qsvc/installers/QS-VC-macOS-x64.zip
-      ENTERPRISE_LINUX_X64_INSTALLER: /opt/qsvc/installers/QS-VC-Linux-x64.tar.gz
+      ENTERPRISE_LINUX_X64_INSTALLER: /opt/qsvc/installers/QS-VC-Linux-x64.zip
     volumes:
       - ./installers:/opt/qsvc/installers:ro
     command: [node, services/auth/dist/index.js]

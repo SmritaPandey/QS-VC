@@ -9,7 +9,7 @@ This guide covers signing in as a platform admin, testing the website and deskto
 | `QS-VC-Windows-x64.zip` | Windows 10/11, 64-bit (contains the setup app) | ZIP hash is release-specific; setup EXE SHA-256: `807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45` |
 | `QS-VC-macOS-arm64.zip` | Mac with Apple silicon (M1/M2/M3/M4) | Release-specific; shown after download and recorded in the deployment artifact |
 | `QS-VC-macOS-x64.zip` | Mac with Intel chip | Release-specific; shown after download and recorded in the deployment artifact |
-| `QS-VC-Linux-x64.tar.gz` | Linux desktop, x86-64 | Release-specific; shown after download and recorded in the deployment artifact |
+| `QS-VC-Linux-x64.zip` | Linux desktop, x86-64 | Release-specific; shown after download and recorded in the deployment artifact |
 
 Choose the matching operating system in the signed-in Intranet page. For Mac,
 Apple menu → **About This Mac** shows "Chip: Apple M…" (choose Apple silicon)
@@ -136,7 +136,7 @@ ENTERPRISE_ACCESS_JSON=[{"tenantId":"<tenant id>","userIds":["<user id>"],"works
 ENTERPRISE_WINDOWS_INSTALLER=/opt/qsvc/installers/QS-VC-Windows-x64.zip
 ENTERPRISE_MACOS_ARM64_INSTALLER=/opt/qsvc/installers/QS-VC-macOS-arm64.zip
 ENTERPRISE_MACOS_X64_INSTALLER=/opt/qsvc/installers/QS-VC-macOS-x64.zip
-ENTERPRISE_LINUX_X64_INSTALLER=/opt/qsvc/installers/QS-VC-Linux-x64.tar.gz
+ENTERPRISE_LINUX_X64_INSTALLER=/opt/qsvc/installers/QS-VC-Linux-x64.zip
 ```
 
 The protected production workflow verifies the Windows setup executable,
@@ -173,7 +173,7 @@ and its `.sha256` sidecar into the deployment installer folder. The Intranet
 page enables each device choice only when auth can read its archive.
 
 For a Linux x64 staging build, run `npm --prefix frontend/desktop run package:linux:x64`
-on Linux, then copy `frontend/desktop/release/QS-VC-Linux-x64.tar.gz` and its
+on Linux, then copy `frontend/desktop/release/QS-VC-Linux-x64.zip` and its
 `.sha256` sidecar into the protected installer directory. After extracting the
 archive on the target Linux distribution, run the `QS-VC` executable in the
 extracted folder. Required system libraries vary by distribution, so validate
