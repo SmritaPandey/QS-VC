@@ -168,16 +168,7 @@ class RoomManager {
      * Persistent rooms allow callers (e.g. SIP/Polycom devices or dialed callers)
      * to enter immediately without waiting for a browser host to arrive first.
      */
-    getOrCreatePersistentRoom(
-        meetingCode: string,
-        opts?: {
-            ownerUserId?: string | null;
-            autoAdmit?: boolean;
-            maxParticipants?: number;
-            encryption?: 'required' | 'optional';
-            displayName?: string;
-        }
-    ): RoomState {
+    getOrCreatePersistentRoom(meetingCode: string, opts?: PersistentRoomOptions): RoomState {
         const existingId = this.codeToRoomId.get(meetingCode);
         if (existingId) {
             const room = this.rooms.get(existingId);
@@ -192,59 +183,17 @@ class RoomManager {
             }
         }
 
-        const roomId = uuidv4();
         const autoAdmit = opts?.autoAdmit ?? true;
-        const room: RoomState = {
-            id: roomId,
-            meetingCode,
-            hostPeerId: null,
-            ownerUserId: opts?.ownerUserId ?? null,
-            peers: new Map(),
-            waitingRoom: new Map(),
-            settings: {
-                ...DEFAULT_SETTINGS,
-                maxParticipants: opts?.maxParticipants ?? 100,
-                waitingRoomEnabled: !autoAdmit,
-                meetingKind: 'conference',
-            },
-            recording: null,
-            hostStarted: autoAdmit,
-            spotlightPeerId: null,
-            stage: new Set(),
-            privateConversations: new Map(),
-            createdAt: new Date(),
-        };
-
-        this.rooms.set(roomId, room);
-        this.codeToRoomId.set(meetingCode, roomId);
-        logger.info(`Persistent room created: ${meetingCode} (${roomId}) autoAdmit=${autoAdmit}`);
-        return room;
-    }
-
-    /**
-     * Get or create a persistent room for a stable meeting code.
-     * Persistent rooms start with hostStarted=true so device-only rooms
-     * work without a browser host. If autoAdmit is true, the waiting room
-     * is disabled so SIP/H.323 devices join directly.
-     */
-    getOrCreatePersistentRoom(meetingCode: string, opts?: PersistentRoomOptions): RoomState {
-        const existing = this.getRoomByCode(meetingCode);
-        if (existing) return existing;
-
         const room = this.getOrCreateRoom(meetingCode, {
             maxParticipants: opts?.maxParticipants ?? 100,
-            waitingRoomEnabled: opts?.autoAdmit ? false : true,
+            waitingRoomEnabled: !autoAdmit,
         });
 
         room.ownerUserId = opts?.ownerUserId ?? null;
-        room.hostStarted = true;
+        room.hostStarted = autoAdmit;
+        room.settings.waitingRoomEnabled = !autoAdmit;
 
-        // Override waitingRoomEnabled for autoAdmit persistent rooms
-        if (opts?.autoAdmit) {
-            room.settings.waitingRoomEnabled = false;
-        }
-
-        logger.info(`Persistent room created: ${meetingCode} (${room.id}), autoAdmit=${opts?.autoAdmit ?? false}`);
+        logger.info(`Persistent room created: ${meetingCode} (${room.id}), autoAdmit=${autoAdmit}`);
         return room;
     }
 

@@ -32,11 +32,13 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
-          backend: |
-            services/**
-            db/**
-            deploy/aws/**
-          desktop: frontend/desktop/**
+          filters: |
+            backend:
+              - 'services/**'
+              - 'db/**'
+              - 'deploy/aws/**'
+            desktop:
+              - 'frontend/desktop/**'
 
   verify:
     name: Verify production revision
