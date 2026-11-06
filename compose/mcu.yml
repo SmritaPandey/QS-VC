@@ -1,0 +1,44 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# QS-VC MCU (FreeSWITCH + Poly Bridge) — Docker Compose
+# Connects legacy SIP/H.323 room systems (e.g. Polycom, Cisco) to QS-VC
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+version: '3.8'
+
+services:
+  freeswitch:
+    image: qsvc-mcu:${QSVC_VERSION:-latest}
+    container_name: qsvc-freeswitch
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      FS_ESL_PASSWORD: ${FS_ESL_PASSWORD:-ClueCon}
+      FS_ESL_PORT: ${FS_ESL_PORT:-8021}
+    volumes:
+      - ../config/freeswitch/dialplan:/etc/freeswitch/dialplan:ro
+      - ../config/freeswitch/directory:/etc/freeswitch/directory:ro
+      - ../config/freeswitch/sip_profiles:/etc/freeswitch/sip_profiles:ro
+      - freeswitch-recordings:/var/lib/freeswitch/recordings
+
+  poly-bridge:
+    image: qsvc-core:${QSVC_VERSION:-latest}
+    container_name: qsvc-poly-bridge
+    restart: unless-stopped
+    command: ["node", "deploy/poly-bridge/server.js"]
+    env_file:
+      - ${QSVC_CONFIG_FILE:-../config/.env}
+    environment:
+      NODE_ENV: production
+      QSVC_DEPLOYMENT: onprem
+      FS_ESL_HOST: ${FS_ESL_HOST:-127.0.0.1}
+      FS_ESL_PORT: ${FS_ESL_PORT:-8021}
+      FS_ESL_PASSWORD: ${FS_ESL_PASSWORD:-ClueCon}
+      BRIDGE_API_TOKEN: ${BRIDGE_API_TOKEN:-dev-bridge-secret-2026}
+      BRIDGE_RTP_ANNOUNCED_IP: ${SFU_ANNOUNCED_IP:-127.0.0.1}
+      SFU_URL: http://127.0.0.1:4000
+      SIGNALING_URL: http://127.0.0.1:4001
+    network_mode: host
+    depends_on:
+      - freeswitch
+
+volumes:
+  freeswitch-recordings:

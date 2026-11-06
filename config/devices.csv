@@ -11,3 +11,5 @@
 # Example:
 # Boardroom 401,Poly Studio X50,sip,4010,10.1.4.0/24,401,true
 name,model,protocol,extension,ip_or_cidr,room_number,auto_admit
+Boardroom 401,Poly Studio X50,sip,4010,10.1.4.0/24,1001,true
+Executive Suite,Poly G7500,sip,1010,,1001,true

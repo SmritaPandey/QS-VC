@@ -176,9 +176,8 @@ class RoomManager {
                 if (opts?.autoAdmit !== undefined) {
                     room.settings.waitingRoomEnabled = !opts.autoAdmit;
                 }
-                if (opts?.autoAdmit) {
-                    room.hostStarted = true;
-                }
+                // Persistent rooms remain active even when attendees must wait.
+                room.hostStarted = true;
                 return room;
             }
         }
@@ -190,7 +189,7 @@ class RoomManager {
         });
 
         room.ownerUserId = opts?.ownerUserId ?? null;
-        room.hostStarted = autoAdmit;
+        room.hostStarted = true;
         room.settings.waitingRoomEnabled = !autoAdmit;
 
         logger.info(`Persistent room created: ${meetingCode} (${room.id}), autoAdmit=${autoAdmit}`);
