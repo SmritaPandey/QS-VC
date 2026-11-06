@@ -32,4 +32,6 @@ export const config = {
   legVideoCodec: req("BRIDGE_LEG_VIDEO_CODEC", "VP8") as "VP8" | "H264",
   /** Shared secret QSVC's MCU service uses to call this bridge. */
   apiToken: req("BRIDGE_API_TOKEN", ""),
+  /** Base URL of the signaling service (internal RPC). */
+  signalingUrl: req("SIGNALING_URL", "http://127.0.0.1:4500"),
 };

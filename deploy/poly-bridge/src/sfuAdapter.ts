@@ -36,6 +36,18 @@ export interface SfuAdapter {
   /** Roster: show/hide Poly endpoints as participants in QSVC. */
   rosterUpsert(roomId: string, entry: PolyParticipant): Promise<void>;
   rosterRemove(roomId: string, callId: string): Promise<void>;
+
+  /**
+   * Resolve a dialed room number to meeting details via the signaling service.
+   * Returns null when the number is not assigned to any room.
+   */
+  resolveDialedNumber(number: string): Promise<DialedNumberResult | null>;
+
+  /**
+   * Ensure a bridge is running for the given room (idempotent).
+   * Starts SFU-side resources so the bridge can attach.
+   */
+  ensureBridge(roomId: string): Promise<void>;
 }
 
 export interface BrowserProducer {
@@ -58,4 +70,12 @@ export interface LobbyEntry {
 export interface PolyParticipant extends LobbyEntry {
   memberId: number; // FreeSWITCH conference member id
   muted: boolean;
+}
+
+export interface DialedNumberResult {
+  roomId: string;
+  meetingCode: string;
+  autoAdmit: boolean;
+  pinRequired: boolean;
+  encryption: string;
 }

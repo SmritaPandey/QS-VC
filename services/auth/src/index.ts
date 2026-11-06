@@ -17,11 +17,12 @@ import dotenv from 'dotenv';
 import pino from 'pino';
 import { createSession, validateSession, requireEnterpriseTerm, endSession, sessionErrorStatus, InvalidSessionError } from './sessions.js';
 import { contactRouter, contactRequestError } from './contact.js';
-import { effectiveRole, isPlatformAdmin } from './platform-admins.js';
+import { effectiveRole, isPlatformAdmin, assertPlatformAdminConfig } from './platform-admins.js';
 import { FEATURE_MIN_PLAN, getEntitlements, getPrivateConversationLimitMs } from '../../../shared/entitlements.cjs';
 
 dotenv.config({ path: '../../.env' });
 assertJwtSecret();
+assertPlatformAdminConfig();
 
 const logger = pino({
     transport: process.env.NODE_ENV === 'development'

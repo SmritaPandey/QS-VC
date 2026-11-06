@@ -79,6 +79,14 @@ export interface RoomSettings {
     allowReactions: boolean;       // participants can send reactions
 }
 
+export interface PersistentRoomOptions {
+    ownerUserId?: string;
+    autoAdmit?: boolean;
+    maxParticipants?: number;
+    encryption?: 'required' | 'optional';
+    displayName?: string;
+}
+
 export interface RoomState {
     id: string;
     meetingCode: string;
@@ -152,6 +160,91 @@ class RoomManager {
         this.rooms.set(roomId, room);
         this.codeToRoomId.set(meetingCode, roomId);
         logger.info(`Room created: ${meetingCode} (${roomId})`);
+        return room;
+    }
+
+    /**
+     * Create or get a persistent room for an assigned number / stable meeting code.
+     * Persistent rooms allow callers (e.g. SIP/Polycom devices or dialed callers)
+     * to enter immediately without waiting for a browser host to arrive first.
+     */
+    getOrCreatePersistentRoom(
+        meetingCode: string,
+        opts?: {
+            ownerUserId?: string | null;
+            autoAdmit?: boolean;
+            maxParticipants?: number;
+            encryption?: 'required' | 'optional';
+            displayName?: string;
+        }
+    ): RoomState {
+        const existingId = this.codeToRoomId.get(meetingCode);
+        if (existingId) {
+            const room = this.rooms.get(existingId);
+            if (room) {
+                if (opts?.autoAdmit !== undefined) {
+                    room.settings.waitingRoomEnabled = !opts.autoAdmit;
+                }
+                if (opts?.autoAdmit) {
+                    room.hostStarted = true;
+                }
+                return room;
+            }
+        }
+
+        const roomId = uuidv4();
+        const autoAdmit = opts?.autoAdmit ?? true;
+        const room: RoomState = {
+            id: roomId,
+            meetingCode,
+            hostPeerId: null,
+            ownerUserId: opts?.ownerUserId ?? null,
+            peers: new Map(),
+            waitingRoom: new Map(),
+            settings: {
+                ...DEFAULT_SETTINGS,
+                maxParticipants: opts?.maxParticipants ?? 100,
+                waitingRoomEnabled: !autoAdmit,
+                meetingKind: 'conference',
+            },
+            recording: null,
+            hostStarted: autoAdmit,
+            spotlightPeerId: null,
+            stage: new Set(),
+            privateConversations: new Map(),
+            createdAt: new Date(),
+        };
+
+        this.rooms.set(roomId, room);
+        this.codeToRoomId.set(meetingCode, roomId);
+        logger.info(`Persistent room created: ${meetingCode} (${roomId}) autoAdmit=${autoAdmit}`);
+        return room;
+    }
+
+    /**
+     * Get or create a persistent room for a stable meeting code.
+     * Persistent rooms start with hostStarted=true so device-only rooms
+     * work without a browser host. If autoAdmit is true, the waiting room
+     * is disabled so SIP/H.323 devices join directly.
+     */
+    getOrCreatePersistentRoom(meetingCode: string, opts?: PersistentRoomOptions): RoomState {
+        const existing = this.getRoomByCode(meetingCode);
+        if (existing) return existing;
+
+        const room = this.getOrCreateRoom(meetingCode, {
+            maxParticipants: opts?.maxParticipants ?? 100,
+            waitingRoomEnabled: opts?.autoAdmit ? false : true,
+        });
+
+        room.ownerUserId = opts?.ownerUserId ?? null;
+        room.hostStarted = true;
+
+        // Override waitingRoomEnabled for autoAdmit persistent rooms
+        if (opts?.autoAdmit) {
+            room.settings.waitingRoomEnabled = false;
+        }
+
+        logger.info(`Persistent room created: ${meetingCode} (${room.id}), autoAdmit=${opts?.autoAdmit ?? false}`);
         return room;
     }
 
@@ -307,7 +400,7 @@ class RoomManager {
                 }
             }, 60000);
         }
-        if (room.peers.size === 0 && room.ownerUserId) {
+        if (room.peers.size === 0 && room.ownerUserId && room.settings.waitingRoomEnabled) {
             // Everyone in the call left; the next person in must wait for the host again.
             room.hostStarted = false;
             for (const waiting of room.waitingRoom.values()) {

@@ -45,7 +45,12 @@ export function captionLimits() {
     };
 }
 
-const googleEnabled = () => process.env.CAPTION_TRANSLATION_PROVIDER === 'google';
+const googleEnabled = () => {
+    if (process.env.QSVC_DEPLOYMENT === 'onprem') {
+        return process.env.CAPTION_TRANSLATION_PROVIDER === 'google' && process.env.ENABLE_ONPREM_GOOGLE_TRANSLATION === 'true';
+    }
+    return process.env.CAPTION_TRANSLATION_PROVIDER === 'google';
+};
 const rooms = new Map<string, RoomCaptions>();
 const limits = new WeakMap<object, { published: number; interim: number; active: Set<string>; minute: number; count: number; capabilities: number }>();
 let activeRequests = 0;
@@ -78,7 +83,10 @@ function roomState(roomId: string) {
     return state;
 }
 function configuredUrl() {
-    const configured = process.env.LIBRETRANSLATE_URL;
+    let configured = process.env.LIBRETRANSLATE_URL;
+    if (!configured && process.env.QSVC_DEPLOYMENT === 'onprem') {
+        configured = process.env.MT_URL || 'http://127.0.0.1:5000';
+    }
     if (!configured) return undefined;
     try {
         const url = new URL(configured);

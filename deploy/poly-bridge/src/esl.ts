@@ -54,6 +54,8 @@ export class FreeSwitch extends EventEmitter {
         protocol: (h("Channel-Name") || "").startsWith("h323") ? "h323" : "sip",
         remoteAddress: h("Caller-Network-Addr") ?? "",
         encrypted: h("variable_rtp_secure_media_confirmed_audio") === "true" || h("variable_h235_enabled") === "true",
+        dialedNumber: h("variable_qsvc_number") || undefined,
+        pin: h("variable_qsvc_pin") || undefined,
       });
     } else if (name === "CHANNEL_HANGUP_COMPLETE" && h("variable_qsvc_lobby") === "true") {
       this.emit("lobby-left", { uuid: h("Unique-ID"), room: h("variable_qsvc_room") });

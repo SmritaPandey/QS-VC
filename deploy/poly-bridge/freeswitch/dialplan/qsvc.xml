@@ -43,6 +43,21 @@
     </extension>
 
     <!-- Dial-in: sip:<room>@mcu  or  H.323 <mcu-ip>##<room>. Goes to the LOBBY. -->
+    <!-- Direct dial-in via numeric room number (3-10 digits). -->
+    <extension name="qsvc_number">
+      <condition field="destination_number" expression="^(\d{3,10})$">
+        <action application="set" data="qsvc_number=$1"/>
+        <action application="set" data="qsvc_room=$1"/>
+        <action application="set" data="qsvc_lobby=true"/>
+        <!-- If a PIN is required, the bridge will check it after parking.
+             Optionally collect a PIN up-front (play_and_get_digits). -->
+        <action application="set" data="rtp_secure_media=optional"/>
+        <action application="answer"/>
+        <action application="playback" data="silence_stream://500"/>
+        <action application="park"/>
+      </condition>
+    </extension>
+
     <extension name="qsvc_lobby">
       <condition field="destination_number" expression="^(?:##)?([\w-]+)$">
         <action application="set" data="qsvc_room=$1"/>
