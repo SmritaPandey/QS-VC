@@ -328,33 +328,24 @@ jobs:
             "$URI" \
             --sse AES256
 
-          DOWNLOAD_URL=$(aws s3 presign "$URI" --expires-in 3600)
-          # Verify that the deploy role can read the object through its short-lived URL.
-          curl --fail --silent --show-error --range 0-0 --output /dev/null "$DOWNLOAD_URL"
-
           echo "uri=$URI" >> "$GITHUB_OUTPUT"
-          echo "download_url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
 
       - name: Trigger EC2 deployment through SSM
         id: ssm
         shell: bash
         env:
-          RELEASE_DOWNLOAD_URL: ${{ steps.upload.outputs.download_url }}
+          RELEASE_URI: ${{ steps.upload.outputs.uri }}
         run: |
           set -euo pipefail
 
           CHECKSUM="$(cat /tmp/qsvc-release.sha256)"
 
-          # The host fetches the private archive with a one-hour presigned URL,
-          # so its instance profile does not need access to the deployment bucket.
+          # The EC2 instance profile has read-only access to this release prefix.
           read -r -d '' REMOTE_SCRIPT <<'REMOTE' || true
           set -Eeuo pipefail
           set +x
           umask 077
 
-          DOWNLOAD_URL="$1"
-          EXPECTED_SHA="$2"
-          EXPECTED_CHECKSUM="$3"
           [[ "$EXPECTED_SHA" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid release SHA" >&2; exit 2; }
           [[ "$EXPECTED_CHECKSUM" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid archive checksum" >&2; exit 2; }
 
@@ -366,7 +357,7 @@ jobs:
 
           ARCHIVE="$TEMP_DIR/qsvc-release.tar.gz"
           STAGE="$TEMP_DIR/release"
-          curl --fail --silent --show-error --location --retry 3 "$DOWNLOAD_URL" --output "$ARCHIVE"
+          aws s3 cp "$RELEASE_URI" "$ARCHIVE" --region ap-south-1
           printf '%s  %s\n' "$EXPECTED_CHECKSUM" "$ARCHIVE" | sha256sum --check --status || {
             echo "Release archive checksum mismatch" >&2
             exit 1
@@ -410,8 +401,10 @@ jobs:
           "$ROOT/deploy/aws/deploy-production.sh"
           REMOTE
 
-          printf -v COMMAND 'sudo bash -c %q -- %q %q %q' \
-            "$REMOTE_SCRIPT" "$RELEASE_DOWNLOAD_URL" "$RELEASE_SHA" "$CHECKSUM"
+          REMOTE_PAYLOAD=$(printf 'RELEASE_URI=%q\nEXPECTED_SHA=%q\nEXPECTED_CHECKSUM=%q\n%s\n' \
+            "$RELEASE_URI" "$RELEASE_SHA" "$CHECKSUM" "$REMOTE_SCRIPT")
+          REMOTE_B64=$(printf '%s' "$REMOTE_PAYLOAD" | base64 -w 0)
+          COMMAND="printf '%s' '$REMOTE_B64' | base64 --decode | sudo bash"
 
           jq -n \
             --arg cmd "$COMMAND" \
