@@ -15,6 +15,11 @@
       "Type": "AWS::EC2::SecurityGroup::Id",
       "Default": "sg-00959f7a8c88ab900"
     },
+    "DeploymentBucket": {
+      "Type": "String",
+      "Default": "qsvc-deploy-artifacts-173535830454",
+      "Description": "Private S3 bucket containing GitHub Actions release archives"
+    },
     "ImageId": {
       "Type": "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>",
       "Default": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
@@ -186,6 +191,15 @@
                   ],
                   "Resource": {
                     "Fn::Sub": "${RecordingsBucket.Arn}/deployment/*"
+                  }
+                },
+                {
+                  "Effect": "Allow",
+                  "Action": [
+                    "s3:GetObject"
+                  ],
+                  "Resource": {
+                    "Fn::Sub": "arn:${AWS::Partition}:s3:::${DeploymentBucket}/qsvc/releases/*"
                   }
                 }
               ]
