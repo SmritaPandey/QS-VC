@@ -208,7 +208,6 @@ export default function Landing() {
             <main className="landing-container" id="main-content">
                 {sessionError && <p role="alert">{sessionError}</p>}
                 {session.status === 'unavailable' && <p role="status">Account unavailable. <button type="button" onClick={() => void refreshSession()}>Try again</button></p>}
-                <p className="demo-notice">Demo environment. Use sample names and content. Sign in as the meeting host to record when cloud storage is configured.</p>
                 <div className="landing-hero">
 
                     <h1>Make room for the conversation.</h1>
