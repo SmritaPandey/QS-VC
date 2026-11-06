@@ -7,7 +7,7 @@ COPY services/signaling/package.json ./
 RUN npm install
 COPY services/signaling/tsconfig.json ./
 COPY services/signaling/src ./src
-COPY shared/jwt-secret.cjs shared/jwt-secret.d.cts /shared/
+COPY shared/ /shared/
 RUN npm run build
 
 FROM node:20-alpine AS meeting-build
@@ -16,8 +16,7 @@ COPY services/meeting/package.json ./
 RUN npm install
 COPY services/meeting/tsconfig.json ./
 COPY services/meeting/src ./src
-COPY shared/database.cjs shared/database.d.cts shared/tenant-database.cjs shared/tenant-database.d.cts /shared/
-COPY shared/jwt-secret.cjs shared/jwt-secret.d.cts /shared/
+COPY shared/ /shared/
 RUN npm run build
 
 FROM node:20-alpine
@@ -30,11 +29,10 @@ COPY services/signaling/package.json ./signaling/package.json
 RUN cd signaling && npm install --omit=dev
 
 COPY --from=meeting-build /meeting/dist ./dist
-COPY shared/database.cjs shared/tenant-database.cjs /shared/
 COPY --from=signaling-build /signaling/dist ./signaling/dist
+COPY shared/ /shared/
 
 ENV HOST=0.0.0.0
 ENV SIGNALING_DIST=/app/signaling/dist/ws-attach.js
-COPY shared/jwt-secret.cjs /shared/
 EXPOSE 4003
 CMD ["node", "dist/index.js"]

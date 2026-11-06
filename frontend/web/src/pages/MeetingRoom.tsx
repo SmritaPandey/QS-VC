@@ -36,6 +36,7 @@ import HostMeetingTools, { type RoomHostSettings } from '../components/HostMeeti
 import { WaitingAdmission, type WaitingMode } from '../components/WaitingRoom';
 import { openMicrophone, startCameraWithFallback, microphoneMessage, deviceLabel } from '../lib/device-access';
 import { initialMeetingLanguage, detectLanguage, setMeetingLanguage, clearSavedLanguage, findLanguage, LANGUAGE_EVENT, type MeetingLanguage } from '../lib/meeting-language';
+import { E2EEManager, type E2EEKeyBundle, type E2EEKeyEnvelope } from '../lib/e2ee';
 
 const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
 const MAX_MEETING_TITLE_LENGTH = 52;
@@ -165,6 +166,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     }, []);
 
     const myPeerIdRef = useRef('');
+    const e2eeRef = useRef<E2EEManager | null>(null);
+    const e2eeBundlesRef = useRef(new Map<string, E2EEKeyBundle>());
+    const hostE2EEBundleRef = useRef<E2EEKeyBundle | null>(null);
+    const [e2eeActive, setE2EEActive] = useState(false);
     const [myRole, setMyRole] = useState<string>('member');
     const [displayName] = useState(state.displayName || 'Guest');
     const [peers, setPeers] = useState<Map<string, PeerData>>(new Map());
@@ -775,7 +780,22 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         patchPeer(peerId, { displayName: name, role });
                         setKnocks(current => current.filter(k => k.peerId !== peerId));
                     }),
-                    signaling.on('peerLeft', ({ peerId }: any) => { notifiedKnocks.current.delete(peerId); setKnocks(current => current.filter(k => k.peerId !== peerId)); setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; }); }),
+                    signaling.on('peerLeft', ({ peerId }: any) => {
+                        notifiedKnocks.current.delete(peerId);
+                        e2eeBundlesRef.current.delete(peerId);
+                        setKnocks(current => current.filter(k => k.peerId !== peerId));
+                        setPeers(prev => { const next = new Map(prev); next.delete(peerId); return next; });
+                        if (myRoleRef.current === 'host' && e2eeRef.current?.isActive()) void (async () => {
+                            const manager = e2eeRef.current!;
+                            manager.rekey();
+                            for (const [targetPeerId, bundle] of e2eeBundlesRef.current) {
+                                if (targetPeerId === myPeerIdRef.current) continue;
+                                const envelope = await manager.wrapMeetingKeyForPeer(targetPeerId, bundle.kemPublicKey);
+                                await signaling.request('distributeEpochKey', { targetPeerId, envelope });
+                            }
+                            await signaling.request('e2eeRekey', {});
+                        })().catch(error => { console.error('[E2EE] Rekey failed:', error); showNotice('Encryption could not rotate after a participant left. Please end and restart the meeting.'); });
+                    }),
                     signaling.on('peerKicked', ({ peerId }: any) => setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; })),
                     signaling.on('peerMuteChanged', ({ peerId, kind, muted }: any) => {
                         if (kind === 'audio') patchPeer(peerId, { audioMuted: !!muted });
@@ -807,7 +827,54 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         if (!emoji || peerId === myPeerIdRef.current) return;
                         pushReaction(emoji, name || 'Guest', false);
                     }),
+                    signaling.on('e2eeKeyExchange', (payload: any) => {
+                        void (async () => {
+                            const manager = e2eeRef.current;
+                            if (!manager || typeof payload?.peerId !== 'string') return;
+                            const bundle: E2EEKeyBundle = { kemPublicKey: payload.kemPublicKey, signingPublicKey: payload.signingPublicKey, signature: payload.signature };
+                            if (!await manager.verifyKeyBundle(bundle)) { showNotice('A participant sent an invalid encryption key. Their media will stay blocked.'); return; }
+                            e2eeBundlesRef.current.set(payload.peerId, bundle);
+                            if (payload.role === 'host') hostE2EEBundleRef.current = bundle;
+                            if (myRoleRef.current === 'host' && payload.peerId !== myPeerIdRef.current) {
+                                const envelope = await manager.wrapMeetingKeyForPeer(payload.peerId, bundle.kemPublicKey);
+                                await signaling.request('distributeEpochKey', { targetPeerId: payload.peerId, envelope });
+                            }
+                        })().catch(error => { console.error('[E2EE] Key exchange failed:', error); showNotice('End-to-end encryption setup failed. Media remains blocked.'); });
+                    }),
+                    signaling.on('e2eeEpochKey', (payload: any) => {
+                        void (async () => {
+                            const manager = e2eeRef.current;
+                            const hostBundle = hostE2EEBundleRef.current;
+                            if (!manager || !hostBundle || typeof payload?.hostPeerId !== 'string') throw new Error('The meeting host encryption identity is unavailable');
+                            if (payload.hostSigningPublicKey !== hostBundle.signingPublicKey) throw new Error('The meeting host encryption identity changed');
+                            await manager.acceptMeetingKey(payload.envelope as E2EEKeyEnvelope, payload.hostPeerId, hostBundle.signingPublicKey, myPeerIdRef.current);
+                            setE2EEActive(true);
+                        })().catch(error => { console.error('[E2EE] Group key rejected:', error); showNotice('The host could not establish end-to-end encryption. Media remains blocked.'); });
+                    }),
                 );
+
+                const e2eeManager = new E2EEManager(meetingCode || '');
+                e2eeRef.current = e2eeManager;
+                media.setE2EEManager(e2eeManager);
+                const localKeyBundle = joinResult.role === 'host'
+                    ? await e2eeManager.initAsHost()
+                    : await e2eeManager.initAsParticipant();
+                if (!alive()) return;
+                if (joinResult.role === 'host') setE2EEActive(true);
+                if (joinResult.role === 'host') hostE2EEBundleRef.current = localKeyBundle;
+                e2eeBundlesRef.current.set(myPeerIdRef.current, localKeyBundle);
+                await signaling.request('exchangeE2EEKeys', localKeyBundle);
+                for (const peer of joinResult.existingPeers || []) {
+                    if (!peer.e2eeKeyBundle) continue;
+                    const bundle = peer.e2eeKeyBundle as E2EEKeyBundle;
+                    if (!await e2eeManager.verifyKeyBundle(bundle)) throw new Error(`Invalid encryption identity for ${peer.displayName || 'participant'}`);
+                    e2eeBundlesRef.current.set(peer.peerId, bundle);
+                    if (peer.role === 'host') hostE2EEBundleRef.current = bundle;
+                    if (joinResult.role === 'host') {
+                        const envelope = await e2eeManager.wrapMeetingKeyForPeer(peer.peerId, bundle.kemPublicKey);
+                        await signaling.request('distributeEpochKey', { targetPeerId: peer.peerId, envelope });
+                    }
+                }
 
                 // People already in the room, with their mic / camera / hand state.
                 for (const p of joinResult.existingPeers || []) {
@@ -1563,12 +1630,12 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             return;
         }
         // Server recognition (any modern browser) or the browser's own recognizer.
-        const supported = SpeechToTextEngine.isSupported() || ServerSpeechEngine.isSupported();
+        const supported = SpeechToTextEngine.isSupported() || (!e2eeActive && ServerSpeechEngine.isSupported());
         if (!canPublishRef.current) { showNotice('Captions are on. You’ll see what the speakers say.'); return; }
         if (supported && hasCaptionConsent()) { setShareSpeech(true); showNotice('Captions are on, including your own speech.'); }
         else if (supported) { setLanguageOpen(true); setReactionsOpen(false); showNotice('Captions are on. To let others read what you say, turn on “Share my speech as captions”.'); }
         else showNotice('Captions are on. This browser can’t caption your own speech, but you’ll see what others say.');
-    }, [captionsOn, showNotice, signedIn, guestCaptionLanguage]);
+    }, [captionsOn, showNotice, signedIn, guestCaptionLanguage, e2eeActive]);
     const closePanels = useCallback(() => {
         setChatOpen(false); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false);
     }, []);
@@ -1732,7 +1799,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         onAccept={acceptPrivateConversation} onDecline={declinePrivateConversation} onCancel={cancelPrivateConversationInvite}
                         onEnd={endPrivateConversation} onToggleMicrophone={() => void togglePrivateMicrophone()} onToggleFocusAudio={togglePrivateFocusAudio} />
                     <ReactionsOverlay reactions={reactions} pickerOpen={reactionsOpen} onSendReaction={handleSendReaction} onClosePicker={closeReactions} onExpire={expireReaction} />
-                    <MeetingCaptions translatedSpeaking={translatedSpeaking} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
+                    <MeetingCaptions translatedSpeaking={translatedSpeaking} e2eeActive={e2eeActive} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
                         showCaptions={captionsOn} onShowCaptionsChange={setCaptionsOn} shareSpeech={shareSpeech} onShareSpeechChange={setShareSpeech}
                         getMicTrack={getCaptionMicTrack} isHost={manager} meetingCode={meetingCode}
                         viewOnly={!signedIn} viewerLanguage={guestCaptionLanguage} />

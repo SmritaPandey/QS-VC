@@ -23,6 +23,7 @@ export interface PeerState {
     handRaised: boolean;
     screenSharing: boolean;
     joinedAt: Date;
+    e2eeKeyBundle?: { kemPublicKey: string; signingPublicKey: string; signature: string };
 }
 
 export interface VerifiedSignalingUser {
@@ -421,6 +422,11 @@ class RoomManager {
             if (peerId === excludePeerId) continue;
             try {
                 if (peer.ws && peer.ws.readyState === 1) {
+                    if (peer.ws.bufferedAmount > 1_048_576) {
+                        logger.warn(`Closing slow signaling peer ${peerId} after its send buffer exceeded 1 MiB`);
+                        peer.ws.terminate?.();
+                        continue;
+                    }
                     peer.ws.send(message);
                 }
             } catch (err) {

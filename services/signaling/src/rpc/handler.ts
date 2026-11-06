@@ -1272,6 +1272,7 @@ export async function handleRpcMessage(
                     videoOff: p.videoOff,
                     handRaised: p.handRaised,
                     screenSharing: p.screenSharing,
+                    e2eeKeyBundle: p.e2eeKeyBundle,
                     joinedAt: p.joinedAt.toISOString(),
                     producers: Array.from(p.producers.values()).filter(producer => producer.appData?.type !== 'private-audio'),
                 }));
@@ -1293,7 +1294,7 @@ export async function handleRpcMessage(
             // E2EE KEY EXCHANGE
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             case 'exchangeE2EEKeys': {
-                const { publicKey } = params;
+                const { kemPublicKey, signingPublicKey, signature } = params;
                 const room = roomManager.getRoom(connectionState.roomId!);
                 if (!room) throw createError(-32002, 'Not in a room');
 
@@ -1301,11 +1302,15 @@ export async function handleRpcMessage(
                 const peer = room.peers.get(connectionState.peerId!);
                 if (!peer) throw createError(-32002, 'Peer not found');
 
-                (peer as any).e2eePublicKey = publicKey;
+                if ([kemPublicKey, signingPublicKey, signature].some(value => typeof value !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length > 7000)) {
+                    throw createError(-32602, 'Invalid E2EE key bundle');
+                }
+                peer.e2eeKeyBundle = { kemPublicKey, signingPublicKey, signature };
 
                 roomManager.broadcast(connectionState.roomId!, 'e2eeKeyExchange', {
                     peerId: connectionState.peerId,
-                    publicKey,
+                    role: peer.role,
+                    ...peer.e2eeKeyBundle,
                 }, connectionState.peerId!);
 
                 return {
@@ -1315,9 +1320,15 @@ export async function handleRpcMessage(
             }
 
             case 'distributeEpochKey': {
-                const { targetPeerId, encryptedKey, epoch } = params;
+                const { targetPeerId, envelope } = params;
                 const room = roomManager.getRoom(connectionState.roomId!);
                 if (!room) throw createError(-32002, 'Not in a room');
+                const sender = room.peers.get(connectionState.peerId!);
+                if (!sender || sender.role !== 'host' || room.hostPeerId !== sender.id) throw createError(-32001, 'Only the meeting host can distribute the E2EE group key');
+                if (typeof targetPeerId !== 'string' || !room.peers.has(targetPeerId) || targetPeerId === sender.id) throw createError(-32602, 'Invalid E2EE key recipient');
+                if (!envelope || envelope.targetPeerId !== targetPeerId || ['ciphertext', 'iv', 'encryptedKey', 'signature'].some(key => typeof envelope[key] !== 'string' || envelope[key].length > 7000)) {
+                    throw createError(-32602, 'Invalid encrypted E2EE key envelope');
+                }
 
                 // Forward encrypted epoch key to specific peer
                 const targetPeer = room.peers.get(targetPeerId);
@@ -1326,9 +1337,9 @@ export async function handleRpcMessage(
                         jsonrpc: '2.0',
                         method: 'e2eeEpochKey',
                         params: {
-                            fromPeerId: connectionState.peerId,
-                            encryptedKey,
-                            epoch,
+                            hostPeerId: connectionState.peerId,
+                            hostSigningPublicKey: sender.e2eeKeyBundle?.signingPublicKey,
+                            envelope,
                         },
                     });
                     (targetPeer as any).ws.send(notification);
@@ -1344,6 +1355,8 @@ export async function handleRpcMessage(
                 // Triggered when a participant leaves and host re-keys
                 const room = roomManager.getRoom(connectionState.roomId!);
                 if (!room) throw createError(-32002, 'Not in a room');
+                const actor = room.peers.get(connectionState.peerId!);
+                if (!actor || actor.role !== 'host' || room.hostPeerId !== actor.id) throw createError(-32001, 'Only the host can rotate the E2EE group key');
 
                 // Broadcast rekey notification to all peers
                 roomManager.broadcast(connectionState.roomId!, 'e2eeRekeyRequired', {
@@ -1465,6 +1478,7 @@ async function joinPeerToRoom(
             handRaised: p.handRaised,
             screenSharing: p.screenSharing,
             onStage: room.stage.has(id),
+            e2eeKeyBundle: p.e2eeKeyBundle,
                     producers: Array.from(p.producers.values()).filter(producer => producer.appData?.type !== 'private-audio'),
         }));
 

@@ -11,6 +11,7 @@
         "lint": "eslint src/"
     },
     "dependencies": {
+        "@noble/post-quantum": "^0.7.1",
         "@sapphi-red/web-noise-suppressor": "^0.4.1",
         "mediasoup-client": "^3.7.0",
         "qrcode.react": "^4.2.0",
