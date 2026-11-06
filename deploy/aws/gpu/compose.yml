@@ -40,6 +40,7 @@ services:
       context: ../../../services/mt
       args:
         BASE: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
+        TORCH_INDEX: https://download.pytorch.org/whl/cu124
     environment:
       MT_LANGUAGES: ${MT_LANGUAGES:-}
       MT_API_KEY: ${MT_API_KEY:?Set the same value as LIBRETRANSLATE_API_KEY on the backend}
