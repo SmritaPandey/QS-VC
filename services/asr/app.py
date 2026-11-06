@@ -6,7 +6,12 @@
     GET /v1/languages -> {"languages":[{code,name}], "autoDetect": true, "engine", "model"}
     GET /health
 
-Engine: faster-whisper (CTranslate2). Default model large-v3-turbo on an NVIDIA GPU, "small" on CPU.
+Engines (ASR_ENGINE):
+  hybrid (default)  Whisper for English, Hindi/Hinglish and other languages; AI4Bharat IndicConformer
+                    for the other scheduled Indian languages (ASR_INDIC_LANGUAGES). If IndicConformer
+                    cannot load (e.g. no Hugging Face access yet), it runs Whisper-only and says so.
+  whisper           faster-whisper only (large-v3-turbo on GPU, "small" on CPU).
+  indicconformer    IndicConformer only (22 Indian languages, no English).
 Utterances are cut by an energy voice-activity detector; partial hypotheses are produced while
 someone speaks, a final one after a short pause. Audio is processed in memory and never stored.
 """
@@ -35,6 +40,16 @@ LANGUAGE_NAMES = {
     "de": "German", "es": "Spanish", "pt": "Portuguese", "ru": "Russian", "it": "Italian", "id": "Indonesian", "th": "Thai",
     "vi": "Vietnamese", "tr": "Turkish", "fa": "Persian", "ms": "Malay", "nl": "Dutch", "pl": "Polish", "uk": "Ukrainian",
 }
+# AI4Bharat IndicConformer (ai4bharat/indic-conformer-600m-multilingual): 22 scheduled languages.
+INDIC_NAMES = {
+    "as": "Assamese", "bn": "Bengali", "brx": "Bodo", "doi": "Dogri", "gu": "Gujarati", "hi": "Hindi", "kn": "Kannada",
+    "kok": "Konkani", "ks": "Kashmiri", "mai": "Maithili", "ml": "Malayalam", "mni": "Manipuri", "mr": "Marathi",
+    "ne": "Nepali", "or": "Odia", "pa": "Punjabi", "sa": "Sanskrit", "sat": "Santali", "sd": "Sindhi", "ta": "Tamil",
+    "te": "Telugu", "ur": "Urdu",
+}
+# Hindi stays on Whisper by default because meetings mix Hindi and English (Hinglish); add "hi" for pure Hindi.
+DEFAULT_INDIC_ROUTE = ",".join(code for code in INDIC_NAMES if code != "hi")
+CODE_ALIASES = {"bo": "brx", "gom": "kok", "mni-mtei": "mni", "np": "ne", "od": "or"}
 # Common Whisper hallucinations on silence / noise.
 HALLUCINATIONS = re.compile(r"^(thank you( for watching)?|thanks for watching|subtitles? by.*|please subscribe.*|you|\.+|ॐ|धन्यवाद।?)$", re.IGNORECASE)
 
@@ -80,6 +95,134 @@ class WhisperEngine:
             kept.append(segment.text)
         text = " ".join(part.strip() for part in kept).strip()
         return text, getattr(info, "language", None)
+
+
+    def detect(self, audio) -> tuple[Optional[str], float]:
+        try:
+            language, probability, _all = self.whisper.detect_language(audio)
+            return language, float(probability)
+        except Exception:
+            return None, 0.0
+
+    def languages(self) -> dict[str, str]:
+        return dict(LANGUAGE_NAMES)
+
+
+class IndicConformerEngine:
+    """AI4Bharat IndicConformer 600M multilingual (hybrid CTC + RNNT, MIT licence).
+
+    Gated on Hugging Face: accept the terms on the model page once and set HF_TOKEN (or copy the
+    downloaded files into ASR_INDIC_MODEL as a local path for air-gapped servers).
+    Partials use fast CTC decoding; finals use RNNT (ASR_INDIC_FINAL_DECODER).
+    """
+
+    name = "indicconformer"
+
+    def __init__(self) -> None:
+        import torch
+        from transformers import AutoModel
+
+        self.torch = torch
+        self.model = os.environ.get("ASR_INDIC_MODEL", "ai4bharat/indic-conformer-600m-multilingual")
+        self.net = AutoModel.from_pretrained(self.model, trust_remote_code=True, token=os.environ.get("HF_TOKEN") or None)
+        device = os.environ.get("ASR_INDIC_DEVICE")
+        if device and hasattr(self.net, "to"):
+            try:
+                self.net = self.net.to(device)
+            except Exception:
+                pass  # ONNX-backed remote code may manage its own device
+        self.final_decoder = os.environ.get("ASR_INDIC_FINAL_DECODER", "rnnt")
+        self.partial_decoder = os.environ.get("ASR_INDIC_PARTIAL_DECODER", "ctc")
+
+    def transcribe(self, audio, language, final, prompt):
+        if not language or language not in INDIC_NAMES:
+            raise ValueError("IndicConformer needs one of its 22 language codes")
+        wav = self.torch.from_numpy(np.ascontiguousarray(audio, dtype=np.float32)).unsqueeze(0)  # [1, samples] at 16 kHz
+        with self.torch.inference_mode():
+            result = self.net(wav, language, self.final_decoder if final else self.partial_decoder)
+        if isinstance(result, (list, tuple)):
+            result = result[0] if result else ""
+        return str(result or "").strip(), language
+
+    def languages(self) -> dict[str, str]:
+        return dict(INDIC_NAMES)
+
+
+class HybridEngine:
+    """Routes each utterance to the better engine for its language.
+
+    - language given and in the Indic route list  -> IndicConformer
+    - language given otherwise                    -> Whisper
+    - auto: Whisper detects the language; if it is in the Indic route list with enough confidence,
+      IndicConformer transcribes, else Whisper does.
+    """
+
+    def __init__(self, whisper: Optional[object], indic: Optional[object], indic_route: set[str], min_confidence: float = 0.5):
+        if whisper is None and indic is None:
+            raise RuntimeError("No speech engine could be loaded")
+        self.whisper, self.indic, self.route = whisper, indic, (indic_route if indic is not None else set())
+        self.min_confidence = min_confidence
+        parts = [engine for engine in (whisper, indic) if engine is not None]
+        self.name = "+".join(getattr(engine, "name", "?") for engine in parts)
+        self.model = " + ".join(str(getattr(engine, "model", "?")) for engine in parts)
+
+    def pick(self, audio, language: Optional[str]) -> tuple[object, Optional[str]]:
+        if language:
+            if language in self.route or self.whisper is None:
+                return self.indic, language
+            return self.whisper, language
+        if self.whisper is None:
+            raise ValueError("Automatic language detection needs Whisper; choose a language")
+        detected, confidence = self.whisper.detect(audio)  # type: ignore[attr-defined]
+        if detected in self.route and confidence >= self.min_confidence:
+            return self.indic, detected
+        return self.whisper, None
+
+    def transcribe(self, audio, language, final, prompt):
+        engine, use = self.pick(audio, language)
+        text, detected = engine.transcribe(audio, use, final, prompt)  # type: ignore[attr-defined]
+        return text, detected or use
+
+    def languages(self) -> dict[str, str]:
+        names: dict[str, str] = {}
+        if self.whisper is not None:
+            names.update(self.whisper.languages())  # type: ignore[attr-defined]
+        if self.indic is not None:
+            names.update(self.indic.languages())  # type: ignore[attr-defined]
+        return names
+
+    def engine_for(self, code: str) -> str:
+        if code in self.route or self.whisper is None:
+            return getattr(self.indic, "name", "indicconformer")
+        return getattr(self.whisper, "name", "faster-whisper")
+
+
+def normalise_language(code: str) -> str:
+    code = code.strip().lower()
+    return CODE_ALIASES.get(code, CODE_ALIASES.get(code.split("-")[0], code.split("-")[0]))
+
+
+def build_engine(whisper_factory: Callable[[], object] = lambda: WhisperEngine(),
+                 indic_factory: Callable[[], object] = lambda: IndicConformerEngine(), log=print) -> HybridEngine:
+    """Build the engine named by ASR_ENGINE. Hybrid degrades to Whisper-only if IndicConformer fails."""
+    mode = (os.environ.get("ASR_ENGINE") or "hybrid").strip().lower()
+    route = {normalise_language(code) for code in (os.environ.get("ASR_INDIC_LANGUAGES") or DEFAULT_INDIC_ROUTE).split(",") if code.strip()}
+    route &= set(INDIC_NAMES)
+    whisper = indic = None
+    if mode in ("hybrid", "whisper"):
+        whisper = whisper_factory()
+    if mode in ("hybrid", "indicconformer"):
+        try:
+            indic = indic_factory()
+        except Exception as error:  # gated model without token, missing packages, no network…
+            if mode == "indicconformer":
+                raise
+            log(f"IndicConformer unavailable, using Whisper only: {type(error).__name__}: {error}")
+    if mode == "indicconformer":
+        route = set(INDIC_NAMES)
+    if mode not in ("hybrid", "whisper", "indicconformer"):
+        raise ValueError(f"Unknown ASR_ENGINE {mode!r}")
+    return HybridEngine(whisper, indic, route, env_float("ASR_DETECT_MIN_CONFIDENCE", 0.5))
 
 
 def _cuda_available() -> bool:
@@ -164,12 +307,13 @@ def clean(text: str) -> str:
     return "" if HALLUCINATIONS.match(text) else text
 
 
-def allowed_languages() -> dict[str, str]:
+def allowed_languages(engine: Optional[object] = None) -> dict[str, str]:
+    available = engine.languages() if engine is not None and hasattr(engine, "languages") else dict(LANGUAGE_NAMES)
     raw = os.environ.get("ASR_LANGUAGES", "").strip()
     if not raw:
-        return LANGUAGE_NAMES
-    wanted = [code.strip() for code in raw.split(",") if code.strip()]
-    return {code: LANGUAGE_NAMES.get(code, code) for code in wanted}
+        return available
+    wanted = [normalise_language(code) for code in raw.split(",") if code.strip()]
+    return {code: available[code] for code in wanted if code in available}
 
 
 def create_app(engine_factory: Optional[Callable[[], Engine]] = None) -> FastAPI:
@@ -180,7 +324,7 @@ def create_app(engine_factory: Optional[Callable[[], Engine]] = None) -> FastAPI
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        state["engine"] = await asyncio.get_running_loop().run_in_executor(None, engine_factory or WhisperEngine)
+        state["engine"] = await asyncio.get_running_loop().run_in_executor(None, engine_factory or build_engine)
         yield
 
     app = FastAPI(title="QS-VC speech", docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -195,8 +339,10 @@ def create_app(engine_factory: Optional[Callable[[], Engine]] = None) -> FastAPI
     @app.get("/v1/languages")
     async def languages():
         engine = state["engine"]
-        return {"languages": [{"code": code, "name": name} for code, name in allowed_languages().items()], "autoDetect": True,
-                "engine": getattr(engine, "name", None), "model": getattr(engine, "model", None)}
+        route = getattr(engine, "engine_for", None)
+        auto = getattr(engine, "whisper", True) is not None
+        return {"languages": [{"code": code, "name": name, **({"engine": route(code)} if route else {})} for code, name in allowed_languages(engine).items()],
+                "autoDetect": auto, "engine": getattr(engine, "name", None), "model": getattr(engine, "model", None)}
 
     @app.websocket("/v1/stream")
     async def stream(ws: WebSocket):
@@ -204,8 +350,8 @@ def create_app(engine_factory: Optional[Callable[[], Engine]] = None) -> FastAPI
             await ws.close(code=4401)
             return
         requested = ws.query_params.get("language", "auto")
-        language = None if requested == "auto" else requested.split("-")[0]
-        if language is not None and language not in allowed_languages():
+        language = None if requested == "auto" else normalise_language(requested)
+        if language is not None and language not in allowed_languages(state["engine"]):
             await ws.close(code=4400)
             return
         if ws.query_params.get("sample_rate", str(RATE)) != str(RATE):
@@ -232,7 +378,8 @@ def create_app(engine_factory: Optional[Callable[[], Engine]] = None) -> FastAPI
                 return  # never let partials delay finals
             async with gpu:
                 started = time.perf_counter()
-                text, lang = await loop.run_in_executor(None, engine.transcribe, audio, language, final, prompt)
+                use = language or (detected if not final else None)
+                text, lang = await loop.run_in_executor(None, engine.transcribe, audio, use, final, prompt)
             text = clean(text)
             lang = language or lang or detected or "en"
             if final:

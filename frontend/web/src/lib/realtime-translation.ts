@@ -38,7 +38,7 @@ export const LANGUAGES: LanguageInfo[] = [
     { code: 'kok-IN',name: 'Konkani',      nativeName: 'कोंकणी',       region: 'indian', ttsSupported: false, sttSupported: false },
     { code: 'mni-IN',name: 'Manipuri',     nativeName: 'মৈতৈলোন্',    region: 'indian', ttsSupported: false, sttSupported: false },
     { code: 'sat-IN',name: 'Santali',      nativeName: 'ᱥᱟᱱᱛᱟᱲᱤ',    region: 'indian', ttsSupported: false, sttSupported: false },
-    { code: 'bo-IN', name: 'Bodo',         nativeName: 'बड़ो',          region: 'indian', ttsSupported: false, sttSupported: false },
+    { code: 'brx-IN', name: 'Bodo',        nativeName: 'बड़ो',          region: 'indian', ttsSupported: false, sttSupported: false },
     { code: 'ur-IN', name: 'Urdu',         nativeName: 'اردو',          region: 'indian', ttsSupported: true,  sttSupported: true  },
 
     // ── East Asian Languages ──────────────────────────────────────────────

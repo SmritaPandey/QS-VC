@@ -37,3 +37,11 @@ describe('server speech audio', () => {
         expect([...new Int16Array(pcm.buffer, pcm.byteOffset, 3)]).toEqual([0, 32767, -32768]);
     });
 });
+
+describe('IndicConformer languages', () => {
+    it('labels the extra scheduled languages the speech server reports', () => {
+        const options = captionLanguageOptions([{ code: 'brx', name: 'Bodo' }, { code: 'sat', name: 'Santali' }, { code: 'mni', name: 'Manipuri' }], 'brx-IN');
+        expect(options.map(option => option.code)).toEqual(['brx-IN', 'sat-IN', 'mni-IN']);
+        expect(options[0].label).toContain('Bodo');
+    });
+});
