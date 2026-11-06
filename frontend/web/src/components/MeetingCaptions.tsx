@@ -51,6 +51,8 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     const [transcriptSaving, setTranscriptSaving] = useState(false);
     const [minutes, setMinutes] = useState('');
     const [minutesBusy, setMinutesBusy] = useState(false);
+    /** False when the meeting server is an older build without transcripts / pushed translations. */
+    const [serverUpToDate, setServerUpToDate] = useState(true);
     const panelRef = useRef<HTMLElement>(null);
     const serverAsr = Boolean(capabilities.asr?.available) && ServerSpeechEngine.isSupported() && Boolean(getMicTrack);
     const recognitionSupported = serverAsr || SpeechToTextEngine.isSupported();
@@ -73,6 +75,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
         signaling.request('translationCapabilities').then((result: Capabilities) => {
             if (!active) return;
             setCapabilities(result);
+            setServerUpToDate(Boolean(result.transcript));
             setTranscriptSaving(Boolean(result.transcript?.saving));
             setCapabilityError(result.configured ? '' : 'Translation server is not configured. Original captions are available.');
         }).catch(() => { if (active) setCapabilityError('Translation server is unavailable. Original captions are available.'); });
@@ -131,9 +134,10 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     useEffect(() => {
         if (!connected) return;
         const targets = [...new Set([showCaptions ? captionLanguage : 'original', voiceEnabled && hearLanguage ? hearLanguage : 'original'])].filter(target => target !== 'original');
+        if (!serverUpToDate) return;
         signaling.request('captionSubscribe', { targets, ...(capabilities.processing === 'google-cloud' ? { allowGoogleTranslation } : {}) })
             .catch(() => setStatus('Could not set your caption language. Original captions are still shown.'));
-    }, [connected, showCaptions, captionLanguage, voiceEnabled, hearLanguage, capabilities.processing, allowGoogleTranslation]);
+    }, [connected, showCaptions, captionLanguage, voiceEnabled, hearLanguage, capabilities.processing, allowGoogleTranslation, serverUpToDate]);
 
     // Translated speech voice.
     useEffect(() => {
@@ -180,7 +184,10 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     // ── Transcript and minutes ───────────────────────────────────────
     const toggleTranscript = (enabled: boolean) => {
         signaling.request('setTranscriptSaving', { enabled }).then(result => setTranscriptSaving(Boolean(result?.saving)))
-            .catch((error: Error) => setStatus(error.message || 'Could not change transcript saving.'));
+            .catch((error: Error) => {
+                if (/method not found/i.test(error.message || '')) { setServerUpToDate(false); setStatus('The meeting server needs the latest update before transcripts can be saved.'); return; }
+                setStatus(error.message || 'Could not change transcript saving.');
+            });
     };
     const download = async (format: 'txt' | 'srt') => {
         try {
@@ -232,8 +239,9 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
                 {voiceDiagnostic.message} Original meeting audio stays on.
             </div>}
             <h3 className="caption-settings-subhead">Transcript</h3>
-            {isHost && <label className="caption-toggle"><input type="checkbox" checked={transcriptSaving} disabled={!connected} onChange={event => toggleTranscript(event.target.checked)} />Save transcript of this meeting (everyone is told)</label>}
-            {!isHost && <p className="caption-settings-note">{transcriptSaving ? 'The host is saving a transcript of shared captions.' : 'The host can save a transcript of shared captions.'}</p>}
+            {!serverUpToDate && <p className="caption-settings-note" role="status">This meeting server is running an older version. Transcripts, minutes and translated captions need the updated signaling service — ask your administrator to restart or redeploy it.</p>}
+            {serverUpToDate && isHost && <label className="caption-toggle"><input type="checkbox" checked={transcriptSaving} disabled={!connected} onChange={event => toggleTranscript(event.target.checked)} />Save transcript of this meeting (everyone is told)</label>}
+            {serverUpToDate && !isHost && <p className="caption-settings-note">{transcriptSaving ? 'The host is saving a transcript of shared captions.' : 'The host can save a transcript of shared captions.'}</p>}
             {transcriptSaving && <div className="caption-actions">
                 <button type="button" className="btn-outline" onClick={() => download('txt')}>Download .txt</button>
                 <button type="button" className="btn-outline" onClick={() => download('srt')}>Download .srt</button>

@@ -1,5 +1,7 @@
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { createSession, validateSession, requireEnterpriseTerm, endSession } from './sessions';
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe('persistent account sessions', () => {
     it('stores a fresh unpredictable session and rejects inactive accounts', async () => {
@@ -22,6 +24,13 @@ describe('persistent account sessions', () => {
         expect(query.mock.calls[0][0]).toContain('is_active = true');
         query.mockResolvedValue({ rows: [{ id: 'user' }] });
         await expect(validateSession({ query }, payload)).resolves.toBeUndefined();
+    });
+
+    it('does not require an enterprise term for a platform admin session', async () => {
+        vi.stubEnv('QSVC_ENTERPRISE_TERMS_REQUIRED', 'yes');
+        const query = vi.fn().mockResolvedValue({ rows: [{ id: 'user', email: 'contact@neurqai.com' }] });
+        await expect(validateSession({ query }, { sub: 'user', tenantId: 'tenant', sessionId: 'session' })).resolves.toBeUndefined();
+        expect(query).toHaveBeenCalledTimes(1);
     });
 
     it('logout only removes matching session so an old logout cannot revoke a newer login', async () => {

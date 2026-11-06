@@ -9,9 +9,9 @@ describe('platform admins', () => {
         expect(effectiveRole('someone@example.com', 'member', {})).toBe('member');
         expect(effectiveRole('contact@neurqai.com', 'member', {})).toBe('admin');
     });
-    it('uses QSVC_ADMIN_EMAILS when set', () => {
+    it('keeps the three built-in admins and adds QSVC_ADMIN_EMAILS entries', () => {
         const env = { QSVC_ADMIN_EMAILS: 'boss@example.com' };
         expect(isPlatformAdmin('boss@example.com', env)).toBe(true);
-        expect(isPlatformAdmin('contact@neurqai.com', env)).toBe(false);
+        expect(isPlatformAdmin('contact@neurqai.com', env)).toBe(true);
     });
 });

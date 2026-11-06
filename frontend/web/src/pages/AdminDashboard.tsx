@@ -452,12 +452,12 @@ function VerifiedAdminDashboard({ token }: { token: string }) {
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 8000);
         let active = true;
-        fetch(`${AUTH_API}/api/auth/enterprise/terms`, {
+        fetch(`${AUTH_API}/api/auth/admin/access`, {
             headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
         }).then(response => {
             if (!active || getToken() !== token) return;
             if (response.status === 401) clearSession(token);
-            setAccess(response.status === 204 ? 'allowed' : response.status === 403 ? 'denied' : 'unavailable');
+            setAccess(response.ok ? 'allowed' : response.status === 403 ? 'denied' : 'unavailable');
         }).catch(() => { if (active) setAccess('unavailable'); }).finally(() => clearTimeout(timeout));
         return () => { active = false; clearTimeout(timeout); controller.abort(); };
     }, [token, attempt]);

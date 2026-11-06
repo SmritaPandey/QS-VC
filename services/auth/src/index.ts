@@ -306,11 +306,13 @@ app.post('/api/auth/login', validateBody(loginBody), async (req, res) => {
             [user.id],
         );
 
-        try {
-            await requireEnterpriseTerm(pool, user.id);
-        } catch (error) {
-            if (sessionErrorStatus(error) === 401) return res.status(403).json({ error: 'Your enterprise access term is missing or expired.' });
-            throw error;
+        if (!isPlatformAdmin(user.email)) {
+            try {
+                await requireEnterpriseTerm(pool, user.id);
+            } catch (error) {
+                if (sessionErrorStatus(error) === 401) return res.status(403).json({ error: 'Your enterprise access term is missing or expired.' });
+                throw error;
+            }
         }
 
         // Listed platform admins are promoted on sign-in, so existing accounts get full access too.
