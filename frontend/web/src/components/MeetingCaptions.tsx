@@ -27,6 +27,9 @@ interface Props {
     /** Host or co-host: can save the transcript and create minutes. */
     isHost?: boolean;
     meetingCode?: string;
+    /** Guests: read-only captions in viewerLanguage; no language choice, no translated voice, no speech sharing. */
+    viewOnly?: boolean;
+    viewerLanguage?: string;
 }
 
 const CONSENT_KEY = 'qsvc:caption-speech-consent';
@@ -35,7 +38,7 @@ function rememberConsent(on: boolean) { try { if (on) localStorage.setItem(CONSE
 const same = (a: string, b: string) => a === b || a.split('-')[0] === b.split('-')[0];
 
 /** Captions: speech → server (or browser) recognition → room; translations pushed by the server per chosen language. */
-export default function MeetingCaptions({ open, onClose, connected, audioMuted, speakingLanguage, displayName, myPeerId, onSpeakingChange, stopRecognition, translatedSpeaking, onSpeakingLanguageChange, onUseDetectedLanguage, showCaptions, onShowCaptionsChange: setShowCaptions, shareSpeech, onShareSpeechChange, getMicTrack, isHost = false, meetingCode = 'meeting' }: Props) {
+export default function MeetingCaptions({ open, onClose, connected, audioMuted, speakingLanguage, displayName, myPeerId, onSpeakingChange, stopRecognition, translatedSpeaking, onSpeakingLanguageChange, onUseDetectedLanguage, showCaptions, onShowCaptionsChange: setShowCaptions, shareSpeech, onShareSpeechChange, getMicTrack, isHost = false, meetingCode = 'meeting', viewOnly = false, viewerLanguage = 'en-US' }: Props) {
     const setShareSpeech = (on: boolean) => { rememberConsent(on); onShareSpeechChange(on); };
     const [captionLanguage, setCaptionLanguage] = useState('original');
     const [hearLanguage, setHearLanguage] = useState('');
@@ -83,6 +86,15 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
         return () => { active = false; offTranscript(); };
     }, [connected]);
 
+    // Guests: caption language fixed to their location language if the translation server offers it.
+    useEffect(() => {
+        if (!viewOnly) return;
+        const match = capabilities.configured ? capabilities.languages.find(item => same(item.code, viewerLanguage)) : undefined;
+        setCaptionLanguage(match ? viewerLanguage : 'original');
+        setVoiceEnabled(false);
+        setHearLanguage('');
+    }, [viewOnly, viewerLanguage, capabilities]);
+
     // Speech language for server recognition: the meeting's language if the service knows it, else auto.
     const asrLanguages = capabilities.asr?.languages || [];
     const asrLanguage = autoDetect && capabilities.asr?.autoDetect !== false ? 'auto'
@@ -90,7 +102,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
 
     // ── Speaking: share my speech ───────────────────────────────────────
     useEffect(() => {
-        if (!connected || !shareSpeech || audioMuted || translatedSpeaking) return;
+        if (viewOnly || !connected || !shareSpeech || audioMuted || translatedSpeaking) return;
         let active = true;
         if (serverAsr) {
             const engine = new ServerSpeechEngine({
@@ -124,7 +136,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
         stopRecognition.current = stop;
         engine.start();
         return () => { stop(); if (stopRecognition.current === stop) stopRecognition.current = () => {}; };
-    }, [connected, shareSpeech, audioMuted, speakingLanguage, displayName, stopRecognition, translatedSpeaking, capabilities.processing, allowGoogleTranslation, serverAsr, asrLanguage, getMicTrack, myPeerId]);
+    }, [viewOnly, connected, shareSpeech, audioMuted, speakingLanguage, displayName, stopRecognition, translatedSpeaking, capabilities.processing, allowGoogleTranslation, serverAsr, asrLanguage, getMicTrack, myPeerId]);
 
     useEffect(() => {
         if (!connected) { onShareSpeechChange(false); setVoiceEnabled(false); setAllowGoogleTranslation(false); setCaptions([]); }
@@ -133,15 +145,15 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     // ── Listening: tell the server which languages I want ─────────────
     useEffect(() => {
         if (!connected) return;
-        const targets = [...new Set([showCaptions ? captionLanguage : 'original', voiceEnabled && hearLanguage ? hearLanguage : 'original'])].filter(target => target !== 'original');
+        const targets = [...new Set([showCaptions ? captionLanguage : 'original', !viewOnly && voiceEnabled && hearLanguage ? hearLanguage : 'original'])].filter(target => target !== 'original');
         if (!serverUpToDate) return;
         signaling.request('captionSubscribe', { targets, ...(capabilities.processing === 'google-cloud' ? { allowGoogleTranslation } : {}) })
             .catch(() => setStatus('Could not set your caption language. Original captions are still shown.'));
-    }, [connected, showCaptions, captionLanguage, voiceEnabled, hearLanguage, capabilities.processing, allowGoogleTranslation, serverUpToDate]);
+    }, [connected, showCaptions, captionLanguage, voiceEnabled, hearLanguage, capabilities.processing, allowGoogleTranslation, serverUpToDate, viewOnly]);
 
     // Translated speech voice.
     useEffect(() => {
-        if (!voiceEnabled || !hearLanguage) { ttsRef.current = null; return; }
+        if (viewOnly || !voiceEnabled || !hearLanguage) { ttsRef.current = null; return; }
         setVoiceDiagnostic({ gate: 'sharing', message: 'Waiting for shared speech in a different language. Speakers must enable speech sharing.' });
         const tts = new TextToSpeechEngine({
             language: hearLanguage,
@@ -150,7 +162,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
         });
         tts.start(); ttsRef.current = tts;
         return () => { if (ttsRef.current === tts) ttsRef.current = null; tts.dispose(); onSpeakingChange(false); };
-    }, [voiceEnabled, hearLanguage, onSpeakingChange]);
+    }, [viewOnly, voiceEnabled, hearLanguage, onSpeakingChange]);
 
     // ── Incoming captions ────────────────────────────────────────────
     useEffect(() => {
@@ -215,7 +227,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
         </div>}
         {transcriptSaving && <div className="transcript-indicator" role="status"><span className="mi" aria-hidden="true">article</span>Transcript is being saved</div>}
         <CaptionOverlay enabled={showCaptions} captions={captions} fontSize="large" />
-        {open && <section ref={panelRef} className="meeting-language-settings" id="meeting-language-settings" role="dialog" aria-labelledby="caption-settings-title" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
+        {open && !viewOnly && <section ref={panelRef} className="meeting-language-settings" id="meeting-language-settings" role="dialog" aria-labelledby="caption-settings-title" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
             <div className="caption-settings-head"><h2 id="caption-settings-title">Captions & language</h2><button type="button" className="neu-icon-btn" aria-label="Close language settings" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></div>
             <label htmlFor="meeting-speaking-language">I speak</label>
             <select id="meeting-speaking-language" value={speakingLanguage} onChange={event => onSpeakingLanguageChange(event.target.value)}>{speakOptions.map(lang => <option value={lang.code} key={lang.code}>{lang.label}</option>)}</select>
