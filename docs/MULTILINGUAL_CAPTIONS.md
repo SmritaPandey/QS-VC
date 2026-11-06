@@ -5,7 +5,7 @@
 ## How it works
 
 ```
-speaker mic (meeting track) ──16 kHz PCM──► signaling ──► services/asr (Whisper)   partial + final text
+speaker mic (meeting track) ──16 kHz PCM──► signaling ──► services/asr (Whisper | IndicConformer)   partial + final text
                                                 │
                captionReceived (original) ◄─────┤
                                                 ├──► services/mt (IndicTrans2)  once per language someone chose
@@ -13,6 +13,9 @@ speaker mic (meeting track) ──16 kHz PCM──► signaling ──► servic
                                                 └──► transcript (host opt-in) ──► meeting service DB ──► minutes (LLM)
 ```
 
+- **Engines**: Whisper for English, Hindi/Hinglish and foreign languages; AI4Bharat IndicConformer for the
+  other 21 scheduled Indian languages (Tamil, Bengali, Telugu, Marathi, …). Automatic detection routes
+  confident Indian-language speech to IndicConformer. See `services/asr/README.md` (needs `HF_TOKEN`).
 - **Speech recognition**: when `ASR_URL` is set, browsers stream the meeting microphone (the device
   picked in the meeting, after noise suppression) to signaling, which relays it to `services/asr`.
   Works in Chrome, Edge, Firefox, Safari and the desktop app; audio stays on your servers.

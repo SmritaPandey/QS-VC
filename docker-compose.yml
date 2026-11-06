@@ -213,12 +213,16 @@ services:
       context: ./services/asr
       args:
         BASE: ${ASR_BASE_IMAGE:-python:3.11-slim}
+        ONNX_RUNTIME: ${ASR_ONNX_RUNTIME:-onnxruntime==1.20.1}
     container_name: qsvc-asr
     environment:
       - ASR_MODEL=${ASR_MODEL:-}
       - ASR_LANGUAGES=${ASR_LANGUAGES:-}
       - ASR_PROMPT=${ASR_PROMPT:-}
       - ASR_API_KEY=${ASR_API_KEY:-}
+      - ASR_ENGINE=${ASR_ENGINE:-hybrid}
+      - ASR_INDIC_LANGUAGES=${ASR_INDIC_LANGUAGES:-}
+      - HF_TOKEN=${HF_TOKEN:-}
     volumes:
       - asr_models:/models
     restart: unless-stopped
