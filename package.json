@@ -44,13 +44,11 @@
     "concurrently": "^9.1.0",
     "localtunnel": "^2.0.2",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "pptxgenjs": "^4.0.1",
+    "puppeteer": "^24.40.0"
   },
   "engines": {
     "node": ">=20.0.0"
-  },
-  "dependencies": {
-    "pptxgenjs": "^4.0.1",
-    "puppeteer": "^24.40.0"
   }
 }
