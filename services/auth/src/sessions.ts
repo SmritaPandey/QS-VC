@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import type { JwtPayload } from 'jsonwebtoken';
+import { isPlatformAdmin } from './platform-admins.js';
 
 export class InvalidSessionError extends Error {}
 export function sessionErrorStatus(error: unknown): number {
@@ -32,10 +33,13 @@ export async function validateSession(db: Database, payload: JwtPayload): Promis
         throw new InvalidSessionError('Invalid session');
     }
     const result = await db.query(
-        `SELECT id FROM users WHERE id = $1 AND tenant_id = $2 AND is_active = true AND tenant_id IN (SELECT id FROM tenants WHERE is_active = true) AND preferences->>'_authSessionId' = $3`,
+        `SELECT id, email FROM users WHERE id = $1 AND tenant_id = $2 AND is_active = true AND tenant_id IN (SELECT id FROM tenants WHERE is_active = true) AND preferences->>'_authSessionId' = $3`,
         [payload.sub, payload.tenantId, payload.sessionId]);
     if (result.rows.length !== 1) throw new InvalidSessionError('Session expired');
-    await requireEnterpriseTerm(db, payload.sub);
+    // Platform admins are not tied to a tenant's enterprise access term.
+    if (typeof result.rows[0].email !== 'string' || !isPlatformAdmin(result.rows[0].email)) {
+        await requireEnterpriseTerm(db, payload.sub);
+    }
 }
 
 export async function endSession(db: Database, payload: JwtPayload): Promise<void> {

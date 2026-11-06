@@ -189,6 +189,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [privateMicMuted, setPrivateMicMuted] = useState(false);
     const [focusPrivateAudio, setFocusPrivateAudio] = useState(false);
     const [chatOpen, setChatOpen] = useState(false);
+    const [incomingChatMessage, setIncomingChatMessage] = useState<ChatMessage | null>(null);
+    const chatOpenRef = useRef(false);
+    chatOpenRef.current = chatOpen;
     const [participantsOpen, setParticipantsOpen] = useState(false);
     const [activitiesOpen, setActivitiesOpen] = useState(false);
     const [hostToolsOpen, setHostToolsOpen] = useState(false);
@@ -291,6 +294,12 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     privateInviteRef.current = privateInvite;
     privateMicMutedRef.current = privateMicMuted;
     useEffect(() => { peersRef.current = peers; }, [peers]);
+
+    useEffect(() => {
+        if (!incomingChatMessage) return;
+        const timer = window.setTimeout(() => setIncomingChatMessage(null), 6000);
+        return () => window.clearTimeout(timer);
+    }, [incomingChatMessage]);
 
     const showNotice = useCallback((text: string) => {
         setNotice(text);
@@ -787,7 +796,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     }),
                     signaling.on('kicked', async ({ reason }: any) => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/meeting-end', { replace: true, state: { meetingCode, reason: reason || 'You were removed from the meeting.', left: true, canRejoin: false } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
                     signaling.on('meetingEnded', async ({ reason }: any) => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/meeting-end', { replace: true, state: { meetingCode, reason: reason || 'The meeting has ended.', left: false } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
-                    signaling.on('chatMessage', (msg: ChatMessage) => { setChatMessages((prev) => [...prev, msg]); }),
+                    signaling.on('chatMessage', (msg: ChatMessage) => {
+                        setChatMessages((prev) => [...prev, msg]);
+                        if (msg.peerId !== myPeerIdRef.current && !chatOpenRef.current) setIncomingChatMessage(msg);
+                    }),
                     signaling.on('reaction', ({ peerId, displayName: name, emoji }: any) => {
                         // The server echoes reactions to the sender too; ours is already on screen.
                         if (!emoji || peerId === myPeerIdRef.current) return;
@@ -1663,6 +1675,23 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             </div>
 
             <div className="meeting-notices">
+            {incomingChatMessage && <div className="meeting-chat-toast" role="status">
+                <span className="mi mi-sm" aria-hidden="true">chat</span>
+                <button type="button" className="meeting-chat-toast-open" onClick={() => {
+                    setIncomingChatMessage(null);
+                    setChatOpen(true);
+                    setParticipantsOpen(false);
+                    setActivitiesOpen(false);
+                    setHostToolsOpen(false);
+                    setEffectsOpen(false);
+                }} aria-label={`Open chat message from ${incomingChatMessage.displayName}`}>
+                    <strong>{incomingChatMessage.displayName}</strong>
+                    <span>{incomingChatMessage.content}</span>
+                </button>
+                <button type="button" className="meeting-chat-toast-close" onClick={() => setIncomingChatMessage(null)} aria-label="Dismiss message notification">
+                    <span className="mi mi-sm" aria-hidden="true">close</span>
+                </button>
+            </div>}
             {restoring && !connectionLost && <div className="meeting-notice" role="status"><span className="mi mi-sm meeting-spin" aria-hidden="true">progress_activity</span> Reconnecting… Hold on, we’re getting you back into the meeting.</div>}
             {connectionLost && <div className="meeting-notice" role="alert">Connection lost. Check your internet connection, then rejoin.
                 <button className="btn-outline" onClick={() => navigate(meetingPreviewPath, { replace: true })}>Rejoin meeting</button>
@@ -1749,7 +1778,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 onToggleLanguage={signedIn ? () => { setLanguageOpen((open) => !open); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); } : undefined}
                 onToggleAudio={handleToggleAudio} onToggleVideo={handleToggleVideo}
                 onToggleScreen={handleScreenShare} onToggleRecording={handleToggleRecording}
-                onToggleChat={() => { if (!roomSettings.allowChat && !manager) { showNotice('Chat is disabled by the host.'); return; } setChatOpen(!chatOpen); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); }}
+                onToggleChat={() => { if (!roomSettings.allowChat && !manager) { showNotice('Chat is disabled by the host.'); return; } setIncomingChatMessage(null); setChatOpen(!chatOpen); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); }}
                 onToggleParticipants={() => { setParticipantsOpen(!participantsOpen); setChatOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); }}
                 onRaiseHand={handleRaiseHand} onLeave={requestLeave}
             />

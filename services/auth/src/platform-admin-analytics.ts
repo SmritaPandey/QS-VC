@@ -38,6 +38,8 @@ export function platformAdminAnalyticsRouter(verify: VerifyToken, db: Database) 
             }
         };
 
+    router.get('/access', withPlatformAdmin(async (_req, res) => res.json({ access: 'granted' })));
+
     router.get('/analytics', withPlatformAdmin(async (req, res) => {
         const quarters = z.string().regex(/^(?:[1-9]|1[0-2])$/).safeParse(req.query.quarters ?? '4');
         if (!quarters.success) return res.status(400).json({ error: 'Choose 1 to 12 calendar quarters.' });

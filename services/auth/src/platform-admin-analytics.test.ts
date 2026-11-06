@@ -55,6 +55,21 @@ it('returns shared analytics through the protected aggregate function', async ()
     expect(res.json).toHaveBeenCalledWith(result);
 });
 
+it('exposes a small protected access check without reading the analytics database', async () => {
+    vi.stubEnv('QSVC_ADMIN_EMAILS', 'operator@example.test');
+    const query = vi.fn();
+    const router = platformAdminAnalyticsRouter(async () => ({ email: 'operator@example.test' }), { query });
+    const res = makeResponse();
+    await route(router, '/access', 'get')({ headers: { authorization: 'Bearer token' } } as unknown as Request, res as unknown as Response, vi.fn());
+    expect(res.json).toHaveBeenCalledWith({ access: 'granted' });
+    expect(query).not.toHaveBeenCalled();
+
+    const denied = makeResponse();
+    const nonAdminRouter = platformAdminAnalyticsRouter(async () => ({ email: 'customer@example.test' }), { query });
+    await route(nonAdminRouter, '/access', 'get')({ headers: { authorization: 'Bearer token' } } as unknown as Request, denied as unknown as Response, vi.fn());
+    expect(denied.sendStatus).toHaveBeenCalledWith(403);
+});
+
 it('returns a safe unavailable response when the shared database function is not ready', async () => {
     vi.stubEnv('QSVC_ADMIN_EMAILS', 'operator@example.test');
     const router = platformAdminAnalyticsRouter(async () => ({ email: 'operator@example.test' }), {

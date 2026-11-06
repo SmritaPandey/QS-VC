@@ -4844,6 +4844,14 @@ label {
 
 .meeting-notices { position: absolute; z-index: 55; top: 96px; left: 24px; right: 88px; max-width: 520px; display: grid; gap: 12px; pointer-events: none; }
 .meeting-notices > .meeting-notice, .meeting-notices > .muted-speech-notice { position: static; transform: none; width: 100%; max-width: none; pointer-events: auto; }
+.meeting-chat-toast { display: flex; align-items: flex-start; gap: 10px; width: 100%; padding: 12px; border: 1px solid rgba(113, 228, 211, .32); border-radius: 14px; background: #162331; color: #edf5fa; box-shadow: 0 12px 34px rgba(3, 8, 15, .42); pointer-events: auto; animation: pickerInLeft 200ms ease; }
+.meeting-chat-toast > .mi { flex: 0 0 auto; margin-top: 2px; color: #71e4d3; }
+.meeting-chat-toast-open { display: grid; flex: 1; min-width: 0; gap: 3px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.meeting-chat-toast-open strong { font-size: 13px; }
+.meeting-chat-toast-open span { overflow: hidden; color: #b9c9d6; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.meeting-chat-toast-open:focus-visible, .meeting-chat-toast-close:focus-visible { outline: 2px solid #71e4d3; outline-offset: 3px; border-radius: 4px; }
+.meeting-chat-toast-close { flex: 0 0 auto; display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: #b9c9d6; cursor: pointer; }
+.meeting-chat-toast-close:hover { background: rgba(255,255,255,.08); color: #fff; }
 .meeting-notices > .muted-speech-notice { justify-content: space-between; }
 @media (max-width: 767px) { .meeting-notices { top: 144px; left: 12px; right: 12px; max-width: none; } }
 @media (max-width: 767px) and (max-height: 600px) { .meeting-room .side-panel { top: 0; } }
