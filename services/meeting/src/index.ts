@@ -18,6 +18,7 @@ import { attachSignalingIfAvailable } from './signaling-bridge.js';
 import { disableDemoPersistence } from './demo-storage-policy.js';
 import { normalizeMeetingSettings } from './meeting-settings.js';
 import meetingInvitation from '../../../shared/meeting-invitation.cjs';
+import { transcriptAsSrt, transcriptAsText, transcriptBody } from './transcripts.js';
 
 const { createMeetingInviteToken } = meetingInvitation;
 
@@ -313,6 +314,61 @@ app.post('/api/internal/meetings/:code/status', express.json(), async (req, res)
     } catch (err: any) {
         logger.warn('Live status not recorded: ' + err.message);
         res.status(503).json({ error: 'Meeting storage unavailable' });
+    }
+});
+
+// Signaling stores a host-enabled transcript (service-to-service only). Idempotent per segment.
+app.post('/api/internal/meetings/:code/transcript', express.json({ limit: '2mb' }), async (req, res) => {
+    try {
+        jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal' });
+    } catch { return res.status(401).json({ error: 'Invalid service authentication' }); }
+    const parsed = transcriptBody.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'Invalid transcript' });
+    const code = String(req.params.code).toUpperCase().slice(0, 30);
+    const { startedAt, segments, minutes } = parsed.data;
+    try {
+        await pool.query(
+            `INSERT INTO meeting_transcripts (meeting_code, started_at, minutes) VALUES ($1, $2, $3)
+             ON CONFLICT (meeting_code, started_at) DO UPDATE SET minutes = COALESCE(EXCLUDED.minutes, meeting_transcripts.minutes), updated_at = NOW()`,
+            [code, startedAt, minutes ?? null],
+        );
+        if (segments.length) {
+            await pool.query(
+                `INSERT INTO meeting_transcript_segments (meeting_code, segment_id, started_at, speaker, language, text, spoken_at)
+                 SELECT $1, s.id, $2, s.speaker, s.language, s.text, to_timestamp(s.ts / 1000.0)
+                 FROM jsonb_to_recordset($3::jsonb) AS s(id text, speaker text, language text, text text, ts bigint)
+                 ON CONFLICT (meeting_code, segment_id) DO NOTHING`,
+                [code, startedAt, JSON.stringify(segments.map(segment => ({ id: segment.id, speaker: segment.speaker, language: segment.language, text: segment.text, ts: segment.timestamp })))],
+            );
+        }
+        res.json({ stored: segments.length });
+    } catch (err: any) {
+        logger.warn('Transcript not stored: ' + err.message);
+        res.status(503).json({ error: 'Transcript storage unavailable' });
+    }
+});
+
+// The meeting's host downloads saved transcripts and minutes: ?format=json (default) | txt | srt
+app.get('/api/meetings/code/:code/transcript', authMiddleware, async (req, res) => {
+    const user = (req as any).user as AuthPayload;
+    const code = String(req.params.code).toUpperCase().slice(0, 30);
+    try {
+        const meeting = await pool.query('SELECT host_id FROM public.qsvc_meeting_by_code($1)', [code]);
+        if (!meeting.rows.length) return res.status(404).json({ error: 'Meeting not found' });
+        if (meeting.rows[0].host_id !== user.sub && user.role !== 'admin') return res.status(403).json({ error: 'Only the meeting host can open its transcript' });
+        const [sessions, rows] = await Promise.all([
+            pool.query('SELECT started_at, minutes FROM meeting_transcripts WHERE meeting_code = $1 ORDER BY started_at', [code]),
+            pool.query('SELECT segment_id, speaker, language, text, spoken_at FROM meeting_transcript_segments WHERE meeting_code = $1 ORDER BY spoken_at, segment_id LIMIT 200000', [code]),
+        ]);
+        const minutes = sessions.rows.map((row: any) => row.minutes).filter(Boolean).join('\n\n') || null;
+        res.setHeader('Cache-Control', 'no-store');
+        const format = String(req.query.format || 'json');
+        if (format === 'txt') { res.type('text/plain; charset=utf-8').setHeader('Content-Disposition', `attachment; filename="${code}-transcript.txt"`); return res.send(transcriptAsText(rows.rows, minutes)); }
+        if (format === 'srt') { res.type('application/x-subrip; charset=utf-8').setHeader('Content-Disposition', `attachment; filename="${code}.srt"`); return res.send(transcriptAsSrt(rows.rows)); }
+        res.json({ meetingCode: code, minutes, sessions: sessions.rows.map((row: any) => ({ startedAt: row.started_at, minutes: row.minutes })), segments: rows.rows.map((row: any) => ({ id: row.segment_id, speaker: row.speaker, language: row.language, text: row.text, spokenAt: row.spoken_at })) });
+    } catch (err: any) {
+        logger.warn('Transcript not read: ' + err.message);
+        res.status(503).json({ error: 'Transcript storage unavailable' });
     }
 });
 

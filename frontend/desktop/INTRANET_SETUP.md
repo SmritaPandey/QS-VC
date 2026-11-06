@@ -1,18 +1,19 @@
 # QS-VC Intranet — install, connect and admin access
 
-Version 1.3.0 · 4 November 2026
+Version 1.4.0 · 5 November 2026
 
-This guide covers signing in as a platform admin, testing the website and desktop clients, installing QS-VC on Windows or Mac, and connecting it to an organisation workspace.
+This guide covers signing in as a platform admin, testing the website and desktop clients, installing QS-VC on Windows, Mac, or Linux x64, and connecting it to an organisation workspace.
 
 | File | For | SHA-256 |
 | --- | --- | --- |
 | `QS-VC-Windows-x64.zip` | Windows 10/11, 64-bit (contains the setup app) | ZIP hash is release-specific; setup EXE SHA-256: `807796fb30b062e5fdee1b028b8c51d21dabb72aef7b4f0fe6b6cf8e516c0b45` |
 | `QS-VC-macOS-arm64.zip` | Mac with Apple silicon (M1/M2/M3/M4) | Release-specific; shown after download and recorded in the deployment artifact |
 | `QS-VC-macOS-x64.zip` | Mac with Intel chip | Release-specific; shown after download and recorded in the deployment artifact |
+| `QS-VC-Linux-x64.tar.gz` | Linux desktop, x86-64 | Release-specific; shown after download and recorded in the deployment artifact |
 
 Choose the matching operating system in the signed-in Intranet page. For Mac,
 Apple menu → **About This Mac** shows "Chip: Apple M…" (choose Apple silicon)
-or "Processor: Intel" (choose Intel). The Windows ZIP contains the `.exe` installer.
+or "Processor: Intel" (choose Intel). The Windows ZIP contains the `.exe` installer. The Linux archive currently supports x86-64 desktops; Linux ARM is not packaged yet.
 
 > The shared admin password is not stored in this repository. Get it from the operator.
 
@@ -32,8 +33,8 @@ These three accounts have the **admin** role, which gives full access to every f
 
 What admin unlocks:
 
-- Sign in on the website or the QS-VC app (Windows or Mac) with the email above and the password supplied privately by the operator.
-- Open the **Intranet** page to open the configured test workspace and choose an available Windows or Mac installer.
+- Sign in on the website or the QS-VC app (Windows, Mac, or supported Linux x64) with the email above and the password supplied privately by the operator.
+- Open the **Intranet** page to open the configured test workspace and choose an available desktop build.
 - Join **any** meeting as host, even before the organiser arrives. This bypasses meeting passwords, locked rooms, the waiting room and participant limits.
 - Mute, remove, lock, record and end any meeting.
 - Start or end any meeting in their organisation through the meeting service.
@@ -43,7 +44,7 @@ Each admin should change this password after the first sign-in. The password scr
 ### 1.1 Admin test: website, workspace and desktop app
 
 Use this flow to confirm that the signed-in admin experience and the available
-Windows/Mac downloads work. The default admin destination is the shared online
+Windows, Mac, and Linux downloads work. The default admin destination is the shared online
 QS-VC test workspace; it is **not** a private intranet or an isolated tenant.
 Use sample names and meeting content there.
 
@@ -60,12 +61,13 @@ Use sample names and meeting content there.
    - **Windows 10/11 (64-bit)** for a 64-bit Windows PC.
    - **Mac · Apple silicon (M1–M4)** for an M-series Mac.
    - **Mac · Intel** for an Intel Mac.
+   - **Linux · x64** for a 64-bit x86 Linux desktop.
    Select **Download selected app**. An unavailable build appears disabled; it
    means that installer has not been staged by the deployed service.
 5. After the download, note the SHA-256 shown by the page. Compare it with the
    value from the matching approved release before installing. The Windows
-   release value is in the table above. Mac checksums are release-specific and
-   are stored alongside each Mac archive in the protected deployment artifact;
+   release value is in the table above. Mac and Linux checksums are release-specific and
+   are stored alongside each archive in the protected deployment artifact;
    ask the operator for that release's value. The page's displayed hash is a
    fingerprint of the received file, not an independent authenticity check.
 6. Install the downloaded app using the matching section below. At first
@@ -102,7 +104,7 @@ Redeploy **auth**, **meeting**, **signaling** and the **Cloudflare Worker** from
 node db/migrate.js
 ```
 
-This applies migration `005_signup_tenant_and_platform_admins.sql`. It fixes the "Account creation is temporarily unavailable" error and promotes any existing admin accounts.
+Run all pending migrations. This includes `013_linux_desktop_support.sql`, which allows Linux x64 installer downloads and activations to be recorded on existing databases.
 
 ### 2.3 Create the three admin accounts with the shared password
 
@@ -134,12 +136,14 @@ ENTERPRISE_ACCESS_JSON=[{"tenantId":"<tenant id>","userIds":["<user id>"],"works
 ENTERPRISE_WINDOWS_INSTALLER=/opt/qsvc/installers/QS-VC-Windows-x64.zip
 ENTERPRISE_MACOS_ARM64_INSTALLER=/opt/qsvc/installers/QS-VC-macOS-arm64.zip
 ENTERPRISE_MACOS_X64_INSTALLER=/opt/qsvc/installers/QS-VC-macOS-x64.zip
+ENTERPRISE_LINUX_X64_INSTALLER=/opt/qsvc/installers/QS-VC-Linux-x64.tar.gz
 ```
 
 The protected production workflow verifies the Windows setup executable,
-packages it as a ZIP, builds both Mac zips on a macOS runner, and includes all
-three archives with release-specific checksum files in the deployment artifact.
-Rebuild all three packages from the same source revision after desktop changes.
+packages it as a ZIP, builds both Mac zips on a macOS runner, and builds the
+Linux x64 tar.gz on an Ubuntu runner. It includes all four archives with
+release-specific checksum files in the deployment artifact. Rebuild all four
+packages from the same source revision after desktop changes.
 The enterprise app-activation metric is reported only by client versions that
 include its first-sign-in reporting code; older staged ZIPs do not send that
 metric even though they remain downloadable. Replace each ZIP and its checksum
@@ -167,6 +171,14 @@ Confirm the setup EXE hash is
 Windows archive contains the `.exe` and its checksum file. Transfer the archive
 and its `.sha256` sidecar into the deployment installer folder. The Intranet
 page enables each device choice only when auth can read its archive.
+
+For a Linux x64 staging build, run `npm --prefix frontend/desktop run package:linux:x64`
+on Linux, then copy `frontend/desktop/release/QS-VC-Linux-x64.tar.gz` and its
+`.sha256` sidecar into the protected installer directory. After extracting the
+archive on the target Linux distribution, run the `QS-VC` executable in the
+extracted folder. Required system libraries vary by distribution, so validate
+the archive on the organisation's managed Linux image before enabling it in
+the portal. Linux ARM builds are not included.
 
 The platform admin fallback opens `https://qsvcmeet.com/app` and is labelled as
 an online test workspace. For a real organisation deployment, set

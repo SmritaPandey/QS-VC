@@ -1,0 +1,6 @@
+{
+  "keep": ["QS-VC", "UPSWAN", "UPDESCO", "NIC", "SWAN"],
+  "fix": {
+    "hi": {}
+  }
+}

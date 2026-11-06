@@ -1,7 +1,7 @@
 export type DownloadState =
     | { phase: 'idle' }
     | { phase: 'working'; received: number; total: number | null }
-    | { phase: 'done'; checksum: string; size: number; archive: 'macos' | 'windows' }
+    | { phase: 'done'; checksum: string; size: number; archive: 'macos' | 'windows' | 'linux' }
     | { phase: 'error'; message: string };
 
 function megabytes(bytes: number) { return `${(bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0)} MB`; }
@@ -27,7 +27,9 @@ export default function DownloadFeedback({ state, onDismiss }: { state: Download
                     <strong>Download complete.</strong>
                     {state.archive === 'macos'
                         ? <span>The Mac ZIP ({megabytes(state.size)}) is in Downloads. Open it to extract QS-VC.app, then move the app to Applications.</span>
-                        : <span>The Windows ZIP ({megabytes(state.size)}) is in Downloads. Extract it and run QS-VC-Windows-Setup.exe.</span>}
+                        : state.archive === 'linux'
+                            ? <span>The Linux x64 tar.gz ({megabytes(state.size)}) is in Downloads. Extract it and run QS-VC from the extracted folder.</span>
+                            : <span>The Windows ZIP ({megabytes(state.size)}) is in Downloads. Extract it and run QS-VC-Windows-Setup.exe.</span>}
                     <span className="download-checksum">SHA-256: <code>{state.checksum}</code></span>
                     <span>Compare the checksum with the value supplied by your administrator before installing.</span>
                 </>}

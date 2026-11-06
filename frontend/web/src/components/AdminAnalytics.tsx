@@ -52,8 +52,8 @@ type Analytics = {
 
 const colors = ['#007879', '#4955a2', '#a75921', '#786887', '#527177', '#a23b53'];
 const platformNames: Record<string, string> = {
-    windows: 'Windows', 'macos-arm64': 'Mac · Apple silicon', 'macos-x64': 'Mac · Intel',
-    win32: 'Windows', darwin: 'Mac', x64: 'Intel / x64', arm64: 'Apple silicon / ARM64',
+    windows: 'Windows', 'macos-arm64': 'Mac · Apple silicon', 'macos-x64': 'Mac · Intel', 'linux-x64': 'Linux · x64',
+    win32: 'Windows', darwin: 'Mac', linux: 'Linux', x64: 'Intel / x64', arm64: 'Apple silicon / ARM64',
 };
 const statusNames: Record<string, string> = {
     waiting: 'Waiting', scheduled: 'Scheduled', active: 'Marked active', ended: 'Ended',

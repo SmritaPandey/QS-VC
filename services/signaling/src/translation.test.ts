@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { translateText, translationLanguage } from './translation';
+import { googleLanguages, resetGoogleLanguageCache, translateText, translationLanguage } from './translation';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); vi.useRealTimers(); });
 
@@ -21,16 +21,33 @@ describe('Google Cloud Translation adapter', () => {
         await expect(translateText('Hello', 'en', 'hi')).rejects.toThrow('not configured');
         expect(request).not.toHaveBeenCalled();
     });
-    it('validates languages and text before making requests and limits the initial capability to Hindi and English', async () => {
+    it('normalises language tags, rejects malformed ones and validates text before any request', async () => {
         const request = vi.fn(); vi.stubGlobal('fetch', request);
         expect(translationLanguage('hi-IN')).toBe('hi');
         expect(translationLanguage('en-GB')).toBe('en');
-        for (const code of ['garbage', 'bo-IN', 'zh-TW', 'fr', 'en-IN', 'en-US&key=bad', '../hi']) {
+        expect(translationLanguage('zh-TW')).toBe('zh-TW');
+        expect(translationLanguage('mni-IN')).toBe('mni-Mtei');
+        expect(translationLanguage('kok-IN')).toBe('gom');
+        for (const code of ['garbage', 'en-US&key=bad', '../hi', 'auto']) {
             await expect(translateText('Hello', 'en', code)).rejects.toThrow('Unsupported');
         }
         for (const text of ['', ' ', 'x'.repeat(2001)]) await expect(translateText(text, 'en', 'hi')).rejects.toThrow('1–2000');
         expect(request).not.toHaveBeenCalled();
         await expect(translateText('Hello', 'en-US', 'en-GB')).resolves.toEqual({ translatedText: 'Hello', sourceLanguage: 'en-US', targetLanguage: 'en-GB' });
+        vi.stubEnv('GOOGLE_TRANSLATE_API_KEY', 'test-secret');
+        await expect(translateText('Hello', 'en', 'fr', [{ code: 'en', name: 'English' }, { code: 'hi', name: 'Hindi' }])).rejects.toThrow('Unsupported');
+        expect(request).not.toHaveBeenCalled();
+    });
+    it('discovers the live Google language list and caches it', async () => {
+        resetGoogleLanguageCache();
+        vi.stubEnv('GOOGLE_TRANSLATE_API_KEY', 'test-secret');
+        const request = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ data: { languages: [{ language: 'en', name: 'English' }, { language: 'ta', name: 'Tamil' }, { language: 'bad code', name: 'x' }] } }) });
+        vi.stubGlobal('fetch', request);
+        expect(await googleLanguages()).toEqual([{ code: 'en', name: 'English' }, { code: 'ta', name: 'Tamil' }]);
+        await googleLanguages();
+        expect(request).toHaveBeenCalledTimes(1);
+        expect(request.mock.calls[0][0]).toBe('https://translation.googleapis.com/language/translate/v2/languages?target=en');
+        resetGoogleLanguageCache();
     });
     it.each([{}, { data: { translations: [] } }, { data: { translations: [{ translatedText: 7 }] } }, { data: { translations: [{ translatedText: '' }] } }])('rejects malformed provider results', async response => {
         vi.stubEnv('GOOGLE_TRANSLATE_API_KEY', 'test-secret');

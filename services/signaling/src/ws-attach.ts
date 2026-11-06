@@ -9,6 +9,10 @@ const AUTH_URL = (process.env.AUTH_INTERNAL_URL || 'http://localhost:4002').repl
 
 export class InvalidAuthentication extends Error {}
 
+/** Matches only the high-frequency caption notifications (method appears first in the client's JSON). */
+const STREAMING_METHODS = /^\{"jsonrpc":"2\.0","method":"(asrAudio|captionInterim)"/;
+const STREAMING_RECHECK_MS = 15_000;
+
 export async function verifySession(token: string): Promise<AuthPayload> {
     const response = await fetch(`${AUTH_URL}/api/auth/verify`, {
         headers: { Authorization: `Bearer ${token}`, 'x-qsvc-service-token': jwt.sign({}, process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-auth-verify', issuer: 'qsvc-internal', expiresIn: 30 }) },
@@ -83,11 +87,16 @@ export function attachSignalingWebSocket(server: http.Server): WebSocketServer {
             }
         });
 
+        let verifiedAt = 0;
         ws.on('message', async (data) => {
             try {
-                if (token) {
+                // Live caption audio/interim text arrive several times a second; re-use a session
+                // check made in the last few seconds for those only, so the auth service is not hit per chunk.
+                const streaming = STREAMING_METHODS.test(data.toString('utf8', 0, 64));
+                if (token && !(streaming && authUser && Date.now() - verifiedAt < STREAMING_RECHECK_MS)) {
                     try {
                         authUser = await verifySession(token);
+                        verifiedAt = Date.now();
                         connectionState.authUser = authUser;
                     } catch (error) {
                         if (error instanceof InvalidAuthentication) ws.close(4003, 'Session expired or invalid');

@@ -13,7 +13,10 @@ import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { getPrivateConversationLimitMs } from '../../../../shared/entitlements.cjs';
 import meetingInvitation from '../../../../shared/meeting-invitation.cjs';
-import { publishCaption, translationCapabilities, translateCaption, clearEmptyRoomCaptions } from '../captions.js';
+import { publishCaption, publishInterim, subscribeCaptions, translationCapabilities, translateCaption, clearEmptyRoomCaptions, forgetPeerCaptions, setTranscriptSaving, transcriptEntries } from '../captions.js';
+import { asrCapabilities, pushAsrAudio, startAsr, stopAsr, stopAsrForPeer } from '../asr-relay.js';
+import { generateMinutes, minutesConfigured } from '../minutes.js';
+import { saveTranscript } from '../transcript-store.js';
 
 const { createMeetingInviteToken, verifyMeetingInviteToken } = meetingInvitation;
 const admittingPeers = new Set<string>();
@@ -237,8 +240,47 @@ export async function handleRpcMessage(
                 }
                 return { jsonrpc: '2.0', id: id!, result: publishCaption(ws, connectionState.roomId!, connectionState.peerId!, params) };
             }
-            case 'translationCapabilities':
-                return { jsonrpc: '2.0', id: id!, result: await translationCapabilities(ws, connectionState.roomId!, connectionState.peerId!) };
+            case 'captionInterim':
+            case 'asrStart':
+            case 'asrAudio': {
+                const room = roomManager.getRoom(connectionState.roomId!);
+                if (room?.settings.webinar && !canPublishInRoom(room.id, connectionState.peerId!, connectionState.authUser?.sub)) {
+                    throw createError(-32005, 'Only the webinar organiser can publish captions');
+                }
+                const [roomId, peerId] = [connectionState.roomId!, connectionState.peerId!];
+                const result = method === 'captionInterim' ? publishInterim(ws, roomId, peerId, params)
+                    : method === 'asrStart' ? await startAsr(ws, roomId, peerId, params)
+                    : pushAsrAudio(ws, roomId, peerId, params);
+                return { jsonrpc: '2.0', id: id!, result };
+            }
+            case 'asrStop':
+                return { jsonrpc: '2.0', id: id!, result: stopAsr(ws, connectionState.roomId!, connectionState.peerId!) };
+            case 'captionSubscribe':
+                return { jsonrpc: '2.0', id: id!, result: subscribeCaptions(ws, connectionState.roomId!, connectionState.peerId!, params) };
+            case 'translationCapabilities': {
+                const [captions, asr] = await Promise.all([translationCapabilities(ws, connectionState.roomId!, connectionState.peerId!), asrCapabilities()]);
+                return { jsonrpc: '2.0', id: id!, result: { ...captions, asr, minutes: { configured: minutesConfigured() } } };
+            }
+            case 'setTranscriptSaving': {
+                const parsed = z.object({ enabled: z.boolean() }).strict().safeParse(params);
+                if (!parsed.success) throw createError(-32602, 'Invalid transcript setting');
+                if (!roomManager.isHostOrCoHost(connectionState.roomId!, connectionState.peerId!)) throw createError(-32005, 'Only hosts can save the transcript');
+                return { jsonrpc: '2.0', id: id!, result: setTranscriptSaving(connectionState.roomId!, parsed.data.enabled) };
+            }
+            case 'getTranscript':
+                return { jsonrpc: '2.0', id: id!, result: transcriptEntries(connectionState.roomId!) };
+            case 'generateMinutes': {
+                const parsed = z.object({ language: z.string().max(40).optional() }).strict().safeParse(params || {});
+                if (!parsed.success) throw createError(-32602, 'Invalid minutes request');
+                const roomId = connectionState.roomId!;
+                if (!roomManager.isHostOrCoHost(roomId, connectionState.peerId!)) throw createError(-32005, 'Only hosts can create meeting minutes');
+                const transcript = transcriptEntries(roomId);
+                if (!transcript.saving) throw createError(-32005, 'Turn on “Save transcript” first');
+                const minutes = await generateMinutes(transcript.entries, parsed.data.language);
+                const room = roomManager.getRoom(roomId);
+                if (room) void saveTranscript(room.meetingCode, [], transcript.since || Date.now(), minutes);
+                return { jsonrpc: '2.0', id: id!, result: { minutes } };
+            }
             case 'translateCaption':
                 return { jsonrpc: '2.0', id: id!, result: await translateCaption(ws, connectionState.roomId!, connectionState.peerId!, params) };
 
@@ -1470,6 +1512,8 @@ export async function handlePeerDisconnect(
         await finishPrivateConversationsForPeer(roomId, peerId, 'participant-left');
         await sfuClient.removePeer(roomId, peerId).catch(() => { });
 
+        stopAsrForPeer(roomId, peerId);
+        forgetPeerCaptions(roomId, peerId);
         roomManager.removePeer(roomId, peerId);
         clearEmptyRoomCaptions(roomId);
         roomManager.broadcast(roomId, 'peerLeft', { peerId, displayName });

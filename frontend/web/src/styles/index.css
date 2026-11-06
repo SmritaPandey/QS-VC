@@ -4959,3 +4959,11 @@ label {
 .public-site .footer-meta>a,.public-site .footer-meta>button { flex:none; }
 
 @media(max-width:760px) { .schedule-kind-options { grid-template-columns:1fr; } .schedule-kind-option { min-height:68px; } }
+
+/* Captions: transcript + minutes (2026-11-06) */
+.caption-settings-subhead { margin: 8px 0 0; font-size: 15px; font-weight: 600; color: #f5f8fa; }
+.caption-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.caption-minutes { border: 1px solid #385063; border-radius: 12px; padding: 12px; background: #0f1b27; }
+.caption-minutes pre { margin: 0; white-space: pre-wrap; font: 14px/1.5 inherit; font-family: inherit; color: #e6eef3; max-height: 260px; overflow: auto; }
+.transcript-indicator { position: absolute; z-index: 40; top: 12px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: rgba(15, 27, 39, 0.88); border: 1px solid #43d9c2; color: #f5f8fa; font-size: 13px; }
+.transcript-indicator .mi { font-size: 16px; color: #43d9c2; }
