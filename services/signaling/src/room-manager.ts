@@ -442,7 +442,11 @@ class RoomManager {
 
         const peer = room.peers.get(peerId);
         if (!peer || !peer.ws || peer.ws.readyState !== 1) return;
-
+        if (peer.ws.bufferedAmount > 1_048_576) {
+            logger.warn(`Closing slow signaling peer ${peerId} after its send buffer exceeded 1 MiB`);
+            peer.ws.terminate?.();
+            return;
+        }
         peer.ws.send(JSON.stringify({ jsonrpc: '2.0', method, params }));
     }
 

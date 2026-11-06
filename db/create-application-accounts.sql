@@ -5,7 +5,6 @@ CREATE ROLE qs_auth_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATIO
 CREATE ROLE qs_meeting_app NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS INHERIT CONNECTION LIMIT 10;
 GRANT qsvc_auth_service TO qs_auth_app;
 GRANT qsvc_meeting_service TO qs_meeting_app;
-GRANT CONNECT ON DATABASE qsvc TO qs_auth_app, qs_meeting_app;
 \password qs_auth_app
 \password qs_meeting_app
 ALTER ROLE qs_auth_app LOGIN;

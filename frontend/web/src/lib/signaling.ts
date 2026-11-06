@@ -14,13 +14,32 @@ export class SignalingClient {
     private nextId = 1;
     private eventHandlers: Map<string, Set<(params: any) => void>> = new Map();
 
-    async connect(): Promise<void> {
+    async connect(meetingCode: string): Promise<void> {
+        const token = getToken();
+        let ticket: string | undefined;
+        if (token) {
+            const endpoint = new URL(SIGNALING_URL);
+            endpoint.protocol = endpoint.protocol === 'wss:' ? 'https:' : 'http:';
+            endpoint.pathname = '/api/signaling-ticket';
+            endpoint.search = '';
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ meetingCode }),
+                cache: 'no-store',
+                signal: AbortSignal.timeout(5000),
+            });
+            if (!response.ok) {
+                const result = await response.json().catch(() => ({}));
+                throw new Error(result.error || 'Could not authenticate with the meeting service.');
+            }
+            const result = await response.json() as { ticket?: string };
+            if (!result.ticket || getToken() !== token) throw new Error('Your session changed. Reconnect to the meeting.');
+            ticket = result.ticket;
+        }
         return new Promise((resolve, reject) => {
             this.unsubscribeSession?.();
-            const url = new URL(SIGNALING_URL);
-            const token = getToken();
-            if (token) url.searchParams.set('token', token);
-            const socket = new WebSocket(url);
+            const socket = new WebSocket(SIGNALING_URL);
             this.ws = socket;
             // Events from a socket that was already replaced or closed by disconnect() (for example
             // React StrictMode mounting the meeting twice in development) must not tear down the
@@ -29,14 +48,25 @@ export class SignalingClient {
 
             socket.onopen = () => {
                 if (!current()) return;
-                console.log('[Signaling] Connected');
-                resolve();
+                // The bearer was exchanged over HTTPS for a short-lived, single-use ticket.
+                // Put that ticket in the first WSS frame instead of any URL or query string.
+                socket.send(JSON.stringify({ jsonrpc: '2.0', method: 'authenticate', id: 0, params: ticket ? { ticket } : { guest: true } }));
             };
 
             socket.onmessage = (event) => {
                 if (!current()) return;
                 try {
                     const data = JSON.parse(event.data);
+                    if (data.id === 0) {
+                        if (data.result?.authenticated === true) {
+                            console.log('[Signaling] Authenticated');
+                            resolve();
+                        } else {
+                            reject(new Error(data.error?.message || 'Meeting authentication failed.'));
+                            socket.close(4003, 'Authentication failed');
+                        }
+                        return;
+                    }
                     this.handleMessage(data);
                 } catch (err) {
                     console.error('[Signaling] Parse error:', err);

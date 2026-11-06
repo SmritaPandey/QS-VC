@@ -25,6 +25,24 @@ const signatureRecord = (signature: string): PQCSignature => ({
     algorithm: PQC_ALGORITHMS.SIG_ML_DSA_87, signature: fromBase64(signature), publicKey: new Uint8Array(), timestamp: 0,
 });
 
+const MAX_CLEAR_BYTES = 10;
+type EncodedFrame = RTCEncodedVideoFrame | RTCEncodedAudioFrame;
+type EncodedStreams = { readable: ReadableStream<EncodedFrame>; writable: WritableStream<EncodedFrame> };
+
+/** Bytes left readable for the SFU: VP8 key frame 10, delta 3, Opus 1 (same split as Jitsi's E2EE). */
+function clearPrefixLength(frame: EncodedFrame): number {
+    const type = (frame as RTCEncodedVideoFrame).type;
+    if (type === 'key') return 10;
+    if (type === 'delta') return 3;
+    if (type === 'empty') return 0;
+    return 1;
+}
+
+/** Chrome/Edge expose encoded streams on RTCRtpSender; Safari and Firefox need RTCRtpScriptTransform instead. */
+export function encodedTransformsSupported(): boolean {
+    return typeof RTCRtpSender !== 'undefined' && 'createEncodedStreams' in RTCRtpSender.prototype;
+}
+
 export class E2EEManager {
     private readonly pqc = new PQCManager();
     private readonly epochKeys = new Map<string, CryptoKey>();
@@ -124,44 +142,66 @@ export class E2EEManager {
         return key;
     }
 
-    async setupSenderTransform(sender: RTCRtpSender): Promise<void> {
-        await this.waitUntilActive();
-        const streams = (sender as RTCRtpSender & { createEncodedStreams?: () => { readable: ReadableStream<RTCEncodedVideoFrame>; writable: WritableStream<RTCEncodedVideoFrame> } }).createEncodedStreams?.();
+    /**
+     * Encrypt every outgoing frame. Must be called synchronously right after the sender exists:
+     * Chrome rejects createEncodedStreams once media has started ("Too late to create encoded streams").
+     * Frames are dropped until the meeting key is known, so nothing is ever sent in the clear.
+     *
+     * Frame layout: [codec header in clear][16-byte E2EE header][AES-GCM ciphertext][1 byte: clear length].
+     * The first few codec bytes stay readable (as in Jitsi/SFrame) so the SFU can still spot VP8 key
+     * frames and switch simulcast layers; they are authenticated as additional data.
+     */
+    setupSenderTransform(sender: RTCRtpSender): void {
+        const streams = (sender as RTCRtpSender & { createEncodedStreams?: () => EncodedStreams }).createEncodedStreams?.();
         if (!streams) throw new Error('This browser does not support encoded media transforms required for end-to-end encryption');
-        const { readable, writable } = streams;
-        const transform = new TransformStream({ transform: async (frame: RTCEncodedVideoFrame, controller) => {
+        const transform = new TransformStream<EncodedFrame, EncodedFrame>({ transform: async (frame, controller) => {
+            if (!this.active || !this.mek) return;
             const epoch = Math.floor(Date.now() / KEY_ROTATION_MS);
             if (this.frameEpoch !== epoch) { this.frameEpoch = epoch; this.frameCounter = 0; }
-            if (this.frameCounter >= 0xffff_fffe) throw new Error('E2EE frame nonce limit reached');
+            if (this.frameCounter >= 0xffff_fffe) return;
             const counter = ++this.frameCounter;
+            const data = new Uint8Array(frame.data);
+            const clearBytes = Math.min(clearPrefixLength(frame), data.length);
             const header = new Uint8Array(HEADER_BYTES);
             const view = new DataView(header.buffer);
             view.setUint32(0, epoch, false); header.set(this.senderPrefix, 4); view.setUint32(12, counter, false);
-            const iv = header.slice(4, 12 + 4);
-            const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: arrayBuffer(iv), additionalData: arrayBuffer(header) }, await this.keyFor(epoch, this.senderPrefix), frame.data);
-            const out = new Uint8Array(header.length + encrypted.byteLength); out.set(header); out.set(new Uint8Array(encrypted), header.length);
-            frame.data = out.buffer; controller.enqueue(frame);
+            const iv = header.slice(4, 16);
+            const clear = data.subarray(0, clearBytes);
+            const aad = new Uint8Array(clearBytes + HEADER_BYTES); aad.set(clear); aad.set(header, clearBytes);
+            try {
+                const key = await this.keyFor(epoch, this.senderPrefix);
+                const encrypted = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: arrayBuffer(iv), additionalData: arrayBuffer(aad) }, key, arrayBuffer(data.subarray(clearBytes))));
+                const out = new Uint8Array(clearBytes + HEADER_BYTES + encrypted.length + 1);
+                out.set(clear); out.set(header, clearBytes); out.set(encrypted, clearBytes + HEADER_BYTES); out[out.length - 1] = clearBytes;
+                frame.data = out.buffer;
+                controller.enqueue(frame);
+            } catch { /* drop the frame rather than send it unencrypted */ }
         } });
-        void readable.pipeThrough(transform).pipeTo(writable).catch(() => undefined);
+        void streams.readable.pipeThrough(transform).pipeTo(streams.writable).catch(() => undefined);
     }
 
-    async setupReceiverTransform(receiver: RTCRtpReceiver): Promise<void> {
-        await this.waitUntilActive();
-        const streams = (receiver as RTCRtpReceiver & { createEncodedStreams?: () => { readable: ReadableStream<RTCEncodedVideoFrame>; writable: WritableStream<RTCEncodedVideoFrame> } }).createEncodedStreams?.();
+    /** Decrypt every incoming frame. Same timing rule as setupSenderTransform. */
+    setupReceiverTransform(receiver: RTCRtpReceiver): void {
+        const streams = (receiver as RTCRtpReceiver & { createEncodedStreams?: () => EncodedStreams }).createEncodedStreams?.();
         if (!streams) throw new Error('This browser does not support encoded media transforms required for end-to-end encryption');
-        const { readable, writable } = streams;
-        const transform = new TransformStream({ transform: async (frame: RTCEncodedVideoFrame, controller) => {
+        const transform = new TransformStream<EncodedFrame, EncodedFrame>({ transform: async (frame, controller) => {
+            if (!this.active || !this.mek) return;
             const data = new Uint8Array(frame.data);
-            if (data.length < HEADER_BYTES + 16) return;
-            const header = data.slice(0, HEADER_BYTES), view = new DataView(header.buffer);
-            const epoch = view.getUint32(0, false), prefix = header.slice(4, 12), counter = view.getUint32(12, false);
-            const iv = new Uint8Array(12); iv.set(prefix); new DataView(iv.buffer).setUint32(8, counter, false);
+            if (data.length < HEADER_BYTES + 17) return;
+            const clearBytes = data[data.length - 1];
+            if (clearBytes > MAX_CLEAR_BYTES || data.length < clearBytes + HEADER_BYTES + 17) return;
+            const header = data.slice(clearBytes, clearBytes + HEADER_BYTES), view = new DataView(header.buffer);
+            const epoch = view.getUint32(0, false), prefix = header.slice(4, 12);
+            const iv = header.slice(4, 16);
+            const aad = data.slice(0, clearBytes + HEADER_BYTES);
             try {
-                frame.data = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: arrayBuffer(iv), additionalData: arrayBuffer(header) }, await this.keyFor(epoch, prefix), arrayBuffer(data.slice(HEADER_BYTES)));
+                const plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: arrayBuffer(iv), additionalData: arrayBuffer(aad) }, await this.keyFor(epoch, prefix), arrayBuffer(data.subarray(clearBytes + HEADER_BYTES, data.length - 1))));
+                const out = new Uint8Array(clearBytes + plain.length); out.set(data.subarray(0, clearBytes)); out.set(plain, clearBytes);
+                frame.data = out.buffer;
                 controller.enqueue(frame);
             } catch { /* Never pass undeciphered media to the renderer. */ }
         } });
-        void readable.pipeThrough(transform).pipeTo(writable).catch(() => undefined);
+        void streams.readable.pipeThrough(transform).pipeTo(streams.writable).catch(() => undefined);
     }
 
     isActive(): boolean { return this.active; }

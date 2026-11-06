@@ -39,6 +39,21 @@ import { initialMeetingLanguage, detectLanguage, setMeetingLanguage, clearSavedL
 import { E2EEManager, type E2EEKeyBundle, type E2EEKeyEnvelope } from '../lib/e2ee';
 
 const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
+
+/**
+ * TURN relays from the signaling service. Lets people on networks that block the SFU's media ports
+ * (office firewalls, some mobile carriers) still send and hear audio. STUN is not needed to reach the SFU.
+ */
+async function loadTurnServers(): Promise<RTCIceServer[] | undefined> {
+    try {
+        const signalingUrl = import.meta.env.VITE_SIGNALING_URL ? new URL(import.meta.env.VITE_SIGNALING_URL) : null;
+        const base = signalingUrl ? `${signalingUrl.protocol === 'wss:' ? 'https:' : 'http:'}//${signalingUrl.host}` : '';
+        const response = await fetch(`${base}/api/ice-servers`, { signal: AbortSignal.timeout(4000) });
+        if (!response.ok) return undefined;
+        const { iceServers } = await response.json() as { iceServers?: RTCIceServer[] };
+        return (iceServers || []).filter(server => [server.urls].flat().some(url => /^turns?:/.test(String(url))));
+    } catch { return undefined; }
+}
 const MAX_MEETING_TITLE_LENGTH = 52;
 
 interface PeerData {
@@ -689,7 +704,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             try {
                 const stream = new MediaStream();
                 localStreamRef.current = stream;
-                await signaling.connect();
+                await signaling.connect(meetingCode);
                 if (!alive()) return;
                 waitingStatusRef.current = null;
                 const admission = new Promise<{ result?: any; error?: string; cancelled?: boolean }>(resolve => { settleAdmission = resolve; });
@@ -905,6 +920,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 // SFU-based media relay — only if SFU is available
                 if (joinResult.routerRtpCapabilities && joinResult.sendTransport && joinResult.recvTransport) {
                     try {
+                        media.setIceServers(await loadTurnServers());
+                        if (!alive()) return;
                         await media.loadDevice(joinResult.routerRtpCapabilities);
                         if (!alive()) return;
                         await media.createSendTransport(joinResult.sendTransport);

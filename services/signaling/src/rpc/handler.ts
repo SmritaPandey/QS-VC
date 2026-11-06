@@ -191,7 +191,7 @@ const CAPTION_SPEAKER_PLAN_MESSAGE = 'Sign in with a plan that includes captions
 export async function handleRpcMessage(
     ws: any,
     message: RpcRequest,
-    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: VerifiedSignalingUser | null }
+    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: VerifiedSignalingUser | null; expectedMeetingCode?: string }
 ): Promise<RpcResponse | null> {
     const { method, params, id } = message;
 
@@ -310,6 +310,9 @@ export async function handleRpcMessage(
                     };
                 }
                 const { meetingCode, displayName: rawName, rtpCapabilities, password, inviteToken } = joinParams.data;
+                if (connectionState.expectedMeetingCode && connectionState.expectedMeetingCode !== meetingCode.trim().toUpperCase()) {
+                    throw createError(-32001, 'This signaling ticket is valid for a different meeting. Reconnect and try again.');
+                }
                 const displayName = sanitizeString(rawName);
                 const peerId = uuidv4();
 

@@ -108,6 +108,7 @@ services:
       - SFU_NUM_WORKERS=4
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - CORS_ORIGINS=https://${DOMAIN}
     depends_on:
       redis:
@@ -118,7 +119,6 @@ services:
       timeout: 5s
       retries: 3
     restart: always
-    network_mode: host
 
   signaling:
     build:
@@ -133,10 +133,7 @@ services:
       - SFU_INTERNAL_URL=http://sfu:4000
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - POSTGRES_HOST=postgres
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
       - JWT_SECRET=${JWT_SECRET}
       - CORS_ORIGINS=https://${DOMAIN}
       - LIBRETRANSLATE_URL=${LIBRETRANSLATE_URL:-}
@@ -150,8 +147,6 @@ services:
       - MINUTES_LLM_API_KEY=${MINUTES_LLM_API_KEY:-}
       - MEETING_INTERNAL_URL=${MEETING_INTERNAL_URL:-http://meeting:4003}
     depends_on:
-      postgres:
-        condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
@@ -172,8 +167,8 @@ services:
       - AUTH_PORT=4002
       - POSTGRES_HOST=postgres
       - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_USER=${AUTH_DB_USER:-qs_auth_app}
+      - POSTGRES_PASSWORD=${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD for the restricted auth database role}
       - JWT_SECRET=${JWT_SECRET}
       - JWT_EXPIRY=24h
       - TURN_SECRET=${TURN_SECRET}
@@ -199,8 +194,8 @@ services:
       - MEETING_PORT=4003
       - POSTGRES_HOST=postgres
       - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_USER=${MEETING_DB_USER:-qs_meeting_app}
+      - POSTGRES_PASSWORD=${MEETING_DB_PASSWORD:?Set MEETING_DB_PASSWORD for the restricted meeting database role}
       - JWT_SECRET=${JWT_SECRET}
       - WEB_URL=https://${DOMAIN}
       - CORS_ORIGINS=https://${DOMAIN}
@@ -222,10 +217,6 @@ services:
     environment:
       - NODE_ENV=production
       - RECORDING_PORT=4004
-      - POSTGRES_HOST=postgres
-      - POSTGRES_DB=${POSTGRES_DB}
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
       - MINIO_ENDPOINT=minio
       - MINIO_PORT=9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
@@ -233,8 +224,6 @@ services:
       - MINIO_BUCKET=qsvc-recordings
       - CORS_ORIGINS=https://${DOMAIN}
     depends_on:
-      postgres:
-        condition: service_healthy
       minio:
         condition: service_healthy
     healthcheck:

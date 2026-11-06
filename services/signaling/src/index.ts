@@ -2,10 +2,12 @@ import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import http from 'http';
+import { randomInt } from 'node:crypto';
 import { config } from './config.js';
 import { logger } from './logger.js';
 import { roomManager } from './room-manager.js';
-import { attachSignalingWebSocket } from './ws-attach.js';
+import { attachSignalingWebSocket, InvalidAuthentication, verifySession } from './ws-attach.js';
+import { createWebSocketTicket } from './ws-tickets.js';
 import meetingInvitation from '../../../shared/meeting-invitation.cjs';
 
 const { createMeetingInviteToken } = meetingInvitation;
@@ -63,6 +65,27 @@ app.get('/api/ice-servers', (_req, res) => {
     res.json({ iceServers: config.iceServers });
 });
 
+// Exchange a verified login session for a 30-second, single-use WebSocket ticket. The
+// long-lived bearer never appears in the WebSocket URL or upgrade logs.
+app.post('/api/signaling-ticket', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false }), async (req, res) => {
+    const authorization = req.headers.authorization || '';
+    const token = authorization.startsWith('Bearer ') ? authorization.slice(7) : '';
+    const meetingCode = typeof req.body?.meetingCode === 'string' ? req.body.meetingCode.trim().toUpperCase() : '';
+    if (!token) return res.status(401).json({ error: 'Sign in to create a signaling ticket.' });
+    if (!/^[A-Z0-9-]{4,32}$/.test(meetingCode)) return res.status(400).json({ error: 'A valid meeting code is required.' });
+    try {
+        const user = await verifySession(token);
+        const ticket = await createWebSocketTicket({ token, userId: user.sub, meetingCode });
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Pragma', 'no-cache');
+        return res.json({ ticket, expiresIn: 30 });
+    } catch (error) {
+        if (error instanceof InvalidAuthentication) return res.status(401).json({ error: 'Your session expired. Sign in again.' });
+        logger.error({ error }, 'Could not issue signaling ticket');
+        return res.status(503).json({ error: 'Signaling authentication is temporarily unavailable.' });
+    }
+});
+
 // Schedule or create a meeting (handles the meeting-service API contract)
 app.post('/api/meetings', express.json(), (req, res) => {
     const code = generateMeetingCode();
@@ -106,7 +129,7 @@ function generateMeetingCode(): string {
     for (let s = 0; s < 3; s++) {
         let seg = '';
         for (let i = 0; i < 4; i++) {
-            seg += chars[Math.floor(Math.random() * chars.length)];
+            seg += chars[randomInt(chars.length)];
         }
         segments.push(seg);
     }
