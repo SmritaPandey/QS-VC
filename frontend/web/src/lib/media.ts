@@ -3,6 +3,7 @@
  */
 import { Device, types as msTypes } from 'mediasoup-client';
 import { signaling } from './signaling';
+import type { E2EEManager } from './e2ee';
 
 export interface ProducerInfo {
     id: string;
@@ -28,6 +29,7 @@ export class MediaManager {
     private recvTransport: msTypes.Transport | null = null;
     private producers: Map<string, msTypes.Producer> = new Map();
     private consumers: Map<string, ConsumerInfo> = new Map();
+    private e2ee: E2EEManager | null = null;
 
     private onNewConsumer: ((info: ConsumerInfo) => void) | null = null;
     private onConsumerRemoved: ((consumerId: string) => void) | null = null;
@@ -39,6 +41,8 @@ export class MediaManager {
         this.onNewConsumer = onNew;
         this.onConsumerRemoved = onRemoved;
     }
+
+    setE2EEManager(manager: E2EEManager | null): void { this.e2ee = manager; }
 
     /**
      * Initialize the mediasoup Device with router RTP capabilities.
@@ -136,6 +140,11 @@ export class MediaManager {
         const revision = this.revision;
         if (!transport) throw new Error('Send transport not created');
 
+        const wasEnabled = track.enabled;
+        if (this.e2ee) {
+            track.enabled = false;
+            await this.e2ee.waitUntilActive();
+        }
         const producer = await transport.produce({
             track,
             // The page owns camera/screen lifetime; replacing a producer must not stop its previous source.
@@ -152,6 +161,18 @@ export class MediaManager {
                 : undefined,
             appData,
         });
+
+        if (this.e2ee) {
+            try {
+                if (!producer.rtpSender) throw new Error('The media transport did not expose an encoded sender');
+                await this.e2ee.setupSenderTransform(producer.rtpSender);
+                track.enabled = wasEnabled;
+            } catch (error) {
+                producer.close();
+                track.enabled = false;
+                throw error;
+            }
+        }
 
         if (revision !== this.revision || transport.closed) { producer.close(); throw new Error('Media session closed'); }
         this.producers.set(producer.id, producer);
@@ -180,6 +201,16 @@ export class MediaManager {
             kind: result.kind,
             rtpParameters: result.rtpParameters,
         });
+
+        if (this.e2ee) {
+            try {
+                if (!consumer.rtpReceiver) throw new Error('The media transport did not expose an encoded receiver');
+                await this.e2ee.setupReceiverTransform(consumer.rtpReceiver);
+            } catch (error) {
+                consumer.close();
+                throw error;
+            }
+        }
 
         if (revision !== this.revision || transport.closed) { consumer.close(); throw new Error('Media session closed'); }
         // Resume the consumer on the server
@@ -283,6 +314,8 @@ export class MediaManager {
         this.recvTransport?.close();
         this.sendTransport = null;
         this.recvTransport = null;
+        this.e2ee?.destroy();
+        this.e2ee = null;
 
         console.log('[Media] All media closed');
     }

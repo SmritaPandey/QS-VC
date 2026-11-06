@@ -487,7 +487,7 @@ app.get('/api/meetings', authMiddleware, async (req, res) => {
         const result = await pool.query(query, params);
 
         res.json({
-            meetings: result.rows.map((m) => ({
+            meetings: result.rows.map((m: any) => ({
                 id: m.id,
                 meetingCode: m.meeting_code,
                 title: m.title,
@@ -641,7 +641,7 @@ app.get('/api/meetings/:meetingId/chat', async (req, res) => {
         const result = await pool.query(query, params);
 
         res.json({
-            messages: result.rows.map((m) => ({
+            messages: result.rows.map((m: any) => ({
                 id: m.id,
                 senderId: m.sender_id,
                 senderName: m.sender_name,

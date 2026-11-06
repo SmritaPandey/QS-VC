@@ -19,7 +19,6 @@
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import { z } from 'zod';
-import { v4 as uuidv4 } from 'uuid';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MCU TYPES
@@ -134,7 +133,7 @@ class MCUPipeline {
         }
 
         const room: MCURoom = {
-            id: uuidv4(),
+            id: crypto.randomUUID(),
             meetingCode,
             layout: this.config.defaultLayout,
             participants: new Map(),

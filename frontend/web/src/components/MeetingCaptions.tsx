@@ -14,6 +14,7 @@ interface AsrCapabilities { configured: boolean; available?: boolean; languages?
 interface Capabilities { configured: boolean; languages: { code: string; name: string; targets?: string[] }[]; processing?: string; asr?: AsrCapabilities; minutes?: { configured: boolean }; transcript?: { saving: boolean } }
 interface Props {
     open: boolean; onClose: () => void; connected: boolean; audioMuted: boolean; translatedSpeaking: boolean;
+    e2eeActive?: boolean;
     speakingLanguage: string; onSpeakingLanguageChange: (code: string) => void; onUseDetectedLanguage: () => void; displayName: string; myPeerId: () => string;
     stopRecognition: MutableRefObject<() => void>;
     onSpeakingChange: (speaking: boolean) => void;
@@ -38,7 +39,7 @@ function rememberConsent(on: boolean) { try { if (on) localStorage.setItem(CONSE
 const same = (a: string, b: string) => a === b || a.split('-')[0] === b.split('-')[0];
 
 /** Captions: speech → server (or browser) recognition → room; translations pushed by the server per chosen language. */
-export default function MeetingCaptions({ open, onClose, connected, audioMuted, speakingLanguage, displayName, myPeerId, onSpeakingChange, stopRecognition, translatedSpeaking, onSpeakingLanguageChange, onUseDetectedLanguage, showCaptions, onShowCaptionsChange: setShowCaptions, shareSpeech, onShareSpeechChange, getMicTrack, isHost = false, meetingCode = 'meeting', viewOnly = false, viewerLanguage = 'en-US' }: Props) {
+export default function MeetingCaptions({ open, onClose, connected, audioMuted, speakingLanguage, displayName, myPeerId, onSpeakingChange, stopRecognition, translatedSpeaking, e2eeActive = false, onSpeakingLanguageChange, onUseDetectedLanguage, showCaptions, onShowCaptionsChange: setShowCaptions, shareSpeech, onShareSpeechChange, getMicTrack, isHost = false, meetingCode = 'meeting', viewOnly = false, viewerLanguage = 'en-US' }: Props) {
     const setShareSpeech = (on: boolean) => { rememberConsent(on); onShareSpeechChange(on); };
     const [captionLanguage, setCaptionLanguage] = useState('original');
     const [hearLanguage, setHearLanguage] = useState('');
@@ -57,7 +58,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     /** False when the meeting server is an older build without transcripts / pushed translations. */
     const [serverUpToDate, setServerUpToDate] = useState(true);
     const panelRef = useRef<HTMLElement>(null);
-    const serverAsr = Boolean(capabilities.asr?.available) && ServerSpeechEngine.isSupported() && Boolean(getMicTrack);
+    const serverAsr = !e2eeActive && Boolean(capabilities.asr?.available) && ServerSpeechEngine.isSupported() && Boolean(getMicTrack);
     const recognitionSupported = serverAsr || SpeechToTextEngine.isSupported();
     const ttsRef = useRef<TextToSpeechEngine | null>(null);
     const prefs = useRef({ captionLanguage, hearLanguage, voiceEnabled, showCaptions });
