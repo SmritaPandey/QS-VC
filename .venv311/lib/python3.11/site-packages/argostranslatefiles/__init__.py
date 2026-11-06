@@ -1,1 +1,0 @@
-from argostranslatefiles.argostranslatefiles import *
