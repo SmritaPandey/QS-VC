@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:22-alpine
 
 WORKDIR /app
 COPY services/signaling/package.json ./
@@ -9,7 +9,7 @@ COPY services/signaling/src/ ./src/
 COPY shared/ /shared/
 RUN npm run build
 
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 COPY services/signaling/package.json ./
 COPY services/signaling/package-lock.json ./package-lock.json

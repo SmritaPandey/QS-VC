@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 COPY services/auth/package.json ./
 COPY services/auth/package-lock.json ./package-lock.json
@@ -8,7 +8,7 @@ COPY services/auth/src/ ./src/
 COPY shared/ /shared/
 RUN npm run build
 
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 COPY services/auth/package.json ./
 COPY services/auth/package-lock.json ./package-lock.json

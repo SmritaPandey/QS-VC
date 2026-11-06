@@ -1,7 +1,7 @@
 # Combined meeting + signaling for production (Render)
 # Build context: repository root
 
-FROM node:20-alpine AS signaling-build
+FROM node:22-alpine AS signaling-build
 WORKDIR /signaling
 COPY services/signaling/package.json ./
 COPY services/signaling/package-lock.json ./package-lock.json
@@ -11,7 +11,7 @@ COPY services/signaling/src ./src
 COPY shared/ /shared/
 RUN npm run build
 
-FROM node:20-alpine AS meeting-build
+FROM node:22-alpine AS meeting-build
 WORKDIR /meeting
 COPY services/meeting/package.json ./
 COPY services/meeting/package-lock.json ./package-lock.json
@@ -21,7 +21,7 @@ COPY services/meeting/src ./src
 COPY shared/ /shared/
 RUN npm run build
 
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 
 COPY services/meeting/package.json ./package.json
