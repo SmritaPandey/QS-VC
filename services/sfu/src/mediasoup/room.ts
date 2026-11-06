@@ -96,7 +96,8 @@ export class Room extends EventEmitter {
             enableTcp: config.webRtcTransport.enableTcp,
             preferUdp: config.webRtcTransport.preferUdp,
             initialAvailableOutgoingBitrate: config.webRtcTransport.initialAvailableOutgoingBitrate,
-            maxSctpMessageSize: config.webRtcTransport.maxSctpMessageSize,
+            // No SCTP options: meetings use no WebRTC data channels, and mediasoup 3.2x+ renamed
+            // maxSctpMessageSize, so leaving it out keeps this compiling on every supported version.
         });
 
         // Set max incoming bitrate

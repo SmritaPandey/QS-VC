@@ -1,4 +1,4 @@
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 COPY services/recording/package.json ./
 COPY services/recording/package-lock.json ./package-lock.json
@@ -8,7 +8,7 @@ COPY services/recording/src/ ./src/
 COPY shared/entitlements.cjs shared/entitlements.d.cts /shared/
 RUN npm run build
 
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 COPY services/recording/package.json ./
 COPY services/recording/package-lock.json ./package-lock.json
