@@ -28,8 +28,8 @@ export default function DownloadFeedback({ state, onDismiss }: { state: Download
                     {state.archive === 'macos'
                         ? <span>The Mac ZIP ({megabytes(state.size)}) is in Downloads. Open it to extract QS-VC.app, then move the app to Applications.</span>
                         : state.archive === 'linux'
-                            ? <span>The Linux x64 tar.gz ({megabytes(state.size)}) is in Downloads. Extract it and run QS-VC from the extracted folder.</span>
-                            : <span>The Windows ZIP ({megabytes(state.size)}) is in Downloads. Extract it and run QS-VC-Windows-Setup.exe.</span>}
+                            ? <span>The Linux x64 ZIP ({megabytes(state.size)}) is in Downloads. Extract it and run qs-vc from the extracted folder.</span>
+                            : <span>The Windows ZIP ({megabytes(state.size)}) is in Downloads. Extract it and run QS-VC.exe from the extracted folder.</span>}
                     <span className="download-checksum">SHA-256: <code>{state.checksum}</code></span>
                     <span>Compare the checksum with the value supplied by your administrator before installing.</span>
                 </>}

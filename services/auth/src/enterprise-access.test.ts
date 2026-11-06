@@ -52,7 +52,7 @@ it('reports the desktop installers that are actually staged', async () => {
         const arm = path.join(folder, 'arm64.zip');
         const intel = path.join(folder, 'x64.zip');
         const windows = path.join(folder, 'windows-x64.zip');
-        const linux = path.join(folder, 'linux-x64.tar.gz');
+        const linux = path.join(folder, 'linux-x64.zip');
         writeFileSync(arm, 'apple-silicon-test-artifact');
         writeFileSync(windows, 'windows-installer-archive');
         writeFileSync(linux, 'linux-desktop-archive');
@@ -76,6 +76,8 @@ it('reports the desktop installers that are actually staged', async () => {
 it.each([
     ['/macos/arm64', 'ENTERPRISE_MACOS_ARM64_INSTALLER', 'arm64.zip', 'QS-VC-macOS-arm64.zip'],
     ['/macos/x64', 'ENTERPRISE_MACOS_X64_INSTALLER', 'intel.zip', 'QS-VC-macOS-x64.zip'],
+    ['/linux/x64', 'ENTERPRISE_LINUX_X64_INSTALLER', 'linux.zip', 'QS-VC-Linux-x64.zip'],
+    ['/windows', 'ENTERPRISE_WINDOWS_INSTALLER', 'windows.zip', 'QS-VC-Windows-x64.zip'],
 ] as const)('sends %s as a named ZIP archive', async (routePath, envName, archiveName, downloadName) => {
     const folder = mkdtempSync(path.join(tmpdir(), 'qsvc-macos-zip-'));
     try {

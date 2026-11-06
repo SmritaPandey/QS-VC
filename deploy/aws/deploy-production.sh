@@ -12,7 +12,7 @@ INSTALLER_DIR="deploy/aws/installers"
 WINDOWS_INSTALLER="$INSTALLER_DIR/QS-VC-Windows-x64.zip"
 MAC_ARM64_INSTALLER="$INSTALLER_DIR/QS-VC-macOS-arm64.zip"
 MAC_X64_INSTALLER="$INSTALLER_DIR/QS-VC-macOS-x64.zip"
-LINUX_X64_INSTALLER="$INSTALLER_DIR/QS-VC-Linux-x64.tar.gz"
+LINUX_X64_INSTALLER="$INSTALLER_DIR/QS-VC-Linux-x64.zip"
 
 echo "Checking production deployment..."
 
@@ -27,30 +27,28 @@ test -f "db/migrations/009_platform_admin_analytics.sql"
 test -f "db/migrations/013_linux_desktop_support.sql"
 test -f "db/migrations/014_meeting_transcripts.sql"
 
-# Installer ZIPs and their release checksums are built on the protected
-# platform runners and included in the approved release archive.
+# Installer archives and their release checksums are built on the protected platform
+# runners. Verify every package that is present; a package that has not been built yet
+# only disables its download (the auth service reports it as unavailable) and must not
+# block a backend or web release.
 install -d -m 0755 "$INSTALLER_DIR"
-test -f "$WINDOWS_INSTALLER"
-test -f "$WINDOWS_INSTALLER.sha256"
-test -f "$MAC_ARM64_INSTALLER"
-test -f "$MAC_X64_INSTALLER"
-test -f "$MAC_ARM64_INSTALLER.sha256"
-test -f "$MAC_X64_INSTALLER.sha256"
-test -f "$LINUX_X64_INSTALLER"
-test -f "$LINUX_X64_INSTALLER.sha256"
-(
-  cd "$INSTALLER_DIR"
-  sha256sum --check --status QS-VC-Windows-x64.zip.sha256
-  sha256sum --check --status QS-VC-macOS-arm64.zip.sha256
-  sha256sum --check --status QS-VC-macOS-x64.zip.sha256
-  sha256sum --check --status QS-VC-Linux-x64.tar.gz.sha256
-)
-unzip -tq "$WINDOWS_INSTALLER"
-unzip -tq "$MAC_ARM64_INSTALLER"
-unzip -tq "$MAC_X64_INSTALLER"
-tar -tzf "$LINUX_X64_INSTALLER" >/dev/null
-chmod 0644 "$WINDOWS_INSTALLER" "$MAC_ARM64_INSTALLER" "$MAC_X64_INSTALLER" "$LINUX_X64_INSTALLER"
-echo "Verified and staged Windows, Mac, and Linux desktop archives"
+staged=0
+for installer in "$WINDOWS_INSTALLER" "$MAC_ARM64_INSTALLER" "$MAC_X64_INSTALLER" "$LINUX_X64_INSTALLER"; do
+  name="$(basename "$installer")"
+  if [[ ! -s "$installer" ]]; then
+    echo "Warning: desktop package not present, download disabled: $name" >&2
+    continue
+  fi
+  test -f "$installer.sha256" || { echo "Checksum missing for $name" >&2; exit 1; }
+  ( cd "$INSTALLER_DIR" && sha256sum --check --status "$name.sha256" ) || { echo "Checksum mismatch for $name" >&2; exit 1; }
+  case "$name" in
+    *.zip) unzip -tq "$installer" ;;
+    *.tar.gz) tar -tzf "$installer" >/dev/null ;;
+  esac
+  chmod 0644 "$installer"
+  staged=$((staged + 1))
+done
+echo "Verified and staged $staged desktop package(s)"
 
 # This script must run under an approved privileged
 # deployment identity with Docker and AWS permissions.

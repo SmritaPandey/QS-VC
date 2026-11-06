@@ -3,7 +3,7 @@ Place reviewed releases here as:
 - `QS-VC-Windows-x64.zip` (contains `QS-VC-Windows-Setup.exe` and its checksum)
 - `QS-VC-macOS-arm64.zip` (Apple silicon)
 - `QS-VC-macOS-x64.zip` (Intel)
-- `QS-VC-Linux-x64.tar.gz` (Linux x86-64)
+- `QS-VC-Linux-x64.zip` (Linux x86-64)
 
 This directory is mounted read-only into auth, never exposed as static web content.
 Do not add installer binaries to Git. The authenticated download API checks each
