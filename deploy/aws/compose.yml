@@ -71,6 +71,16 @@ services:
       GOOGLE_TRANSLATE_API_KEY: ${GOOGLE_TRANSLATE_API_KEY:-}
       LIBRETRANSLATE_URL: ${LIBRETRANSLATE_URL:-}
       LIBRETRANSLATE_API_KEY: ${LIBRETRANSLATE_API_KEY:-}
+      # Multilingual captions on the GPU host (deploy/aws/gpu). Private VPC addresses only.
+      ASR_URL: ${ASR_URL:-}
+      ASR_API_KEY: ${ASR_API_KEY:-}
+      ASR_MAX_SESSIONS: ${ASR_MAX_SESSIONS:-50}
+      MINUTES_LLM_URL: ${MINUTES_LLM_URL:-}
+      MINUTES_LLM_MODEL: ${MINUTES_LLM_MODEL:-}
+      MINUTES_LLM_API_KEY: ${MINUTES_LLM_API_KEY:-}
+      CAPTION_MAX_ROOMS: ${CAPTION_MAX_ROOMS:-500}
+      CAPTION_ROOM_CONCURRENCY: ${CAPTION_ROOM_CONCURRENCY:-8}
+      CAPTION_GLOBAL_CONCURRENCY: ${CAPTION_GLOBAL_CONCURRENCY:-64}
     command: [node, services/signaling/dist/index.js]
   sfu:
     <<: *app
