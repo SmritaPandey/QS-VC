@@ -9,3 +9,9 @@ docker-data
 .aws
 certs
 marketing
+.venv*
+Claude outputs
+deploy/aws/installers
+deploy/aws/outgoing
+frontend/desktop
+tmp

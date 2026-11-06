@@ -164,6 +164,13 @@ jobs:
           RELEASE_DIR="/tmp/qsvc-release-source"
           mkdir -p "$RELEASE_DIR/deploy/aws/installers"
           git archive --format=tar "$RELEASE_SHA" | tar -x -C "$RELEASE_DIR"
+          # Ship only what the server runs: no local Python environments, design/marketing
+          # material, desktop build output or old installer parts (they filled the server disk).
+          rm -rf "$RELEASE_DIR"/.venv* "$RELEASE_DIR/Claude outputs" "$RELEASE_DIR/marketing" \
+                 "$RELEASE_DIR/deploy/aws/outgoing" "$RELEASE_DIR/frontend/desktop" \
+                 "$RELEASE_DIR/deploy/aws/installers"/QS-VC-Windows-Setup.exe*
+          mkdir -p "$RELEASE_DIR/deploy/aws/installers"
+          du -sh "$RELEASE_DIR"
           for file in /tmp/qsvc-desktop/QS-VC-*.zip /tmp/qsvc-desktop/QS-VC-*.zip.sha256; do
             if [[ -f "$file" ]]; then install -m 0644 "$file" "$RELEASE_DIR/deploy/aws/installers/"; fi
           done
@@ -223,8 +230,22 @@ jobs:
             echo "Release archive checksum mismatch" >&2
             exit 1
           }
+          # Free space before unpacking: old image layers and build cache from earlier
+          # releases, and files earlier releases shipped that the server never uses.
+          docker builder prune -af --filter "until=72h" >/dev/null 2>&1 || true
+          docker image prune -af --filter "until=72h" >/dev/null 2>&1 || true
+          rm -rf "$ROOT"/.venv* "$ROOT/Claude outputs" "$ROOT/marketing" "$ROOT/deploy/aws/outgoing" "$ROOT/frontend/desktop"
+          AVAILABLE_MB=$(df -Pm "$TEMP_DIR" | awk 'NR==2 {print $4}')
+          NEEDED_MB=$(( $(stat -c %s "$ARCHIVE") * 3 / 1048576 + 2048 ))
+          echo "Disk space: ${AVAILABLE_MB} MB free, about ${NEEDED_MB} MB needed"
+          if (( AVAILABLE_MB < NEEDED_MB )); then
+            echo "Not enough disk space on the server to unpack this release" >&2
+            df -h >&2
+            exit 1
+          fi
           mkdir -p "$STAGE"
           tar -xzf "$ARCHIVE" -C "$STAGE"
+          rm -f "$ARCHIVE"
 
           test -f "$STAGE/deploy/aws/compose.yml"
           test -f "$STAGE/deploy/aws/deploy-production.sh"
