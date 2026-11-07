@@ -2,13 +2,10 @@
 name: QSVC Production Deployment
 
 on:
+  # Every push to main runs CI once (the verify job below). The deploy job itself only runs
+  # when backend, database or deployment files changed, or when started manually.
   push:
     branches: [main]
-    paths:
-      - 'services/**'
-      - 'db/**'
-      - 'deploy/aws/**'
-      - '.github/workflows/deploy-production.yml'
   workflow_dispatch:
 
 permissions:

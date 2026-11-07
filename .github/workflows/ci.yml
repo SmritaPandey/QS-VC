@@ -1,229 +1,157 @@
 name: QS-VC CI
 
+# Pushes to main run this through "QSVC Production Deployment" (workflow_call), so main is
+# checked exactly once per push. Other branches and pull requests trigger it directly.
 on:
   workflow_call:
   push:
-    branches: [main, develop]
+    branches: [develop]
   pull_request:
     branches: [main, develop]
 
 permissions:
   contents: read
 
-jobs:
-  lint-test-build:
-    name: Lint → Test → Build
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [22]
+concurrency:
+  group: qsvc-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+env:
+  # Root devDependency used only for local document export; never needed in CI.
+  PUPPETEER_SKIP_DOWNLOAD: 'true'
+  NODE_VERSION: 22
+
+jobs:
+  # ── Fast checks: run in parallel, no npm install needed ─────────────────────
+  security:
+    name: Security evidence and dependency audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
-
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: 'npm'
-
+          node-version: ${{ env.NODE_VERSION }}
       - name: Validate deployment security evidence and findings
         run: node --test security/check.test.cjs && node security/check.cjs
-
-      - name: Install dependencies
-        run: npm ci
-
+      # Audits read the lockfiles only; installing packages first is unnecessary.
       - name: Audit production dependencies
-        run: npm audit --omit=dev --audit-level=high
-
-      - name: Install locked Poly bridge dependencies
-        run: npm --prefix deploy/poly-bridge ci --ignore-scripts
-
+        run: npm audit --omit=dev --audit-level=high --package-lock-only
       - name: Audit Poly bridge dependencies
-        run: npm --prefix deploy/poly-bridge audit --omit=dev --audit-level=high
+        run: npm --prefix deploy/poly-bridge audit --omit=dev --audit-level=high --package-lock-only
 
-      - name: Type-check Poly bridge
-        run: npm --prefix deploy/poly-bridge run typecheck
+  # ── Tests and builds share one cached install ───────────────────────────────
+  test:
+    name: Unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Restore node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            services/*/node_modules
+            frontend/web/node_modules
+          key: modules-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
+      - name: Install dependencies
+        if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci
+      - name: Run tests
+        run: npx vitest run
 
+  build:
+    name: Type-check and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            deploy/poly-bridge/package-lock.json
+      - name: Restore node_modules
+        id: modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            services/*/node_modules
+            frontend/web/node_modules
+          key: modules-${{ runner.os }}-node${{ env.NODE_VERSION }}-${{ hashFiles('package-lock.json') }}
+      - name: Install dependencies
+        if: steps.modules.outputs.cache-hit != 'true'
+        run: npm ci
       - name: Lint
         run: npm run lint
         continue-on-error: true
-
-      - name: Run tests
-        run: npx vitest run --reporter=verbose
-
       - name: Build all services
         run: npm run build
+      - name: Type-check Poly bridge
+        run: |
+          npm --prefix deploy/poly-bridge ci --ignore-scripts
+          npm --prefix deploy/poly-bridge run typecheck
 
+  # ── Container images: one parallel job per image, layer cache, cached scan DB ─
   docker:
-    name: Docker Build
+    name: Image ${{ matrix.image }}
     runs-on: ubuntu-latest
-    needs: lint-test-build
-
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { image: sfu, context: services/sfu, file: services/sfu/Dockerfile }
+          - { image: signaling, context: ., file: services/signaling/Dockerfile }
+          - { image: auth, context: ., file: services/auth/Dockerfile }
+          - { image: meeting, context: ., file: services/meeting/Dockerfile }
+          - { image: recording, context: ., file: services/recording/Dockerfile }
+          - { image: web, context: ., file: frontend/web/Dockerfile }
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
           persist-credentials: false
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build SFU image
+      - uses: docker/setup-buildx-action@v3
+      - name: Build ${{ matrix.image }} image
         uses: docker/build-push-action@v6
         with:
-          context: services/sfu
-          file: services/sfu/Dockerfile
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
           push: false
           load: true
-          tags: qsvc-sfu:latest
-
-      - name: Generate SFU image SBOM
+          tags: qsvc-${{ matrix.image }}:latest
+          # Unchanged layers (npm installs, the mediasoup worker) come from the cache.
+          cache-from: type=gha,scope=qsvc-${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=qsvc-${{ matrix.image }}
+      - name: Generate SBOM
         uses: anchore/sbom-action@v0
         with:
-          image: qsvc-sfu:latest
+          image: qsvc-${{ matrix.image }}:latest
           format: cyclonedx-json
-          output-file: qsvc-sfu.cdx.json
-          artifact-name: qsvc-sfu.cdx.json
-
-      - name: Scan SFU image SBOM
+          output-file: qsvc-${{ matrix.image }}.cdx.json
+          artifact-name: qsvc-${{ matrix.image }}.cdx.json
+      - name: Scan SBOM
         uses: anchore/scan-action@v7
         with:
-          sbom: qsvc-sfu.cdx.json
+          sbom: qsvc-${{ matrix.image }}.cdx.json
           fail-build: true
           severity-cutoff: high
           # Fail on high/critical findings that have a published fix; unfixed OS CVEs are tracked in the SBOM.
           only-fixed: true
-
-      - name: Build Signaling image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/signaling/Dockerfile
-          push: false
-          load: true
-          tags: qsvc-signaling:latest
-
-      - name: Generate signaling image SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          image: qsvc-signaling:latest
-          format: cyclonedx-json
-          output-file: qsvc-signaling.cdx.json
-          artifact-name: qsvc-signaling.cdx.json
-
-      - name: Scan signaling image SBOM
-        uses: anchore/scan-action@v7
-        with:
-          sbom: qsvc-signaling.cdx.json
-          fail-build: true
-          severity-cutoff: high
-          # Fail on high/critical findings that have a published fix; unfixed OS CVEs are tracked in the SBOM.
-          only-fixed: true
-
-      - name: Build Auth image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/auth/Dockerfile
-          push: false
-          load: true
-          tags: qsvc-auth:latest
-
-      - name: Generate Auth image SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          image: qsvc-auth:latest
-          format: cyclonedx-json
-          output-file: qsvc-auth.cdx.json
-          artifact-name: qsvc-auth.cdx.json
-
-      - name: Scan Auth image SBOM
-        uses: anchore/scan-action@v7
-        with:
-          sbom: qsvc-auth.cdx.json
-          fail-build: true
-          severity-cutoff: high
-          # Fail on high/critical findings that have a published fix; unfixed OS CVEs are tracked in the SBOM.
-          only-fixed: true
-
-      - name: Build Meeting image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/meeting/Dockerfile
-          push: false
-          load: true
-          tags: qsvc-meeting:latest
-
-      - name: Generate Meeting image SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          image: qsvc-meeting:latest
-          format: cyclonedx-json
-          output-file: qsvc-meeting.cdx.json
-          artifact-name: qsvc-meeting.cdx.json
-
-      - name: Scan Meeting image SBOM
-        uses: anchore/scan-action@v7
-        with:
-          sbom: qsvc-meeting.cdx.json
-          fail-build: true
-          severity-cutoff: high
-          # Fail on high/critical findings that have a published fix; unfixed OS CVEs are tracked in the SBOM.
-          only-fixed: true
-
-      - name: Build Recording image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: services/recording/Dockerfile
-          push: false
-          load: true
-          tags: qsvc-recording:latest
-
-      - name: Generate Recording image SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          image: qsvc-recording:latest
-          format: cyclonedx-json
-          output-file: qsvc-recording.cdx.json
-          artifact-name: qsvc-recording.cdx.json
-
-      - name: Scan Recording image SBOM
-        uses: anchore/scan-action@v7
-        with:
-          sbom: qsvc-recording.cdx.json
-          fail-build: true
-          severity-cutoff: high
-          # Fail on high/critical findings that have a published fix; unfixed OS CVEs are tracked in the SBOM.
-          only-fixed: true
-
-      - name: Build Web image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: frontend/web/Dockerfile
-          push: false
-          load: true
-          tags: qsvc-web:latest
-
-      - name: Generate Web image SBOM
-        uses: anchore/sbom-action@v0
-        with:
-          image: qsvc-web:latest
-          format: cyclonedx-json
-          output-file: qsvc-web.cdx.json
-          artifact-name: qsvc-web.cdx.json
-
-      - name: Scan Web image SBOM
-        uses: anchore/scan-action@v7
-        with:
-          sbom: qsvc-web.cdx.json
-          fail-build: true
-          severity-cutoff: high
-          # Fail on high/critical findings that have a published fix; unfixed OS CVEs are tracked in the SBOM.
-          only-fixed: true
+          # Reuse the vulnerability database between runs instead of downloading it per image.
+          cache-db: true
