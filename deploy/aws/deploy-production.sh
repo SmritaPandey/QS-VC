@@ -40,7 +40,11 @@ for installer in "$WINDOWS_INSTALLER" "$MAC_ARM64_INSTALLER" "$MAC_X64_INSTALLER
     continue
   fi
   test -f "$installer.sha256" || { echo "Checksum missing for $name" >&2; exit 1; }
-  ( cd "$INSTALLER_DIR" && sha256sum --check --status "$name.sha256" ) || { echo "Checksum mismatch for $name" >&2; exit 1; }
+  # Compare hashes directly: checksum files written on Windows end lines with CRLF, which
+  # `sha256sum --check` would treat as part of the file name.
+  expected="$(tr -d '\r' < "$installer.sha256" | awk 'NR==1 {print tolower($1)}')"
+  actual="$(sha256sum "$installer" | awk '{print $1}')"
+  [[ "$expected" =~ ^[0-9a-f]{64}$ && "$expected" == "$actual" ]] || { echo "Checksum mismatch for $name" >&2; exit 1; }
   case "$name" in
     *.zip) unzip -tq "$installer" ;;
     *.tar.gz) tar -tzf "$installer" >/dev/null ;;
