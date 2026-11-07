@@ -11,9 +11,15 @@ let pending: { token: string; promise: Promise<void> } | undefined;
 let channel: BroadcastChannel | undefined;
 
 export function getToken(): string {
-    if (typeof sessionStorage === 'undefined') return '';
-    localStorage.removeItem('token');
-    return sessionStorage.getItem('token') || '';
+    try {
+        const local = typeof localStorage !== 'undefined' ? localStorage.getItem('token') : null;
+        if (local) return local;
+    } catch { }
+    try {
+        const session = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('token') : null;
+        if (session) return session;
+    } catch { }
+    return '';
 }
 function publish(next: SessionState) { state = next; listeners.forEach(listener => listener()); }
 export const getSessionState = () => state;
@@ -21,7 +27,8 @@ export const getServerSessionState = () => serverState;
 
 export function setSessionToken(token: string): void {
     intent++;
-    sessionStorage.setItem('token', token);
+    try { localStorage.setItem('token', token); } catch { }
+    try { sessionStorage.setItem('token', token); } catch { }
     generation++; pending = undefined;
     publish({ status: 'checking' });
     channel?.postMessage('revalidate');
@@ -42,8 +49,8 @@ export function beginSignIn(): (token: string) => boolean {
 export function clearSession(expectedToken?: string): boolean {
     if (expectedToken === undefined) { intent++; expectedToken = getToken(); }
     if (getToken() !== expectedToken) return false;
-    sessionStorage.removeItem('token');
-    localStorage.removeItem('token');
+    try { localStorage.removeItem('token'); } catch { }
+    try { sessionStorage.removeItem('token'); } catch { }
     generation++; pending = undefined;
     publish({ status: 'anonymous' });
     return true;
@@ -78,15 +85,35 @@ export function refreshSession(): Promise<void> {
 
 const revalidate = () => { void refreshSession(); };
 
+const handleMessage = (event: MessageEvent | any) => {
+    const data = typeof event === 'object' && event !== null && 'data' in event ? event.data : event;
+    if (data === 'logout' || (typeof data === 'object' && data?.type === 'logout')) {
+        clearSession();
+        return;
+    }
+    void refreshSession();
+};
+
+const handleStorage = (event: StorageEvent) => {
+    if (event.key === 'token') {
+        if (!event.newValue) {
+            clearSession();
+        } else {
+            void refreshSession();
+        }
+    }
+};
+
 export function subscribeSession(listener: () => void): () => void {
     listeners.add(listener);
     if (listeners.size === 1 && typeof window !== 'undefined') {
         window.addEventListener('focus', revalidate);
         window.addEventListener('pageshow', revalidate);
-        // Tab credentials remain separate. Other tabs verify their own token; no credential is broadcast.
+        window.addEventListener('storage', handleStorage);
+        // Multi-tab session synchronization: all tabs maintain a shared authenticated session.
         if (typeof BroadcastChannel !== 'undefined') {
             channel = new BroadcastChannel('qsvc-session');
-            channel.onmessage = revalidate;
+            channel.onmessage = handleMessage;
         }
         revalidate();
     }
@@ -95,6 +122,7 @@ export function subscribeSession(listener: () => void): () => void {
         if (!listeners.size && typeof window !== 'undefined') {
             window.removeEventListener('focus', revalidate);
             window.removeEventListener('pageshow', revalidate);
+            window.removeEventListener('storage', handleStorage);
             channel?.close(); channel = undefined;
         }
     };
@@ -103,14 +131,16 @@ export function subscribeSession(listener: () => void): () => void {
 export async function signOut(): Promise<void> {
     intent++;
     const token = getToken();
-    if (!token) { clearSession(); return; }
+    if (!token) { clearSession(); channel?.postMessage('logout'); return; }
     const response = await fetch(`${AUTH_API}/api/auth/logout`, {
         method: 'POST', headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(8000),
     });
     if (!response.ok && response.status !== 401) {
         throw new Error('Sign out could not finish. Check your connection and try again.');
     }
-    if (clearSession(token)) channel?.postMessage('revalidate');
+    if (clearSession(token)) {
+        channel?.postMessage('logout');
+    }
 }
 
 /** Where to go after signing in: an in-app path from ?next=, otherwise the meetings app. Never an external URL. */

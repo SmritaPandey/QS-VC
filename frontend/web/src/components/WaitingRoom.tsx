@@ -1,4 +1,4 @@
-export interface WaitingPeer { peerId: string; displayName: string; requestedAt?: string; invited?: boolean; reviewed?: boolean }
+export interface WaitingPeer { peerId: string; displayName: string; requestedAt?: string; invited?: boolean; reviewed?: boolean; isGuest?: boolean; }
 interface Props {
     waitingPeers: WaitingPeer[];
     onAdmit: (peerId: string) => void;
@@ -13,7 +13,12 @@ export default function WaitingRoom({ waitingPeers, onAdmit, onKeepWaiting, onRe
     return <section className="host-waiting" aria-labelledby="host-waiting-title" aria-live="polite">
         <div className="host-tools-row"><h3 id="host-waiting-title">Waiting to join ({waitingPeers.length})</h3>{waitingPeers.length > 1 && <button type="button" disabled={busy} onClick={onAdmitAll}>Admit all</button>}</div>
         {waitingPeers.length === 0 ? <p>No one is waiting.</p> : <ul>{waitingPeers.map(peer => <li key={peer.peerId}>
-            <div className="host-waiting-person"><span>{peer.displayName}</span>{peer.invited && <span className="host-invited-label">Invited</span>}{peer.reviewed && <span className="host-reviewed-label" role="status">Still waiting · remains in this queue</span>}</div>
+            <div className="host-waiting-person">
+                <span>{peer.displayName}</span>
+                <span className={peer.isGuest ? 'host-guest-label' : 'host-member-label'}>{peer.isGuest ? 'Guest' : 'Member'}</span>
+                {peer.invited && <span className="host-invited-label">Invited</span>}
+                {peer.reviewed && <span className="host-reviewed-label" role="status">Still waiting · remains in this queue</span>}
+            </div>
             <div className="host-tools-actions">
                 <button type="button" disabled={busy} aria-label={`Admit ${peer.displayName} to the meeting`} onClick={() => onAdmit(peer.peerId)}>Admit to meeting</button>
                 <button type="button" disabled={busy || peer.reviewed} aria-label={peer.reviewed ? `${peer.displayName} is already kept waiting in this queue` : `Keep ${peer.displayName} waiting in this queue`} onClick={() => onKeepWaiting(peer.peerId)}>{peer.reviewed ? 'Kept waiting' : 'Keep waiting'}</button>

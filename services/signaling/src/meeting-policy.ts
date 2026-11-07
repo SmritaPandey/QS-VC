@@ -36,3 +36,33 @@ export async function reportMeetingStatus(code: string, status: 'active' | 'ende
         });
     } catch { /* The live meeting does not depend on this record. */ }
 }
+
+export interface SignalingAccessResult {
+    valid: boolean;
+    isGuest?: boolean;
+    isInvited?: boolean;
+    role?: 'host' | 'co-host' | 'member' | 'guest' | 'participant';
+}
+
+/** Check guest token or member invitation status with the meeting service */
+export async function verifySignalingAccess(
+    code: string,
+    opts: { userId?: string; guestToken?: string; inviteToken?: string }
+): Promise<SignalingAccessResult | null> {
+    const base = process.env.MEETING_INTERNAL_URL || 'http://localhost:4003';
+    const token = jwt.sign({}, process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', {
+        audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', expiresIn: 30,
+    });
+    try {
+        const response = await fetch(`${base}/api/internal/meetings/${encodeURIComponent(code)}/verify-access`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(opts),
+            signal: AbortSignal.timeout(4000),
+        });
+        if (!response.ok) return null;
+        return (await response.json()) as SignalingAccessResult;
+    } catch {
+        return null;
+    }
+}

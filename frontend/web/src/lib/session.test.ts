@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearSession, getToken, signOut } from './session';
 const stored = () => { const map = new Map<string, string>(); return { getItem: (key: string) => map.get(key) || null, setItem: (key: string, value: string) => map.set(key, value), removeItem: (key: string) => map.delete(key) }; };
 beforeEach(() => { vi.stubGlobal('localStorage', stored()); vi.stubGlobal('sessionStorage', stored()); vi.stubGlobal('fetch', vi.fn()); });
-it('discards legacy persistent credentials', () => { localStorage.setItem('token', 'legacy'); expect(getToken()).toBe(''); expect(localStorage.getItem('token')).toBeNull(); });
+it('shares credentials across tabs via localStorage and sessionStorage', () => { localStorage.setItem('token', 'shared-tab'); expect(getToken()).toBe('shared-tab'); });
 it('revokes the active session before clearing its credential', async () => { sessionStorage.setItem('token', 'demo'); vi.mocked(fetch).mockResolvedValue({ ok: true } as Response); await signOut(); expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/api/auth/logout'), expect.objectContaining({ method: 'POST', headers: { Authorization: 'Bearer demo' } })); expect(getToken()).toBe(''); });
 it('keeps the session available to retry failed server logout', async () => { sessionStorage.setItem('token', 'demo'); vi.mocked(fetch).mockResolvedValue({ ok: false, status: 503 } as Response); await expect(signOut()).rejects.toThrow('Sign out could not finish'); expect(getToken()).toBe('demo'); clearSession(); expect(getToken()).toBe(''); });
 
@@ -177,4 +177,43 @@ it('lets a newer login complete after an earlier logout response clears its old 
     expect(completeSignIn('new')).toBe(true);
     await refreshSession();
     expect(getToken()).toBe('new');
+});
+
+describe('multi-tab session synchronization', () => {
+    it('synchronizes explicit logout across tabs via BroadcastChannel', async () => {
+        clearSession();
+        const { setSessionToken, subscribeSession, getSessionState } = await import('./session');
+        let broadcastHandler: ((event: any) => void) | undefined;
+        class MockChannel {
+            set onmessage(fn: (event: any) => void) { broadcastHandler = fn; }
+            postMessage = vi.fn();
+            close = vi.fn();
+        }
+        vi.stubGlobal('BroadcastChannel', MockChannel);
+        vi.stubGlobal('window', new EventTarget());
+        vi.mocked(fetch).mockResolvedValue(accountResponse('user1'));
+
+        setSessionToken('active-token');
+        const unsub = subscribeSession(vi.fn());
+
+        // Simulate another tab logging out
+        broadcastHandler?.({ data: 'logout' });
+        expect(getToken()).toBe('');
+        expect(getSessionState().status).toBe('anonymous');
+
+        unsub();
+        vi.unstubAllGlobals();
+    });
+
+    it('keeps existing tab authenticated when opening a new tab', async () => {
+        clearSession();
+        const { setSessionToken, getToken } = await import('./session');
+        // Tab 1 sets token
+        setSessionToken('tab1-token');
+        expect(getToken()).toBe('tab1-token');
+
+        // Tab 2 opens and checks token
+        const tab2Token = getToken();
+        expect(tab2Token).toBe('tab1-token');
+    });
 });

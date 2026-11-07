@@ -1,0 +1,345 @@
+/* Screen Sharing Modal & Presenter Banner */
+
+.share-screen-dialog {
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+    border-radius: 20px;
+    background: var(--bg-secondary, #131b26);
+    color: var(--text-primary, #f0f4f8);
+    padding: 0;
+    width: min(560px, calc(100vw - 32px));
+    max-height: calc(100dvh - 48px);
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+}
+
+.share-screen-dialog::backdrop {
+    background: rgba(10, 16, 26, 0.75);
+    backdrop-filter: blur(8px);
+}
+
+.share-screen-modal-content {
+    display: flex;
+    flex-direction: column;
+    padding: 28px;
+    gap: 20px;
+}
+
+.share-screen-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.share-screen-title-group {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.share-screen-icon-bubble {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: rgba(0, 163, 255, 0.12);
+    display: grid;
+    place-items: center;
+    color: var(--accent-primary, #00a3ff);
+    flex-shrink: 0;
+}
+
+.share-screen-icon-bubble .mi {
+    font-size: 24px;
+}
+
+#share-screen-title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--text-primary, #f0f4f8);
+}
+
+.share-screen-lead {
+    margin: 4px 0 0;
+    font-size: 13px;
+    color: var(--text-secondary, #8fa3b8);
+    line-height: 1.4;
+}
+
+.share-screen-close {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary, #8fa3b8);
+    cursor: pointer;
+    padding: 6px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    transition: background 0.15s, color 0.15s;
+}
+
+.share-screen-close:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+}
+
+.share-screen-options {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.share-screen-card {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 18px;
+    border-radius: 14px;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    background: var(--bg-tertiary, #1a2433);
+    cursor: pointer;
+    transition: all 0.18s ease-in-out;
+    outline: none;
+}
+
+.share-screen-card:hover {
+    border-color: rgba(0, 163, 255, 0.35);
+    background: rgba(26, 36, 51, 0.9);
+}
+
+.share-screen-card:focus-visible {
+    border-color: var(--accent-primary, #00a3ff);
+    box-shadow: 0 0 0 2px rgba(0, 163, 255, 0.3);
+}
+
+.share-screen-card.selected {
+    border-color: var(--accent-primary, #00a3ff);
+    background: rgba(0, 163, 255, 0.08);
+}
+
+.share-card-icon-wrapper {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.06);
+    display: grid;
+    place-items: center;
+    color: var(--text-secondary, #8fa3b8);
+    flex-shrink: 0;
+    transition: color 0.18s, background 0.18s;
+}
+
+.share-screen-card.selected .share-card-icon-wrapper {
+    background: rgba(0, 163, 255, 0.2);
+    color: var(--accent-primary, #00a3ff);
+}
+
+.share-card-body {
+    flex: 1;
+    min-width: 0;
+}
+
+.share-card-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.share-card-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary, #f0f4f8);
+}
+
+.share-card-badge {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 999px;
+    background: rgba(0, 163, 255, 0.15);
+    color: var(--accent-primary, #00a3ff);
+}
+
+.share-card-desc {
+    margin: 4px 0 0;
+    font-size: 12.5px;
+    color: var(--text-secondary, #8fa3b8);
+    line-height: 1.35;
+}
+
+.share-card-radio {
+    color: var(--text-secondary, #8fa3b8);
+    display: grid;
+    place-items: center;
+    flex-shrink: 0;
+}
+
+.share-screen-card.selected .share-card-radio {
+    color: var(--accent-primary, #00a3ff);
+}
+
+.share-screen-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+    flex-wrap: wrap;
+}
+
+.share-screen-privacy-note {
+    margin: 0;
+    font-size: 12px;
+    color: var(--text-secondary, #8fa3b8);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.share-screen-privacy-note .mi {
+    font-size: 14px;
+}
+
+.share-screen-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+}
+
+.share-screen-btn-secondary {
+    padding: 9px 18px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 500;
+    background: transparent;
+    border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.15));
+    color: var(--text-primary, #f0f4f8);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.share-screen-btn-secondary:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.share-screen-btn-primary {
+    padding: 9px 20px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    background: var(--accent-primary, #00a3ff);
+    color: #0b1420;
+    border: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: filter 0.15s, transform 0.1s;
+}
+
+.share-screen-btn-primary:hover {
+    filter: brightness(1.1);
+}
+
+.share-screen-btn-primary:active {
+    transform: scale(0.98);
+}
+
+/* Presenting Banner (Google Meet / Zoom style) */
+.presenting-banner {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 900;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 10px 18px;
+    border-radius: 30px;
+    background: rgba(14, 23, 36, 0.92);
+    backdrop-filter: blur(12px);
+    border: 1px solid rgba(0, 163, 255, 0.35);
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4), 0 0 15px rgba(0, 163, 255, 0.2);
+    color: #f0f4f8;
+    animation: slideDownBanner 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideDownBanner {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -20px);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0);
+    }
+}
+
+.presenting-banner-icon {
+    font-size: 20px;
+    color: var(--accent-primary, #00a3ff);
+    animation: pulseShare 2s infinite ease-in-out;
+}
+
+@keyframes pulseShare {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
+}
+
+.presenting-banner-text {
+    font-size: 13.5px;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+}
+
+.presenting-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-banner-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    border-radius: 20px;
+    font-size: 12.5px;
+    font-weight: 500;
+    background: rgba(255, 255, 255, 0.1);
+    color: #f0f4f8;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.btn-banner-action:hover {
+    background: rgba(255, 255, 255, 0.18);
+}
+
+.btn-banner-stop {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 14px;
+    border-radius: 20px;
+    font-size: 12.5px;
+    font-weight: 600;
+    background: #e53e3e;
+    color: #fff;
+    border: none;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+}
+
+.btn-banner-stop:hover {
+    background: #f56565;
+}
+
+.btn-banner-stop:active {
+    transform: scale(0.97);
+}

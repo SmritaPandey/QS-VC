@@ -18,6 +18,7 @@ export interface PeerState {
     rtpCapabilities: any;
     producers: Map<string, { id: string; kind: string; appData: any }>;
     role: PeerRole;
+    initialRole?: PeerRole;
     audioMuted: boolean;
     videoOff: boolean;
     handRaised: boolean;
@@ -48,6 +49,8 @@ export interface WaitingPeer {
     awaitingHost?: boolean;
     /** Valid invitation link holder; identifies the link path but does not bypass host admission. */
     invited?: boolean;
+    /** External guest without a registered member account */
+    isGuest?: boolean;
     /** Host or co-host has acknowledged the request while leaving the attendee in this queue. */
     reviewedAt?: Date;
 }
@@ -239,6 +242,13 @@ export class RoomManager {
         if ((!room.ownerUserId && !room.hostPeerId) || (!!room.ownerUserId && room.ownerUserId === peer.userId && ![...room.peers.values()].some(p => p.userId === peer.userId && p.role === 'host'))) {
             peer.role = 'host';
             room.hostPeerId = peer.id;
+        }
+        if (peer.role !== 'host') {
+            if (!peer.userId && !peer.platformAdmin) {
+                peer.role = 'guest';
+            } else if (peer.initialRole === 'co-host' && [...room.peers.values()].filter(other => other.role === 'co-host').length < MAX_CO_HOSTS) {
+                peer.role = 'co-host';
+            }
         }
         // Platform admins get host controls without creating a second host.
         if (peer.platformAdmin && peer.role !== 'host') {

@@ -39,6 +39,8 @@ import { initialMeetingLanguage, detectLanguage, setMeetingLanguage, clearSavedL
 import { E2EEManager, encodedTransformsSupported, type E2EEKeyBundle, type E2EEKeyEnvelope } from '../lib/e2ee';
 import { meetingSecurityCode } from '../lib/e2ee-safety';
 import EncryptionBadge from '../components/EncryptionBadge';
+import ShareScreenModal, { type ScreenShareSurface } from '../components/ShareScreenModal';
+import '../styles/screen-share.css';
 
 const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
 
@@ -202,6 +204,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [videoOff, setVideoOff] = useState(true);
     const [cameraNotice, setCameraNotice] = useState('');
     const [screenSharing, setScreenSharing] = useState(false);
+    const [screenPaused, setScreenPaused] = useState(false);
+    const [shareScreenModalOpen, setShareScreenModalOpen] = useState(false);
     const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
     const [isRecording, setIsRecording] = useState(false);
     const [roomRecording, setRoomRecording] = useState<{ peerId: string; displayName: string } | null>(null);
@@ -1401,6 +1405,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         screenStreamRef.current = null;
         setScreenStream(null);
         setScreenSharing(false);
+        setScreenPaused(false);
         playSound('toggleOff');
         await media.closeProducerBySource('screen').catch(() => { });
         if (!sessionActive.current || revision !== sessionRevision.current) return;
@@ -1409,14 +1414,34 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     stopScreenShareRef.current = stopScreenShare;
 
-    const startScreenShare = useCallback(async () => {
+    const togglePauseScreenShare = useCallback(() => {
+        if (!sharingRef.current) return;
+        const next = !screenPaused;
+        setScreenPaused(next);
+        media.setPaused('video', next, 'screen');
+        showNotice(next ? 'Screen sharing paused' : 'Screen sharing resumed');
+    }, [screenPaused, showNotice]);
+
+    const startScreenShare = useCallback(async (surface?: ScreenShareSurface) => {
         if (!roomSettingsRef.current.allowScreenShare) { showNotice('Screen sharing is disabled by the host.'); return; }
         if (!sessionActive.current || sharingRef.current || busyRef.current.screen) return;
         if (initializingRef.current || !joinedRef.current || !media.canSend) { showNotice('Screen sharing needs an active media connection. Rejoin and try again.'); return; }
         busyRef.current.screen = true;
         const revision = sessionRevision.current;
         try {
-            const display = await navigator.mediaDevices.getDisplayMedia({ video: { width: 1920, height: 1080, frameRate: 30 }, audio: true });
+            const videoConstraints: any = {
+                width: { ideal: 1920, max: 2560 },
+                height: { ideal: 1080, max: 1440 },
+                frameRate: { ideal: 30, max: 60 },
+            };
+            if (surface) {
+                videoConstraints.displaySurface = surface;
+            }
+            const display = await navigator.mediaDevices.getDisplayMedia({
+                video: videoConstraints,
+                audio: true,
+                ...({ selfBrowserSurface: 'include', systemAudio: 'include', surfaceSwitching: 'include' } as any),
+            });
             if (!sessionActive.current || revision !== sessionRevision.current || !roomSettingsRef.current.allowScreenShare) { display.getTracks().forEach(t => t.stop()); return; }
             const screenTrack = display.getVideoTracks()[0];
             screenTrack.onended = () => { stopScreenShare(); };
@@ -1424,6 +1449,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             sharingRef.current = true;
             setScreenStream(display);
             setScreenSharing(true);
+            setScreenPaused(false);
             if (media.canSend) {
                 await media.produce(screenTrack, { source: 'screen', type: 'screen' });
             }
@@ -1444,8 +1470,12 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const handleScreenShare = useCallback(() => {
         if (!canPublishRef.current) { showNotice('Only the webinar organiser can share media.'); return; }
         if (!sharingRef.current && !roomSettings.allowScreenShare) { showNotice('Screen sharing is disabled by the host.'); return; }
-        if (sharingRef.current) stopScreenShare(); else startScreenShare();
-    }, [startScreenShare, stopScreenShare, roomSettings.allowScreenShare, showNotice]);
+        if (sharingRef.current) {
+            stopScreenShare();
+        } else {
+            setShareScreenModalOpen(true);
+        }
+    }, [stopScreenShare, roomSettings.allowScreenShare, showNotice]);
 
     const savePendingRecording = useCallback(async () => {
         const pending = pendingRecording.current;
@@ -1885,6 +1915,23 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 <button type="button" className="btn-text" onClick={handleToggleAudio}>Unmute mic</button>
             </div>}
 
+            {screenSharing && (
+                <div className="presenting-banner" role="status" aria-live="polite">
+                    <span className="mi presenting-banner-icon" aria-hidden="true">screen_share</span>
+                    <span className="presenting-banner-text">You are presenting to everyone{screenPaused ? ' (Paused)' : ''}</span>
+                    <div className="presenting-banner-actions">
+                        <button type="button" className="btn-banner-action" onClick={togglePauseScreenShare} title={screenPaused ? 'Resume screen sharing' : 'Pause screen sharing'}>
+                            <span className="mi" aria-hidden="true">{screenPaused ? 'play_arrow' : 'pause'}</span>
+                            {screenPaused ? 'Resume' : 'Pause'}
+                        </button>
+                        <button type="button" className="btn-banner-stop" onClick={() => void stopScreenShare()} title="Stop presenting your screen">
+                            <span className="mi" aria-hidden="true">stop_screen_share</span>
+                            Stop presenting
+                        </button>
+                    </div>
+                </div>
+            )}
+
             </div>
             <div className="meeting-content">
                 <div ref={videoAreaRef} className={`video-area ${sidePanelOpen ? 'with-panel' : ''}`}>
@@ -1955,6 +2002,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 onRaiseHand={handleRaiseHand} onLeave={requestLeave}
             />
             <MeetingInformation open={informationOpen} meetingCode={meetingCode || ''} joinUrl={`${window.location.origin}${meetingPreviewPath}`} meetingTitle={meetingTitle} onClose={() => setInformationOpen(false)} />
+            <ShareScreenModal
+                open={shareScreenModalOpen}
+                onClose={() => setShareScreenModalOpen(false)}
+                onSelect={(surface) => void startScreenShare(surface)}
+            />
             {reportOpen && <ReportProblem meetingCode={meetingCode || ''} displayName={displayName} diagnostics={collectDiagnostics} onClose={() => setReportOpen(false)} />}
             {leaveOpen && <div className="meeting-dialog-backdrop" onClick={() => setLeaveOpen(false)}>
                 <div className="meeting-dialog" role="dialog" aria-modal="true" aria-labelledby="leave-title" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') setLeaveOpen(false); }}>
