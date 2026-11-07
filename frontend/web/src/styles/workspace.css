@@ -246,3 +246,20 @@
 .workspace-personal-overview dd { margin:4px 0 0; font-size:26px; font-weight:500; font-variant-numeric:tabular-nums; }
 .workspace-personal-overview label { display:flex; align-items:center; gap:8px; color:var(--text-secondary); }
 .workspace-personal-overview select { min-height:44px; max-width:100%; font:inherit; padding:6px 10px; color:var(--text-primary); background:var(--bg-secondary); border:1px solid var(--border-tone,#7893a5); border-radius:8px; }
+
+/* ── Workspace Invitations & Notifications ───────────────────────────── */
+.invitations-section-title { font-size:15px; font-weight:600; text-transform:uppercase; letter-spacing:0.04em; color:var(--text-secondary); margin:16px 0 12px; }
+.invitation-icon-col { width:44px; height:44px; display:grid; place-items:center; border-radius:10px; background:var(--surface-tint, #edf5f5); flex-shrink:0; }
+.mi-invitation-badge { font-size:24px; color:var(--accent-primary, #006d77); }
+.invite-role-tag { display:inline-block; padding:2px 8px; border-radius:6px; font-size:12px; font-weight:600; margin:4px 0; }
+.invite-role-tag.is-cohost { background:#e0f2fe; color:#0369a1; }
+.invite-role-tag.is-participant { background:#f0fdf4; color:#15803d; }
+:root[data-theme=dark] .invite-role-tag.is-cohost { background:#0c4a6e; color:#7dd3fc; }
+:root[data-theme=dark] .invite-role-tag.is-participant { background:#14532d; color:#86efac; }
+.invite-instant-tag { color:var(--text-secondary); font-size:13px; font-style:italic; }
+.btn-decline-invite { border:1px solid var(--border-tone, #cbd9e1); border-radius:8px; padding:8px 14px; font-size:14px; font-weight:500; color:#ef4444; cursor:pointer; transition:background 150ms ease; }
+.btn-decline-invite:hover { background:rgba(239, 68, 68, 0.1); }
+.workspace-badge { display:inline-flex; align-items:center; justify-content:center; min-width:20px; height:20px; border-radius:10px; background:#ef4444; color:#fff; font-size:11px; font-weight:700; padding:0 6px; margin-left:6px; vertical-align:middle; }
+.notif-row.is-unread { border-left:3px solid var(--accent-primary, #006d77); padding-left:12px; }
+.notif-row.is-read { opacity:0.8; }
+

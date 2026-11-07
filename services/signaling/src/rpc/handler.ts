@@ -341,7 +341,7 @@ export async function handleRpcMessage(
                     inviteToken,
                 });
                 const isInvited = verifyMeetingInviteToken(meetingCode, inviteToken) || !!verifiedAccess?.isInvited;
-                const isGuestUser = !!verifiedAccess?.isGuest || !connectionState.authUser?.sub;
+                const isGuestUser = Boolean(guestToken || verifiedAccess?.isGuest);
                 const webinarGuest = room.settings.webinar && isGuestUser && !isInvited;
                 // Platform admins (role from the server-signed session) can enter and run any meeting.
                 const isPlatformAdmin = connectionState.authUser?.role === 'admin';
@@ -1484,8 +1484,9 @@ async function joinPeerToRoom(
         ws,
         rtpCapabilities,
         producers: new Map(),
-        role: initialRole || (connectionState.authUser?.sub ? 'member' : 'guest'),
+        role: initialRole || (connectionState?.isGuest ? 'guest' : 'member'),
         initialRole,
+        isGuest: Boolean(connectionState?.isGuest || initialRole === 'guest'),
         userId: connectionState.authUser?.sub,
         platformAdmin: connectionState.authUser?.role === 'admin',
         audioMuted: false,

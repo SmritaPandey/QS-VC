@@ -1,5 +1,6 @@
 import { useState, type CSSProperties } from 'react';
 import { isOnStage } from '../lib/meeting-layout';
+import { signaling } from '../lib/signaling';
 
 interface PeerData {
     peerId: string;
@@ -60,6 +61,31 @@ export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self
         ? [['On stage', filtered.filter(p => isOnStage(p))], ['Audience', filtered.filter(p => !isOnStage(p))]]
         : [['In the meeting', filtered]];
 
+    const handleMutePeer = async (peerId: string) => {
+        try {
+            await signaling.request('hostMutePeer', { targetPeerId: peerId, kind: 'audio' });
+        } catch (e) {
+            console.error('Failed to mute peer', e);
+        }
+    };
+
+    const handleKickPeer = async (peerId: string, name: string) => {
+        if (typeof window !== 'undefined' && !window.confirm(`Remove ${name} from this meeting?`)) return;
+        try {
+            await signaling.request('kickPeer', { targetPeerId: peerId });
+        } catch (e) {
+            console.error('Failed to remove peer', e);
+        }
+    };
+
+    const handleChangeRole = async (peerId: string, newRole: string) => {
+        try {
+            await signaling.request('changeRole', { targetPeerId: peerId, newRole });
+        } catch (e) {
+            console.error('Failed to change role', e);
+        }
+    };
+
     const row = (p: Row) => {
         const isSpeaking = speaking.has(p.peerId) && p.micOn;
         const manageable = canManage && !p.isLocal && p.role !== 'host';
@@ -69,7 +95,10 @@ export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self
             <div className="participant-info">
                 <span className="participant-name">{p.displayName}</span>
                 <span className="participant-tags">
-                    {(p.role === 'host' || p.role === 'co-host') && <span className="participant-role">{p.role === 'host' ? 'Host' : 'Co-host'}</span>}
+                    {p.role === 'host' && <span className="participant-role">Host</span>}
+                    {p.role === 'co-host' && <span className="participant-role">Co-host</span>}
+                    {p.role === 'guest' && <span className="participant-role host-guest-label">Guest</span>}
+                    {(!p.role || p.role === 'member') && !p.isLocal && <span className="participant-role host-member-label">Member</span>}
                     {p.presenting && <span className="participant-tag participant-tag--present">Presenting</span>}
                     {spotlightId === p.peerId && <span className="participant-tag">Spotlight</span>}
                     {isSpeaking && <span className="participant-tag participant-tag--speaking">Speaking</span>}
@@ -81,11 +110,26 @@ export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self
                 {isSpeaking ? <span className="qsvc-speaking" data-speaking="true" style={{ '--voice-level': '0.8' } as CSSProperties} role="img" aria-label="Speaking"><i /><i /><i /></span>
                     : <span className={`status-icon mi mi-sm ${p.micOn ? '' : 'is-off'}`} title={p.micOn ? 'Microphone on' : 'Microphone off'}>{p.micOn ? 'mic' : 'mic_off'}</span>}
                 <span className={`status-icon mi mi-sm ${p.camOn ? '' : 'is-off'}`} title={p.camOn ? 'Camera on' : 'Camera off'}>{p.camOn ? 'videocam' : 'videocam_off'}</span>
+                {manageable && p.micOn && (
+                    <button type="button" className="participant-icon-action" aria-label={`Mute ${p.displayName}`} title="Mute participant" onClick={() => void handleMutePeer(p.peerId)}>
+                        <span className="mi mi-sm" aria-hidden="true">mic_off</span>
+                    </button>
+                )}
                 {manageable && webinar && onToggleStage && p.role !== 'co-host' && <button type="button" className="participant-action" onClick={() => onToggleStage(p.peerId, !p.onStage)}>{p.onStage ? 'Move to audience' : 'Invite to stage'}</button>}
                 {canStartPrivateConversation && !p.isLocal && onStartPrivateConversation && <button type="button" className="participant-action participant-private-action" disabled={privateConversationStatus !== 'idle'} onClick={() => onStartPrivateConversation(p.peerId)}>
                     {privateConversationStatus === 'active' && isPrivateConversationPeer ? 'In conversation' : privateConversationStatus === 'outgoing' && isPrivateConversationPeer ? 'Invite sent' : `Talk privately · ${privateConversationLimitLabel}`}
                 </button>}
                 {manageable && onSpotlight && (!webinar || isOnStage(p)) && <button type="button" className="participant-icon-action" aria-label={spotlightId === p.peerId ? `Remove spotlight from ${p.displayName}` : `Spotlight ${p.displayName} for everyone`} title={spotlightId === p.peerId ? 'Remove spotlight' : 'Spotlight for everyone'} aria-pressed={spotlightId === p.peerId} onClick={() => onSpotlight(spotlightId === p.peerId ? null : p.peerId)}><span className="mi mi-sm" aria-hidden="true">star</span></button>}
+                {manageable && myRole === 'host' && (
+                    <button type="button" className="participant-action" title={p.role === 'co-host' ? 'Remove co-host' : 'Make co-host'} onClick={() => void handleChangeRole(p.peerId, p.role === 'co-host' ? 'member' : 'co-host')}>
+                        {p.role === 'co-host' ? 'Remove co-host' : 'Make co-host'}
+                    </button>
+                )}
+                {manageable && (
+                    <button type="button" className="participant-icon-action host-danger" aria-label={`Remove ${p.displayName}`} title="Remove from meeting" onClick={() => void handleKickPeer(p.peerId, p.displayName)}>
+                        <span className="mi mi-sm" aria-hidden="true">person_remove</span>
+                    </button>
+                )}
             </div>
         </div>;
     };

@@ -68,7 +68,8 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
     const [guestMessage, setGuestMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
     // Method C: Copy Meeting Link
-    const standardLink = `${window.location.origin}/meeting/${encodeURIComponent(meetingCode)}/preview${inviteToken ? `?invite=${encodeURIComponent(inviteToken)}` : ''}`;
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://qsvcmeeting.com';
+    const standardLink = `${origin}/meeting/${encodeURIComponent(meetingCode)}/preview${inviteToken ? `?invite=${encodeURIComponent(inviteToken)}` : ''}`;
     const [copiedStandard, setCopiedStandard] = useState(false);
 
     useEffect(() => {

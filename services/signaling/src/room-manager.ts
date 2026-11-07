@@ -14,6 +14,7 @@ export interface PeerState {
     userId?: string;
     /** Platform admin (server-verified): joins any meeting with host controls. */
     platformAdmin?: boolean;
+    isGuest?: boolean;
     ws: any; // WebSocket reference
     rtpCapabilities: any;
     producers: Map<string, { id: string; kind: string; appData: any }>;
@@ -244,7 +245,7 @@ export class RoomManager {
             room.hostPeerId = peer.id;
         }
         if (peer.role !== 'host') {
-            if (!peer.userId && !peer.platformAdmin) {
+            if (peer.initialRole === 'guest' || peer.isGuest) {
                 peer.role = 'guest';
             } else if (peer.initialRole === 'co-host' && [...room.peers.values()].filter(other => other.role === 'co-host').length < MAX_CO_HOSTS) {
                 peer.role = 'co-host';

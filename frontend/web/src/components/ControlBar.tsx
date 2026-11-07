@@ -34,6 +34,7 @@ interface Props {
     onToggleAudio: () => void;
     onToggleVideo: () => void;
     onToggleScreen: () => void;
+    onOpenInvite?: () => void;
     onToggleRecording: () => void;
     onToggleChat: () => void;
     onToggleParticipants: () => void;
@@ -130,7 +131,7 @@ export default function ControlBar({
     activitiesOpen = false, hostToolsOpen = false, onToggleActivities, onToggleHostTools,
     audioMuted, videoOff, screenSharing,
     chatOpen, participantsOpen, handRaised, reactionsOpen = false, languageOpen = false, languageLabel, languageCode,
-    onToggleAudio, onToggleVideo, onToggleScreen,
+    onToggleAudio, onToggleVideo, onToggleScreen, onOpenInvite,
     onToggleChat, onToggleParticipants, onRaiseHand, onToggleReactions, onToggleLanguage,
     captionsOn = false, onToggleCaptions, fullscreen = false, onToggleFullscreen, effectsOn = false, onOpenEffects, onReportProblem,
     tilesPerPage = 'auto', onChangeTilesPerPage,
@@ -196,6 +197,18 @@ export default function ControlBar({
             <div className="controls-center">
                 <ToggleControl on={screenSharing} label="Share" title={screenSharing ? 'Stop presenting' : 'Present your screen'}
                     iconOn="stop_screen_share" iconOff="screen_share" stateClass={screenSharing ? 'active-sharing' : ''} onToggle={onToggleScreen} />
+                {onOpenInvite && (
+                    <button
+                        type="button"
+                        className="ctrl-btn"
+                        aria-label="Invite people"
+                        data-tip="Invite people"
+                        onClick={onOpenInvite}
+                    >
+                        <span className="ctrl-icon mi" aria-hidden="true">person_add</span>
+                        <span className="ctrl-label">Invite</span>
+                    </button>
+                )}
                 <div className="control-extra-inline"><ToggleControl on={handRaised} label="Hand" title={handRaised ? 'Lower hand' : 'Raise hand'}
                     iconOn="front_hand" iconOff="back_hand" stateClass={handRaised ? 'active' : ''} onToggle={onRaiseHand} /></div>
                 {onToggleReactions && (
@@ -252,6 +265,7 @@ export default function ControlBar({
                         <div className="meeting-more-mobile-actions">
                             {onToggleCaptions && <button type="button" aria-pressed={captionsOn} aria-disabled={captionsLocked || undefined} className={captionsLocked ? 'is-feature-locked' : ''} onClick={() => { setMoreOpen(false); if (captionsLocked) onRequirePlanFeature?.('ai_captions'); else onToggleCaptions(); }}><span className="mi" aria-hidden="true">closed_caption</span>{captionsOn ? 'Turn off captions' : 'Turn on captions'}{captionsLocked && <span className="mi ctrl-plan-lock" aria-hidden="true">lock</span>}</button>}
                             <button type="button" onClick={() => { setMoreOpen(false); onToggleScreen(); }}><span className="mi" aria-hidden="true">screen_share</span>{screenSharing ? 'Stop presenting' : 'Present screen'}</button>
+                            {onOpenInvite && <button type="button" onClick={() => { setMoreOpen(false); onOpenInvite(); }}><span className="mi" aria-hidden="true">person_add</span>Invite people</button>}
                             {onToggleReactions && <button type="button" onClick={() => { setMoreOpen(false); onToggleReactions(); }}><span className="mi" aria-hidden="true">add_reaction</span>Reactions</button>}
                             <button type="button" onClick={() => { setMoreOpen(false); onToggleParticipants(); }}><span className="mi" aria-hidden="true">group</span>Participants</button>
                             <button type="button" onClick={() => { setMoreOpen(false); onToggleChat(); }}><span className="mi" aria-hidden="true">chat</span>Chat</button>

@@ -1,4 +1,8 @@
-vi.mock('../meeting-policy.js', () => ({ loadMeetingPolicy: vi.fn().mockResolvedValue(null), reportMeetingStatus: vi.fn().mockResolvedValue(undefined) }));
+vi.mock('../meeting-policy.js', () => ({
+    loadMeetingPolicy: vi.fn().mockResolvedValue(null),
+    reportMeetingStatus: vi.fn().mockResolvedValue(undefined),
+    verifySignalingAccess: vi.fn().mockResolvedValue({ allowed: true, isGuest: false })
+}));
 import { describe, it, expect, vi } from 'vitest';
 vi.mock('../sfu-client.js', () => ({ sfuClient: {
     getRtpCapabilities: vi.fn().mockResolvedValue({ rtpCapabilities: {} }),

@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-vi.mock('../meeting-policy.js', () => ({ loadMeetingPolicy: vi.fn().mockResolvedValue(null) }));
+vi.mock('../meeting-policy.js', () => ({
+    loadMeetingPolicy: vi.fn().mockResolvedValue(null),
+    reportMeetingStatus: vi.fn().mockResolvedValue(undefined),
+    verifySignalingAccess: vi.fn().mockResolvedValue({ allowed: true, isGuest: false })
+}));
 vi.mock('../sfu-client.js', () => ({ sfuClient: {
     getRtpCapabilities: vi.fn().mockResolvedValue({ rtpCapabilities: {} }),
     createTransport: vi.fn().mockResolvedValue({ id: 'transport' }),

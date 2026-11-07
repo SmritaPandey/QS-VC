@@ -10,12 +10,13 @@ import '../styles/workspace.css';
 import useScrollReveal from '../lib/scroll-reveal';
 import HostedMeetings from './HostedMeetings';
 import MeetingSetupDialog, { type MeetingSetup } from './MeetingSetupDialog';
+import PendingInvitations from './PendingInvitations';
 
 const API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
 type Meeting = { id: string; meetingCode: string; title: string; status: string; scheduledStart?: string; createdAt: string; isHost?: boolean; canCancel?: boolean };
-type View = 'day' | 'hosted';
+type View = 'day' | 'hosted' | 'invitations';
 const VIEW_KEY = 'qsvc:workspace-view';
-function savedView(): View { try { return localStorage.getItem(VIEW_KEY) === 'hosted' ? 'hosted' : 'day'; } catch { return 'day'; } }
+function savedView(): View { try { const v = localStorage.getItem(VIEW_KEY); return (v === 'hosted' || v === 'invitations') ? v : 'day'; } catch { return 'day'; } }
 type Props = { creating: boolean; signingOut: boolean; sessionError: string; onCreate: (setup: MeetingSetup) => void | Promise<void>; onSignOut: () => void; onExpired: () => void };
 function dateKey(date: Date) { return `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`; }
 function moveDay(date: Date, amount: number) { const next = new Date(date); next.setDate(next.getDate()+amount); return next; }
@@ -35,8 +36,22 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
     const [more, setMore] = useState(false);
     const [offset, setOffset] = useState(0);
     const [view, setViewState] = useState<View>(savedView);
+    const [pendingInviteCount, setPendingInviteCount] = useState(0);
     const setView = (next: View) => { setViewState(next); try { localStorage.setItem(VIEW_KEY, next); } catch { /* per-viewer convenience only */ } };
     const profileError = session.status === 'unavailable';
+
+    useEffect(() => {
+        const token = getToken();
+        if (!token) return;
+        fetch(`${API}/api/notifications`, { headers: { Authorization: `Bearer ${token}` } })
+            .then(res => res.json())
+            .then(data => {
+                if (Array.isArray(data.pendingInvitations)) {
+                    setPendingInviteCount(data.pendingInvitations.length);
+                }
+            })
+            .catch(() => {});
+    }, [refresh]);
     const root = useRef<HTMLDivElement>(null);
     useScrollReveal(root);
     const selectedKey = dateKey(selected);
@@ -124,8 +139,22 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                 <div className="workspace-views" role="tablist" aria-label="Which meetings to show">
                     <button type="button" role="tab" id="tab-day" aria-selected={view === 'day'} aria-controls="workspace-view-panel" onClick={() => setView('day')}><span className="mi mi-sm" aria-hidden="true">calendar_today</span>By day</button>
                     <button type="button" role="tab" id="tab-hosted" aria-selected={view === 'hosted'} aria-controls="workspace-view-panel" onClick={() => setView('hosted')}><span className="mi mi-sm" aria-hidden="true">shield_person</span>Meetings I host</button>
+                    <button type="button" role="tab" id="tab-invitations" aria-selected={view === 'invitations'} aria-controls="workspace-view-panel" onClick={() => setView('invitations')}>
+                        <span className="mi mi-sm" aria-hidden="true">mail</span>Invitations
+                        {pendingInviteCount > 0 && <span className="workspace-badge">{pendingInviteCount}</span>}
+                    </button>
                 </div>
-                {view === 'hosted' ? <section id="workspace-view-panel" role="tabpanel" aria-labelledby="tab-hosted" className="workspace-schedule"><div className="workspace-day-heading"><div><h2>Meetings I host</h2><p>Start, share or review the meetings you created.</p></div></div><HostedMeetings onExpired={onExpired} /></section> : <div id="workspace-view-panel" role="tabpanel" aria-labelledby="tab-day">
+                {view === 'invitations' ? (
+                    <section id="workspace-view-panel" role="tabpanel" aria-labelledby="tab-invitations" className="workspace-schedule">
+                        <div className="workspace-day-heading">
+                            <div>
+                                <h2>Meeting Invitations & Updates</h2>
+                                <p>Respond to invitations and view in-app notices.</p>
+                            </div>
+                        </div>
+                        <PendingInvitations onCountChange={setPendingInviteCount} onExpired={onExpired} />
+                    </section>
+                ) : view === 'hosted' ? <section id="workspace-view-panel" role="tabpanel" aria-labelledby="tab-hosted" className="workspace-schedule"><div className="workspace-day-heading"><div><h2>Meetings I host</h2><p>Start, share or review the meetings you created.</p></div></div><HostedMeetings onExpired={onExpired} /></section> : <div id="workspace-view-panel" role="tabpanel" aria-labelledby="tab-day">
                 <div className="workspace-day-heading"><div><h2>{selected.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</h2><p>Meetings in your organisation</p></div><div className="workspace-date-actions"><button onClick={() => selectDay(new Date(new Date().setHours(0,0,0,0)))}>Today</button><label className="workspace-date-picker"><span className="workspace-sr">Choose a date</span><input type="date" value={selectedKey} onChange={event => { const parts = event.target.value.split('-').map(Number); if (parts.length === 3 && parts.every(Boolean)) selectDay(new Date(parts[0],parts[1]-1,parts[2])); }} /></label></div></div>
                 <div className="workspace-week" aria-label="Choose meeting day"><button className="workspace-week-arrow" aria-label="Previous week" onClick={() => selectDay(moveDay(selected,-7))}><span className="mi" aria-hidden="true">chevron_left</span></button><div className="workspace-days">{Array.from({length:7},(_,index) => { const day = moveDay(monday,index); return <button key={dateKey(day)} aria-label={day.toLocaleDateString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'})} aria-pressed={dateKey(day) === selectedKey} onClick={() => selectDay(day)}><span>{day.toLocaleDateString(undefined,{weekday:'short'})}</span><span>{day.getDate()}</span><i aria-hidden="true" data-today={dateKey(day) === dateKey(new Date())} /></button>; })}</div><button className="workspace-week-arrow" aria-label="Next week" onClick={() => selectDay(moveDay(selected,7))}><span className="mi" aria-hidden="true">chevron_right</span></button></div>
                 <section className="workspace-schedule" aria-label="Meetings for the selected date" aria-busy={loading}>

@@ -44,6 +44,27 @@ const chatMessageBody = z.object({
     type: z.enum(['text', 'file', 'system']).default('text'),
 });
 
+const createInvitationsBody = z.object({
+    invites: z.array(z.object({
+        userId: z.string().uuid(),
+        assignedRole: z.enum(['co-host', 'participant']).default('participant'),
+    })).min(1).max(50),
+});
+
+const updateInvitationBody = z.object({
+    action: z.enum(['accept', 'decline', 'revoke']),
+});
+
+const createGuestTokenBody = z.object({
+    maxUses: z.number().int().min(1).max(500).default(50),
+    expiresInHours: z.number().min(0.5).max(720).default(24),
+});
+
+const validateAccessBody = z.object({
+    guestToken: z.string().optional(),
+    inviteToken: z.string().optional(),
+});
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // CREATE MEETING
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -228,5 +249,73 @@ describe('Meeting: chatMessageBody schema', () => {
             type: 'file',
         });
         expect(result.success).toBe(true);
+    });
+});
+
+describe('createInvitationsBody', () => {
+    it('accepts valid invitation list with uuid and role', () => {
+        const result = createInvitationsBody.safeParse({
+            invites: [
+                { userId: '11111111-1111-4111-8111-111111111111', assignedRole: 'co-host' },
+                { userId: '22222222-2222-4222-8222-222222222222' },
+            ],
+        });
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect(result.data.invites[1].assignedRole).toBe('participant');
+        }
+    });
+
+    it('rejects empty invites array', () => {
+        const result = createInvitationsBody.safeParse({ invites: [] });
+        expect(result.success).toBe(false);
+    });
+
+    it('rejects invalid uuid in invites', () => {
+        const result = createInvitationsBody.safeParse({
+            invites: [{ userId: 'invalid-uuid' }],
+        });
+        expect(result.success).toBe(false);
+    });
+});
+
+describe('updateInvitationBody', () => {
+    it('accepts accept, decline, and revoke actions', () => {
+        expect(updateInvitationBody.safeParse({ action: 'accept' }).success).toBe(true);
+        expect(updateInvitationBody.safeParse({ action: 'decline' }).success).toBe(true);
+        expect(updateInvitationBody.safeParse({ action: 'revoke' }).success).toBe(true);
+    });
+
+    it('rejects unknown actions', () => {
+        expect(updateInvitationBody.safeParse({ action: 'delete' }).success).toBe(false);
+    });
+});
+
+describe('createGuestTokenBody', () => {
+    it('applies defaults for maxUses and expiresInHours', () => {
+        const result = createGuestTokenBody.safeParse({});
+        expect(result.success).toBe(true);
+        if (result.success) {
+            expect(result.data.maxUses).toBe(50);
+            expect(result.data.expiresInHours).toBe(24);
+        }
+    });
+
+    it('accepts custom limits within boundaries', () => {
+        const result = createGuestTokenBody.safeParse({ maxUses: 10, expiresInHours: 48 });
+        expect(result.success).toBe(true);
+    });
+
+    it('rejects invalid limits', () => {
+        expect(createGuestTokenBody.safeParse({ maxUses: 0 }).success).toBe(false);
+        expect(createGuestTokenBody.safeParse({ expiresInHours: 0.1 }).success).toBe(false);
+    });
+});
+
+describe('validateAccessBody', () => {
+    it('accepts guestToken or inviteToken or empty', () => {
+        expect(validateAccessBody.safeParse({ guestToken: 'abc' }).success).toBe(true);
+        expect(validateAccessBody.safeParse({ inviteToken: 'xyz' }).success).toBe(true);
+        expect(validateAccessBody.safeParse({}).success).toBe(true);
     });
 });

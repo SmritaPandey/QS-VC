@@ -30,3 +30,4 @@ describe('ShareScreenModal', () => {
         expect(html).toContain('Share');
     });
 });
+
