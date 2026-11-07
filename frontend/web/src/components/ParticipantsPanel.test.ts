@@ -25,4 +25,24 @@ describe('ParticipantsPanel private conversation actions', () => {
         expect(markup).toContain('Co-host</span>');
         expect(markup).toContain('Guest</span>');
     });
+
+    it('displays Member tags and provides host controls when canManage is true', () => {
+        const markup = renderToStaticMarkup(createElement(ParticipantsPanel, {
+            peers: new Map([
+                ['member-peer', { peerId: 'member-peer', displayName: 'Alice Member', role: 'member', audioMuted: false }],
+                ['guest-peer', { peerId: 'guest-peer', displayName: 'Bob Guest', role: 'guest', audioMuted: false }],
+            ]),
+            displayName: 'Host User',
+            myPeerId: 'host-self',
+            myRole: 'host',
+            canManage: true,
+            onClose: () => {},
+        }));
+
+        expect(markup).toContain('Member</span>');
+        expect(markup).toContain('Guest</span>');
+        expect(markup).toContain('Mute participant');
+        expect(markup).toContain('Make co-host');
+        expect(markup).toContain('Remove from meeting');
+    });
 });

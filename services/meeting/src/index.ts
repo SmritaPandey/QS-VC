@@ -842,7 +842,7 @@ app.post('/api/meetings/:code/validate-access', async (req, res) => {
                     signal: AbortSignal.timeout(5000),
                 });
                 if (response.ok) {
-                    const data = await response.json();
+                    const data = (await response.json()) as any;
                     if (data?.valid && data?.payload) user = data.payload as AuthPayload;
                 }
             } catch { }

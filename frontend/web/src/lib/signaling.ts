@@ -3,7 +3,7 @@ import { getToken, clearSession, subscribeSession } from './session';
  * WebSocket + JSON-RPC 2.0 signaling client.
  */
 
-const SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL || `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
+const SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL || (typeof window !== 'undefined' ? `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws` : 'ws://localhost:3000/ws');
 
 type RpcCallback = (result: any, error?: any) => void;
 

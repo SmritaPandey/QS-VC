@@ -47,8 +47,41 @@ export default function PreMeeting() {
         speakers: MediaDeviceInfo[];
     }>({ cameras: [], mics: [], speakers: [] });
 
-    const inviteToken = new URLSearchParams(location.search).get('invite');
-    const inviteQuery = inviteToken ? `?invite=${encodeURIComponent(inviteToken)}` : '';
+    const searchParams = new URLSearchParams(location.search);
+    const inviteToken = searchParams.get('invite');
+    const guestToken = searchParams.get('guest');
+    const [guestTokenStatus, setGuestTokenStatus] = useState<'valid' | 'invalid' | 'checking' | null>(guestToken ? 'checking' : null);
+    const [guestTokenError, setGuestTokenError] = useState('');
+
+    useEffect(() => {
+        if (!guestToken || !meetingCode) return;
+        const controller = new AbortController();
+        const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
+        fetch(`${MEETING_API}/api/meetings/${encodeURIComponent(meetingCode)}/validate-access`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ guestToken }),
+            signal: controller.signal
+        })
+            .then(async res => {
+                if (!res.ok) {
+                    const data = await res.json().catch(() => ({}));
+                    setGuestTokenStatus('invalid');
+                    setGuestTokenError(data.error || 'This guest link is invalid or expired.');
+                } else {
+                    setGuestTokenStatus('valid');
+                }
+            })
+            .catch(() => {
+                setGuestTokenStatus('valid');
+            });
+        return () => controller.abort();
+    }, [guestToken, meetingCode]);
+
+    const inviteParams = new URLSearchParams();
+    if (inviteToken) inviteParams.set('invite', inviteToken);
+    if (guestToken) inviteParams.set('guest', guestToken);
+    const inviteQuery = inviteParams.toString() ? `?${inviteParams.toString()}` : '';
     const inviteLink = `${window.location.origin}/meeting/${meetingCode}/preview${inviteQuery}`;
 
     const refreshDevices = () => navigator.mediaDevices.enumerateDevices().then((devs) => {
@@ -203,9 +236,20 @@ export default function PreMeeting() {
     };
 
     const handleJoin = () => {
-        const name = displayName.trim() || 'Guest';
+        if (guestTokenStatus === 'invalid') {
+            alert('Cannot join: ' + guestTokenError);
+            return;
+        }
+        const name = displayName.trim() || (guestToken ? 'Guest' : 'Participant');
         navigate(`/meeting/${meetingCode}${inviteQuery}`, {
-            state: { displayName: name, audioMuted, videoOff, micId: micId || stream?.getAudioTracks()[0]?.getSettings().deviceId, cameraId: cameraId || stream?.getVideoTracks()[0]?.getSettings().deviceId },
+            state: {
+                displayName: name,
+                audioMuted,
+                videoOff,
+                guestToken: guestToken || undefined,
+                micId: micId || stream?.getAudioTracks()[0]?.getSettings().deviceId,
+                cameraId: cameraId || stream?.getVideoTracks()[0]?.getSettings().deviceId
+            },
         });
     };
 
@@ -264,6 +308,18 @@ export default function PreMeeting() {
                     </div>
 
                     <h2>Before you join.</h2>
+                    {guestTokenStatus === 'valid' && (
+                        <div className="guest-banner-valid" style={{ background: 'color-mix(in srgb, #10b981 12%, var(--bg-secondary))', color: '#10b981', border: '1px solid #10b981', padding: '8px 12px', borderRadius: '8px', fontSize: '13px', margin: '8px 0 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span className="mi" aria-hidden="true" style={{ fontSize: '18px' }}>verified</span>
+                            <span>Guest link verified. You will join as a guest participant.</span>
+                        </div>
+                    )}
+                    {guestTokenStatus === 'invalid' && (
+                        <div className="guest-banner-invalid" style={{ background: 'color-mix(in srgb, #ef4444 12%, var(--bg-secondary))', color: '#ef4444', border: '1px solid #ef4444', padding: '8px 12px', borderRadius: '8px', fontSize: '13px', margin: '8px 0 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span className="mi" aria-hidden="true" style={{ fontSize: '18px' }}>error</span>
+                            <span>{guestTokenError}</span>
+                        </div>
+                    )}
                     {cameraNotice && <p role="status">{cameraNotice}</p>}
 
                     <div className="preview-invite-actions">

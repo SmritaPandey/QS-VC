@@ -40,6 +40,7 @@ import { E2EEManager, encodedTransformsSupported, type E2EEKeyBundle, type E2EEK
 import { meetingSecurityCode } from '../lib/e2ee-safety';
 import EncryptionBadge from '../components/EncryptionBadge';
 import ShareScreenModal, { type ScreenShareSurface } from '../components/ShareScreenModal';
+import InviteModal from '../components/InviteModal';
 import '../styles/screen-share.css';
 
 const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
@@ -159,6 +160,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const isPlatformAdmin = entitlements.isPlatformAdmin;
     const state = { ...((location.state as any) || {}), ...(reconnecting ? carried : {}) };
     const initialInviteToken = new URLSearchParams(location.search).get('invite') || '';
+    const initialGuestToken = (state as any)?.guestToken || new URLSearchParams(location.search).get('guest') || '';
     const [meetingInviteToken, setMeetingInviteToken] = useState(initialInviteToken);
     const meetingPreviewPath = `/meeting/${meetingCode}/preview${meetingInviteToken ? `?invite=${encodeURIComponent(meetingInviteToken)}` : ''}`;
     const initialMeetingTitle = typeof state.title === 'string' ? state.title.trim() : '';
@@ -206,6 +208,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [screenSharing, setScreenSharing] = useState(false);
     const [screenPaused, setScreenPaused] = useState(false);
     const [shareScreenModalOpen, setShareScreenModalOpen] = useState(false);
+    const [inviteModalOpen, setInviteModalOpen] = useState(false);
     const [screenStream, setScreenStream] = useState<MediaStream | null>(null);
     const [isRecording, setIsRecording] = useState(false);
     const [roomRecording, setRoomRecording] = useState<{ peerId: string; displayName: string } | null>(null);
@@ -738,7 +741,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 });
                 unsubscribe.push(stopAdmitted, stopRejected, stopWaitingStatus);
                 let joinResult = await signaling.request('joinRoom', {
-                    meetingCode, displayName, inviteToken: initialInviteToken || undefined,
+                    meetingCode, displayName,
+                    inviteToken: initialInviteToken || undefined,
+                    guestToken: initialGuestToken || undefined,
                     supportsE2EE: encodedTransformsSupported(),
                 });
                 if (joinResult.status === 'waiting' || joinResult.status === 'waitingForHost' || joinResult.status === 'keptWaiting') {
@@ -758,7 +763,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 if (typeof joinResult.inviteToken === 'string') setMeetingInviteToken(joinResult.inviteToken);
                 myPeerIdRef.current = joinResult.peerId;
                 canPublishRef.current = joinResult.canPublish !== false;
-                setMyRole(joinResult.role || 'member');
+                setMyRole(joinResult.role || (joinResult.isGuest ? 'guest' : 'member'));
                 setRoomRecording(joinResult.recording || null);
                 setRoomSettings(current => ({ ...current, ...joinResult.settings }));
                 setRoomDevicesEnabled(joinResult.polyBridgeEnabled === true && joinResult.sfuAvailable === true);
@@ -1996,7 +2001,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 languageOpen={languageOpen} languageLabel={findLanguage(signedIn ? speechLanguage.code : guestCaptionLanguage)?.name} languageCode={(signedIn ? speechLanguage.code : guestCaptionLanguage).split('-')[0].toUpperCase()}
                 onToggleLanguage={signedIn ? () => { setLanguageOpen((open) => !open); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); } : undefined}
                 onToggleAudio={handleToggleAudio} onToggleVideo={handleToggleVideo}
-                onToggleScreen={handleScreenShare} onToggleRecording={handleToggleRecording}
+                onToggleScreen={handleScreenShare} onOpenInvite={() => setInviteModalOpen(true)} onToggleRecording={handleToggleRecording}
                 onToggleChat={() => { if (!roomSettings.allowChat && !manager) { showNotice('Chat is disabled by the host.'); return; } setIncomingChatMessage(null); setChatOpen(!chatOpen); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); }}
                 onToggleParticipants={() => { setParticipantsOpen(!participantsOpen); setChatOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); }}
                 onRaiseHand={handleRaiseHand} onLeave={requestLeave}
@@ -2006,6 +2011,13 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 open={shareScreenModalOpen}
                 onClose={() => setShareScreenModalOpen(false)}
                 onSelect={(surface) => void startScreenShare(surface)}
+            />
+            <InviteModal
+                open={inviteModalOpen}
+                meetingCode={meetingCode || ''}
+                meetingTitle={meetingTitle}
+                inviteToken={meetingInviteToken}
+                onClose={() => setInviteModalOpen(false)}
             />
             {reportOpen && <ReportProblem meetingCode={meetingCode || ''} displayName={displayName} diagnostics={collectDiagnostics} onClose={() => setReportOpen(false)} />}
             {leaveOpen && <div className="meeting-dialog-backdrop" onClick={() => setLeaveOpen(false)}>

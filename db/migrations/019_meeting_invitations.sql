@@ -153,3 +153,4 @@ $$;
 
 REVOKE ALL ON FUNCTION public.qsvc_increment_guest_token_use(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.qsvc_increment_guest_token_use(uuid) TO qsvc_meeting_service;
+
