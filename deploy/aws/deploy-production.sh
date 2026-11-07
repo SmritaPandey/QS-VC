@@ -96,6 +96,13 @@ docker compose \
   --env-file "$ENV_FILE" \
   up -d --no-build
 
+# Caddy reads its config only at start. The Caddyfile is a bind mount that each release
+# replaces, so restart the proxy to pick up new routes (for example /api/signaling-ticket).
+docker compose \
+  -f "$COMPOSE" \
+  --env-file "$ENV_FILE" \
+  restart proxy
+
 echo "Container deployment completed."
 
 docker compose \
