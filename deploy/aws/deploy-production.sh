@@ -65,14 +65,28 @@ echo "Verified and staged $staged desktop package(s)"
 
 echo "Retrieving temporary migration credentials..."
 
+# Preferred: SSM Parameter Store (SecureString). Fallback: MIGRATION_DATABASE_URL in the
+# server's .env, which is how this host was originally set up. The value is never printed.
+MIGRATION_PARAMETER="/qsvc/production/migration-database-url"
 MIGRATION_DATABASE_URL="$(
   aws ssm get-parameter \
     --region ap-south-1 \
-    --name "/qsvc/production/migration-database-url" \
+    --name "$MIGRATION_PARAMETER" \
     --with-decryption \
     --query 'Parameter.Value' \
-    --output text
+    --output text 2>/dev/null || true
 )"
+if [[ -z "$MIGRATION_DATABASE_URL" || "$MIGRATION_DATABASE_URL" == "None" ]]; then
+  MIGRATION_DATABASE_URL="$(grep -E '^MIGRATION_DATABASE_URL=' "$ENV_FILE" | tail -n 1 | cut -d= -f2- | tr -d '\r' | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//")"
+  if [[ -n "$MIGRATION_DATABASE_URL" ]]; then
+    echo "Using the migration credential from the server .env (SSM parameter $MIGRATION_PARAMETER not found)."
+  fi
+fi
+if [[ -z "$MIGRATION_DATABASE_URL" ]]; then
+  echo "No migration database credential. Create the SecureString SSM parameter $MIGRATION_PARAMETER" >&2
+  echo "(region ap-south-1) with the qsvcadmin PostgreSQL URL, or add MIGRATION_DATABASE_URL to $ENV_FILE." >&2
+  exit 1
+fi
 
 test -n "$MIGRATION_DATABASE_URL"
 export MIGRATION_DATABASE_URL
