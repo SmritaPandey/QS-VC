@@ -9,9 +9,11 @@
 .host-waiting ul,.host-tools-people { margin:12px 0 0; padding:0; list-style:none; }
 .host-waiting li,.host-tools-people li { padding:12px 0; border-bottom:1px solid #354c5b; overflow-wrap:anywhere; }
 .host-waiting-person { display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; min-width:0; }
-.host-reviewed-label,.host-invited-label { display:inline-flex; align-items:center; min-height:24px; padding:2px 8px; border-radius:999px; font-size:12px; line-height:1.35; }
+.host-reviewed-label,.host-invited-label,.host-guest-label,.host-member-label { display:inline-flex; align-items:center; min-height:24px; padding:2px 8px; border-radius:999px; font-size:12px; line-height:1.35; }
 .host-reviewed-label { color:#d7f7ef; background:#164c48; }
 .host-invited-label { color:#d4e5ed; background:#2b4050; }
+.host-guest-label { color:#fed7aa; background:#431407; }
+.host-member-label { color:#bfdbfe; background:#1e3a8a; }
 .host-tools-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 .host-tools-settings label { display:flex; justify-content:space-between; align-items:center; gap:16px; min-height:48px; font-size:14px; }
 .host-tools-settings input { width:20px; height:20px; accent-color:#43d9c2; }

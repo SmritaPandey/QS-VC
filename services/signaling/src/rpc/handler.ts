@@ -1,4 +1,4 @@
-import { loadMeetingPolicy, reportMeetingStatus } from '../meeting-policy.js';
+import { loadMeetingPolicy, reportMeetingStatus, verifySignalingAccess } from '../meeting-policy.js';
 /**
  * JSON-RPC 2.0 Method Handler for QS-VC Signaling.
  *
@@ -64,7 +64,8 @@ async function admitWaitingPeer(roomId: string, targetId: string) {
     admittingPeers.add(targetId);
     try {
         const result = await joinPeerToRoom(waiting.ws, roomId, waiting.id, waiting.displayName, waiting.rtpCapabilities, { authUser: waiting.authUser }, null,
-            () => { if (room.waitingRoom.get(targetId) !== waiting) throw createError(-32000, 'Admission cancelled'); });
+            () => { if (room.waitingRoom.get(targetId) !== waiting) throw createError(-32000, 'Admission cancelled'); },
+            waiting.isGuest ? 'guest' : undefined);
         room.waitingRoom.delete(targetId);
         roomManager.sendToSocket(waiting.ws, 'admitted', result?.result || {}, waiting.id);
         return result;
@@ -158,6 +159,7 @@ const joinRoomSchema = z.object({
     meetingCode: z.string().min(1).max(30),
     displayName: z.string().min(1).max(100),
     inviteToken: z.string().max(128).optional(),
+    guestToken: z.string().max(128).optional(),
     rtpCapabilities: z.record(z.string(), z.unknown()).optional(),
     password: z.string().max(50).optional(),
     role: z.enum(['host', 'co-host', 'participant']).optional(),
@@ -314,7 +316,7 @@ export async function handleRpcMessage(
                         error: { code: -32602, message: 'Invalid params: ' + joinParams.error.issues.map(i => i.message).join(', ') },
                     };
                 }
-                const { meetingCode, displayName: rawName, rtpCapabilities, password, inviteToken } = joinParams.data;
+                const { meetingCode, displayName: rawName, rtpCapabilities, password, inviteToken, guestToken } = joinParams.data;
                 if (connectionState.expectedMeetingCode && connectionState.expectedMeetingCode !== meetingCode.trim().toUpperCase()) {
                     throw createError(-32001, 'This signaling ticket is valid for a different meeting. Reconnect and try again.');
                 }
@@ -333,8 +335,14 @@ export async function handleRpcMessage(
                     throw createError(-32005, 'This meeting uses end-to-end encrypted media. Use a current version of Chrome, Edge, Safari or Firefox.');
                 }
                 if (policy?.hostId) room.ownerUserId = policy.hostId;
-                const isInvited = verifyMeetingInviteToken(meetingCode, inviteToken);
-                const webinarGuest = room.settings.webinar && !connectionState.authUser?.sub && !isInvited;
+                const verifiedAccess = await verifySignalingAccess(meetingCode, {
+                    userId: connectionState.authUser?.sub,
+                    guestToken,
+                    inviteToken,
+                });
+                const isInvited = verifyMeetingInviteToken(meetingCode, inviteToken) || !!verifiedAccess?.isInvited;
+                const isGuestUser = !!verifiedAccess?.isGuest || !connectionState.authUser?.sub;
+                const webinarGuest = room.settings.webinar && isGuestUser && !isInvited;
                 // Platform admins (role from the server-signed session) can enter and run any meeting.
                 const isPlatformAdmin = connectionState.authUser?.role === 'admin';
                 const isOwner = (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub) || isPlatformAdmin;
@@ -347,7 +355,7 @@ export async function handleRpcMessage(
                     if (room.settings.password && room.settings.password !== password) {
                         return { jsonrpc: '2.0', id: id!, error: { code: -32001, message: 'Invalid meeting password' } };
                     }
-                    roomManager.addToWaitingRoom(room.id, { id: peerId, displayName, ws, rtpCapabilities, requestedAt: new Date(), authUser: connectionState.authUser, awaitingHost: true, invited: isInvited });
+                    roomManager.addToWaitingRoom(room.id, { id: peerId, displayName, ws, rtpCapabilities, requestedAt: new Date(), authUser: connectionState.authUser, awaitingHost: true, invited: isInvited, isGuest: isGuestUser });
                     connectionState.peerId = peerId;
                     connectionState.roomId = room.id;
                     connectionState.displayName = displayName;
@@ -388,6 +396,7 @@ export async function handleRpcMessage(
                         requestedAt: new Date(),
                         authUser: connectionState.authUser,
                         invited: isInvited,
+                        isGuest: isGuestUser,
                     });
 
                     connectionState.peerId = peerId;
@@ -396,7 +405,7 @@ export async function handleRpcMessage(
 
                     // Notify host and co-hosts about the new request to join
                     for (const manager of room.peers.values()) {
-                        if (isManager(manager)) roomManager.sendToPeer(room.id, manager.id, 'waitingRoomPeer', { peerId, displayName });
+                        if (isManager(manager)) roomManager.sendToPeer(room.id, manager.id, 'waitingRoomPeer', { peerId, displayName, invited: isInvited, isGuest: isGuestUser });
                     }
 
                     return {
@@ -407,7 +416,7 @@ export async function handleRpcMessage(
 
                 // Direct join (no waiting room or first peer)
                 const hostWasPresent = room.hostStarted;
-                const joined = await joinPeerToRoom(ws, room.id, peerId, displayName, rtpCapabilities, connectionState, id!);
+                const joined = await joinPeerToRoom(ws, room.id, peerId, displayName, rtpCapabilities, connectionState, id!, undefined, verifiedAccess?.role as any);
                 const me = room.peers.get(peerId);
                 if (me?.role === 'host' && joined?.result) joined.result.inviteToken = createMeetingInviteToken(meetingCode);
                 if (me?.role === 'host') {
@@ -1446,7 +1455,8 @@ async function joinPeerToRoom(
     rtpCapabilities: any,
     connectionState: any,
     rpcId: number | string | null,
-    beforeRegister?: () => void
+    beforeRegister?: () => void,
+    initialRole?: PeerRole
 ): Promise<RpcResponse | null> {
     const room = roomManager.getRoom(roomId);
     if (!room) throw createError(-32000, 'Room not found');
@@ -1474,7 +1484,8 @@ async function joinPeerToRoom(
         ws,
         rtpCapabilities,
         producers: new Map(),
-        role: 'member',
+        role: initialRole || (connectionState.authUser?.sub ? 'member' : 'guest'),
+        initialRole,
         userId: connectionState.authUser?.sub,
         platformAdmin: connectionState.authUser?.role === 'admin',
         audioMuted: false,

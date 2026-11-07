@@ -20,6 +20,7 @@ import { disableDemoPersistence } from './demo-storage-policy.js';
 import { normalizeMeetingSettings } from './meeting-settings.js';
 import meetingInvitation from '../../../shared/meeting-invitation.cjs';
 import { transcriptAsSrt, transcriptAsText, transcriptBody } from './transcripts.js';
+import crypto from 'node:crypto';
 
 const { createMeetingInviteToken } = meetingInvitation;
 
@@ -76,6 +77,20 @@ const chatMessageBody = z.object({
     content: z.string().min(1, 'Message cannot be empty').max(4096)
         .transform((s) => s.trim().replace(/<script[^>]*>.*?<\/script>/gi, '')),
     type: z.enum(['text', 'file', 'system']).default('text'),
+});
+
+const inviteMembersBody = z.object({
+    inviteeUserIds: z.array(z.string().uuid()).min(1).max(50),
+    assignedRole: z.enum(['participant', 'co-host']).default('participant'),
+});
+
+const updateInvitationBody = z.object({
+    action: z.enum(['accept', 'decline', 'revoke']),
+});
+
+const createGuestTokenBody = z.object({
+    expiresInHours: z.number().int().min(1).max(720).default(24),
+    maxUses: z.number().int().min(1).max(1000).default(100),
 });
 
 function validateBody<T>(schema: z.ZodSchema<T>) {
@@ -319,6 +334,58 @@ app.post('/api/internal/meetings/:code/status', express.json(), async (req, res)
     }
 });
 
+// Signaling checks guest token or user invitation (service-to-service only).
+app.post('/api/internal/meetings/:code/verify-access', express.json(), async (req, res) => {
+    try {
+        jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal' });
+    } catch { return res.status(401).json({ error: 'Invalid service authentication' }); }
+
+    const code = String(req.params.code).toUpperCase().trim();
+    const { userId, guestToken, inviteToken } = req.body || {};
+
+    try {
+        // 1. Check guest token
+        if (guestToken && typeof guestToken === 'string') {
+            const tokenHash = crypto.createHash('sha256').update(guestToken.trim()).digest('hex');
+            const result = await rawPool.query('SELECT * FROM public.qsvc_validate_guest_token($1, $2)', [code, tokenHash]);
+            const row = result.rows[0];
+            if (row && row.valid) {
+                await rawPool.query('SELECT public.qsvc_increment_guest_token_use($1)', [row.token_id]);
+                return res.json({ valid: true, isGuest: true, isInvited: true, role: 'participant' });
+            }
+        }
+
+        // 2. Check user invitation
+        if (userId && typeof userId === 'string') {
+            const invResult = await rawPool.query(
+                `SELECT i.assigned_role, i.invitation_status
+                 FROM meeting_invitations i
+                 JOIN meetings m ON m.id = i.meeting_id
+                 WHERE m.meeting_code = $1 AND i.invitee_user_id = $2`,
+                [code, userId]
+            );
+            if (invResult.rows.length > 0 && invResult.rows[0].invitation_status !== 'revoked') {
+                return res.json({
+                    valid: true,
+                    isGuest: false,
+                    isInvited: true,
+                    role: invResult.rows[0].assigned_role || 'participant',
+                });
+            }
+        }
+
+        // 3. Check HMAC inviteToken
+        if (inviteToken && typeof inviteToken === 'string' && meetingInvitation.verifyMeetingInviteToken(code, inviteToken)) {
+            return res.json({ valid: true, isGuest: false, isInvited: true, role: 'participant' });
+        }
+
+        return res.json({ valid: false, isGuest: false, isInvited: false, role: 'participant' });
+    } catch (err: any) {
+        logger.warn('Error in verify-access: ' + err.message);
+        res.status(503).json({ error: 'Access verification unavailable' });
+    }
+});
+
 // Signaling stores a host-enabled transcript (service-to-service only). Idempotent per segment.
 app.post('/api/internal/meetings/:code/transcript', express.json({ limit: '2mb' }), async (req, res) => {
     try {
@@ -433,6 +500,436 @@ app.get('/api/meetings/code/:code', meetingCodeLookupLimit, async (req, res) => 
     } catch (err: any) {
         logger.error(err, 'Failed to get meeting');
         res.status(500).json({ error: 'Failed to get meeting' });
+    }
+});
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// INVITATIONS & GUEST TOKENS (Phase 2)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+// Invite registered members to a meeting
+app.post('/api/meetings/:code/invitations', authMiddleware, validateBody(inviteMembersBody), async (req, res) => {
+    try {
+        const user = (req as any).user as AuthPayload;
+        const code = String(req.params.code).toUpperCase().trim();
+        const { inviteeUserIds, assignedRole } = req.body;
+
+        const meetingResult = await pool.query(
+            `SELECT id, title, host_id, tenant_id FROM meetings WHERE meeting_code = $1 AND tenant_id = $2`,
+            [code, user.tenantId]
+        );
+        if (!meetingResult.rows.length) return res.status(404).json({ error: 'Meeting not found' });
+        const meeting = meetingResult.rows[0];
+
+        if (meeting.host_id !== user.sub && user.role !== 'admin') {
+            return res.status(403).json({ error: 'Only the meeting host or administrator can invite participants' });
+        }
+
+        const validUsers = await pool.query(
+            `SELECT id, display_name, email FROM users WHERE id = ANY($1::uuid[]) AND tenant_id = $2 AND is_active = true`,
+            [inviteeUserIds, user.tenantId]
+        );
+        if (!validUsers.rows.length) return res.status(400).json({ error: 'No valid invitees found in your organisation' });
+
+        const createdInvitations: any[] = [];
+        for (const invitee of validUsers.rows) {
+            const inviteId = uuidv4();
+            const notifId = uuidv4();
+
+            const invResult = await pool.query(
+                `INSERT INTO meeting_invitations (id, meeting_id, tenant_id, inviter_id, invitee_user_id, invite_type, assigned_role, invitation_status, expires_at)
+                 VALUES ($1, $2, $3, $4, $5, 'member', $6, 'pending', NOW() + INTERVAL '7 days')
+                 ON CONFLICT (meeting_id, invitee_user_id)
+                 DO UPDATE SET assigned_role = EXCLUDED.assigned_role, invitation_status = 'pending', revoked_at = NULL, responded_at = NULL, expires_at = NOW() + INTERVAL '7 days'
+                 RETURNING id, assigned_role, invitation_status, created_at`,
+                [inviteId, meeting.id, user.tenantId, user.sub, invitee.id, assignedRole]
+            );
+
+            await pool.query(
+                `INSERT INTO user_notifications (id, tenant_id, recipient_user_id, notification_type, title, message, related_meeting_id, related_invitation_id)
+                 VALUES ($1, $2, $3, 'meeting_invitation', $4, $5, $6, $7)`,
+                [
+                    notifId,
+                    user.tenantId,
+                    invitee.id,
+                    `Invitation: ${meeting.title || 'Meeting'}`,
+                    `${user.displayName || 'The host'} invited you to join "${meeting.title || 'Meeting'}" as ${assignedRole === 'co-host' ? 'a co-host' : 'a participant'}.`,
+                    meeting.id,
+                    invResult.rows[0].id
+                ]
+            );
+
+            createdInvitations.push({
+                id: invResult.rows[0].id,
+                inviteeId: invitee.id,
+                displayName: invitee.display_name,
+                email: invitee.email,
+                role: invResult.rows[0].assigned_role,
+                status: invResult.rows[0].invitation_status,
+            });
+        }
+
+        res.status(201).json({ created: createdInvitations.length, invitations: createdInvitations });
+    } catch (err: any) {
+        logger.error(err, 'Failed to create meeting invitations');
+        res.status(500).json({ error: 'Failed to create invitations' });
+    }
+});
+
+// List invitations for a meeting (host/admin)
+app.get('/api/meetings/:code/invitations', authMiddleware, async (req, res) => {
+    try {
+        const user = (req as any).user as AuthPayload;
+        const code = String(req.params.code).toUpperCase().trim();
+
+        const meetingResult = await pool.query(
+            `SELECT id, host_id FROM meetings WHERE meeting_code = $1 AND tenant_id = $2`,
+            [code, user.tenantId]
+        );
+        if (!meetingResult.rows.length) return res.status(404).json({ error: 'Meeting not found' });
+        const meeting = meetingResult.rows[0];
+
+        if (meeting.host_id !== user.sub && user.role !== 'admin') {
+            return res.status(403).json({ error: 'Only the meeting host can view invitations' });
+        }
+
+        const result = await pool.query(
+            `SELECT i.id, i.assigned_role AS "assignedRole", i.invitation_status AS "status",
+                    i.created_at AS "createdAt", i.responded_at AS "respondedAt", i.revoked_at AS "revokedAt",
+                    u.id AS "userId", u.display_name AS "displayName", u.email, u.avatar_url AS "avatarUrl"
+             FROM meeting_invitations i
+             JOIN users u ON u.id = i.invitee_user_id
+             WHERE i.meeting_id = $1 AND i.tenant_id = $2
+             ORDER BY i.created_at DESC`,
+            [meeting.id, user.tenantId]
+        );
+
+        res.json({ invitations: result.rows });
+    } catch (err: any) {
+        logger.error(err, 'Failed to list invitations');
+        res.status(500).json({ error: 'Failed to list invitations' });
+    }
+});
+
+// Update invitation status (accept / decline / revoke)
+app.patch('/api/meetings/:code/invitations/:id', authMiddleware, validateBody(updateInvitationBody), async (req, res) => {
+    try {
+        const user = (req as any).user as AuthPayload;
+        const { action } = req.body;
+        const inviteId = req.params.id;
+
+        const invResult = await pool.query(
+            `SELECT i.id, i.meeting_id, i.invitee_user_id, i.invitation_status, m.host_id
+             FROM meeting_invitations i
+             JOIN meetings m ON m.id = i.meeting_id
+             WHERE i.id = $1 AND i.tenant_id = $2`,
+            [inviteId, user.tenantId]
+        );
+        if (!invResult.rows.length) return res.status(404).json({ error: 'Invitation not found' });
+        const invitation = invResult.rows[0];
+
+        if (action === 'revoke') {
+            if (invitation.host_id !== user.sub && user.role !== 'admin') {
+                return res.status(403).json({ error: 'Only the meeting host can revoke an invitation' });
+            }
+            await pool.query(
+                `UPDATE meeting_invitations SET invitation_status = 'revoked', revoked_at = NOW() WHERE id = $1`,
+                [inviteId]
+            );
+            return res.json({ updated: true, status: 'revoked' });
+        }
+
+        if (invitation.invitee_user_id !== user.sub) {
+            return res.status(403).json({ error: 'You can only respond to your own invitations' });
+        }
+
+        if (invitation.invitation_status === 'revoked') {
+            return res.status(400).json({ error: 'This invitation has been revoked by the host' });
+        }
+
+        const newStatus = action === 'accept' ? 'accepted' : 'declined';
+        await pool.query(
+            `UPDATE meeting_invitations SET invitation_status = $1, responded_at = NOW() WHERE id = $2`,
+            [newStatus, inviteId]
+        );
+
+        res.json({ updated: true, status: newStatus });
+    } catch (err: any) {
+        logger.error(err, 'Failed to update invitation');
+        res.status(500).json({ error: 'Failed to update invitation' });
+    }
+});
+
+// Generate cryptographically secure guest access token (hash stored in DB)
+app.post('/api/meetings/:code/guest-tokens', authMiddleware, validateBody(createGuestTokenBody), async (req, res) => {
+    try {
+        const user = (req as any).user as AuthPayload;
+        const code = String(req.params.code).toUpperCase().trim();
+        const { expiresInHours, maxUses } = req.body;
+
+        const meetingResult = await pool.query(
+            `SELECT id, host_id, tenant_id FROM meetings WHERE meeting_code = $1 AND tenant_id = $2`,
+            [code, user.tenantId]
+        );
+        if (!meetingResult.rows.length) return res.status(404).json({ error: 'Meeting not found' });
+        const meeting = meetingResult.rows[0];
+
+        if (meeting.host_id !== user.sub && user.role !== 'admin') {
+            return res.status(403).json({ error: 'Only the meeting host can generate guest links' });
+        }
+
+        const rawToken = crypto.randomBytes(24).toString('base64url');
+        const tokenHash = crypto.createHash('sha256').update(rawToken).digest('hex');
+        const id = uuidv4();
+        const WEB_URL = (process.env.WEB_URL || 'https://qs-vc.vercel.app').replace(/\/$/, '');
+
+        const expiresAt = new Date(Date.now() + expiresInHours * 3600 * 1000).toISOString();
+
+        await pool.query(
+            `INSERT INTO guest_access_tokens (id, meeting_id, tenant_id, token_hash, created_by, expires_at, max_uses)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [id, meeting.id, user.tenantId, tokenHash, user.sub, expiresAt, maxUses]
+        );
+
+        const guestUrl = `${WEB_URL}/meeting/${code}/preview?guest=${rawToken}`;
+        res.status(201).json({
+            id,
+            guestToken: rawToken,
+            guestUrl,
+            expiresAt,
+            maxUses,
+            usageCount: 0,
+        });
+    } catch (err: any) {
+        logger.error(err, 'Failed to create guest access token');
+        res.status(500).json({ error: 'Failed to create guest access token' });
+    }
+});
+
+// List guest tokens for meeting (host/admin)
+app.get('/api/meetings/:code/guest-tokens', authMiddleware, async (req, res) => {
+    try {
+        const user = (req as any).user as AuthPayload;
+        const code = String(req.params.code).toUpperCase().trim();
+
+        const meetingResult = await pool.query(
+            `SELECT id, host_id FROM meetings WHERE meeting_code = $1 AND tenant_id = $2`,
+            [code, user.tenantId]
+        );
+        if (!meetingResult.rows.length) return res.status(404).json({ error: 'Meeting not found' });
+        const meeting = meetingResult.rows[0];
+
+        if (meeting.host_id !== user.sub && user.role !== 'admin') {
+            return res.status(403).json({ error: 'Only the meeting host can view guest links' });
+        }
+
+        const result = await pool.query(
+            `SELECT id, expires_at AS "expiresAt", revoked_at AS "revokedAt",
+                    max_uses AS "maxUses", usage_count AS "usageCount", created_at AS "createdAt"
+             FROM guest_access_tokens
+             WHERE meeting_id = $1 AND tenant_id = $2
+             ORDER BY created_at DESC`,
+            [meeting.id, user.tenantId]
+        );
+
+        res.json({ guestTokens: result.rows });
+    } catch (err: any) {
+        logger.error(err, 'Failed to list guest tokens');
+        res.status(500).json({ error: 'Failed to list guest tokens' });
+    }
+});
+
+// Revoke a guest access token
+app.delete('/api/meetings/:code/guest-tokens/:id', authMiddleware, async (req, res) => {
+    try {
+        const user = (req as any).user as AuthPayload;
+        const code = String(req.params.code).toUpperCase().trim();
+        const tokenId = req.params.id;
+
+        const meetingResult = await pool.query(
+            `SELECT id, host_id FROM meetings WHERE meeting_code = $1 AND tenant_id = $2`,
+            [code, user.tenantId]
+        );
+        if (!meetingResult.rows.length) return res.status(404).json({ error: 'Meeting not found' });
+        const meeting = meetingResult.rows[0];
+
+        if (meeting.host_id !== user.sub && user.role !== 'admin') {
+            return res.status(403).json({ error: 'Only the meeting host can revoke guest links' });
+        }
+
+        await pool.query(
+            `UPDATE guest_access_tokens SET revoked_at = NOW() WHERE id = $1 AND meeting_id = $2 AND tenant_id = $3`,
+            [tokenId, meeting.id, user.tenantId]
+        );
+
+        res.json({ revoked: true });
+    } catch (err: any) {
+        logger.error(err, 'Failed to revoke guest token');
+        res.status(500).json({ error: 'Failed to revoke guest token' });
+    }
+});
+
+// In-app notifications & pending invitations for the logged-in user
+app.get('/api/notifications', authMiddleware, async (req, res) => {
+    try {
+        const user = (req as any).user as AuthPayload;
+
+        const [notifs, pendingInvites] = await Promise.all([
+            pool.query(
+                `SELECT n.id, n.notification_type AS "type", n.title, n.message, n.is_read AS "isRead",
+                        n.related_meeting_id AS "meetingId", n.related_invitation_id AS "invitationId",
+                        n.created_at AS "createdAt", m.meeting_code AS "meetingCode"
+                 FROM user_notifications n
+                 LEFT JOIN meetings m ON m.id = n.related_meeting_id
+                 WHERE n.recipient_user_id = $1 AND n.tenant_id = $2
+                 ORDER BY n.created_at DESC LIMIT 50`,
+                [user.sub, user.tenantId]
+            ),
+            pool.query(
+                `SELECT i.id, i.assigned_role AS "assignedRole", i.invitation_status AS "status",
+                        i.created_at AS "createdAt", i.expires_at AS "expiresAt",
+                        m.meeting_code AS "meetingCode", m.title AS "meetingTitle",
+                        m.scheduled_start AS "scheduledStart", m.scheduled_end AS "scheduledEnd",
+                        u.display_name AS "hostName"
+                 FROM meeting_invitations i
+                 JOIN meetings m ON m.id = i.meeting_id
+                 JOIN users u ON u.id = i.inviter_id
+                 WHERE i.invitee_user_id = $1 AND i.tenant_id = $2
+                   AND i.invitation_status = 'pending'
+                   AND (i.expires_at IS NULL OR i.expires_at > NOW())
+                 ORDER BY i.created_at DESC`,
+                [user.sub, user.tenantId]
+            ),
+        ]);
+
+        res.json({
+            notifications: notifs.rows,
+            pendingInvitations: pendingInvites.rows,
+            unreadCount: notifs.rows.filter((n: any) => !n.isRead).length,
+        });
+    } catch (err: any) {
+        logger.error(err, 'Failed to get notifications');
+        res.status(500).json({ error: 'Failed to get notifications' });
+    }
+});
+
+app.patch('/api/notifications/:id/read', authMiddleware, async (req, res) => {
+    try {
+        const user = (req as any).user as AuthPayload;
+        await pool.query(
+            `UPDATE user_notifications SET is_read = true WHERE id = $1 AND recipient_user_id = $2 AND tenant_id = $3`,
+            [req.params.id, user.sub, user.tenantId]
+        );
+        res.json({ read: true });
+    } catch (err: any) {
+        logger.error(err, 'Failed to mark notification read');
+        res.status(500).json({ error: 'Failed to update notification' });
+    }
+});
+
+// Validate meeting access token (registered member, guest token, or invite link)
+app.post('/api/meetings/:code/validate-access', async (req, res) => {
+    try {
+        const code = String(req.params.code).toUpperCase().trim();
+        const { guestToken, inviteToken } = req.body || {};
+        let user: AuthPayload | null = null;
+
+        const authHeader = req.headers.authorization;
+        if (authHeader?.startsWith('Bearer ')) {
+            try {
+                const response = await fetch(`${AUTH_URL}/api/auth/verify`, {
+                    headers: { Authorization: authHeader },
+                    signal: AbortSignal.timeout(5000),
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    if (data?.valid && data?.payload) user = data.payload as AuthPayload;
+                }
+            } catch { }
+        }
+
+        const meetingRes = await pool.query(`SELECT * FROM public.qsvc_meeting_by_code($1)`, [code]);
+        if (!meetingRes.rows.length) return res.status(404).json({ error: 'Meeting not found' });
+        const meeting = meetingRes.rows[0];
+
+        // 1. Host or admin
+        if (user && (user.sub === meeting.host_id || user.role === 'admin')) {
+            return res.json({
+                authorized: true,
+                accessType: 'host',
+                role: 'host',
+                title: meeting.title,
+                hostName: meeting.host_name,
+                status: meeting.status,
+            });
+        }
+
+        // 2. Registered invited member
+        if (user) {
+            const invRes = await rawPool.query(
+                `SELECT assigned_role, invitation_status FROM meeting_invitations
+                 WHERE meeting_id = $1 AND invitee_user_id = $2`,
+                [meeting.id, user.sub]
+            );
+            if (invRes.rows.length > 0 && invRes.rows[0].invitation_status !== 'revoked') {
+                return res.json({
+                    authorized: true,
+                    accessType: 'invited_member',
+                    role: invRes.rows[0].assigned_role || 'participant',
+                    title: meeting.title,
+                    hostName: meeting.host_name,
+                    status: meeting.status,
+                });
+            }
+        }
+
+        // 3. Guest Access Token (hashed check)
+        if (guestToken && typeof guestToken === 'string') {
+            const tokenHash = crypto.createHash('sha256').update(guestToken.trim()).digest('hex');
+            const validateResult = await rawPool.query(
+                `SELECT * FROM public.qsvc_validate_guest_token($1, $2)`,
+                [code, tokenHash]
+            );
+            const row = validateResult.rows[0];
+            if (row && row.valid) {
+                return res.json({
+                    authorized: true,
+                    accessType: 'guest',
+                    role: 'participant',
+                    tokenId: row.token_id,
+                    title: meeting.title,
+                    hostName: meeting.host_name,
+                    status: meeting.status,
+                });
+            }
+            if (row && !row.valid) {
+                return res.status(403).json({ authorized: false, error: row.reason || 'Invalid guest token' });
+            }
+        }
+
+        // 4. HMAC invite token
+        if (inviteToken && typeof inviteToken === 'string' && meetingInvitation.verifyMeetingInviteToken(code, inviteToken)) {
+            return res.json({
+                authorized: true,
+                accessType: 'open',
+                role: 'participant',
+                title: meeting.title,
+                hostName: meeting.host_name,
+                status: meeting.status,
+            });
+        }
+
+        return res.json({
+            authorized: true,
+            accessType: 'open',
+            role: 'participant',
+            title: meeting.title,
+            hostName: meeting.host_name,
+            status: meeting.status,
+        });
+    } catch (err: any) {
+        logger.error(err, 'Failed to validate meeting access');
+        res.status(500).json({ error: 'Failed to validate meeting access' });
     }
 });
 

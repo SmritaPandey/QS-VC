@@ -411,6 +411,32 @@ app.post('/api/auth/logout', async (req, res) => {
 // Get current user profile
 app.get('/api/auth/me', profileHandler(verifyToken, pool));
 
+// Search registered users within the caller's tenant (for meeting invitations)
+app.get('/api/users/search', async (req, res) => {
+    try {
+        const header = req.headers.authorization;
+        if (!header?.startsWith('Bearer ')) return res.status(401).json({ error: 'No token provided' });
+        const user = await verifyToken(header.slice(7));
+        const q = String(req.query.q || '').trim();
+        if (!q || q.length < 1) return res.json({ users: [] });
+
+        const searchPattern = `%${q.toLowerCase()}%`;
+        const result = await pool.query(
+            `SELECT id, email, display_name AS "displayName", avatar_url AS "avatarUrl", role
+             FROM users
+             WHERE tenant_id = $1 AND is_active = true
+               AND (lower(display_name) LIKE $2 OR lower(email) LIKE $2)
+             ORDER BY display_name ASC
+             LIMIT 20`,
+            [user.tenantId, searchPattern]
+        );
+        res.json({ users: result.rows });
+    } catch (err) {
+        const status = sessionErrorStatus(err);
+        res.status(status).json({ error: status === 401 ? 'Invalid session' : 'Failed to search users' });
+    }
+});
+
 app.get('/api/auth/me/entitlements', async (req, res) => {
     res.set('Cache-Control', 'no-store');
     const authorization = req.get('authorization');
