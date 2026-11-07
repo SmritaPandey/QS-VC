@@ -306,7 +306,7 @@ jobs:
           echo "Building production images for $EXPECTED_SHA"
           docker compose -f "$ROOT/deploy/aws/compose.yml" --env-file "$ROOT/deploy/aws/.env" build
           echo "Running migrations and starting services"
-          "$ROOT/deploy/aws/deploy-production.sh"
+          bash "$ROOT/deploy/aws/deploy-production.sh"
           REMOTE
 
           REMOTE_PAYLOAD=$(printf 'RELEASE_URI=%q\nEXPECTED_SHA=%q\nEXPECTED_CHECKSUM=%q\n%s\n' \
