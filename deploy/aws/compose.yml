@@ -68,6 +68,9 @@ services:
       QSVC_ENTERPRISE_TERMS_REQUIRED: ${QSVC_ENTERPRISE_TERMS_REQUIRED:-no}
       <<: *runtime
       WS_TRUST_PROXY_HEADER: x-qsvc-client-ip
+      # One signaling instance on this host: single-use 30-second join tickets are kept in its
+      # memory. Set WS_TICKET_STORE=redis (and REDIS_URL) in .env before running more than one.
+      WS_TICKET_STORE: ${WS_TICKET_STORE:-memory}
       SFU_CONTROL_TOKEN: ${SFU_CONTROL_TOKEN:?Set a shared SFU control token}
       CAPTION_TRANSLATION_PROVIDER: ${CAPTION_TRANSLATION_PROVIDER:-libretranslate}
       GOOGLE_TRANSLATE_API_KEY: ${GOOGLE_TRANSLATE_API_KEY:-}
