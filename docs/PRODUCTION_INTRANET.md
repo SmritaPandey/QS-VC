@@ -81,6 +81,28 @@ docker compose --env-file .env.production -f docker-compose.prod.yml exec -T cad
 
 Never export `/data/caddy/pki/authorities/local/root.key`. Clients must trust the root certificate and resolve `DOMAIN` to the intranet server for camera and microphone access over HTTPS.
 
+## 5a. Desktop app downloads
+
+The Intranet page offers the desktop app as plain ZIP archives (no installers). Download the four
+ZIPs and their `.sha256` files from the GitHub release `desktop-latest` (published by the
+"Desktop downloads" workflow), verify them, and place them next to `docker-compose.prod.yml`:
+
+```bash
+mkdir -p installers && cd installers
+# copy QS-VC-Windows-x64.zip, QS-VC-macOS-arm64.zip, QS-VC-macOS-x64.zip, QS-VC-Linux-x64.zip and their .sha256 files here
+for f in *.zip; do [ "$(sha256sum "$f" | cut -d' ' -f1)" = "$(tr -d '\r' < "$f.sha256" | cut -d' ' -f1)" ] && echo "OK $f"; done
+cd .. && docker compose --env-file .env.production -f docker-compose.prod.yml up -d auth
+```
+
+A missing ZIP only makes that download show "not available yet".
+
+## Meeting encryption
+
+Browser meetings are end-to-end encrypted by default (ML-KEM-1024 key exchange, ML-DSA-87
+signatures, AES-256-GCM media) in current Chrome, Edge, Safari and Firefox. Participants can compare
+the security code in the lock badge. Room-number rooms that bridge SIP/H.323 (Poly) devices use
+DTLS-SRTP transport encryption instead, because the bridge must mix decoded audio.
+
 ## 6. Verify each release
 
 Check service health, test sign-in with both application roles, and run two-device meeting checks from the real enterprise network. Confirm TLS trust, join approval, TURN fallback, SFU media, screen sharing, reconnect behavior, and database cross-tenant denial. The CI workflow also builds each app image, stores its SBOM as a workflow artifact, and scans it with Grype before passing the release gate.

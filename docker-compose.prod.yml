@@ -188,6 +188,13 @@ services:
       - TURN_SECRET=${TURN_SECRET:?Set a unique shared TURN_SECRET}
       - TURN_SERVERS=turn:${DOMAIN}:3478?transport=udp,turn:${DOMAIN}:3478?transport=tcp
       - CORS_ORIGINS=https://${DOMAIN}
+      # Desktop app downloads on the Intranet page (plain ZIPs; a missing file shows "not available yet").
+      - ENTERPRISE_WINDOWS_INSTALLER=/opt/qsvc/installers/QS-VC-Windows-x64.zip
+      - ENTERPRISE_MACOS_ARM64_INSTALLER=/opt/qsvc/installers/QS-VC-macOS-arm64.zip
+      - ENTERPRISE_MACOS_X64_INSTALLER=/opt/qsvc/installers/QS-VC-macOS-x64.zip
+      - ENTERPRISE_LINUX_X64_INSTALLER=/opt/qsvc/installers/QS-VC-Linux-x64.zip
+    volumes:
+      - ./installers:/opt/qsvc/installers:ro
     depends_on:
       postgres:
         condition: service_healthy

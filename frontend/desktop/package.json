@@ -61,7 +61,8 @@
             ],
             "icon": "assets/icon.png",
             "category": "Network",
-            "artifactName": "QS-VC-Linux-${arch}.zip"
+            "artifactName": "QS-VC-Linux-${arch}.zip",
+            "executableName": "qs-vc"
         },
         "mac": {
             "target": [
