@@ -104,7 +104,10 @@ services:
     restart: 'no'
     environment:
       NODE_ENV: production
-      DATABASE_URL: ${MIGRATION_DATABASE_URL:?Migration URL is required}
+      # Supplied only while deploy-production.sh runs migrations (read from SSM). Optional here so
+      # building and starting the other services does not need the migration credential;
+      # db/migrate.js refuses to run without it.
+      DATABASE_URL: ${MIGRATION_DATABASE_URL:-}
       POSTGRES_SSL: verify-full
       POSTGRES_CA_FILE: /opt/qsvc/certs/rds-ca.pem
     command: [node, db/migrate.js]
