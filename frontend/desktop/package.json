@@ -5,9 +5,9 @@
     "description": "QS-VC Desktop Client for organisation intranets",
     "main": "dist/main.js",
     "scripts": {
-        "build": "tsc",
+        "build": "node scripts/vendor-shared.cjs && tsc",
         "start": "electron .",
-        "dev": "tsc && electron .",
+        "dev": "npm run build && electron .",
         "package:win": "npm run package:win:x64",
         "package:mac": "electron-builder --mac",
         "package:mac:arm64": "npm run build && electron-builder --mac zip --arm64",
@@ -62,7 +62,7 @@
             "icon": "assets/icon.png",
             "category": "Network",
             "artifactName": "QS-VC-Linux-${arch}.zip",
-            "executableName": "qs-vc"
+            "executableName": "qs-vc-bin"
         },
         "mac": {
             "target": [
@@ -84,7 +84,8 @@
                 "NSCameraUsageDescription": "QS-VC uses your camera for video meetings.",
                 "NSMicrophoneUsageDescription": "QS-VC uses your microphone for video meetings."
             }
-        }
+        },
+        "afterPack": "scripts/after-pack.cjs"
     },
     "dependencies": {},
     "devDependencies": {
