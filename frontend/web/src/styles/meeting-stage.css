@@ -133,7 +133,7 @@
   .qs-strip-bottom .qs-strip, .qs-strip-side .qs-strip { grid-auto-flow:column; grid-auto-rows:auto; grid-auto-columns:minmax(0, calc((100% - 30px) / var(--strip-count, 3))); height:96px; }
   .qs-topchip { max-width:150px; }
 }
-@media (max-width:767px) and (orientation:landscape) and (max-height:520px) {
+@media (min-width:560px) and (max-width:767px) and (orientation:landscape) and (max-height:520px) {
   .meeting-room .meeting-content { padding:6px; gap:6px; }
   .qs-stage-layout { gap:6px; }
   .qs-strip-bottom .qs-strip, .qs-strip-side .qs-strip { height:64px; }

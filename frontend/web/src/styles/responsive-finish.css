@@ -33,7 +33,9 @@
   .public-site .payment-layout,.public-site .intranet-layout { grid-template-columns:minmax(0,1fr); }
 }
 @media(min-width:768px) and (max-width:1100px) { .public-site .pricing-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } }
-@media(max-width:767px) and (orientation:landscape) {
+/* Real phone landscape only: a portrait phone with the keyboard open is also "landscape"
+   (wider than tall) but stays under 560px wide, and must keep the single-column layout. */
+@media(min-width:560px) and (max-width:767px) and (orientation:landscape) {
   .pre-meeting-page .pre-meeting-container { grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; }
   .pre-meeting-page .video-preview-wrapper { max-height:none; }
   .meeting-room .side-panel:not(.meeting-chat-overlay),.meeting-room .ai-chat-panel,.meeting-room .meeting-collaboration,.meeting-room .meeting-language-settings { top:8px; }

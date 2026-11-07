@@ -295,7 +295,11 @@ export default function PreMeeting() {
                         onChange={(e) => setDisplayName(e.target.value)}
                         className="input-name"
                         onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
-                        autoFocus
+                        // Focus the name on desktop only: on phones it would open the keyboard
+                        // over the camera preview as soon as the page loads.
+                        autoFocus={typeof window !== 'undefined' && window.matchMedia?.('(pointer: fine)').matches}
+                        autoComplete="name"
+                        enterKeyHint="go"
                     />
 
                     <div className="device-selectors">
