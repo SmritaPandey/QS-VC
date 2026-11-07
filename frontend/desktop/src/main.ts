@@ -12,7 +12,9 @@
 import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell, session, desktopCapturer, dialog, net, nativeTheme, safeStorage, clipboard } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
-import { FEATURE_MIN_PLAN } from '../../../shared/entitlements.cjs';
+// Copied into the app package at build time (scripts/vendor-shared.cjs): the packaged app must never
+// load files from outside its own folder, or it fails to start.
+import { FEATURE_MIN_PLAN } from './vendor/entitlements.cjs';
 
 const PROTOCOL = 'qsvc';
 const MEETING_CODE = /^[A-Z0-9]{2,8}(-[A-Z0-9]{2,8}){1,4}$/;
@@ -379,6 +381,19 @@ function handleDeepLink(link: string) {
     } catch { /* ignore malformed links */ }
 }
 
+// ━━━ Release smoke test ━━━
+// CI starts each packaged app with QSVC_SMOKE_TEST=<file>. The app writes OK once its window has
+// rendered the start page, then quits; a startup crash leaves no file and fails the release.
+function runSmokeTest(win: BrowserWindow, resultFile: string) {
+    const finish = (result: string) => { try { fs.writeFileSync(resultFile, result); } catch { /* CI reports the missing file */ } app.exit(result === 'OK' ? 0 : 1); };
+    win.webContents.once('did-fail-load', (_event, code, description) => finish(`FAIL load ${code} ${description}`));
+    win.webContents.once('did-finish-load', () => {
+        win.webContents.executeJavaScript('document.body ? document.body.innerText.length : 0')
+            .then(length => finish(Number(length) > 0 ? 'OK' : 'FAIL empty start page'))
+            .catch(error => finish(`FAIL ${error}`));
+    });
+}
+
 // ━━━ Lifecycle ━━━
 
 if (!app.requestSingleInstanceLock()) {
@@ -407,6 +422,7 @@ if (!app.requestSingleInstanceLock()) {
         const link = process.argv.find(arg => arg.startsWith(`${PROTOCOL}://`));
         if (link) handleDeepLink(link);
         if (pendingDeepLink && workspace) { const code = pendingDeepLink; pendingDeepLink = ''; mainWindow.webContents.once('did-finish-load', () => openMeeting(code)); }
+        if (process.env.QSVC_SMOKE_TEST) runSmokeTest(mainWindow, process.env.QSVC_SMOKE_TEST);
     });
 
     app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });

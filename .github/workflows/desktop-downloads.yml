@@ -12,6 +12,7 @@ on:
       - 'frontend/desktop/**'
       - '.github/workflows/desktop-downloads.yml'
       - 'docs/QS-VC-Intranet-Setup.pdf'
+      - 'shared/entitlements.cjs'
 
 permissions:
   contents: read
@@ -29,10 +30,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: Windows x64, os: windows-latest, script: 'package:win:x64', file: QS-VC-Windows-x64.zip }
-          - { name: Mac Apple silicon, os: macos-latest, script: 'package:mac:arm64', file: QS-VC-macOS-arm64.zip }
-          - { name: Mac Intel, os: macos-latest, script: 'package:mac:x64', file: QS-VC-macOS-x64.zip }
-          - { name: Linux x64, os: ubuntu-latest, script: 'package:linux:x64', file: QS-VC-Linux-x64.zip }
+          - { name: Windows x64, os: windows-latest, script: 'package:win:x64', file: QS-VC-Windows-x64.zip, smoke: required }
+          - { name: Mac Apple silicon, os: macos-latest, script: 'package:mac:arm64', file: QS-VC-macOS-arm64.zip, smoke: required }
+          - { name: Mac Intel, os: macos-latest, script: 'package:mac:x64', file: QS-VC-macOS-x64.zip, smoke: optional }
+          - { name: Linux x64, os: ubuntu-latest, script: 'package:linux:x64', file: QS-VC-Linux-x64.zip, smoke: required }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,14 +49,41 @@ jobs:
         run: npm --prefix frontend/desktop run ${{ matrix.script }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Install a virtual display
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
+      # Start the packaged app from the ZIP exactly as a user would. The app renders its start page,
+      # writes OK to QSVC_SMOKE_TEST and quits; a startup crash leaves no result and fails the build.
+      # (Mac Intel runs under Rosetta on the Apple silicon runner, so its result is advisory.)
+      - name: Start the packaged app (smoke test)
+        shell: bash
+        working-directory: frontend/desktop/release
+        continue-on-error: ${{ matrix.smoke == 'optional' }}
+        run: |
+          set -euo pipefail
+          rm -rf smoke && mkdir smoke
+          case "${{ runner.os }}" in
+            Linux)   unzip -q "${{ matrix.file }}" -d smoke/app; cmd=(xvfb-run -a smoke/app/qs-vc) ;;
+            Windows) unzip -q "${{ matrix.file }}" -d smoke/app; cmd=(smoke/app/QS-VC.exe) ;;
+            macOS)   ditto -x -k "${{ matrix.file }}" smoke/app
+                     codesign --verify --deep --strict --verbose=2 smoke/app/QS-VC.app
+                     cmd=(smoke/app/QS-VC.app/Contents/MacOS/QS-VC) ;;
+          esac
+          result="$(pwd -W 2>/dev/null || pwd)/smoke/result.txt"
+          QSVC_SMOKE_TEST="$result" timeout 120 "${cmd[@]}" || true
+          if [ ! -f "$result" ]; then echo "::error::${{ matrix.name }} app did not start"; exit 1; fi
+          cat "$result"; echo
+          grep -qx OK "$result" || { echo "::error::${{ matrix.name }} app started but its start page failed"; exit 1; }
+          rm -rf smoke
       - name: Verify ZIP and write checksum
         shell: bash
         working-directory: frontend/desktop/release
         run: |
           set -euo pipefail
           test -s "${{ matrix.file }}"
-          # Ship the getting-started guide and the full intranet setup guide at the top of every ZIP.
-          python3 -c "import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], 'a', zipfile.ZIP_DEFLATED); z.write(sys.argv[2], 'QS-VC-Getting-Started.pdf'); z.write(sys.argv[3], 'QS-VC-Intranet-Setup.pdf'); z.close()" "${{ matrix.file }}" ../guide/QS-VC-Getting-Started.pdf ../../../docs/QS-VC-Intranet-Setup.pdf
+          # Ship the getting-started, prerequisites and intranet setup guides at the top of every ZIP.
+          python3 -c "import sys, zipfile; z = zipfile.ZipFile(sys.argv[1], 'a', zipfile.ZIP_DEFLATED); [z.write(f, f.replace(chr(92), '/').split('/')[-1]) for f in sys.argv[2:]]; z.close()" "${{ matrix.file }}" ../guide/QS-VC-Getting-Started.pdf ../guide/QS-VC-Prerequisites.pdf ../../../docs/QS-VC-Intranet-Setup.pdf
+          python3 -c "import sys, zipfile; names = zipfile.ZipFile(sys.argv[1]).namelist(); missing = [n for n in ('QS-VC-Getting-Started.pdf', 'QS-VC-Prerequisites.pdf', 'QS-VC-Intranet-Setup.pdf') if n not in names]; sys.exit(f'guides missing: {missing}' if missing else 0)" "${{ matrix.file }}"
           python3 -c "import sys, zipfile; z = zipfile.ZipFile(sys.argv[1]); bad = z.testzip(); sys.exit(f'corrupt entry {bad}' if bad else 0)" "${{ matrix.file }}"
           python3 -c "import hashlib, sys; f = sys.argv[1]; open(f + '.sha256', 'wb').write((hashlib.sha256(open(f, 'rb').read()).hexdigest() + '  ' + f + chr(10)).encode())" "${{ matrix.file }}"
           cat "${{ matrix.file }}.sha256"
@@ -74,6 +102,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -90,3 +119,8 @@ jobs:
               --title "QS-VC desktop downloads" --notes "Plain ZIP archives of the QS-VC desktop app. Updated automatically." --latest=false
           fi
           gh release upload desktop-latest zips/QS-VC-*.zip zips/QS-VC-*.zip.sha256 --repo "$GITHUB_REPOSITORY" --clobber
+      # The server copies ZIPs from desktop-latest during a deployment, so start one now.
+      - name: Deploy the new ZIPs to the server
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run deploy-production.yml --repo "$GITHUB_REPOSITORY" --ref main
