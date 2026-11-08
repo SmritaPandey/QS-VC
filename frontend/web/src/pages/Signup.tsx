@@ -26,7 +26,7 @@ export default function Signup() {
         try {
             const response = await fetch(`${AUTH_API}/api/auth/register`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ displayName: fields.get('displayName'), email: fields.get('email'), password: fields.get('password') }),
+                body: JSON.stringify({ displayName: fields.get('displayName'), email: fields.get('email'), phoneNumber: fields.get('phoneNumber'), password: fields.get('password') }),
             });
             const data = await response.json();
             if (!response.ok || typeof data.token !== 'string' || !data.token) throw new Error(data.error || 'Could not create your account. Please try again.');
@@ -46,6 +46,9 @@ export default function Signup() {
             <form className="public-auth-form" onSubmit={submit} aria-label="Create an account" aria-busy={busy}>
                 <label htmlFor="signup-name">Your name</label>
                 <input id="signup-name" name="displayName" autoComplete="name" required maxLength={100} />
+                <label htmlFor="signup-phone">Mobile number</label>
+                <input id="signup-phone" name="phoneNumber" type="tel" autoComplete="tel" inputMode="tel" placeholder="+91 98765 43210" required maxLength={24} aria-describedby="signup-phone-help" />
+                <p id="signup-phone-help">Include your country code. We store it on your account; it is not verified by SMS yet.</p>
                 <label htmlFor="signup-email">Email</label>
                 <input id="signup-email" name="email" type="email" autoComplete="email" required maxLength={255} />
                 <label htmlFor="signup-password">Password</label>

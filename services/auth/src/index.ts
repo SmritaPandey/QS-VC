@@ -1,6 +1,6 @@
 import { assertJwtSecret } from '../../../shared/jwt-secret.cjs';
 import { profileHandler } from './profile.js';
-import { registerBody } from './registration';
+import { phoneNumberSchema, registerBody } from './registration';
 import { enterpriseRouter } from './enterprise-access.js';
 import { platformAdminAnalyticsRouter } from './platform-admin-analytics.js';
 import express, { Request, Response, NextFunction } from 'express';
@@ -19,6 +19,7 @@ import { createSession, validateSession, requireEnterpriseTerm, endSession, sess
 import { contactRouter, contactRequestError } from './contact.js';
 import { effectiveRole, isPlatformAdmin, assertPlatformAdminConfig } from './platform-admins.js';
 import { FEATURE_MIN_PLAN, getEntitlements, getPrivateConversationLimitMs } from '../../../shared/entitlements.cjs';
+import { billingRouter } from './billing.js';
 
 dotenv.config({ path: '../../.env' });
 assertJwtSecret();
@@ -49,6 +50,7 @@ const loginBody = z.object({
 const updateProfileBody = z.object({
     displayName: z.string().min(1).max(100)
         .transform((s) => s.trim().replace(/<[^>]*>/g, '')).optional(),
+    phoneNumber: phoneNumberSchema.optional(),
     avatarUrl: z.string().url('Invalid URL').max(2048).optional(),
     preferences: z.record(z.string(), z.any()).optional(),
 }).refine((data) => Object.keys(data).some(k => (data as any)[k] !== undefined), {
@@ -94,14 +96,24 @@ app.use(cors({
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     credentials: true,
 }));
-app.use(express.json());
+app.use(express.json({
+    verify: (req, _res, buffer) => {
+        if ((req.url || '').startsWith('/api/auth/billing/webhooks/')) {
+            (req as Request & { rawBody?: Buffer }).rawBody = Buffer.from(buffer);
+        }
+    },
+}));
 
 // Rate limiting
 const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } });
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many auth attempts, please try again later' } });
 // Signaling verifies each authenticated RPC, so do not apply the low browser API quota here.
 app.use('/api/auth/verify', rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, skip: req => { try { const value = jwt.verify(String(req.headers['x-qsvc-service-token'] || ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production') as jwt.JwtPayload; return value.aud === 'qsvc-auth-verify' && value.iss === 'qsvc-internal'; } catch { return false; } }, keyGenerator: req => req.headers.authorization ? crypto.createHash('sha256').update(req.headers.authorization).digest('hex') : ipKeyGenerator(req.ip || 'unknown'), standardHeaders: true, legacyHeaders: false }));
-app.use((req, res, next) => req.path === '/api/auth/verify' ? next() : generalLimiter(req, res, next));
+app.use((req, res, next) => {
+    // Payment webhooks have their own higher, retry-friendly per-IP limit in billingRouter.
+    if (req.path === '/api/auth/verify' || req.path.startsWith('/api/auth/billing/webhooks/')) return next();
+    return generalLimiter(req, res, next);
+});
 app.use('/api/auth/register', authLimiter);
 app.use('/api/auth/login', authLimiter);
 
@@ -198,6 +210,7 @@ async function verifyToken(token: string): Promise<jwt.JwtPayload> {
 
 app.use('/api/auth/enterprise', enterpriseRouter(verifyToken, pool));
 app.use('/api/auth/admin', platformAdminAnalyticsRouter(verifyToken, pool));
+app.use('/api/auth/billing', billingRouter(pool, verifyToken, logger));
 
 // Health check
 app.get('/health', (_req, res) => {
@@ -207,6 +220,8 @@ app.get('/health', (_req, res) => {
 app.get('/ready', async (_req, res) => {
     try {
         await pool.query('SELECT 1 FROM enterprise_access_terms LIMIT 0');
+        await pool.query('SELECT 1 FROM payment_subscriptions LIMIT 0');
+        await pool.query('SELECT phone_number FROM users LIMIT 0');
         res.json({ status: 'ready' });
     } catch {
         res.status(503).json({ status: 'unavailable', dependency: 'database' });
@@ -219,7 +234,7 @@ app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
         return res.status(403).json({ error: 'Your organisation provisions accounts for this workspace.' });
     }
     try {
-        const { password, displayName, tenantSlug } = req.body;
+        const { password, displayName, phoneNumber, tenantSlug } = req.body;
         const email = String(req.body.email).trim().toLowerCase();
 
         // Public signup cannot enrol users into an organisation or a paid tenant.
@@ -253,18 +268,12 @@ app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
         const userId = uuidv4();
 
         await pool.query(
-            `INSERT INTO users (id, tenant_id, email, display_name, password_hash, role)
-       VALUES ($1, $2, $3, $4, $5, $6)`,
-            [userId, tenantId, email, displayName, passwordHash, role]
+            `INSERT INTO users (id, tenant_id, email, display_name, phone_number, password_hash, role)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [userId, tenantId, email, displayName, phoneNumber, passwordHash, role]
         );
 
         const sessionId = await createSession(pool, userId);
-        await pool.query(
-            `UPDATE users SET subscription_plan = 'starter_trial', trial_started_at = NOW(),
-                              trial_ends_at = NOW() + INTERVAL '7 days', updated_at = NOW()
-             WHERE id = $1 AND subscription_plan IS NULL AND trial_started_at IS NULL`,
-            [userId],
-        );
         const token = generateToken({ id: userId, email, tenantId, role, displayName }, sessionId);
 
         logger.info(`User registered: ${email} [tenant:${tenantId}]`);
@@ -300,15 +309,6 @@ app.post('/api/auth/login', validateBody(loginBody), async (req, res) => {
         if (!validPassword) {
             return res.status(401).json({ error: 'Invalid email or password' });
         }
-
-        // Existing free-account guests receive one trial on their first sign-in after this rollout.
-        await pool.query(
-            `UPDATE users SET subscription_plan = 'starter_trial', trial_started_at = NOW(),
-                              trial_ends_at = NOW() + INTERVAL '7 days', updated_at = NOW()
-             WHERE id = $1 AND subscription_plan IS NULL AND trial_started_at IS NULL
-               AND tenant_id IN (SELECT id FROM tenants WHERE plan = 'free')`,
-            [user.id],
-        );
 
         if (!isPlatformAdmin(user.email)) {
             try {
@@ -367,7 +367,7 @@ app.get('/api/auth/verify', async (req, res) => {
         const token = authHeader.slice(7);
         const payload = await verifyToken(token);
         const result = await pool.query(
-            `SELECT u.email, u.role, u.subscription_plan, u.trial_ends_at, u.enterprise_status, t.plan AS tenant_plan
+            `SELECT u.email, u.role, u.subscription_plan, u.trial_started_at, u.trial_ends_at, u.subscription_expires_at, u.enterprise_status, t.plan AS tenant_plan
              FROM users u JOIN tenants t ON t.id = u.tenant_id
              WHERE u.id = $1 AND u.tenant_id = $2 AND u.is_active AND t.is_active`,
             [payload.sub, payload.tenantId],
@@ -441,12 +441,12 @@ app.get('/api/auth/me/entitlements', async (req, res) => {
     res.set('Cache-Control', 'no-store');
     const authorization = req.get('authorization');
     if (!authorization?.startsWith('Bearer ')) {
-        return res.json({ plan: 'guest', status: 'paid_active', trialEndsAt: null, features: [], featureMinimumPlans: FEATURE_MIN_PLAN, privateConversationLimitSeconds: 0 });
+        return res.json({ plan: 'guest', status: 'paid_active', trialEndsAt: null, trialUsed: false, features: [], featureMinimumPlans: FEATURE_MIN_PLAN, privateConversationLimitSeconds: 0 });
     }
     try {
         const user = await verifyToken(authorization.slice(7));
         const result = await pool.query(
-            `SELECT u.email, u.role, u.subscription_plan, u.trial_ends_at, u.enterprise_status, t.plan AS tenant_plan
+            `SELECT u.email, u.role, u.subscription_plan, u.trial_started_at, u.trial_ends_at, u.subscription_expires_at, u.enterprise_status, t.plan AS tenant_plan
              FROM users u JOIN tenants t ON t.id = u.tenant_id
              WHERE u.id = $1 AND u.tenant_id = $2 AND u.is_active AND t.is_active`,
             [user.sub, user.tenantId],
@@ -501,13 +501,14 @@ app.patch('/api/auth/me', validateBody(updateProfileBody), async (req, res) => {
         }
 
         const payload = await verifyToken(authHeader.slice(7));
-        const { displayName, avatarUrl, preferences } = req.body;
+        const { displayName, phoneNumber, avatarUrl, preferences } = req.body;
 
         const fields: string[] = [];
         const values: any[] = [];
         let idx = 1;
 
         if (displayName) { fields.push(`display_name = $${idx++}`); values.push(displayName); }
+        if (phoneNumber !== undefined) { fields.push(`phone_number = $${idx++}`); values.push(phoneNumber); }
         if (avatarUrl !== undefined) { fields.push(`avatar_url = $${idx++}`); values.push(avatarUrl); }
         if (preferences) {
             delete preferences._authSessionId;

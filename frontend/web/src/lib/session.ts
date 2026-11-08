@@ -1,6 +1,6 @@
 export const AUTH_API = import.meta.env.VITE_AUTH_URL || '';
 
-type Profile = { id: string; displayName: string; email: string; role?: string };
+type Profile = { id: string; displayName: string; email: string; phoneNumber?: string | null; role?: string };
 export type SessionState = { status: 'checking' | 'authenticated' | 'anonymous' | 'unavailable'; profile?: Profile };
 const serverState: SessionState = { status: 'checking' };
 let state: SessionState = serverState;

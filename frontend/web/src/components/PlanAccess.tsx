@@ -6,8 +6,8 @@ import type { Plan } from '../../../../shared/entitlements.cjs';
 
 export function CrownBadge({ plan }: { plan: Plan }) {
     if (plan === 'guest') return null;
-    const label = plan === 'starter' || plan === 'starter_trial' ? 'Starter' : plan === 'pro' ? 'Pro' : 'Quantum-Premise';
-    const tone = plan === 'starter' || plan === 'starter_trial' ? 'silver' : plan === 'pro' ? 'gold' : 'violet';
+    const label = plan === 'starter' || plan === 'starter_trial' ? 'Starter' : plan === 'pro' || plan === 'pro_trial' ? 'Pro' : 'Quantum-Premise';
+    const tone = plan === 'starter' || plan === 'starter_trial' ? 'silver' : plan === 'pro' || plan === 'pro_trial' ? 'gold' : 'violet';
     return <span className={`plan-crown plan-crown--${tone}`} title={`${label} plan`} aria-label={`${label} plan`}><span className="mi" aria-hidden="true">workspace_premium</span></span>;
 }
 
@@ -18,9 +18,10 @@ export function TrialChip() {
         const timer = window.setInterval(() => tick(value => value + 1), 60_000);
         return () => window.clearInterval(timer);
     }, []);
-    if (plan !== 'starter_trial' || !trialEndsAt) return null;
+    if ((plan !== 'starter_trial' && plan !== 'pro_trial') || !trialEndsAt) return null;
     const days = Math.max(0, Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / 86400000));
-    return <span className="trial-chip" aria-label={`Starter trial, ${days} days left`}>Starter trial · {days} {days === 1 ? 'day' : 'days'} left</span>;
+    const tier = plan === 'pro_trial' ? 'Pro' : 'Starter';
+    return <span className="trial-chip" aria-label={`${tier} trial, ${days} days left`}>{tier} trial · {days} {days === 1 ? 'day' : 'days'} left</span>;
 }
 
 export function UpgradePrompt({ requiredPlan, onClose, blocking = false, signInReturnTo, intendedFeature }: { requiredPlan: Plan; onClose?: () => void; blocking?: boolean; signInReturnTo?: string; intendedFeature?: string }) {
@@ -29,6 +30,7 @@ export function UpgradePrompt({ requiredPlan, onClose, blocking = false, signInR
     const dialogRef = useRef<HTMLElement>(null);
     const guest = session.status !== 'authenticated';
     const trialEnded = entitlements.status === 'trial_expired';
+    const trialTier = entitlements.plan === 'pro_trial' ? 'Pro' : 'Starter';
     const enterprisePending = entitlements.status === 'enterprise_pending';
     const enterpriseRejected = entitlements.status === 'enterprise_rejected';
     const requiredLabel = requiredPlan === 'enterprise' ? 'Quantum-Premise' : requiredPlan.charAt(0).toUpperCase() + requiredPlan.slice(1);
@@ -73,7 +75,7 @@ export function UpgradePrompt({ requiredPlan, onClose, blocking = false, signInR
         }}>
             <button className="upgrade-close" type="button" aria-label="Close upgrade prompt" onClick={onClose} disabled={blocking}>×</button>
             <span className="mi upgrade-icon" aria-hidden="true">{trialEnded ? 'hourglass_disabled' : enterprisePending || enterpriseRejected ? 'domain' : 'lock'}</span>
-            <h2 id="upgrade-title">{trialEnded ? 'Your Starter trial has ended' : enterprisePending ? 'Quantum-Premise access pending' : enterpriseRejected ? 'Quantum-Premise access not approved' : guest ? 'Sign in to use extra features' : <>Available on {requiredLabel} {requiredPlan === 'pro' && <CrownBadge plan="pro" />}</>}</h2>
+            <h2 id="upgrade-title">{trialEnded ? `Your ${trialTier} trial has ended` : enterprisePending ? 'Quantum-Premise access pending' : enterpriseRejected ? 'Quantum-Premise access not approved' : guest ? 'Sign in to use extra features' : <>Available on {requiredLabel} {requiredPlan === 'pro' && <CrownBadge plan="pro" />}</>}</h2>
             <p id="upgrade-copy">{trialEnded ? 'Choose a plan to keep using your meetings workspace.' : enterprisePending ? 'Your Quantum-Premise request is waiting for administrator approval.' : enterpriseRejected ? 'Contact your organisation administrator to discuss Quantum-Premise access.' : guest ? 'Sign in to access this meeting feature.' : 'Choose a plan to access this feature.'}</p>
             {actions}
         </section>

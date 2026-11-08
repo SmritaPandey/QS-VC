@@ -29,11 +29,13 @@ describe('Auth: registerBody schema', () => {
             email: 'test@example.com',
             password: 'securePass123',
             displayName: 'Test User',
+            phoneNumber: '+91 98765 43210',
         });
         expect(result.success).toBe(true);
         if (result.success) {
             expect(result.data.email).toBe('test@example.com');
             expect(result.data.displayName).toBe('Test User');
+            expect(result.data.phoneNumber).toBe('+919876543210');
         }
     });
 
@@ -42,6 +44,7 @@ describe('Auth: registerBody schema', () => {
             email: 'user@corp.com',
             password: 'strongPassword!',
             displayName: 'Corp User',
+            phoneNumber: '+919876543210',
             tenantSlug: 'acme-corp',
         });
         expect(result.success).toBe(false);
@@ -52,6 +55,7 @@ describe('Auth: registerBody schema', () => {
             email: 'not-an-email',
             password: 'securePass123',
             displayName: 'Test User',
+            phoneNumber: '+919876543210',
         });
         expect(result.success).toBe(false);
     });
@@ -61,6 +65,7 @@ describe('Auth: registerBody schema', () => {
             email: 'test@example.com',
             password: 'short',
             displayName: 'Test User',
+            phoneNumber: '+919876543210',
         });
         expect(result.success).toBe(false);
         if (!result.success) {
@@ -73,6 +78,7 @@ describe('Auth: registerBody schema', () => {
             email: 'test@example.com',
             password: 'securePass123',
             displayName: '',
+            phoneNumber: '+919876543210',
         });
         expect(result.success).toBe(false);
     });
@@ -82,6 +88,7 @@ describe('Auth: registerBody schema', () => {
             email: 'test@example.com',
             password: 'securePass123',
             displayName: 'User <script>alert("xss")</script>',
+            phoneNumber: '+919876543210',
         });
         expect(result.success).toBe(true);
         if (result.success) {
@@ -94,6 +101,7 @@ describe('Auth: registerBody schema', () => {
             email: 'test@example.com',
             password: 'securePass123',
             displayName: '  Trimmed User  ',
+            phoneNumber: '+919876543210',
         });
         expect(result.success).toBe(true);
         if (result.success) {
@@ -101,11 +109,16 @@ describe('Auth: registerBody schema', () => {
         }
     });
 
+    it('requires a valid mobile number with an international country code', () => {
+        expect(registerBody.safeParse({ email: 'test@example.com', password: 'securePass123', displayName: 'Test User' }).success).toBe(false);
+        expect(registerBody.safeParse({ email: 'test@example.com', password: 'securePass123', displayName: 'Test User', phoneNumber: '9876543210' }).success).toBe(false);
+    });
+
     it('should reject missing required fields', () => {
         const result = registerBody.safeParse({});
         expect(result.success).toBe(false);
         if (!result.success) {
-            expect(result.error.issues.length).toBeGreaterThanOrEqual(3);
+            expect(result.error.issues.length).toBeGreaterThanOrEqual(4);
         }
     });
 });

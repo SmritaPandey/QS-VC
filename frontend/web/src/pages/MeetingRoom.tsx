@@ -1656,7 +1656,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     const privateConversationLimitMs = isPlatformAdmin ? null : entitlements.privateConversationLimitSeconds !== undefined
         ? (entitlements.privateConversationLimitSeconds === null ? null : entitlements.privateConversationLimitSeconds * 1000)
-        : entitlements.plan === 'pro' || (entitlements.plan === 'enterprise' && entitlements.status === 'enterprise_approved')
+        : entitlements.plan === 'pro' || entitlements.plan === 'pro_trial' || (entitlements.plan === 'enterprise' && entitlements.status === 'enterprise_approved')
             ? null
             : entitlements.plan === 'starter' || (entitlements.plan === 'starter_trial' && entitlements.status === 'trial_active')
                 ? 30 * 60 * 1000 : 2 * 60 * 1000;

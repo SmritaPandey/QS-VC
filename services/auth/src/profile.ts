@@ -13,7 +13,7 @@ export function profileHandler(verifyToken: (token: string) => Promise<JwtPayloa
 
             const payload = await verifyToken(authHeader.slice(7));
             const result = await pool.query(
-                `SELECT id, tenant_id, email, display_name, role, avatar_url, preferences, created_at
+                `SELECT id, tenant_id, email, display_name, phone_number, role, avatar_url, preferences, created_at
            FROM users WHERE id = $1`,
                 [payload.sub]
             );
@@ -27,6 +27,7 @@ export function profileHandler(verifyToken: (token: string) => Promise<JwtPayloa
                 id: user.id,
                 email: user.email,
                 displayName: user.display_name,
+                phoneNumber: user.phone_number,
                 role: typeof user.email === 'string' ? effectiveRole(user.email, user.role) : user.role,
                 avatarUrl: user.avatar_url,
                 preferences: Object.fromEntries(Object.entries(user.preferences || {}).filter(([key]) => key !== '_authSessionId')),

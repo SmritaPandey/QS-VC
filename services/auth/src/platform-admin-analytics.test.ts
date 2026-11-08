@@ -55,6 +55,45 @@ it('returns shared analytics through the protected aggregate function', async ()
     expect(res.json).toHaveBeenCalledWith(result);
 });
 
+it('returns mobile, billing, and plan data only through the protected paginated admin directory', async () => {
+    vi.stubEnv('QSVC_ADMIN_EMAILS', 'operator@example.test');
+    const directory = { totalUsers: 21, total: 1, planCounts: { pro: 3 }, users: [{ email: 'member@example.test', plan: 'pro', phoneNumber: '+919876543210' }] };
+    const query = vi.fn().mockResolvedValue({ rows: [{ directory }] });
+    const router = platformAdminAnalyticsRouter(async () => ({ email: 'operator@example.test' }), { query });
+    const res = makeResponse();
+    await route(router, '/users', 'get')({
+        headers: { authorization: 'Bearer token' },
+        query: { limit: '20', offset: '10', search: 'member', plan: 'pro', role: 'user' },
+    } as unknown as Request, res as unknown as Response, vi.fn());
+    expect(query).toHaveBeenCalledWith(
+        'SELECT public.qsvc_platform_admin_user_directory($1, $2, $3, $4, $5) AS directory',
+        [20, 10, 'member', 'pro', 'user'],
+    );
+    expect(res.json).toHaveBeenCalledWith(directory);
+
+    const deniedQuery = vi.fn();
+    const deniedRouter = platformAdminAnalyticsRouter(async () => ({ email: 'customer@example.test', role: 'admin' }), { query: deniedQuery });
+    const denied = makeResponse();
+    await route(deniedRouter, '/users', 'get')({ headers: { authorization: 'Bearer token' }, query: {} } as unknown as Request, denied as unknown as Response, vi.fn());
+    expect(denied.sendStatus).toHaveBeenCalledWith(403);
+    expect(deniedQuery).not.toHaveBeenCalled();
+});
+
+it('accepts Pro trial as an admin-directory plan filter', async () => {
+    vi.stubEnv('QSVC_ADMIN_EMAILS', 'operator@example.test');
+    const query = vi.fn().mockResolvedValue({ rows: [{ directory: { totalUsers: 1, total: 1, planCounts: { pro_trial: 1 }, users: [] } }] });
+    const router = platformAdminAnalyticsRouter(async () => ({ email: 'operator@example.test' }), { query });
+    const res = makeResponse();
+    await route(router, '/users', 'get')({
+        headers: { authorization: 'Bearer token' },
+        query: { plan: 'pro_trial' },
+    } as unknown as Request, res as unknown as Response, vi.fn());
+    expect(query).toHaveBeenCalledWith(
+        'SELECT public.qsvc_platform_admin_user_directory($1, $2, $3, $4, $5) AS directory',
+        [50, 0, '', 'pro_trial', null],
+    );
+});
+
 it('exposes a small protected access check without reading the analytics database', async () => {
     vi.stubEnv('QSVC_ADMIN_EMAILS', 'operator@example.test');
     const query = vi.fn();

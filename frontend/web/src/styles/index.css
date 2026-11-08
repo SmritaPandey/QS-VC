@@ -2080,6 +2080,39 @@ label {
   gap:12px;
   margin-bottom:24px;
 }
+.admin-user-plan-summary {
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(132px,1fr));
+  gap:12px;
+  margin-bottom:24px;
+}
+.admin-user-plan-summary article {
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  padding:14px 16px;
+  color:var(--text-secondary);
+  background:var(--bg-secondary);
+  border:1px solid var(--border-subtle);
+  border-radius:10px;
+}
+.admin-user-plan-summary strong {
+  color:var(--text-primary);
+  font-size:24px;
+  font-variant-numeric:tabular-nums;
+}
+.admin-user-pagination {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:16px;
+  margin-top:16px;
+  color:var(--text-secondary);
+}
+.admin-user-pagination > div {
+  display:flex;
+  gap:8px;
+}
 .search-input {
   flex:1;
 }
@@ -4975,3 +5008,14 @@ label {
 .caption-minutes pre { margin: 0; white-space: pre-wrap; font: 14px/1.5 inherit; font-family: inherit; color: #e6eef3; max-height: 260px; overflow: auto; }
 .transcript-indicator { position: absolute; z-index: 40; top: 12px; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: rgba(15, 27, 39, 0.88); border: 1px solid #43d9c2; color: #f5f8fa; font-size: 13px; }
 .transcript-indicator .mi { font-size: 16px; color: #43d9c2; }
+
+/* Pricing and trial actions keep the current plan cards but make the decision clear. */
+.pricing-trial-note { max-width:68ch; margin:12px 0 0; color:var(--text-secondary); font-size:15px; line-height:1.55; }
+.pricing-card-actions { display:grid; justify-items:stretch; gap:10px; margin-top:auto; }
+.pricing-card-actions .pricing-trial-button.qsvc-action { width:100%; }
+.pricing-checkout-link { display:inline-flex; min-height:44px; align-items:center; justify-content:center; padding:8px 10px; color:var(--text-secondary); font-size:14px; text-align:center; text-underline-offset:4px; }
+.pricing-trial-card-status { display:flex; min-height:48px; align-items:center; justify-content:center; margin:auto 0 0; padding:10px 12px; border:1px solid var(--border-tone,#d5e0e5); border-radius:12px; color:var(--text-secondary); font-size:14px; line-height:1.45; text-align:center; }
+.pricing-admin-note { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:16px 0 0; padding:12px 16px; border-left:3px solid var(--accent-primary); background:var(--bg-secondary); color:var(--text-secondary); }
+.pricing-admin-included { margin:auto 0 0; padding:12px 0; border-top:1px solid var(--border-tone,#d5e0e5); color:var(--text-secondary); text-align:center; }
+.pricing-card-actions .pricing-trial-button .qsvc-action__inner { min-height:48px; }
+@media(max-width:640px) { .pricing-trial-note { font-size:16px; } .pricing-card-actions { gap:6px; } }

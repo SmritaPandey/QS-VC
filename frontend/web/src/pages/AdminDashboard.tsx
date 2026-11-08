@@ -36,11 +36,33 @@ interface UserRecord {
     id: string;
     email: string;
     displayName: string;
+    phoneNumber: string | null;
     role: 'admin' | 'user' | 'guest';
+    plan: string;
+    planStatus: string;
+    billingProvider: 'razorpay' | 'paypal' | 'cashfree' | null;
+    billingStatus: string | null;
+    subscriptionEndsAt: string | null;
+    billingAmount: string | null;
+    billingCurrency: string | null;
     createdAt: string;
     lastLogin: string;
     meetingCount: number;
     status: 'active' | 'suspended' | 'invited';
+}
+
+type UserDirectory = { totalUsers: number; total: number; planCounts: Record<string, number>; users: UserRecord[] };
+const USER_PAGE_SIZE = 50;
+const userPlanLabels: Record<string, string> = {
+    admin: 'Admin', guest: 'Free', starter_trial: 'Starter trial', pro_trial: 'Pro trial', trial_expired: 'Trial expired',
+    starter: 'Starter', pro: 'Pro', paid_expired: 'Expired', enterprise: 'Enterprise',
+};
+
+function formatBillingAmount(amount: string, currency: string) {
+    const value = Number(amount);
+    if (!Number.isFinite(value)) return `${currency} ${amount}`;
+    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 2 }).format(value); }
+    catch { return `${currency} ${value.toFixed(2)}`; }
 }
 
 interface RecordingRecord {
@@ -74,6 +96,12 @@ const AdminDashboard: React.FC = () => {
     const [activeTab, setActiveTab] = useState<TabName>('overview');
     const [userSearch, setUserSearch] = useState('');
     const [userRoleFilter, setUserRoleFilter] = useState<string>('all');
+    const [userPlanFilter, setUserPlanFilter] = useState<string>('all');
+    const [userSearchQuery, setUserSearchQuery] = useState('');
+    const [userPage, setUserPage] = useState(0);
+    const [usersTotal, setUsersTotal] = useState(0);
+    const [planCounts, setPlanCounts] = useState<Record<string, number>>({});
+    const [userDirectoryError, setUserDirectoryError] = useState('');
 
     // ── Fetch dashboard data ──
     useEffect(() => {
@@ -99,19 +127,6 @@ const AdminDashboard: React.FC = () => {
             } catch {
                 // Silently handle
             }
-        };
-
-        const fetchUsers = async () => {
-            try {
-                const res = await fetch(`${AUTH_URL}/api/auth/users`, {
-                    headers: { Authorization: `Bearer ${getToken()}` },
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    setUsers(data.users || []);
-                    setStats(prev => ({ ...prev, totalUsers: data.users?.length || 0 }));
-                }
-            } catch { /* silent */ }
         };
 
         const fetchRecordings = async () => {
@@ -140,7 +155,6 @@ const AdminDashboard: React.FC = () => {
         };
 
         fetchStats();
-        fetchUsers();
         fetchRecordings();
         fetchMeetings();
 
@@ -148,14 +162,35 @@ const AdminDashboard: React.FC = () => {
         return () => clearInterval(interval);
     }, []);
 
-    // ── Filter users ──
-    const filteredUsers = users.filter(u => {
-        const matchesSearch = userSearch === '' ||
-            u.email.toLowerCase().includes(userSearch.toLowerCase()) ||
-            u.displayName.toLowerCase().includes(userSearch.toLowerCase());
-        const matchesRole = userRoleFilter === 'all' || u.role === userRoleFilter;
-        return matchesSearch && matchesRole;
-    });
+    useEffect(() => {
+        const timer = window.setTimeout(() => { setUserSearchQuery(userSearch); setUserPage(0); }, 250);
+        return () => window.clearTimeout(timer);
+    }, [userSearch]);
+
+    useEffect(() => {
+        const controller = new AbortController();
+        const query = new URLSearchParams({
+            limit: String(USER_PAGE_SIZE), offset: String(userPage * USER_PAGE_SIZE),
+            search: userSearchQuery, role: userRoleFilter,
+        });
+        if (userPlanFilter !== 'all') query.set('plan', userPlanFilter);
+        fetch(`${AUTH_URL}/api/auth/admin/users?${query}`, {
+            headers: { Authorization: `Bearer ${getToken()}` }, signal: controller.signal,
+        }).then(async response => {
+            if (!response.ok) throw new Error('The admin account directory is unavailable.');
+            return await response.json() as UserDirectory;
+        }).then(data => {
+            setUsers(data.users || []);
+            setUsersTotal(data.total || 0);
+            setPlanCounts(data.planCounts || {});
+            setStats(prev => ({ ...prev, totalUsers: data.totalUsers || 0 }));
+            setUserDirectoryError('');
+        }).catch(error => {
+            if (controller.signal.aborted) return;
+            setUserDirectoryError(error instanceof Error ? error.message : 'The admin account directory is unavailable.');
+        });
+        return () => controller.abort();
+    }, [userPage, userPlanFilter, userRoleFilter, userSearchQuery]);
 
     // ── Health status helper ──
     const HealthDot: React.FC<{ status: string; label: string }> = ({ status, label }) => (
@@ -259,13 +294,19 @@ const AdminDashboard: React.FC = () => {
                     <div className="admin-users">
                         <div className="tab-header">
                             <h2>User Management</h2>
-                            <span className="badge">{users.length} users</span>
+                            <span className="badge">{stats.totalUsers.toLocaleString()} total users</span>
+                        </div>
+
+                        <div className="admin-user-plan-summary" aria-label="Users by plan">
+                            {Object.entries(userPlanLabels).map(([key, label]) => <article key={key}>
+                                <span>{label}</span><strong>{(planCounts[key] || 0).toLocaleString()}</strong>
+                            </article>)}
                         </div>
 
                         <div className="filter-bar">
                             <input
                                 type="text"
-                                placeholder="Search by name or email..."
+                                placeholder="Search by name, email or mobile..."
                                 value={userSearch}
                                 onChange={e => setUserSearch(e.target.value)}
                                 className="form-input search-input"
@@ -280,12 +321,23 @@ const AdminDashboard: React.FC = () => {
                                 <option value="user">User</option>
                                 <option value="guest">Guest</option>
                             </select>
+                            <select
+                                value={userPlanFilter}
+                                onChange={e => { setUserPlanFilter(e.target.value); setUserPage(0); }}
+                                className="form-input role-filter"
+                                aria-label="Filter by plan"
+                            >
+                                <option value="all">All Plans</option>
+                                {Object.entries(userPlanLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                            </select>
                         </div>
 
-                        {filteredUsers.length === 0 ? (
+                        {userDirectoryError && <p role="alert">{userDirectoryError}</p>}
+
+                        {users.length === 0 ? (
                             <div className="empty-state">
                                 <div className="empty-icon"><span className="mi" style={{ fontSize: '48px' }}>person</span></div>
-                                <p>{userSearch ? 'No users match your search' : 'No users registered yet'}</p>
+                                <p>{userSearch || userPlanFilter !== 'all' || userRoleFilter !== 'all' ? 'No users match these filters' : 'No users registered yet'}</p>
                             </div>
                         ) : (
                             <table className="admin-table">
@@ -293,7 +345,10 @@ const AdminDashboard: React.FC = () => {
                                     <tr>
                                         <th>Name</th>
                                         <th>Email</th>
+                                        <th>Mobile</th>
                                         <th>Role</th>
+                                        <th>Plan</th>
+                                        <th>Payment</th>
                                         <th>Status</th>
                                         <th>Joined</th>
                                         <th>Last Login</th>
@@ -301,16 +356,19 @@ const AdminDashboard: React.FC = () => {
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {filteredUsers.map(u => (
+                                    {users.map(u => (
                                         <tr key={u.id}>
                                             <td className="user-name">
                                                 <div className="avatar-sm">{u.displayName?.[0]?.toUpperCase() || '?'}</div>
                                                 {u.displayName}
                                             </td>
                                             <td>{u.email}</td>
+                                            <td>{u.phoneNumber || '—'}</td>
                                             <td>
                                                 <span className={`role-badge role-${u.role}`}>{u.role}</span>
                                             </td>
+                                            <td><strong>{userPlanLabels[u.plan] || u.plan}</strong><br /><small>{u.planStatus?.replace(/_/g, ' ') || '—'}</small></td>
+                                            <td>{u.billingProvider ? <><span>{{ razorpay: 'Razorpay', paypal: 'PayPal', cashfree: 'Cashfree' }[u.billingProvider]} · {u.billingStatus || 'pending'}</span>{u.billingAmount && u.billingCurrency ? <><br /><small>{formatBillingAmount(u.billingAmount, u.billingCurrency)}</small></> : null}{u.subscriptionEndsAt && <><br /><small>Access through {new Date(u.subscriptionEndsAt).toLocaleDateString()}</small></>}</> : '—'}</td>
                                             <td>
                                                 <span className={`status-badge status-${u.status}`}>{u.status}</span>
                                             </td>
@@ -322,6 +380,11 @@ const AdminDashboard: React.FC = () => {
                                 </tbody>
                             </table>
                         )}
+                        <div className="admin-user-pagination">
+                            <span>{usersTotal ? `Showing ${userPage * USER_PAGE_SIZE + 1}–${Math.min((userPage + 1) * USER_PAGE_SIZE, usersTotal)} of ${usersTotal.toLocaleString()}` : '0 matching users'}</span>
+                            <div><button type="button" className="btn-sm" disabled={userPage === 0} onClick={() => setUserPage(page => Math.max(0, page - 1))}>Previous</button>
+                                <button type="button" className="btn-sm" disabled={(userPage + 1) * USER_PAGE_SIZE >= usersTotal} onClick={() => setUserPage(page => page + 1)}>Next</button></div>
+                        </div>
                     </div>
                 )}
 

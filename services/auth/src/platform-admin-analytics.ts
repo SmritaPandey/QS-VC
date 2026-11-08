@@ -17,6 +17,13 @@ const entryBody = z.object({
     occurredOn: dateOnly,
     description: z.string().trim().min(1).max(500),
 });
+const userDirectoryQuery = z.object({
+    limit: z.coerce.number().int().min(1).max(100).default(50),
+    offset: z.coerce.number().int().min(0).max(1_000_000).default(0),
+    search: z.string().trim().max(100).default(''),
+    plan: z.enum(['admin', 'guest', 'starter_trial', 'pro_trial', 'trial_expired', 'starter', 'pro', 'paid_expired', 'enterprise']).optional(),
+    role: z.enum(['all', 'admin', 'user', 'guest']).default('all'),
+});
 
 type VerifyToken = (token: string) => Promise<Record<string, any>>;
 type Database = Pick<Pool, 'query'>;
@@ -48,6 +55,21 @@ export function platformAdminAnalyticsRouter(verify: VerifyToken, db: Database) 
             return res.json(result.rows[0]?.analytics ?? {});
         } catch {
             return res.status(503).json({ error: 'Platform analytics are temporarily unavailable.' });
+        }
+    }));
+
+    router.get('/users', withPlatformAdmin(async (req, res) => {
+        const parsed = userDirectoryQuery.safeParse(req.query);
+        if (!parsed.success) return res.status(400).json({ error: 'Check the user list filters and try again.' });
+        const { limit, offset, search, plan, role } = parsed.data;
+        try {
+            const result = await db.query(
+                'SELECT public.qsvc_platform_admin_user_directory($1, $2, $3, $4, $5) AS directory',
+                [limit, offset, search, plan ?? null, role === 'all' ? null : role],
+            );
+            return res.json(result.rows[0]?.directory ?? { totalUsers: 0, total: 0, planCounts: {}, users: [] });
+        } catch {
+            return res.status(503).json({ error: 'The account directory is temporarily unavailable.' });
         }
     }));
 
