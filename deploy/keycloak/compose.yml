@@ -1,0 +1,47 @@
+services:
+  keycloak-db:
+    profiles: [sso]
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_ADMIN_PASSWORD:-}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-}
+    healthcheck:
+      test: [CMD-SHELL, 'PGPASSWORD="$$KEYCLOAK_DB_PASSWORD" psql -h 127.0.0.1 -U keycloak -d keycloak -Atqc "SELECT 1"']
+      interval: 5s
+      timeout: 4s
+      retries: 15
+    networks: [keycloak-db]
+  keycloak:
+    profiles: [sso]
+    image: quay.io/keycloak/keycloak:26.8.2@sha256:3879c623248408de29a5303178b5816c77e8dfef3890c361f8c0bbeaa979ba3b
+    command: [start, --import-realm]
+    restart: unless-stopped
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8085}
+      KC_HTTP_ENABLED: 'true'
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: 'true'
+      KC_METRICS_ENABLED: 'true'
+      KC_HTTP_MANAGEMENT_HEALTH_ENABLED: 'true'
+      QSVC_KEYCLOAK_CLIENT_SECRET: ${QSVC_KEYCLOAK_CLIENT_SECRET:-}
+      QSVC_KEYCLOAK_ADMIN_CLIENT_SECRET: ${QSVC_KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-}
+    ports:
+      - '127.0.0.1:${KEYCLOAK_PORT:-8085}:8080'
+    healthcheck:
+      test: [CMD, bash, -ec, 'exec 3<>/dev/tcp/127.0.0.1/9000; printf "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r status <&3; [[ "$$status" == *" 200 "* ]]']
+      interval: 10s
+      timeout: 5s
+      start_period: 60s
+      retries: 8
+    networks: [default, keycloak-db]

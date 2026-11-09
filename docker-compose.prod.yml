@@ -5,6 +5,18 @@
 version: "3.9"
 
 services:
+  keycloak-db:
+    extends: { file: ./deploy/keycloak/compose.yml, service: keycloak-db }
+    volumes:
+      - keycloak-data:/var/lib/postgresql/data
+      - ./deploy/keycloak/init-db.sql:/docker-entrypoint-initdb.d/01-keycloak.sql:ro
+  keycloak:
+    extends: { file: ./deploy/keycloak/compose.yml, service: keycloak }
+    environment:
+      QSVC_SSO_AUTH_URL: ${QSVC_SSO_AUTH_URL:-http://localhost:4002}
+    volumes:
+      - ./deploy/keycloak/qsvc-realm.json:/opt/keycloak/data/import/qsvc-realm.json:ro
+    networks: [default, keycloak-db]
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # REVERSE PROXY (TLS Termination)
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -74,8 +86,8 @@ services:
     container_name: qsvc-minio
     command: server /data --console-address ":9001"
     environment:
-      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY}
-      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY}
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:?Set a private MinIO account}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:?Set a private MinIO password}
     volumes:
       - minio_data:/data
     healthcheck:
@@ -86,10 +98,17 @@ services:
     restart: always
 
   coturn:
+    entrypoint: [sh, /etc/coturn/start.sh]
+    volumes:
+      - ./deploy/turn/start.sh:/etc/coturn/start.sh:ro
+      - ./deploy/turn/peer-policy.conf:/etc/coturn/peer-policy.conf:ro
+    environment:
+      TURN_SECRET: ${TURN_SECRET:?Set a private shared TURN secret}
+      TURN_REALM: ${TURN_REALM:-qsvc}
+      SFU_ANNOUNCED_IP: ${SFU_ANNOUNCED_IP:-}
+      TURN_ALLOWED_SFU_IP: ${TURN_ALLOWED_SFU_IP:-}
     image: coturn/coturn:4.6.3
     container_name: qsvc-coturn
-    command: >
-      -n --lt-cred-mech --use-auth-secret --static-auth-secret=${TURN_SECRET:?Set a unique shared TURN_SECRET} --realm=${DOMAIN} --listening-port=3478 --min-port=49152 --max-port=49200 --log-file=stdout
     ports:
       - "3478:3478"
       - "3478:3478/udp"
@@ -137,6 +156,10 @@ services:
       dockerfile: services/signaling/Dockerfile
     container_name: qsvc-signaling
     environment:
+      - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-}
+      - MEETING_POLICY_SECRET=${MEETING_POLICY_SECRET:-}
+      - INVITATION_SECRET=${INVITATION_SECRET:-}
+      - TURN_ACCESS_SECRET=${TURN_ACCESS_SECRET:-}
       - QSVC_ENTERPRISE_TERMS_REQUIRED=${QSVC_ENTERPRISE_TERMS_REQUIRED:-no}
       - SFU_CONTROL_TOKEN=${SFU_CONTROL_TOKEN:?Set a shared SFU control token}
       - NODE_ENV=production
@@ -147,7 +170,6 @@ services:
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:?Set a unique REDIS_PASSWORD}
-      - JWT_SECRET=${JWT_SECRET:?Set a random JWT_SECRET}
       - CORS_ORIGINS=https://${DOMAIN}
       - LIBRETRANSLATE_URL=${LIBRETRANSLATE_URL:-}
       - LIBRETRANSLATE_API_KEY=${LIBRETRANSLATE_API_KEY:-}
@@ -170,12 +192,38 @@ services:
     restart: always
 
   auth:
+    secrets: [session_signing_key]
     image: qsvc-auth:intranet
     build:
       context: .
       dockerfile: services/auth/Dockerfile
     container_name: qsvc-auth
     environment:
+      - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-}
+      - TURN_ACCESS_SECRET=${TURN_ACCESS_SECRET:-}
+      - SESSION_SIGNING_KEY_FILE=/run/secrets/session_signing_key
+      - QSVC_SSO_ENABLED=${QSVC_SSO_ENABLED:-false}
+      - QSVC_SSO_AUTH_URL=${QSVC_SSO_AUTH_URL:-http://localhost:4002}
+      - QSVC_SSO_WEB_URL=${QSVC_SSO_WEB_URL:-http://localhost:5173}
+      - QSVC_KEYCLOAK_ISSUER=${QSVC_KEYCLOAK_ISSUER:-http://localhost:8085/realms/qsvc}
+      - QSVC_KEYCLOAK_INTERNAL_URL=${QSVC_KEYCLOAK_INTERNAL_URL:-http://keycloak:8080}
+      - QSVC_KEYCLOAK_CLIENT_SECRET=${QSVC_KEYCLOAK_CLIENT_SECRET:-}
+      - QSVC_KEYCLOAK_ADMIN_CLIENT_ID=${QSVC_KEYCLOAK_ADMIN_CLIENT_ID:-qsvc-idp-admin}
+      - QSVC_KEYCLOAK_ADMIN_CLIENT_SECRET=${QSVC_KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      - QSVC_SSO_IDP_HOSTS=${QSVC_SSO_IDP_HOSTS:-}
+      - QSVC_DIGILOCKER_ENABLED=${QSVC_DIGILOCKER_ENABLED:-false}
+      - QSVC_DIGILOCKER_AUTHORIZE_URL=${QSVC_DIGILOCKER_AUTHORIZE_URL:-}
+      - QSVC_DIGILOCKER_TOKEN_URL=${QSVC_DIGILOCKER_TOKEN_URL:-}
+      - QSVC_DIGILOCKER_USER_URL=${QSVC_DIGILOCKER_USER_URL:-}
+      - QSVC_DIGILOCKER_CLIENT_ID=${QSVC_DIGILOCKER_CLIENT_ID:-}
+      - QSVC_DIGILOCKER_CLIENT_SECRET=${QSVC_DIGILOCKER_CLIENT_SECRET:-}
+      - QSVC_DIGILOCKER_SCOPE=${QSVC_DIGILOCKER_SCOPE:-}
+      - QSVC_GOOGLE_CLIENT_ID=${QSVC_GOOGLE_CLIENT_ID:-}
+      - QSVC_GOOGLE_CLIENT_SECRET=${QSVC_GOOGLE_CLIENT_SECRET:-}
+      - QSVC_MICROSOFT_CLIENT_ID=${QSVC_MICROSOFT_CLIENT_ID:-}
+      - QSVC_MICROSOFT_CLIENT_SECRET=${QSVC_MICROSOFT_CLIENT_SECRET:-}
+      - QSVC_EMAIL_API_KEY=${QSVC_EMAIL_API_KEY:-}
+      - QSVC_EMAIL_FROM=${QSVC_EMAIL_FROM:-}
       - QSVC_ENTERPRISE_TERMS_REQUIRED=${QSVC_ENTERPRISE_TERMS_REQUIRED:-no}
       - NODE_ENV=production
       - AUTH_PORT=4002
@@ -183,7 +231,6 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${AUTH_DB_USER:-qs_auth_app}
       - POSTGRES_PASSWORD=${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD for the restricted auth database role}
-      - JWT_SECRET=${JWT_SECRET:?Set a random JWT_SECRET}
       - JWT_EXPIRY=24h
       - PAYMENTS_ENABLED=${PAYMENTS_ENABLED:-false}
       - PAYMENT_TERMS_CONFIRMED=${PAYMENT_TERMS_CONFIRMED:-false}
@@ -237,13 +284,15 @@ services:
       dockerfile: services/meeting/Dockerfile
     container_name: qsvc-meeting
     environment:
+      - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-}
+      - MEETING_POLICY_SECRET=${MEETING_POLICY_SECRET:-}
+      - INVITATION_SECRET=${INVITATION_SECRET:-}
       - NODE_ENV=production
       - MEETING_PORT=4003
       - POSTGRES_HOST=postgres
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${MEETING_DB_USER:-qs_meeting_app}
       - POSTGRES_PASSWORD=${MEETING_DB_PASSWORD:?Set MEETING_DB_PASSWORD for the restricted meeting database role}
-      - JWT_SECRET=${JWT_SECRET:?Set a random JWT_SECRET}
       - WEB_URL=https://${DOMAIN}
       - CORS_ORIGINS=https://${DOMAIN}
     depends_on:
@@ -299,13 +348,17 @@ services:
   asr:
     profiles: ["ai"]
     build:
-      context: ./services/asr
+      context: .
+      dockerfile: services/asr/Dockerfile
       args:
         BASE: ${ASR_BASE_IMAGE:-python:3.11-slim}
-        ONNX_RUNTIME: ${ASR_ONNX_RUNTIME:-onnxruntime==1.20.1}
+        ONNX_RUNTIME: ${ASR_ONNX_RUNTIME:-onnxruntime==1.31.1}
     container_name: qsvc-asr
     environment:
-      - ASR_MODEL=${ASR_MODEL:-}
+      - NODE_ENV=production
+      - QSVC_ALLOW_UNVERIFIED_MODELS=${QSVC_ALLOW_UNVERIFIED_MODELS:-false}
+      - ASR_MODEL=${ASR_MODEL:-/models/whisper}
+      - ASR_INDIC_MODEL=${ASR_INDIC_MODEL:-/models/indic}
       - ASR_LANGUAGES=${ASR_LANGUAGES:-}
       - ASR_PROMPT=${ASR_PROMPT:-}
       - ASR_API_KEY=${ASR_API_KEY:-}
@@ -313,7 +366,7 @@ services:
       - ASR_INDIC_LANGUAGES=${ASR_INDIC_LANGUAGES:-}
       - HF_TOKEN=${HF_TOKEN:-}
     volumes:
-      - asr_models:/models
+      - asr_models:/models:ro
     restart: unless-stopped
     # GPU: uncomment and build with ASR_BASE_IMAGE=nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
     # deploy: { resources: { reservations: { devices: [ { driver: nvidia, count: 1, capabilities: [gpu] } ] } } }
@@ -321,20 +374,26 @@ services:
   mt:
     profiles: ["ai"]
     build:
-      context: ./services/mt
+      context: .
+      dockerfile: services/mt/Dockerfile
       args:
         BASE: ${MT_BASE_IMAGE:-python:3.11-slim}
     container_name: qsvc-mt
     environment:
+      - NODE_ENV=production
+      - QSVC_ALLOW_UNVERIFIED_MODELS=${QSVC_ALLOW_UNVERIFIED_MODELS:-false}
+      - MT_MODEL_EN_INDIC=${MT_MODEL_EN_INDIC:-/models/en-indic}
+      - MT_MODEL_INDIC_EN=${MT_MODEL_INDIC_EN:-/models/indic-en}
       - MT_LANGUAGES=${MT_LANGUAGES:-}
       - MT_API_KEY=${LIBRETRANSLATE_API_KEY:-}
       - MT_GLOSSARY_FILE=/app/glossary.example.json
     volumes:
-      - mt_models:/models
+      - mt_models:/models:ro
     restart: unless-stopped
     # deploy: { resources: { reservations: { devices: [ { driver: nvidia, count: 1, capabilities: [gpu] } ] } } }
 
 volumes:
+  keycloak-data:
   caddy_data:
   caddy_config:
   asr_models:
@@ -342,3 +401,11 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+
+networks:
+  keycloak-db:
+    internal: true
+
+secrets:
+  session_signing_key:
+    file: ${SESSION_SIGNING_KEY_FILE:?Set the Ed25519 auth signing key file}

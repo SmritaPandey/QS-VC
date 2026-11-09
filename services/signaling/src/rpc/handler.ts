@@ -1,3 +1,4 @@
+import { admittedPeerIceServers } from '../turn.js';
 import { loadMeetingPolicy, reportMeetingStatus, verifySignalingAccess } from '../meeting-policy.js';
 /**
  * JSON-RPC 2.0 Method Handler for QS-VC Signaling.
@@ -20,6 +21,7 @@ import { saveTranscript } from '../transcript-store.js';
 
 const { createMeetingInviteToken, verifyMeetingInviteToken } = meetingInvitation;
 const admittingPeers = new Set<string>();
+const relayConfigurations = new WeakMap<object, { until: number; request: ReturnType<typeof admittedPeerIceServers> }>();
 function canManagePeer(roomId: string, actorId: string, targetId: string): boolean {
     const room = roomManager.getRoom(roomId), actor = room?.peers.get(actorId), target = room?.peers.get(targetId);
     return !!actor && !!target && actorId !== targetId && target.role !== 'host' &&
@@ -216,6 +218,16 @@ export async function handleRpcMessage(
     }
     try {
         switch (method) {
+            case 'getIceServers': {
+                let cached = relayConfigurations.get(ws);
+                if (!cached || cached.until < Date.now()) {
+                    const request = admittedPeerIceServers(connectionState.peerId!, connectionState.roomId!);
+                    cached = { until: Date.now() + 30 * 60 * 1000, request };
+                    relayConfigurations.set(ws, cached);
+                    request.catch(() => { relayConfigurations.delete(ws); });
+                }
+                return { jsonrpc: '2.0', id: id!, result: await cached.request };
+            }
             case 'setRecordingState': {
                 const parsed = z.object({ recording: z.boolean() }).strict().safeParse(params);
                 if (!parsed.success) throw createError(-32602, 'Invalid recording state');

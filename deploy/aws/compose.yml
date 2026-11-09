@@ -15,7 +15,6 @@ x-runtime: &runtime
   CORS_ORIGINS: ${CORS_ORIGINS:?Set allowed public website origins}
   POSTGRES_SSL: verify-full
   POSTGRES_CA_FILE: /opt/qsvc/certs/rds-ca.pem
-  JWT_SECRET: ${JWT_SECRET:?Set a private JWT secret}
   AUTH_INTERNAL_URL: http://127.0.0.1:4002
   MEETING_INTERNAL_URL: http://127.0.0.1:4003
   SFU_INTERNAL_URL: http://127.0.0.1:4000
@@ -26,15 +25,53 @@ x-runtime: &runtime
   TURN_SERVERS: ${TURN_SERVERS}
   # Time-limited TURN credentials (coturn REST API). Falls back to the old TURN_PASSWORD value so
   # existing servers keep working; set a dedicated TURN_SECRET in .env when convenient.
-  TURN_SECRET: ${TURN_SECRET:-${TURN_PASSWORD:?Set TURN_SECRET (or TURN_PASSWORD) for TURN relay credentials}}
+  TURN_SECRET: ${TURN_SECRET:?Set a private shared TURN secret}
 services:
+  keycloak-db:
+    extends: { file: ../keycloak/compose.yml, service: keycloak-db }
+    volumes:
+      - keycloak-data:/var/lib/postgresql/data
+      - ../keycloak/init-db.sql:/docker-entrypoint-initdb.d/01-keycloak.sql:ro
+  keycloak:
+    extends: { file: ../keycloak/compose.yml, service: keycloak }
+    environment:
+      QSVC_SSO_AUTH_URL: ${QSVC_SSO_AUTH_URL:-http://localhost:4002}
+    volumes:
+      - ../keycloak/qsvc-realm.json:/opt/keycloak/data/import/qsvc-realm.json:ro
+    networks: [default, keycloak-db]
   auth:
+    secrets: [session_signing_key]
     <<: *app
     build:
       context: ../..
       dockerfile: deploy/aws/Dockerfile
       target: build
     environment:
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-}
+      TURN_ACCESS_SECRET: ${TURN_ACCESS_SECRET:-}
+      SESSION_SIGNING_KEY_FILE: /run/secrets/session_signing_key
+      QSVC_SSO_ENABLED: ${QSVC_SSO_ENABLED:-false}
+      QSVC_SSO_AUTH_URL: ${QSVC_SSO_AUTH_URL:-http://localhost:4002}
+      QSVC_SSO_WEB_URL: ${QSVC_SSO_WEB_URL:-http://localhost:5173}
+      QSVC_KEYCLOAK_ISSUER: ${QSVC_KEYCLOAK_ISSUER:-http://localhost:8085/realms/qsvc}
+      QSVC_KEYCLOAK_INTERNAL_URL: ${QSVC_KEYCLOAK_INTERNAL_URL:-http://127.0.0.1:8085}
+      QSVC_KEYCLOAK_CLIENT_SECRET: ${QSVC_KEYCLOAK_CLIENT_SECRET:-}
+      QSVC_KEYCLOAK_ADMIN_CLIENT_ID: ${QSVC_KEYCLOAK_ADMIN_CLIENT_ID:-qsvc-idp-admin}
+      QSVC_KEYCLOAK_ADMIN_CLIENT_SECRET: ${QSVC_KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      QSVC_SSO_IDP_HOSTS: ${QSVC_SSO_IDP_HOSTS:-}
+      QSVC_DIGILOCKER_ENABLED: ${QSVC_DIGILOCKER_ENABLED:-false}
+      QSVC_DIGILOCKER_AUTHORIZE_URL: ${QSVC_DIGILOCKER_AUTHORIZE_URL:-}
+      QSVC_DIGILOCKER_TOKEN_URL: ${QSVC_DIGILOCKER_TOKEN_URL:-}
+      QSVC_DIGILOCKER_USER_URL: ${QSVC_DIGILOCKER_USER_URL:-}
+      QSVC_DIGILOCKER_CLIENT_ID: ${QSVC_DIGILOCKER_CLIENT_ID:-}
+      QSVC_DIGILOCKER_CLIENT_SECRET: ${QSVC_DIGILOCKER_CLIENT_SECRET:-}
+      QSVC_DIGILOCKER_SCOPE: ${QSVC_DIGILOCKER_SCOPE:-}
+      QSVC_GOOGLE_CLIENT_ID: ${QSVC_GOOGLE_CLIENT_ID:-}
+      QSVC_GOOGLE_CLIENT_SECRET: ${QSVC_GOOGLE_CLIENT_SECRET:-}
+      QSVC_MICROSOFT_CLIENT_ID: ${QSVC_MICROSOFT_CLIENT_ID:-}
+      QSVC_MICROSOFT_CLIENT_SECRET: ${QSVC_MICROSOFT_CLIENT_SECRET:-}
+      QSVC_EMAIL_API_KEY: ${QSVC_EMAIL_API_KEY:-}
+      QSVC_EMAIL_FROM: ${QSVC_EMAIL_FROM:-}
       QSVC_ENTERPRISE_TERMS_REQUIRED: ${QSVC_ENTERPRISE_TERMS_REQUIRED:-no}
       <<: *runtime
       DATABASE_URL: ${AUTH_DATABASE_URL:?Set the restricted auth database URL}
@@ -79,6 +116,9 @@ services:
   meeting:
     <<: *app
     environment:
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-}
+      MEETING_POLICY_SECRET: ${MEETING_POLICY_SECRET:-}
+      INVITATION_SECRET: ${INVITATION_SECRET:-}
       <<: *runtime
       DATABASE_URL: ${MEETING_DATABASE_URL:?Set the restricted meeting database URL}
     command: [node, services/meeting/dist/index.js]
@@ -90,6 +130,10 @@ services:
   signaling:
     <<: *app
     environment:
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-}
+      MEETING_POLICY_SECRET: ${MEETING_POLICY_SECRET:-}
+      INVITATION_SECRET: ${INVITATION_SECRET:-}
+      TURN_ACCESS_SECRET: ${TURN_ACCESS_SECRET:-}
       QSVC_ENTERPRISE_TERMS_REQUIRED: ${QSVC_ENTERPRISE_TERMS_REQUIRED:-no}
       <<: *runtime
       WS_TRUST_PROXY_HEADER: x-qsvc-client-ip
@@ -143,7 +187,15 @@ services:
     image: coturn/coturn:4.6.3
     network_mode: host
     restart: unless-stopped
-    command: ["-n", "--lt-cred-mech", "--use-auth-secret", "--static-auth-secret=${TURN_SECRET:-${TURN_PASSWORD}}", "--realm=${DOMAIN}", "--external-ip=${SFU_ANNOUNCED_IP}", "--listening-port=3478", "--min-port=49152", "--max-port=49200", "--no-cli", "--no-multicast-peers", "--log-file=stdout"]
+    entrypoint: [sh, /etc/coturn/start.sh]
+    environment:
+      TURN_SECRET: ${TURN_SECRET:?Set a private shared TURN secret}
+      TURN_REALM: ${DOMAIN}
+      SFU_ANNOUNCED_IP: ${SFU_ANNOUNCED_IP}
+      TURN_ALLOWED_SFU_IP: ${TURN_ALLOWED_SFU_IP:-}
+    volumes:
+      - ../turn/start.sh:/etc/coturn/start.sh:ro
+      - ../turn/peer-policy.conf:/etc/coturn/peer-policy.conf:ro
   web:
     image: qsvc-web:local
     build:
@@ -159,10 +211,20 @@ services:
     restart: unless-stopped
     environment:
       DOMAIN: ${DOMAIN}
+      ORIGIN_AUTH_SECRET: ${ORIGIN_AUTH_SECRET:?Set the private Cloudflare-to-origin secret}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
 volumes:
+  keycloak-data:
   caddy_data:
   caddy_config:
+
+networks:
+  keycloak-db:
+    internal: true
+
+secrets:
+  session_signing_key:
+    file: ${SESSION_SIGNING_KEY_FILE:?Set the Ed25519 auth signing key file}

@@ -18,6 +18,7 @@ someone speaks, a final one after a short pause. Audio is processed in memory an
 from __future__ import annotations
 
 import asyncio
+from shared.model_security import model_path, offline_models
 import json
 import os
 import re
@@ -77,7 +78,7 @@ class WhisperEngine:
         device = os.environ.get("ASR_DEVICE") or ("cuda" if _cuda_available() else "cpu")
         self.model = os.environ.get("ASR_MODEL") or ("large-v3-turbo" if device == "cuda" else "small")
         compute = os.environ.get("ASR_COMPUTE_TYPE") or ("float16" if device == "cuda" else "int8")
-        self.whisper = WhisperModel(self.model, device=device, compute_type=compute, download_root=os.environ.get("ASR_MODEL_DIR") or None,
+        self.whisper = WhisperModel(model_path(self.model), device=device, compute_type=compute, local_files_only=offline_models(), download_root=os.environ.get("ASR_MODEL_DIR") or None,
                                     cpu_threads=int(os.environ.get("ASR_CPU_THREADS", "0")) or 0)
         self.beam_final = int(os.environ.get("ASR_BEAM_SIZE", "5"))
 
@@ -124,7 +125,7 @@ class IndicConformerEngine:
 
         self.torch = torch
         self.model = os.environ.get("ASR_INDIC_MODEL", "ai4bharat/indic-conformer-600m-multilingual")
-        self.net = AutoModel.from_pretrained(self.model, trust_remote_code=True, token=os.environ.get("HF_TOKEN") or None)
+        self.net = AutoModel.from_pretrained(model_path(self.model), trust_remote_code=True, local_files_only=offline_models(), use_safetensors=True, token=os.environ.get("HF_TOKEN") or None)
         device = os.environ.get("ASR_INDIC_DEVICE")
         if device and hasattr(self.net, "to"):
             try:

@@ -218,6 +218,11 @@ async function checkSignalingAndMedia(iceServers) {
         if (join?.status && join.status !== 'joined' && !join.sendTransport) { warn('Discovery', `join returned "${join.status}" (meeting policy); use --token for an organisation account`); return; }
         if (!join?.sfuAvailable || !join.sendTransport) { fail('Discovery', 'signaling could not reach the SFU (check SFU_INTERNAL_URL and SFU_CONTROL_TOKEN)'); return; }
         pass('Discovery', 'signaling → SFU transport created');
+        if (!iceServers.length) {
+            const relay = await rpc('getIceServers');
+            iceServers = relay.iceServers || [];
+            for (const server of iceServers.filter(s => [].concat(s.urls).some(u => /^turns?:/.test(u)))) await checkTurn(server);
+        }
         if (skipMedia) return;
         const { iceParameters, iceCandidates } = join.sendTransport;
         const udp = iceCandidates.filter(c => (c.protocol || '').toLowerCase() === 'udp');
@@ -250,12 +255,17 @@ try {
 } catch (error) { fail('Gateway', error.message); }
 let iceServers = [];
 try {
-    const res = await request('/api/ice-servers');
-    if (res.status !== 200) throw new Error(`HTTP ${res.status}`);
-    iceServers = JSON.parse(res.body).iceServers || [];
-    const turn = iceServers.filter(s => [].concat(s.urls).some(u => /^turns?:/.test(u)));
-    turn.length ? pass('ICE config', `${turn.length} TURN server entr${turn.length === 1 ? 'y' : 'ies'} published`) : warn('ICE config', 'no TURN server published; users behind strict firewalls will have no audio/video');
-    for (const server of turn) await checkTurn(server);
+    const unauthenticated = await request('/api/ice-servers');
+    if (unauthenticated.status !== 401) throw new Error(`Unauthenticated relay access returned HTTP ${unauthenticated.status}; expected 401`);
+    pass('ICE access', 'unauthenticated relay access rejected');
+    if (token) {
+        const res = await request('/api/ice-servers', { headers: { Authorization: `Bearer ${token}` } });
+        if (res.status !== 200) throw new Error(`Authenticated relay access returned HTTP ${res.status}`);
+        iceServers = JSON.parse(res.body).iceServers || [];
+        const turn = iceServers.filter(s => [].concat(s.urls).some(u => /^turns?:/.test(u)));
+        turn.length ? pass('ICE config', `${turn.length} authenticated TURN configuration(s)`) : fail('ICE config', 'no TURN server configured');
+        for (const server of turn) await checkTurn(server);
+    }
 } catch (error) { fail('ICE config', `/api/ice-servers: ${error.message}`); }
 await checkSignalingAndMedia(iceServers);
 console.log(failures ? `\n${failures} check(s) failed.` : '\nAll checks passed.');

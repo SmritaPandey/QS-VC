@@ -9,6 +9,7 @@ COPY frontend/web/tsconfig.json ./
 COPY frontend/web/vite.config.ts ./
 COPY frontend/web/index.html ./
 COPY frontend/web/src/ ./src/
+COPY frontend/web/public/ ./public/
 COPY shared/ /shared/
 RUN npx vite build
 
@@ -17,5 +18,6 @@ FROM nginx:alpine
 RUN apk upgrade --no-cache
 COPY --from=builder /app/dist /usr/share/nginx/html
 COPY frontend/web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY frontend/web/security-headers.conf /etc/nginx/qsvc-security-headers.conf
 EXPOSE 5173
 CMD ["nginx", "-g", "daemon off;"]

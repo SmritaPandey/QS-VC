@@ -211,12 +211,14 @@ def test_indicconformer_engine_calls_model_with_documented_signature(monkeypatch
 
     fake_torch = types.SimpleNamespace(from_numpy=lambda a: types.SimpleNamespace(unsqueeze=lambda d: types.SimpleNamespace(shape=(1, len(a)))),
                                        inference_mode=lambda: __import__("contextlib").nullcontext())
-    fake_transformers = types.SimpleNamespace(AutoModel=types.SimpleNamespace(from_pretrained=lambda name, trust_remote_code, token: (calls.setdefault("load", (name, trust_remote_code, token)), FakeNet())[1]))
+    fake_transformers = types.SimpleNamespace(AutoModel=types.SimpleNamespace(from_pretrained=lambda name, **options: (calls.setdefault("load", (name, options)), FakeNet())[1]))
+    monkeypatch.setattr(asr, 'model_path', lambda name: '/reviewed/local-model')
+    monkeypatch.setattr(asr, 'offline_models', lambda: True)
     monkeypatch.setitem(sys.modules, "torch", fake_torch)
     monkeypatch.setitem(sys.modules, "transformers", fake_transformers)
     monkeypatch.setenv("HF_TOKEN", "hf_x")
     engine = asr.IndicConformerEngine()
-    assert calls["load"] == ("ai4bharat/indic-conformer-600m-multilingual", True, "hf_x")
+    assert calls["load"] == ('/reviewed/local-model', dict(trust_remote_code=True, token='hf_x', local_files_only=True, use_safetensors=True))
     assert engine.transcribe(np.zeros(8000, dtype=np.float32), "bn", True, None) == ("আজ মিটিং", "bn")
     assert calls == {**calls, "shape": (1, 8000), "language": "bn", "decoder": "rnnt"}
     engine.transcribe(np.zeros(8000, dtype=np.float32), "bn", False, None)

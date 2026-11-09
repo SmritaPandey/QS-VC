@@ -1,0 +1,67 @@
+{
+  "realm": "qsvc",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "duplicateEmailsAllowed": true,
+  "loginWithEmailAllowed": false,
+  "bruteForceProtected": true,
+  "accessCodeLifespan": 60,
+  "accessTokenLifespan": 120,
+  "authenticationFlows": [
+    {
+      "alias": "qsvc-first-broker-login",
+      "description": "Create unique broker users without profile editing or account linking",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        { "authenticator": "idp-create-user-if-unique", "authenticatorFlow": false, "requirement": "REQUIRED", "priority": 10 }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "qsvc",
+      "enabled": true,
+      "secret": "${QSVC_KEYCLOAK_CLIENT_SECRET}",
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": ["${QSVC_SSO_AUTH_URL}/api/auth/sso/callback"],
+      "attributes": { "pkce.code.challenge.method": "S256", "id.token.signed.response.alg": "RS256" },
+      "defaultClientScopes": ["basic", "profile", "email"],
+      "protocolMappers": [
+        {
+          "name": "QS-VC identity provider",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usersessionmodel-note-mapper",
+          "config": { "user.session.note": "identity_provider", "claim.name": "qsvc_idp", "jsonType.label": "String", "id.token.claim": "true", "access.token.claim": "false" }
+        }
+      ]
+    },
+    {
+      "clientId": "qsvc-idp-admin",
+      "enabled": true,
+      "secret": "${QSVC_KEYCLOAK_ADMIN_CLIENT_SECRET}",
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": true,
+      "defaultClientScopes": ["basic", "roles", "kc-admin-api"]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-qsvc-idp-admin",
+      "enabled": true,
+      "serviceAccountClientId": "qsvc-idp-admin",
+      "clientRoles": { "realm-management": ["manage-identity-providers"] }
+    }
+  ]
+}

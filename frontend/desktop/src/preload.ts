@@ -2,15 +2,16 @@
  * QS-VC Desktop — preload (secure bridge). No Node.js access reaches page code.
  * - The app's own page (static/app.html) gets `window.qsvcDesktop` to call the main process;
  *   the main process refuses these calls from any other page.
- * - The server's meeting room page receives the signed-in session once, before its scripts run,
+ * - The server's meeting room page receives a non-secret session marker, before its scripts run,
  *   so the meeting joins as the signed-in user instead of a guest.
  */
 import { contextBridge, ipcRenderer } from 'electron';
 
 if (location.protocol !== 'file:' && /^\/meeting\/[^/]+(\/preview)?\/?$/.test(location.pathname)) {
     try {
-        const token = ipcRenderer.sendSync('meeting:token');
-        if (typeof token === 'string' && token) sessionStorage.setItem('token', token);
+        const marker = ipcRenderer.sendSync('meeting:session-marker');
+        if (typeof marker === 'string' && marker) sessionStorage.setItem('token', marker);
+        else sessionStorage.removeItem('token');
     } catch { /* join as guest if the session is unavailable */ }
 }
 
@@ -21,6 +22,13 @@ contextBridge.exposeInMainWorld('qsvcDesktop', {
     platform: process.platform,
     state: () => call('app:state'),
     setWorkspace: (url: string) => call('workspace:set', url),
+    discover: (email: string) => call('auth:discover', email),
+    personalProviders: () => call('auth:personal-providers'),
+    signInWithProvider: (provider: string, keep: boolean) => call('auth:personal', provider, keep),
+    completePersonalSignIn: (profile: object) => call('auth:personal-complete', profile),
+    cancelPersonalSignIn: () => call('auth:personal-cancel'),
+    signInWithOrganisation: (email: string, keep: boolean) => call('auth:sso', email, keep),
+    cancelOrganisationSignIn: () => call('auth:sso-cancel'),
     login: (email: string, password: string, keep: boolean) => call('auth:login', email, password, keep),
     logout: () => call('auth:logout'),
     listMeetings: (start: string, end: string) => call('meetings:list', start, end),

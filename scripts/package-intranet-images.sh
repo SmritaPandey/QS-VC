@@ -22,6 +22,13 @@ app_images=(qsvc-sfu:intranet qsvc-signaling:intranet qsvc-auth:intranet qsvc-me
 runtime_images=(caddy:2-alpine postgres:16-alpine redis:7-alpine minio/minio:latest coturn/coturn:4.6.3)
 
 "${compose[@]}" pull caddy postgres redis minio coturn
+if [[ "${QSVC_PACKAGE_SSO:-false}" == true ]]; then
+  "${compose[@]}" --profile sso pull keycloak keycloak-db
+  keycloak_image=$("${compose[@]}" --profile sso config --format json | python3 -c 'import json, sys; print(json.load(sys.stdin)["services"]["keycloak"]["image"])')
+  docker tag "$keycloak_image" "${keycloak_image%@*}"
+  # Preserve the tag in the offline archive and verify the pinned digest via the manifest.
+  runtime_images+=("${keycloak_image%@*}")
+fi
 "${compose[@]}" build sfu signaling auth meeting recording web
 
 mkdir -p "$output_dir/sbom"
@@ -36,12 +43,18 @@ done
 
 docker save --output "$output_dir/qsvc-intranet-images.tar" "${runtime_images[@]}" "${app_images[@]}"
 cp "$compose_file" "$output_dir/docker-compose.prod.yml"
-mkdir -p "$output_dir/config" "$output_dir/db"
+mkdir -p "$output_dir/config" "$output_dir/db" "$output_dir/deploy/keycloak" "$output_dir/deploy/turn"
+cp -R "$repo_root/deploy/turn/." "$output_dir/deploy/turn/"
+cp -R "$repo_root/deploy/keycloak/." "$output_dir/deploy/keycloak/"
 cp "$repo_root/config/Caddyfile.template" "$output_dir/config/Caddyfile.template"
 cp -R "$repo_root/db/migrations" "$output_dir/db/migrations"
 cp "$repo_root/db/create-application-accounts.sql" "$output_dir/db/create-application-accounts.sql"
 cp "$repo_root/db/verify-access.sql" "$output_dir/db/verify-access.sql"
+cp "$repo_root/docs/ENTERPRISE_SSO.md" "$output_dir/ENTERPRISE_SSO.md"
 cp "$repo_root/docs/PRODUCTION_INTRANET.md" "$output_dir/PRODUCTION_INTRANET.md"
+mkdir -p "$output_dir/scripts"
+cp "$repo_root/scripts/provision-security-keys.mjs" "$output_dir/scripts/"
+cp "$repo_root/docs/SECURITY_REMEDIATION_2026-11.md" "$output_dir/SECURITY_REMEDIATION_2026-11.md"
 
 {
   echo "Source revision: $(git -C "$repo_root" rev-parse HEAD)"

@@ -1,4 +1,4 @@
-import { assertJwtSecret } from '../../../shared/jwt-secret.cjs';
+import { serviceSecret } from '../../../shared/service-secrets.cjs';
 import { insertSchedule, scheduleOccurrences } from './schedule-occurrences.js';
 import { meetingAuth, requireFeature, type AuthPayload } from './auth.js';
 import jwt from 'jsonwebtoken';
@@ -25,7 +25,7 @@ import crypto from 'node:crypto';
 const { createMeetingInviteToken } = meetingInvitation;
 
 dotenv.config({ path: '../../.env' });
-assertJwtSecret();
+for (const name of ['INTERNAL_AUTH_SECRET', 'MEETING_POLICY_SECRET', 'INVITATION_SECRET'] as const) serviceSecret(name);
 
 const logger = pino({
     transport: process.env.NODE_ENV === 'development'
@@ -111,6 +111,7 @@ function validateBody<T>(schema: z.ZodSchema<T>) {
 }
 
 const app = express();
+app.disable('x-powered-by');
 app.disable('x-powered-by'); // Do not advertise the framework (OWASP A05).
 app.set('trust proxy', 1);
 
@@ -139,7 +140,7 @@ app.use((req, res, next) => {
         : express.json({ limit: '100kb' });
     parser(req, res, next);
 });
-app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, skip: req => { if (!req.path.startsWith('/api/internal/meetings/')) return false; try { jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal' }); return true; } catch { return false; } }, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } }));
+app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 100, skip: req => { if (!req.path.startsWith('/api/internal/meetings/')) return false; try { jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), serviceSecret('MEETING_POLICY_SECRET'), { algorithms: ['HS256'], audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', maxAge: 30 }); return true; } catch { return false; } }, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } }));
 const meetingCodeLookupLimit = rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many meeting-code lookup attempts' } });
 
 const PORT = parseInt(process.env.PORT || process.env.MEETING_PORT || '4003', 10);
@@ -278,7 +279,7 @@ app.post('/api/meetings/schedule', scheduleFeature, authMiddleware, validateBody
 // Get meeting by code
 app.get('/api/internal/meetings/:code', async (req, res) => {
     try {
-        jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal' });
+        jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), serviceSecret('MEETING_POLICY_SECRET'), { algorithms: ['HS256'], audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', maxAge: 30 });
     } catch { return res.status(401).json({ error: 'Invalid service authentication' }); }
     try {
         const result = await pool.query('SELECT * FROM public.qsvc_meeting_by_code($1)', [String(req.params.code).toUpperCase()]);
@@ -321,7 +322,7 @@ app.post('/api/meetings/problem-reports', express.json({ limit: '24kb' }), async
 // Signaling reports that the host started or ended the meeting (service-to-service only).
 app.post('/api/internal/meetings/:code/status', express.json(), async (req, res) => {
     try {
-        jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal' });
+        jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), serviceSecret('MEETING_POLICY_SECRET'), { algorithms: ['HS256'], audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', maxAge: 30 });
     } catch { return res.status(401).json({ error: 'Invalid service authentication' }); }
     const status = req.body?.status;
     if (status !== 'active' && status !== 'ended') return res.status(400).json({ error: 'status must be active or ended' });
@@ -337,7 +338,7 @@ app.post('/api/internal/meetings/:code/status', express.json(), async (req, res)
 // Signaling checks guest token or user invitation (service-to-service only).
 app.post('/api/internal/meetings/:code/verify-access', express.json(), async (req, res) => {
     try {
-        jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal' });
+        jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), serviceSecret('MEETING_POLICY_SECRET'), { algorithms: ['HS256'], audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', maxAge: 30 });
     } catch { return res.status(401).json({ error: 'Invalid service authentication' }); }
 
     const code = String(req.params.code).toUpperCase().trim();
@@ -389,7 +390,7 @@ app.post('/api/internal/meetings/:code/verify-access', express.json(), async (re
 // Signaling stores a host-enabled transcript (service-to-service only). Idempotent per segment.
 app.post('/api/internal/meetings/:code/transcript', express.json({ limit: '2mb' }), async (req, res) => {
     try {
-        jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal' });
+        jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), serviceSecret('MEETING_POLICY_SECRET'), { algorithms: ['HS256'], audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', maxAge: 30 });
     } catch { return res.status(401).json({ error: 'Invalid service authentication' }); }
     const parsed = transcriptBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid transcript' });
@@ -1190,6 +1191,7 @@ app.get('/api/meetings/:meetingId/chat', async (req, res) => {
 // GLOBAL ERROR HANDLER
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+app.use((_req, res) => { res.status(404).json({ error: 'Route not found' }); });
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     logger.error(err, 'Unhandled error');
     res.status(500).json({ error: 'Internal server error' });

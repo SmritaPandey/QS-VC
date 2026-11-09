@@ -16,8 +16,8 @@ export const plans = [
         desc: 'Perfect for personal use and quick meetings.',
         highlight: false,
         features: [
-            { text: 'Up to 100 participants', included: true },
-            { text: '40-minute meeting limit', included: true },
+            { text: 'Browser meetings', included: true },
+            { text: 'Host controls', included: true },
             { text: 'HD video & audio', included: true },
             { text: 'Screen sharing', included: true },
             { text: 'In-meeting chat', included: true },
@@ -35,10 +35,10 @@ export const plans = [
         desc: 'For small teams that need longer meetings.',
         highlight: false,
         features: [
-            { text: 'Up to 300 participants', included: true },
-            { text: '24-hour meeting limit', included: true },
-            { text: 'Full HD video (1080p)', included: true },
-            { text: 'Cloud recording (50GB)', included: true },
+            { text: 'Signed-in workspace', included: true },
+            { text: 'Private conversations up to 30 minutes', included: true },
+            { text: 'Video quality depends on device and network', included: true },
+            { text: 'Cloud recording (requires Pro)', included: false },
             { text: 'AI noise suppression', included: true },
             { text: 'AI captions (English)', included: true },
             { text: 'Meeting scheduling', included: true },
@@ -54,15 +54,15 @@ export const plans = [
         desc: 'For growing businesses with advanced needs.',
         highlight: true,
         features: [
-            { text: 'Up to 500 participants', included: true },
-            { text: 'Unlimited meeting duration', included: true },
-            { text: '4K video support', included: true },
-            { text: 'Cloud recording (200GB)', included: true },
+            { text: 'Advanced meeting tools', included: true },
+            { text: 'Private conversations without a plan time cap', included: true },
+            { text: 'Video quality depends on device and network', included: true },
+            { text: 'Cloud recording (configured storage required)', included: true },
             { text: 'AI captions (22 languages)', included: true },
             { text: 'Real-time translation', included: true },
             { text: 'Meeting summaries (AI)', included: true },
             { text: 'Breakout rooms', included: true },
-            { text: 'SSO / Google / Microsoft', included: true },
+            { text: 'Google / Microsoft sign-in (when configured)', included: true },
             { text: 'Admin dashboard & analytics', included: true },
         ],
     },
@@ -74,14 +74,14 @@ export const plans = [
         desc: 'For large organizations, banks, government.',
         highlight: false,
         features: [
-            { text: '1000+ participants', included: true },
-            { text: 'Unlimited everything', included: true },
+            { text: 'Capacity scoped to your deployment', included: true },
+            { text: 'Features agreed for your organisation', included: true },
             { text: 'Post-Quantum Encryption (PQC): ML-KEM-1024 + ML-DSA-87', included: true },
             { text: 'End-to-End Encryption (E2EE), on by default', included: true },
             { text: 'On-Premise / Air-Gapped', included: true },
             { text: 'LDAP / Active Directory', included: true },
             { text: 'SIP/H.323 interop', included: true },
-            { text: 'Dedicated SLA (99.99%)', included: true },
+            { text: 'SLA agreed in your contract', included: true },
             { text: 'White-label / Custom branding', included: true },
             { text: 'Dedicated support engineer', included: true },
         ],
@@ -93,12 +93,12 @@ const capabilities = [
     ['Browser meetings', 'Available in the demo'],
     ['Screen sharing and chat', 'Available in the demo'],
     ['Captions and speech options', 'Depend on browser, device and meeting server'],
-    ['Meeting recording', 'Disabled in the demo. Paid recording is planned.'],
+    ['Meeting recording', 'Requires Pro, a signed-in host and configured storage'],
     ['Organisation hosting and identity', 'Require a separate deployment review'],
 ];
 const questions = [
     { question: 'Can I buy a plan now?', answer: 'Checkout availability depends on this deployment. If a recurring payment provider is enabled on the checkout page, you can continue there; otherwise no payment will be taken. Prices, inclusions and commercial terms remain proposed and require confirmation before purchase.' },
-    { question: 'Can I record a meeting?', answer: 'Cloud recording is available to signed-in meeting hosts when storage is configured. Hosts choose when to download, share or delete recordings. Paid-plan inclusions remain proposals.' },
+    { question: 'Can I record a meeting?', answer: 'Cloud recording requires Pro or an approved enterprise plan, a signed-in meeting host and configured storage. Hosts choose when to download, share or delete recordings.' },
     { question: 'Which languages can I use?', answer: 'Available caption languages depend on the configured meeting server. Translated speech also needs a matching voice on your device. Check the language control inside the meeting.' },
     { question: 'Can my organisation run QS-VC internally?', answer: 'An internal deployment needs a review of your network, devices, identity and hosting requirements. This demo does not establish offline or air-gapped operation.' },
 ];
@@ -171,8 +171,8 @@ export default function PricingPage() {
                 </div>
             </section>
             <section className="public-plan-details" id="recording-status" aria-labelledby="recording-status-title">
-                <h2 id="recording-status-title">Recording is a planned option.</h2>
-                <p>Paid recording is intended for teams that need a record of their meetings. It is not enabled or available to buy in this demo. Storage, participant notices, access and retention terms need to be agreed before a rollout.</p>
+                <h2 id="recording-status-title">Recording requires Pro and configured storage.</h2>
+                <p>Signed-in hosts with access can record meetings when storage is configured. Storage capacity, participant notices, access and retention terms need to be agreed before a rollout.</p>
             </section>
             <section className="public-plan-details" id="deployment-considerations" aria-labelledby="deployment-title">
                 <h2 id="deployment-title">Start with your requirements.</h2>

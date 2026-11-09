@@ -1,17 +1,19 @@
-import IdentityOptions from '../components/IdentityOptions';
+import PersonalSignInButtons from '../components/PersonalSignInButtons';
 import ActionContents from '../components/ActionContents';
-import { useEffect, useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AUTH_API, beginSignIn, nextPath } from '../lib/session';
 import { useSession } from '../lib/use-session';
 import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
+import { browserProof, ssoRequest } from '../lib/sso';
 
 export default function Login() {
     const navigate = useNavigate();
     const location = useLocation();
-    const [busy, setBusy] = useState(false);
+    const [busy, setBusy] = useState<'password' | 'organisation'>();
     const [error, setError] = useState('');
+    const emailInput = useRef<HTMLInputElement>(null);
     const session = useSession();
     const signedOutNotice = (location.state as { notice?: string } | null)?.notice;
     // Already signed in (e.g. Back after signing in, or a stale bookmark): go where they were heading.
@@ -23,7 +25,7 @@ export default function Login() {
         if (busy) return;
         const fields = new FormData(event.currentTarget);
         const completeSignIn = beginSignIn();
-        setBusy(true); setError('');
+        setBusy('password'); setError('');
         try {
             const response = await fetch(`${AUTH_API}/api/auth/login`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -35,7 +37,22 @@ export default function Login() {
             navigate(nextPath(location.search, data.user?.role === 'admin' ? '/admin' : '/app'), { replace: true });
         } catch (reason) {
             setError(reason instanceof Error ? reason.message : 'Cannot reach sign in. Please try again.');
-        } finally { setBusy(false); }
+        } finally { setBusy(undefined); }
+    }
+    async function startSSO() {
+        const input = emailInput.current;
+        if (busy || !input?.reportValidity()) return;
+        const email = input.value;
+        setBusy('organisation'); setError('');
+        try {
+            const { verifier, challenge } = await browserProof();
+            const result = await ssoRequest<{ url: string }>('start', 'POST', { email, challenge });
+            sessionStorage.setItem('qsvc-sso', JSON.stringify({ verifier, search: location.search }));
+            window.location.assign(result.url);
+        } catch (reason) {
+            setError(reason instanceof Error ? reason.message : 'Organisation sign-in is unavailable.');
+            setBusy(undefined);
+        }
     }
     return <div className="public-site public-login">
         <SiteNav accountAction={<Link className="btn-secondary qsvc-action qsvc-action--secondary" to="/app"><ActionContents>Continue as guest</ActionContents></Link>} />
@@ -46,15 +63,20 @@ export default function Login() {
                 <p>Check your camera and microphone before entering the meeting.</p>
                 <Link className="public-text-link qsvc-action qsvc-action--secondary" to="/app"><ActionContents>Continue as guest</ActionContents></Link>
             </div>
-            <form className="public-auth-form" onSubmit={submit} aria-busy={busy} aria-label="Sign in">
+            <form className="public-auth-form" onSubmit={submit} aria-busy={!!busy} aria-label="Sign in">
                 <label className="field-label" htmlFor="login-email">Email</label>
-                <input id="login-email" name="email" type="email" autoComplete="username" required maxLength={255} className="input-meeting-code" />
+                <input ref={emailInput} id="login-email" name="email" type="email" autoComplete="username" required maxLength={255}
+                    className="input-meeting-code" />
                 <label className="field-label" htmlFor="login-password">Password</label>
-                <input id="login-password" name="password" type="password" autoComplete="current-password" required maxLength={128} className="input-meeting-code" />
+                <input id="login-password" name="password" type="password" autoComplete="current-password" required maxLength={128}
+                    className="input-meeting-code" />
                 {signedOutNotice && !error && <p role="status" className="public-auth-notice">{signedOutNotice}</p>}
                 {error && <p role="alert">{error}</p>}
-                <button className="public-primary qsvc-action" disabled={busy}><ActionContents><span>{busy ? 'Signing in…' : 'Sign in'}</span></ActionContents></button>
-                <IdentityOptions /><p>Need an account? <Link to={`/signup${location.search}`}>Sign up</Link></p>
+                <button className="public-primary qsvc-action" disabled={!!busy}>
+                    <ActionContents>{busy === 'password' ? 'Signing in…' : 'Sign in'}</ActionContents>
+                </button>
+                <PersonalSignInButtons disabled={!!busy} onOrganisationSignIn={() => void startSSO()} />
+                <p>Need an account? <Link to={`/signup${location.search}`}>Sign up</Link></p>
             </form>
         </main>
         <SiteFooter />

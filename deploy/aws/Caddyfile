@@ -1,10 +1,17 @@
 {$DOMAIN} {
     encode zstd gzip
+    tls {
+        curves x25519mlkem768 x25519
+    }
     header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
         X-Content-Type-Options nosniff
         Referrer-Policy strict-origin-when-cross-origin
         X-Frame-Options DENY
     }
+    route {
+        @notFromEdge expression size({env.ORIGIN_AUTH_SECRET}) < 32 || {http.request.header.X-QSVC-Origin} != {env.ORIGIN_AUTH_SECRET}
+    respond @notFromEdge "Forbidden" 403
     handle /health {
         respond "QS-VC backend gateway" 200
     }
@@ -27,5 +34,6 @@
     }
     handle {
         reverse_proxy 127.0.0.1:8080
+    }
     }
 }

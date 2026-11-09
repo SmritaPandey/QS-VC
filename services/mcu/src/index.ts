@@ -320,6 +320,7 @@ class MCUPipeline {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const app = express();
+app.disable('x-powered-by');
 app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json());
@@ -416,6 +417,7 @@ app.get('/api/gateway/status', (_req, res) => {
 // START MCU SERVER
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+app.use((_req, res) => { res.status(404).json({ error: 'Route not found' }); });
 const PORT = DEFAULT_MCU_CONFIG.port;
 
 app.listen(PORT, '127.0.0.1', () => {

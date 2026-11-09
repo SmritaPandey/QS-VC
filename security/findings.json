@@ -1,1 +1,326 @@
-[]
+[
+  {
+    "id": "QS-01-public",
+    "title": "TURN relay authorization and peer restrictions",
+    "asset": "TURN",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-01-intranet",
+    "title": "TURN relay authorization and peer restrictions",
+    "asset": "TURN",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-02-public",
+    "title": "Supported desktop runtime and signed updates",
+    "asset": "desktop",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-02-intranet",
+    "title": "Supported desktop runtime and signed updates",
+    "asset": "desktop",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-03-public",
+    "title": "Page security headers",
+    "asset": "edge/web",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-03-intranet",
+    "title": "Page security headers",
+    "asset": "edge/web",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-04-public",
+    "title": "Session and service signing-key separation",
+    "asset": "auth/services",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-04-intranet",
+    "title": "Session and service signing-key separation",
+    "asset": "auth/services",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-05-public",
+    "title": "Failed trial mandate cancellation and capture reconciliation",
+    "asset": "billing",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-05-intranet",
+    "title": "Failed trial mandate cancellation and capture reconciliation",
+    "asset": "billing",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-06-public",
+    "title": "AI dependencies and model provenance",
+    "asset": "ASR/MT",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-06-intranet",
+    "title": "AI dependencies and model provenance",
+    "asset": "ASR/MT",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-07-public",
+    "title": "Account-bound E2EE identities",
+    "asset": "E2EE",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-07-intranet",
+    "title": "Account-bound E2EE identities",
+    "asset": "E2EE",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-08-public",
+    "title": "Origin isolation and hybrid TLS",
+    "asset": "gateway",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-08-intranet",
+    "title": "Origin isolation and hybrid TLS",
+    "asset": "gateway",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-09-public",
+    "title": "Mandatory administrator MFA and verified registration",
+    "asset": "identity",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-09-intranet",
+    "title": "Mandatory administrator MFA and verified registration",
+    "asset": "identity",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-10-public",
+    "title": "Append-only security logging and retention",
+    "asset": "operations",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-10-intranet",
+    "title": "Append-only security logging and retention",
+    "asset": "operations",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-11-public",
+    "title": "Release identity and audit freeze",
+    "asset": "release",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-11-intranet",
+    "title": "Release identity and audit freeze",
+    "asset": "release",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-12-public",
+    "title": "Crypto validation evidence",
+    "asset": "crypto",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-12-intranet",
+    "title": "Crypto validation evidence",
+    "asset": "crypto",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-13-public",
+    "title": "Private STUN and TURN TLS",
+    "asset": "TURN",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-13-intranet",
+    "title": "Private STUN and TURN TLS",
+    "asset": "TURN",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-14-public",
+    "title": "Plan promises and enforced entitlements",
+    "asset": "plans",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-14-intranet",
+    "title": "Plan promises and enforced entitlements",
+    "asset": "plans",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-15-public",
+    "title": "Build dependency vulnerabilities",
+    "asset": "build",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-15-intranet",
+    "title": "Build dependency vulnerabilities",
+    "asset": "build",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-16-public",
+    "title": "Reserved administrator registration enumeration",
+    "asset": "auth",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-16-intranet",
+    "title": "Reserved administrator registration enumeration",
+    "asset": "auth",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-17-public",
+    "title": "Error responses and deployment metadata",
+    "asset": "services/deployment",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-17-intranet",
+    "title": "Error responses and deployment metadata",
+    "asset": "services/deployment",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-18-public",
+    "title": "Encrypted ClientHello",
+    "asset": "edge",
+    "deployment": "public",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  },
+  {
+    "id": "QS-18-intranet",
+    "title": "Encrypted ClientHello",
+    "asset": "edge",
+    "deployment": "intranet",
+    "status": "triaged",
+    "source": "User-supplied pre-assessment dated 2026-11-09; not a formal audit finding",
+    "remediationRecord": "docs/SECURITY_REMEDIATION_2026-11.md"
+  }
+]

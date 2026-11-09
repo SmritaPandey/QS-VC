@@ -1,4 +1,6 @@
-import { assertJwtSecret } from '../../../shared/jwt-secret.cjs';
+import { signSession, verifySessionToken, prepareSessionSigning } from './session-token.js';
+import { turnCredentials } from './turn.js';
+import { serviceSecret } from '../../../shared/service-secrets.cjs';
 import { profileHandler } from './profile.js';
 import { phoneNumberSchema, registerBody } from './registration';
 import { enterpriseRouter } from './enterprise-access.js';
@@ -19,10 +21,12 @@ import { createSession, validateSession, requireEnterpriseTerm, endSession, sess
 import { contactRouter, contactRequestError } from './contact.js';
 import { effectiveRole, isPlatformAdmin, assertPlatformAdminConfig } from './platform-admins.js';
 import { FEATURE_MIN_PLAN, getEntitlements, getPrivateConversationLimitMs } from '../../../shared/entitlements.cjs';
-import { billingRouter } from './billing.js';
+import { billingRouter, processMandateCancellations } from './billing.js';
+import { ssoRouter } from './sso.js';
+import { passwordBlocked, type Account } from './sso-store.js';
+import { personalSignInRouter } from './personal-sign-in.js';
 
 dotenv.config({ path: '../../.env' });
-assertJwtSecret();
 assertPlatformAdminConfig();
 if (process.env.NODE_ENV === 'production' && (!process.env.TURN_SECRET || process.env.TURN_SECRET === 'dev-turn-secret')) {
     throw new Error('Production TURN_SECRET must be set to a unique secret shared with the TURN server.');
@@ -42,7 +46,7 @@ const logger = pino({
 
 
 const loginBody = z.object({
-    email: z.string().email('Invalid email').max(255),
+    email: z.string().trim().email('Invalid email').max(255),
     password: z.string().min(1, 'Password is required').max(128),
     tenantSlug: z.string().min(1).max(100).optional(),
 });
@@ -108,7 +112,7 @@ app.use(express.json({
 const generalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 100, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many requests' } });
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false, message: { error: 'Too many auth attempts, please try again later' } });
 // Signaling verifies each authenticated RPC, so do not apply the low browser API quota here.
-app.use('/api/auth/verify', rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, skip: req => { try { const value = jwt.verify(String(req.headers['x-qsvc-service-token'] || ''), process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production') as jwt.JwtPayload; return value.aud === 'qsvc-auth-verify' && value.iss === 'qsvc-internal'; } catch { return false; } }, keyGenerator: req => req.headers.authorization ? crypto.createHash('sha256').update(req.headers.authorization).digest('hex') : ipKeyGenerator(req.ip || 'unknown'), standardHeaders: true, legacyHeaders: false }));
+app.use('/api/auth/verify', rateLimit({ windowMs: 15 * 60 * 1000, max: 3000, skip: req => { try { const value = jwt.verify(String(req.headers['x-qsvc-service-token'] || ''), serviceSecret('INTERNAL_AUTH_SECRET'), { algorithms: ['HS256'], audience: 'qsvc-auth-verify', issuer: 'qsvc-internal', maxAge: 30 }) as jwt.JwtPayload; return value.aud === 'qsvc-auth-verify' && value.iss === 'qsvc-internal'; } catch { return false; } }, keyGenerator: req => req.headers.authorization ? crypto.createHash('sha256').update(req.headers.authorization).digest('hex') : ipKeyGenerator(req.ip || 'unknown'), standardHeaders: true, legacyHeaders: false }));
 app.use((req, res, next) => {
     // Payment webhooks have their own higher, retry-friendly per-IP limit in billingRouter.
     if (req.path === '/api/auth/verify' || req.path.startsWith('/api/auth/billing/webhooks/')) return next();
@@ -118,7 +122,7 @@ app.use('/api/auth/register', authLimiter);
 app.use('/api/auth/login', authLimiter);
 
 const PORT = parseInt(process.env.PORT || process.env.AUTH_PORT || '4002', 10);
-const JWT_SECRET = process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production';
+
 // Convert time string to seconds for JWT (avoids StringValue branded type issue)
 function parseExpiry(val: string): number {
     const match = val.match(/^(\d+)\s*(s|m|h|d)$/i);
@@ -143,19 +147,9 @@ app.use('/api/auth/contact', contactRouter(pool));
 // HELPERS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function generateToken(user: { id: string; email: string; tenantId: string; role: string; displayName: string }, sessionId: string) {
-    return jwt.sign(
-        {
-            sub: user.id,
-            sessionId,
-            email: user.email,
-            tenantId: user.tenantId,
-            role: user.role,
-            displayName: user.displayName,
-        },
-        JWT_SECRET as jwt.Secret,
-        { expiresIn: JWT_EXPIRY }
-    );
+async function generateToken(user: { id: string; email: string; tenantId: string; role: string; displayName: string }, sessionId: string) {
+    return signSession({ sub: user.id, sessionId, email: user.email, tenantId: user.tenantId,
+        role: user.role, displayName: user.displayName }, JWT_EXPIRY);
 }
 
 /**
@@ -187,7 +181,7 @@ async function personalTenantId(): Promise<string | null> {
 }
 
 async function verifyToken(token: string): Promise<jwt.JwtPayload> {
-    const payload = jwt.verify(token, JWT_SECRET);
+    const payload = await verifySessionToken(token);
     if (typeof payload === 'string') throw new Error('Invalid token');
     await validateSession(pool, payload);
     const result = await pool.query(
@@ -211,6 +205,15 @@ async function verifyToken(token: string): Promise<jwt.JwtPayload> {
 app.use('/api/auth/enterprise', enterpriseRouter(verifyToken, pool));
 app.use('/api/auth/admin', platformAdminAnalyticsRouter(verifyToken, pool));
 app.use('/api/auth/billing', billingRouter(pool, verifyToken, logger));
+async function issueSsoSession(account: Account) {
+    await requireEnterpriseTerm(pool, account.id);
+    const sessionId = await createSession(pool, account.id);
+    const user = { id: account.id, tenantId: account.tenant_id, email: account.email,
+        displayName: account.display_name, role: account.role, avatarUrl: account.avatar_url };
+    return { token: await generateToken(user, sessionId), user };
+}
+app.use('/api/auth/sso/personal', personalSignInRouter(pool, verifyToken, issueSsoSession, personalTenantId));
+app.use('/api/auth/sso', ssoRouter(pool, verifyToken, issueSsoSession, action => logger.warn({ action }, 'Organisation SSO request failed')));
 
 // Health check
 app.get('/health', (_req, res) => {
@@ -221,7 +224,10 @@ app.get('/ready', async (_req, res) => {
     try {
         await pool.query('SELECT 1 FROM enterprise_access_terms LIMIT 0');
         await pool.query('SELECT 1 FROM payment_subscriptions LIMIT 0');
+        await pool.query('SELECT 1 FROM payment_mandate_cancellations LIMIT 0');
+        await pool.query('SELECT needs_review, review_reason FROM payment_captures LIMIT 0');
         await pool.query('SELECT phone_number FROM users LIMIT 0');
+        await pool.query('SELECT 1 FROM sso_connections LIMIT 0');
         res.json({ status: 'ready' });
     } catch {
         res.status(503).json({ status: 'unavailable', dependency: 'database' });
@@ -237,6 +243,9 @@ app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
         const { password, displayName, phoneNumber, tenantSlug } = req.body;
         const email = String(req.body.email).trim().toLowerCase();
 
+        if (await passwordBlocked(pool, email)) {
+            return res.status(403).json({ code: 'SSO_REQUIRED', error: 'Use your organisation sign-in for this email address.' });
+        }
         // Public signup cannot enrol users into an organisation or a paid tenant.
         if (tenantSlug) {
             return res.status(403).json({ error: 'Enterprise access requires organisation SSO / SAML.' });
@@ -248,7 +257,7 @@ app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
         // Platform-admin addresses cannot be claimed through public sign-up (there is no email
         // verification yet). Operators open this briefly with QSVC_ADMIN_SIGNUP_OPEN=yes.
         if (isPlatformAdmin(email) && process.env.QSVC_ADMIN_SIGNUP_OPEN !== 'yes') {
-            return res.status(403).json({ error: 'This address is reserved. Contact QS-VC support to set up this account.' });
+            return res.status(409).json({ error: 'Email already registered' });
         }
         const role = effectiveRole(email, 'member');
 
@@ -274,7 +283,7 @@ app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
         );
 
         const sessionId = await createSession(pool, userId);
-        const token = generateToken({ id: userId, email, tenantId, role, displayName }, sessionId);
+        const token = await generateToken({ id: userId, email, tenantId, role, displayName }, sessionId);
 
         logger.info(`User registered: ${email} [tenant:${tenantId}]`);
         res.status(201).json({
@@ -291,6 +300,9 @@ app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
 app.post('/api/auth/login', validateBody(loginBody), async (req, res) => {
     try {
         const { email, password, tenantSlug } = req.body;
+        if (await passwordBlocked(pool, email)) {
+            return res.status(403).json({ code: 'SSO_REQUIRED', error: 'Use your organisation sign-in for this email address.' });
+        }
 
         const result = await pool.query(
             `SELECT id, tenant_id, email, display_name, password_hash, role, avatar_url
@@ -330,7 +342,7 @@ app.post('/api/auth/login', validateBody(loginBody), async (req, res) => {
         // Update last login
         const sessionId = await createSession(pool, user.id);
 
-        const token = generateToken({
+        const token = await generateToken({
             id: user.id,
             email: user.email,
             tenantId: user.tenant_id,
@@ -536,35 +548,13 @@ app.patch('/api/auth/me', validateBody(updateProfileBody), async (req, res) => {
 });
 
 // Generate TURN credentials (time-limited)
-app.get('/api/auth/turn-credentials', (req, res) => {
-    // Production never signs TURN credentials with a built-in development secret.
-    const turnSecret = process.env.TURN_SECRET || (process.env.NODE_ENV === 'production' ? '' : 'dev-turn-secret');
-    const turnServers = turnSecret ? (process.env.TURN_SERVERS || '').split(',').map((value: string) => value.trim()).filter((value: string) => /^turns?:/i.test(value)) : [];
-    const stunServers = (process.env.STUN_SERVERS || 'stun:stun.l.google.com:19302,stun:stun1.l.google.com:19302').split(',').map((value: string) => value.trim()).filter(Boolean);
-    const ttl = 3600; // 1 hour
-    const timestamp = Math.floor(Date.now() / 1000) + ttl;
-    const username = `${timestamp}:qsvc`;
-
-    // HMAC-SHA1 credential generation for coturn
-    const credential = crypto
-        .createHmac('sha1', turnSecret)
-        .update(username)
-        .digest('base64');
-
-    const iceServers: Array<{ urls: string[]; username?: string; credential?: string }> = [{ urls: stunServers }];
-    if (turnServers.length) iceServers.push({
-                urls: turnServers,
-                username,
-                credential,
-            });
-    res.setHeader('Cache-Control', 'no-store');
-    res.json({ iceServers, ttl });
-});
+app.get('/api/auth/turn-credentials', turnCredentials(verifyToken));
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // GLOBAL ERROR HANDLER
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+app.use((_req, res) => { res.status(404).json({ error: 'Route not found' }); });
 app.use(contactRequestError);
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     logger.error(err, 'Unhandled error');
@@ -575,9 +565,21 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 // START
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-app.listen(PORT, () => {
-    logger.info(`🔐 QS-VC Auth running on port ${PORT}`);
-});
+void prepareSessionSigning().then(() => {
+    serviceSecret('INTERNAL_AUTH_SECRET');
+    serviceSecret('TURN_ACCESS_SECRET');
+    app.listen(PORT, () => logger.info({ port: PORT }, 'Auth service listening'));
+    let processingCancellations = false;
+    const cancelMandates = async () => {
+        if (processingCancellations) return;
+        processingCancellations = true;
+        try { await processMandateCancellations(pool, logger); }
+        catch { logger.error('Mandate cancellation queue is unavailable. Check database migrations.'); }
+        finally { processingCancellations = false; }
+    };
+    void cancelMandates();
+    setInterval(() => { void cancelMandates(); }, 30_000).unref();
+}).catch(() => { logger.fatal('Auth signing keys are missing or invalid. Check the secret configuration.'); process.exitCode = 1; });
 
 process.on('SIGTERM', () => { pool.end(); process.exit(0); });
 process.on('SIGINT', () => { pool.end(); process.exit(0); });

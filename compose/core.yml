@@ -5,6 +5,18 @@
 version: '3.8'
 
 services:
+  keycloak-db:
+    extends: { file: ../deploy/keycloak/compose.yml, service: keycloak-db }
+    volumes:
+      - keycloak-data:/var/lib/postgresql/data
+      - ../deploy/keycloak/init-db.sql:/docker-entrypoint-initdb.d/01-keycloak.sql:ro
+  keycloak:
+    extends: { file: ../deploy/keycloak/compose.yml, service: keycloak }
+    environment:
+      QSVC_SSO_AUTH_URL: ${QSVC_SSO_AUTH_URL:-http://localhost:4002}
+    volumes:
+      - ../deploy/keycloak/qsvc-realm.json:/opt/keycloak/data/import/qsvc-realm.json:ro
+    networks: [qsvc-net, keycloak-db]
   postgres:
     image: postgres:16-alpine
     container_name: qsvc-postgres
@@ -64,15 +76,22 @@ services:
       - qsvc-net
 
   coturn:
+    entrypoint: [sh, /etc/coturn/start.sh]
+    volumes:
+      - ../deploy/turn/start.sh:/etc/coturn/start.sh:ro
+      - ../deploy/turn/peer-policy.conf:/etc/coturn/peer-policy.conf:ro
+    environment:
+      TURN_SECRET: ${TURN_SECRET:?Set a private shared TURN secret}
+      TURN_REALM: ${TURN_REALM:-qsvc}
+      SFU_ANNOUNCED_IP: ${SFU_ANNOUNCED_IP:-}
+      TURN_ALLOWED_SFU_IP: ${TURN_ALLOWED_SFU_IP:-}
     image: coturn/coturn:4.6.2-alpine
     container_name: qsvc-coturn
     restart: unless-stopped
     network_mode: host
-    environment:
-      TURN_SECRET: ${TURN_SECRET:-dev-turn-secret-change-in-production}
-      EXTERNAL_IP: ${SFU_ANNOUNCED_IP:-127.0.0.1}
 
   auth:
+    secrets: [session_signing_key]
     image: qsvc-core:${QSVC_VERSION:-latest}
     container_name: qsvc-auth
     restart: unless-stopped
@@ -80,6 +99,31 @@ services:
     env_file:
       - ${QSVC_CONFIG_FILE:-../config/.env}
     environment:
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-}
+      TURN_ACCESS_SECRET: ${TURN_ACCESS_SECRET:-}
+      SESSION_SIGNING_KEY_FILE: /run/secrets/session_signing_key
+      QSVC_SSO_ENABLED: ${QSVC_SSO_ENABLED:-false}
+      QSVC_SSO_AUTH_URL: ${QSVC_SSO_AUTH_URL:-http://localhost:4002}
+      QSVC_SSO_WEB_URL: ${QSVC_SSO_WEB_URL:-http://localhost:5173}
+      QSVC_KEYCLOAK_ISSUER: ${QSVC_KEYCLOAK_ISSUER:-http://localhost:8085/realms/qsvc}
+      QSVC_KEYCLOAK_INTERNAL_URL: ${QSVC_KEYCLOAK_INTERNAL_URL:-http://keycloak:8080}
+      QSVC_KEYCLOAK_CLIENT_SECRET: ${QSVC_KEYCLOAK_CLIENT_SECRET:-}
+      QSVC_KEYCLOAK_ADMIN_CLIENT_ID: ${QSVC_KEYCLOAK_ADMIN_CLIENT_ID:-qsvc-idp-admin}
+      QSVC_KEYCLOAK_ADMIN_CLIENT_SECRET: ${QSVC_KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      QSVC_SSO_IDP_HOSTS: ${QSVC_SSO_IDP_HOSTS:-}
+      QSVC_DIGILOCKER_ENABLED: ${QSVC_DIGILOCKER_ENABLED:-false}
+      QSVC_DIGILOCKER_AUTHORIZE_URL: ${QSVC_DIGILOCKER_AUTHORIZE_URL:-}
+      QSVC_DIGILOCKER_TOKEN_URL: ${QSVC_DIGILOCKER_TOKEN_URL:-}
+      QSVC_DIGILOCKER_USER_URL: ${QSVC_DIGILOCKER_USER_URL:-}
+      QSVC_DIGILOCKER_CLIENT_ID: ${QSVC_DIGILOCKER_CLIENT_ID:-}
+      QSVC_DIGILOCKER_CLIENT_SECRET: ${QSVC_DIGILOCKER_CLIENT_SECRET:-}
+      QSVC_DIGILOCKER_SCOPE: ${QSVC_DIGILOCKER_SCOPE:-}
+      QSVC_GOOGLE_CLIENT_ID: ${QSVC_GOOGLE_CLIENT_ID:-}
+      QSVC_GOOGLE_CLIENT_SECRET: ${QSVC_GOOGLE_CLIENT_SECRET:-}
+      QSVC_MICROSOFT_CLIENT_ID: ${QSVC_MICROSOFT_CLIENT_ID:-}
+      QSVC_MICROSOFT_CLIENT_SECRET: ${QSVC_MICROSOFT_CLIENT_SECRET:-}
+      QSVC_EMAIL_API_KEY: ${QSVC_EMAIL_API_KEY:-}
+      QSVC_EMAIL_FROM: ${QSVC_EMAIL_FROM:-}
       NODE_ENV: production
       QSVC_DEPLOYMENT: onprem
       PORT: 4002
@@ -101,6 +145,9 @@ services:
     env_file:
       - ${QSVC_CONFIG_FILE:-../config/.env}
     environment:
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-}
+      MEETING_POLICY_SECRET: ${MEETING_POLICY_SECRET:-}
+      INVITATION_SECRET: ${INVITATION_SECRET:-}
       NODE_ENV: production
       QSVC_DEPLOYMENT: onprem
       PORT: 4003
@@ -122,6 +169,10 @@ services:
     env_file:
       - ${QSVC_CONFIG_FILE:-../config/.env}
     environment:
+      INTERNAL_AUTH_SECRET: ${INTERNAL_AUTH_SECRET:-}
+      MEETING_POLICY_SECRET: ${MEETING_POLICY_SECRET:-}
+      INVITATION_SECRET: ${INVITATION_SECRET:-}
+      TURN_ACCESS_SECRET: ${TURN_ACCESS_SECRET:-}
       NODE_ENV: production
       QSVC_DEPLOYMENT: onprem
       PORT: 4001
@@ -203,6 +254,7 @@ services:
       - qsvc-net
 
 volumes:
+  keycloak-data:
   postgres-data:
   redis-data:
   minio-data:
@@ -210,6 +262,12 @@ volumes:
   caddy-config:
 
 networks:
+  keycloak-db:
+    internal: true
   qsvc-net:
     driver: bridge
 
+
+secrets:
+  session_signing_key:
+    file: ${SESSION_SIGNING_KEY_FILE:?Set the Ed25519 auth signing key file}

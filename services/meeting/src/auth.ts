@@ -1,3 +1,4 @@
+import { serviceSecret } from '../../../shared/service-secrets.cjs';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import { FEATURE_MIN_PLAN } from '../../../shared/entitlements.cjs';
@@ -35,7 +36,7 @@ export function meetingAuth(AUTH_URL: string, runWithTenant: (tenantId: string, 
         }
         try {
             const response = await fetch(`${AUTH_URL}/api/auth/verify`, {
-                headers: { Authorization: authHeader, 'x-qsvc-service-token': jwt.sign({}, process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-auth-verify', issuer: 'qsvc-internal', expiresIn: 30 }) }, signal: AbortSignal.timeout(5000),
+                headers: { Authorization: authHeader, 'x-qsvc-service-token': jwt.sign({}, serviceSecret('INTERNAL_AUTH_SECRET'), { audience: 'qsvc-auth-verify', issuer: 'qsvc-internal', expiresIn: 30 }) }, signal: AbortSignal.timeout(5000),
             });
             if (response.status === 401) return res.status(401).json({ error: 'Invalid token' });
             if (!response.ok) throw new Error('Authentication unavailable');

@@ -224,7 +224,7 @@ html { scroll-behavior:smooth; }
  .identity-options { display:grid; gap:12px; padding-top:16px; min-width:0; }
 .identity-options-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .identity-options-grid>.qsvc-action.qsvc-action { width:100%; font-size:14px; }
-.identity-options-grid>button:last-child { grid-column:1 / -1; }
+.identity-options-grid>button:only-child { grid-column:1 / -1; }
 .public-site .identity-options button:disabled { opacity:.7; cursor:not-allowed; }
 .identity-options p { font-size:13px; line-height:1.6; margin:0; }
 

@@ -1,10 +1,11 @@
+import { serviceSecret } from '../../../shared/service-secrets.cjs';
 import jwt from 'jsonwebtoken';
 import { logger } from './logger.js';
 
 export type SavedSegment = { id: string; peerId: string; speaker: string; language: string; text: string; timestamp: number };
 
 function serviceToken() {
-    return jwt.sign({}, process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', expiresIn: 30 });
+    return jwt.sign({}, serviceSecret('MEETING_POLICY_SECRET'), { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', expiresIn: 30 });
 }
 
 /**

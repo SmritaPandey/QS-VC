@@ -5,7 +5,9 @@
 
 {$QSVC_DOMAIN:meet.internal} {
     # Internal TLS (self-signed / internal CA for intranet air-gapped environments)
-    tls internal
+    tls internal {
+        curves x25519mlkem768 x25519
+    }
     # Access logs never keep credentials: query strings that carry invitation or ticket
     # values are redacted and authorization/cookie headers are dropped.
     log {
@@ -17,6 +19,9 @@
                     replace invite REDACTED
                     replace token REDACTED
                     replace ticket REDACTED
+                    replace launch REDACTED
+                    replace code REDACTED
+                    replace state REDACTED
                 }
                 request>headers>Authorization delete
                 request>headers>Cookie delete
@@ -29,7 +34,7 @@
     header {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
         X-Content-Type-Options "nosniff"
-        X-Frame-Options "SAMEORIGIN"
+        X-Frame-Options "DENY"
         Referrer-Policy "strict-origin-when-cross-origin"
     }
 

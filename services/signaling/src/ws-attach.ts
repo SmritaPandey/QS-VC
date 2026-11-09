@@ -1,3 +1,4 @@
+import { serviceSecret } from '../../../shared/service-secrets.cjs';
 import jwt from 'jsonwebtoken';
 import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
@@ -30,7 +31,7 @@ export function resolveClientAddress(req: http.IncomingMessage, trustedHeader = 
 
 export async function verifySession(token: string): Promise<AuthPayload> {
     const response = await fetch(`${AUTH_URL}/api/auth/verify`, {
-        headers: { Authorization: `Bearer ${token}`, 'x-qsvc-service-token': jwt.sign({}, process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-auth-verify', issuer: 'qsvc-internal', expiresIn: 30 }) },
+        headers: { Authorization: `Bearer ${token}`, 'x-qsvc-service-token': jwt.sign({}, serviceSecret('INTERNAL_AUTH_SECRET'), { audience: 'qsvc-auth-verify', issuer: 'qsvc-internal', expiresIn: 30 }) },
         signal: AbortSignal.timeout(3000),
     });
     if (response.status === 401 || response.status === 403) throw new InvalidAuthentication('Invalid authentication');

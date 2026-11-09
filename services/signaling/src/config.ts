@@ -1,14 +1,14 @@
-import { assertJwtSecret } from '../../../shared/jwt-secret.cjs';
+import { serviceSecret } from '../../../shared/service-secrets.cjs';
 import dotenv from 'dotenv';
 dotenv.config({ path: '../../.env' });
-assertJwtSecret();
+for (const name of ['INTERNAL_AUTH_SECRET', 'MEETING_POLICY_SECRET', 'INVITATION_SECRET', 'TURN_ACCESS_SECRET'] as const) serviceSecret(name);
 
 export const config = {
     port: parseInt(process.env.PORT || process.env.SIGNALING_PORT || '4001', 10),
     sfuUrl: process.env.SFU_INTERNAL_URL || 'http://localhost:4000',
 
     iceServers: [
-        { urls: process.env.STUN_SERVERS?.split(',') || ['stun:stun.l.google.com:19302'] },
+        { urls: process.env.STUN_SERVERS?.split(',').filter(Boolean) || [] },
         ...(process.env.TURN_SERVERS && process.env.TURN_USERNAME && process.env.TURN_PASSWORD
             ? [{ urls: process.env.TURN_SERVERS.split(','), username: process.env.TURN_USERNAME, credential: process.env.TURN_PASSWORD }]
             : []),
@@ -16,11 +16,6 @@ export const config = {
     mcuEnabled: process.env.MCU_ENABLED === 'true',
     mcuUrl: process.env.MCU_INTERNAL_URL || 'http://localhost:4005',
     hybridMode: process.env.HYBRID_MODE === 'true',
-
-    jwt: {
-        secret: process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production',
-        expiry: process.env.JWT_EXPIRY || '24h',
-    },
 
     // Redis — supports REDIS_URL (Render) or individual env vars (local)
     redisUrl: process.env.REDIS_URL || undefined,

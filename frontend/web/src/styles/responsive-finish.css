@@ -44,6 +44,7 @@
 
 /* Keep authentication controls aligned with the full form width. */
 .public-site .public-auth-form > .qsvc-action.qsvc-action.qsvc-action,
+.public-login .identity-options > .qsvc-action.qsvc-action.qsvc-action,
 .public-site .identity-options-grid > .qsvc-action.qsvc-action.qsvc-action {
     width: 100%;
     max-width: none;
@@ -56,8 +57,11 @@
 .public-login .public-auth-form > button,
 .public-signup .public-auth-form > button { margin-top: 10px; }
 .public-site .identity-options-grid > button:last-child { grid-column: 1 / -1; }
+.public-site.public-login .identity-options-grid > button { grid-column: auto; }
+.public-login .identity-options-grid { grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr)); }
+.public-login .cookie-banner h2 { font-weight: 500; }
 .public-site .identity-options-grid .qsvc-action__inner { padding-inline: 12px; }
-.public-site .identity-options { border-top: 1px solid #e5ecef; margin-top: 10px; }
+.public-site .identity-options { border-top: 1px solid var(--border-tone, #d5e0e5); margin-top: 10px; }
 
 .public-nav-links > .public-mobile-app { display:none; }
 @media(max-width:1240px) {

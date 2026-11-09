@@ -4,6 +4,7 @@ vi.mock('../meeting-policy.js', () => ({
     verifySignalingAccess: vi.fn().mockResolvedValue({ allowed: true, isGuest: false })
 }));
 import { describe, it, expect, vi } from 'vitest';
+vi.mock('../turn.js', () => ({ admittedPeerIceServers: vi.fn().mockResolvedValue({ iceServers: [], ttl: 3600 }) }));
 vi.mock('../sfu-client.js', () => ({ sfuClient: {
     getRtpCapabilities: vi.fn().mockResolvedValue({ rtpCapabilities: {} }),
     createTransport: vi.fn().mockResolvedValue({ id: 'transport' }),
@@ -19,6 +20,7 @@ vi.mock('../sfu-client.js', () => ({ sfuClient: {
 import { handleRpcMessage, handlePeerDisconnect } from './handler.js';
 import { roomManager } from '../room-manager.js';
 import { sfuClient } from '../sfu-client.js';
+import { admittedPeerIceServers } from '../turn.js';
 import meetingInvitation from '../../../../shared/meeting-invitation.cjs';
 
 const socket = () => ({ readyState: 1, send: vi.fn(), close: vi.fn() });
@@ -27,6 +29,26 @@ const rpc = (ws: any, state: any, method: string, params: any = {}) =>
     handleRpcMessage(ws, { jsonrpc: '2.0', id: 1, method, params: method === 'joinRoom' ? { supportsE2EE: true, ...params } : params }, state);
 
 describe('production meeting permissions', () => {
+    it('only issues relay credentials to the admitted socket, caching repeated requests', async () => {
+        vi.mocked(admittedPeerIceServers).mockClear();
+        const hostWs = socket(), waitingWs = socket(), host: any = {}, waiting: any = {};
+        const code = `turn-${crypto.randomUUID().slice(0, 10)}`;
+        try {
+            expect((await rpc(waitingWs, waiting, 'getIceServers'))?.error).toBeDefined();
+            await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+            await rpc(hostWs, host, 'updateSettings', { settings: { waitingRoomEnabled: true } });
+            await rpc(waitingWs, waiting, 'joinRoom', { meetingCode: code, displayName: 'Waiting' });
+            expect((await rpc(waitingWs, waiting, 'getIceServers'))?.error).toBeDefined();
+            expect(admittedPeerIceServers).not.toHaveBeenCalled();
+            await rpc(hostWs, host, 'admitPeer', { targetPeerId: waiting.peerId });
+            expect((await rpc(socket(), waiting, 'getIceServers'))?.error).toBeDefined();
+            expect((await rpc(waitingWs, waiting, 'getIceServers'))?.result).toHaveProperty('iceServers');
+            await rpc(waitingWs, waiting, 'getIceServers');
+            expect(admittedPeerIceServers).toHaveBeenCalledTimes(1);
+            await handlePeerDisconnect(waiting);
+            expect((await rpc(waitingWs, waiting, 'getIceServers'))?.error).toBeDefined();
+        } finally { await handlePeerDisconnect(waiting); await handlePeerDisconnect(host); }
+    });
     it('notifies queued guests when the host ends the meeting', async () => {
         const hostWs=socket(), guestWs=socket(), host:any={}, guest:any={};
         const code=`end-${crypto.randomUUID().slice(0,10)}`;

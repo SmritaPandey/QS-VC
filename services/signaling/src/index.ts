@@ -12,6 +12,7 @@ const AUTH_INTERNAL_URL = (process.env.AUTH_INTERNAL_URL || 'http://localhost:40
 const MEETING_INTERNAL_URL = (process.env.MEETING_INTERNAL_URL || 'http://localhost:4003').replace(/\/$/, '');
 
 const app = express();
+app.disable('x-powered-by');
 app.set('trust proxy', 1);  // Trust first proxy (Cloudflare tunnel)
 
 // CORS: merge env with production defaults so stale Render env can't lock out Vercel
@@ -66,9 +67,13 @@ app.post('/api/meetings/create', async (_req, res) => {
 
 // Return STUN and short-lived TURN credentials from Auth. TURN's shared secret
 // stays server-side and is never included in the client response.
-app.get('/api/ice-servers', async (_req, res) => {
+app.get('/api/ice-servers', async (req, res) => {
+    const authorization = req.headers.authorization;
+    res.setHeader('Cache-Control', 'no-store');
+    if (!authorization?.startsWith('Bearer ')) return res.status(401).json({ error: 'Join a meeting or sign in to use the relay.' });
     try {
-        const response = await fetch(`${AUTH_INTERNAL_URL}/api/auth/turn-credentials`, { signal: AbortSignal.timeout(3000) });
+        const response = await fetch(`${AUTH_INTERNAL_URL}/api/auth/turn-credentials`, { headers: { Authorization: authorization }, signal: AbortSignal.timeout(3000) });
+        if (response.status === 401 || response.status === 403) return res.status(401).json({ error: 'Invalid relay access.' });
         if (!response.ok) throw new Error(`Auth returned ${response.status}`);
         const body = await response.json() as { iceServers?: { urls: string | string[]; username?: string; credential?: string }[]; ttl?: number };
         if (!Array.isArray(body.iceServers) || !body.iceServers.length) throw new Error('Auth returned no ICE servers');
@@ -123,6 +128,7 @@ app.post('/api/meetings', async (req, res) => {
 // WEBSOCKET SERVER
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+app.use((_req, res) => { res.status(404).json({ error: 'Route not found' }); });
 const server = http.createServer(app);
 const wss = attachSignalingWebSocket(server);
 

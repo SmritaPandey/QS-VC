@@ -11,6 +11,8 @@
  */
 import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell, session, desktopCapturer, dialog, net, nativeTheme, safeStorage, clipboard } from 'electron';
 import * as fs from 'fs';
+import { randomBytes } from 'node:crypto';
+import { createSsoLoopback } from './sso-loopback';
 import * as path from 'path';
 // Copied into the app package at build time (scripts/vendor-shared.cjs): the packaged app must never
 // load files from outside its own folder, or it fails to start.
@@ -31,7 +33,8 @@ let quitting = false;
 let workspace: URL | null = null;
 let token = '';
 let user: User | null = null;
-let meetingToken = '';           // handed once to the meeting page's preload
+let meetingMarker = '';           // non-secret placeholder for meeting web requests
+let cancelSso: (() => void) | undefined;
 let pendingDeepLink = '';
 
 // ━━━ Settings on disk ━━━
@@ -71,7 +74,7 @@ function saveSession() {
 function restoreSession() {
     try { if (safeStorage.isEncryptionAvailable()) token = safeStorage.decryptString(fs.readFileSync(file('session.bin'))); } catch { token = ''; }
 }
-function clearSession() { token = ''; user = null; meetingToken = ''; try { fs.rmSync(file('session.bin'), { force: true }); } catch { /* ignore */ } }
+function clearSession() { token = ''; user = null; meetingMarker = ''; cancelSso?.(); try { fs.rmSync(file('session.bin'), { force: true }); } catch { /* ignore */ } }
 
 // ━━━ Server API (from the main process) ━━━
 
@@ -159,7 +162,7 @@ function showApp(notice = '') {
 
 function openMeeting(code: string) {
     if (!mainWindow || !workspace) return;
-    meetingToken = token;
+    meetingMarker = token ? `qsvc-desktop-${randomBytes(16).toString('hex')}` : '';
     void mainWindow.loadURL(new URL(`meeting/${encodeURIComponent(code)}/preview`, workspace).href);
 }
 
@@ -202,6 +205,15 @@ function createMainWindow(): BrowserWindow {
 // ━━━ Media permissions and screen sharing (meeting room only) ━━━
 
 function setupPermissions() {
+    session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['*://*/api/*'] }, (details, done) => {
+        const headers = details.requestHeaders;
+        if (token && meetingMarker && details.webContentsId === mainWindow?.webContents.id
+            && details.frame === mainWindow?.webContents.mainFrame && inMeeting(details.frame?.url || '') && sameOrigin(details.url)) {
+            const name = Object.keys(headers).find(key => key.toLowerCase() === 'authorization');
+            if (name && headers[name] === `Bearer ${meetingMarker}`) headers[name] = `Bearer ${token}`;
+        }
+        done({ requestHeaders: headers });
+    });
     const allowed = new Set(['media', 'display-capture', 'notifications', 'fullscreen', 'clipboard-sanitized-write']);
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => callback(allowed.has(permission) && sameOrigin(webContents.getURL())));
     session.defaultSession.setPermissionCheckHandler((_webContents, permission, origin) => allowed.has(permission) && sameOrigin(origin));
@@ -284,7 +296,92 @@ function setupIPC() {
         return { ok: true };
     });
 
+    appHandler('auth:discover', async (email: unknown) => {
+        const result = await api('api/auth/sso/discover', { method: 'POST', auth: false, body: { email: String(email || '').trim() } });
+        // Older workspaces still support password sign-in.
+        if (result.status === 404) return { ok: true, available: false, required: false };
+        return result.ok ? { ok: true, available: !!result.data?.available, required: !!result.data?.required }
+            : { ok: false, error: result.error };
+    });
+
+    let pendingPersonal: { origin: string; code: string; verifier: string; keep: boolean; verifying: boolean } | undefined;
+    function finishSignIn(data: any, keep: boolean) {
+        const profile = cleanUser(data?.user);
+        if (!profile || typeof data?.token !== 'string') return { ok: false, error: 'Sign-in could not be completed.' };
+        token = data.token;
+        user = profile;
+        writeConfig({ keepSignedIn: keep });
+        saveSession();
+        void reportDesktopActivation();
+        return { ok: true, user };
+    }
+
+    async function browserSignIn(identity: string, keep: boolean, personal = false) {
+        if (!workspace || cancelSso) return { ok: false, error: 'A browser sign-in is already in progress or the workspace is unavailable.' };
+        pendingPersonal = undefined;
+        const origin = workspace.origin;
+        const base = personal ? 'api/auth/sso/personal' : 'api/auth/sso';
+        let loopback: Awaited<ReturnType<typeof createSsoLoopback>> | undefined;
+        let cancelled = false;
+        cancelSso = () => { cancelled = true; loopback?.close(); };
+        try {
+            loopback = await createSsoLoopback();
+            if (cancelled) return { ok: false, error: 'Sign-in was cancelled.' };
+            const start = await api(`${base}/start`, { method: 'POST', auth: false, body: {
+                ...(personal ? { provider: identity } : { email: identity }), challenge: loopback.challenge, desktop: { port: loopback.port, path: loopback.path },
+            } });
+            if (!start.ok || cancelled) return { ok: false, error: start.error || 'Sign-in was cancelled.' };
+            const url = new URL(start.data.url);
+            if (url.origin !== origin || url.pathname !== `/${base}/start` || url.username || url.password) {
+                throw new Error('Invalid workspace sign-in URL');
+            }
+            await shell.openExternal(url.href);
+            const code = await loopback.result;
+            if (!code || cancelled || workspace?.origin !== origin) return { ok: false, error: 'Sign-in was cancelled or expired.' };
+            const signedIn = await api(`${base}/exchange`, { method: 'POST', auth: false, body: { code, verifier: loopback.verifier } });
+            if (!signedIn.ok || cancelled || workspace?.origin !== origin) {
+                return { ok: false, error: signedIn.error || 'Sign-in could not be completed.' };
+            }
+            if (personal && typeof signedIn.data?.enrol?.code === 'string') {
+                const { code, name, email, verifiedEmail } = signedIn.data.enrol;
+                pendingPersonal = { origin, code, verifier: loopback.verifier, keep, verifying: false };
+                return { ok: true, enrol: { name, email, verifiedEmail } };
+            }
+            return finishSignIn(signedIn.data, keep);
+        } catch { return { ok: false, error: 'Could not start browser sign-in.' }; }
+        finally { loopback?.close(); cancelSso = undefined; }
+    }
+
+    appHandler('auth:sso', (email: unknown, keep: unknown) => browserSignIn(String(email || '').trim(), keep === true));
+    appHandler('auth:personal-providers', async () => {
+        const result = await api('api/auth/sso/personal/providers', { auth: false });
+        return Array.isArray(result.data?.providers) ? result.data.providers.filter((provider: unknown) => provider === 'google' || provider === 'microsoft') : [];
+    });
+    appHandler('auth:personal', (provider: unknown, keep: unknown) => provider === 'google' || provider === 'microsoft'
+        ? browserSignIn(provider, keep === true, true) : { ok: false, error: 'Unknown sign-in provider.' });
+    appHandler('auth:personal-cancel', () => { pendingPersonal = undefined; });
+    appHandler('auth:personal-complete', async (input: Record<string, unknown>) => {
+        const pending = pendingPersonal;
+        if (!pending || pending.origin !== workspace?.origin) return { ok: false, error: 'Start sign-in again.' };
+        const body = pending.verifying ? { otp: String(input?.otp || '') }
+            : { email: String(input?.email || ''), displayName: String(input?.displayName || ''), phoneNumber: String(input?.phoneNumber || '') };
+        const result = await api(`api/auth/sso/personal/${pending.verifying ? 'verify-email' : 'signup'}`,
+            { method: 'POST', auth: false, body: { ...body, code: pending.code, verifier: pending.verifier } });
+        if (pendingPersonal !== pending || workspace?.origin !== pending.origin) return { ok: false, error: 'Sign-in was cancelled.' };
+        if (!result.ok) return { ok: false, error: result.error };
+        if (typeof result.data?.verification === 'string') {
+            pendingPersonal = { ...pending, code: result.data.verification, verifying: true };
+            return { ok: true, verification: result.data.email };
+        }
+        pendingPersonal = undefined;
+        return finishSignIn(result.data, pending.keep);
+    });
+
+    appHandler('auth:sso-cancel', () => { cancelSso?.(); });
+
     appHandler('auth:login', async (email: unknown, password: unknown, keep: unknown) => {
+        cancelSso?.();
+        pendingPersonal = undefined;
         const result = await api('api/auth/login', { method: 'POST', auth: false, body: { email: String(email || '').trim(), password: String(password || '') } });
         if (!result.ok || typeof result.data?.token !== 'string') return { ok: false, error: result.status === 401 ? 'Wrong email or password.' : result.error };
         token = result.data.token;
@@ -361,10 +458,10 @@ function setupIPC() {
 
     appHandler('app:notify', (title: unknown, body: unknown) => { new Notification({ title: String(title).slice(0, 80), body: String(body).slice(0, 200) }).show(); });
 
-    // The meeting page's preload asks once for the session so the meeting runs signed in.
-    ipcMain.on('meeting:token', event => {
+    // The renderer sees only a placeholder. The actual credential stays in this process.
+    ipcMain.on('meeting:session-marker', event => {
         const url = event.senderFrame?.url || '';
-        event.returnValue = inMeeting(url) && meetingToken ? meetingToken : '';
+        event.returnValue = event.sender === mainWindow?.webContents && event.senderFrame === mainWindow?.webContents.mainFrame && inMeeting(url) ? meetingMarker : '';
     });
 }
 

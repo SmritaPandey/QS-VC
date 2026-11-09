@@ -1,12 +1,8 @@
 const { createHmac, timingSafeEqual } = require('node:crypto');
 
-const DEVELOPMENT_SECRET = 'dev-jwt-secret-change-in-production';
+const { serviceSecret } = require('./service-secrets.cjs');
 
-function invitationSecret(secret = process.env.JWT_SECRET) {
-    if (secret && secret !== DEVELOPMENT_SECRET) return secret;
-    if (process.env.NODE_ENV === 'production') throw new Error('A private JWT_SECRET is required to create meeting invitations.');
-    return secret || DEVELOPMENT_SECRET;
-}
+function invitationSecret(secret) { return secret || serviceSecret('INVITATION_SECRET'); }
 
 function createMeetingInviteToken(meetingCode, secret) {
     return createHmac('sha256', invitationSecret(secret))

@@ -46,7 +46,7 @@ const initials = name => String(name || '?').replace(/\(.*?\)/g, '').trim().spli
 // ── screens ──
 function render() {
     document.documentElement.dataset.theme = state.theme;
-    const screen = !state.workspace ? setupScreen() : !state.user ? signInScreen() : shell();
+    const screen = !state.workspace ? setupScreen() : !state.user ? (state.personalEnrol ? personalEnrolScreen() : signInScreen()) : shell();
     root.replaceChildren(state.upgradePrompt
         ? h('div', {}, h('div', { class: 'app-surface', inert: true }, screen), upgradeModal())
         : screen);
@@ -136,20 +136,80 @@ function setupScreen() {
 function signInScreen() {
     const error = h('p', { class: 'error', role: 'alert' });
     const email = h('input', { class: 'input', id: 'email', type: 'email', autocomplete: 'username', required: true, maxlength: 255 });
-    const password = h('input', { class: 'input', id: 'password', type: 'password', autocomplete: 'current-password', required: true, maxlength: 128 });
+    const password = h('input', { class: 'input', id: 'password', type: 'password', autocomplete: 'current-password', maxlength: 128 });
+    const passwordField = h('label', { class: 'field' }, h('span', { text: 'Password' }), password);
     const keep = h('input', { type: 'checkbox', checked: state.keepSignedIn });
-    const submit = h('button', { class: 'btn block', type: 'submit' }, 'Sign in');
+    const submit = h('button', { class: 'btn block', type: 'submit' }, 'Continue');
+    const cancel = h('button', { class: 'btn secondary', type: 'button', onclick: () => void api.cancelOrganisationSignIn() }, 'Cancel browser sign-in');
+    const organisation = h('button', { class: 'btn block', type: 'button', onclick: async () => {
+        error.textContent = '';
+        cancel.hidden = false;
+        submit.disabled = true;
+        email.disabled = true;
+        const result = await busy(organisation, 'Waiting for browser…', () => api.signInWithOrganisation(email.value, keep.checked));
+        cancel.hidden = true;
+        email.disabled = false;
+        submit.disabled = false;
+        if (!result.ok) { error.textContent = result.error || 'Organisation sign-in failed.'; return; }
+        state.view = 'home';
+        await refresh();
+    } }, 'Sign in with your organisation');
+    const personal = h('div', { class: 'personal-sign-in' });
+    personal.hidden = true;
+    void api.personalProviders().then(providers => {
+        personal.replaceChildren(...providers.map(provider => {
+            const label = provider === 'google' ? 'Google' : 'Microsoft';
+            const button = h('button', { class: 'btn secondary block', type: 'button', onclick: async () => {
+                error.textContent = '';
+                cancel.hidden = false;
+                email.disabled = submit.disabled = organisation.disabled = true;
+                for (const action of personal.querySelectorAll('button')) action.disabled = true;
+                const result = await busy(button, 'Waiting for browser…', () => api.signInWithProvider(provider, keep.checked));
+                cancel.hidden = true;
+                email.disabled = submit.disabled = organisation.disabled = false;
+                for (const action of personal.querySelectorAll('button')) action.disabled = false;
+                if (!result.ok) { error.textContent = result.error || 'Sign-in could not be completed.'; return; }
+                if (result.enrol) { state.personalEnrol = result.enrol; render(); return; }
+                state.view = 'home'; await refresh();
+            } }, `Continue with ${label}`);
+            return button;
+        }));
+        personal.hidden = !providers.length || !!method?.required;
+    }).catch(() => {});
+    let method;
+    const update = () => {
+        passwordField.hidden = !method || method.required;
+        password.required = !!method && !method.required;
+        organisation.hidden = !method?.available;
+        submit.hidden = !!method?.required;
+        personal.hidden = !personal.childElementCount || !!method?.required;
+        submit.textContent = method ? 'Sign in with password' : 'Continue';
+    };
+    cancel.hidden = true;
+    update();
+    email.addEventListener('input', () => { method = undefined; password.value = ''; error.textContent = ''; update(); });
     const form = h('form', { onsubmit: async event => {
         event.preventDefault(); error.textContent = '';
-        if (!email.value || !password.value) { error.textContent = 'Enter your email and password.'; return; }
+        if (!method) {
+            const address = email.value;
+            const result = await busy(submit, 'Checking…', () => api.discover(address));
+            if (email.value !== address) return;
+            if (!result.ok) { error.textContent = result.error || 'Sign-in discovery failed.'; return; }
+            method = result;
+            update();
+            if (result.available) organisation.focus();
+            else if (!result.required) password.focus();
+            else error.textContent = 'Your organisation requires SSO. Contact your administrator.';
+            return;
+        }
+        if (method.required) return;
         const result = await busy(submit, 'Signing in…', () => api.login(email.value, password.value, keep.checked));
         if (!result.ok) { error.textContent = result.error || 'Sign in failed.'; password.select(); return; }
         password.value = ''; state.view = 'home'; await refresh();
     } },
         h('label', { class: 'field' }, h('span', { text: 'Email' }), email),
-        h('label', { class: 'field' }, h('span', { text: 'Password' }), password),
-        h('label', { class: 'check' }, keep, 'Keep me signed in on this computer'),
-        error, submit);
+        passwordField, h('label', { class: 'check' }, keep, 'Keep me signed in on this computer'),
+        error, submit, organisation, personal, cancel);
 
     const code = h('input', { class: 'input code-input', placeholder: 'Meeting code', 'aria-label': 'Meeting code' });
     const joinButton = h('button', { class: 'btn secondary', type: 'submit' }, 'Join');
@@ -160,14 +220,46 @@ function signInScreen() {
     } }, code, joinButton);
     setTimeout(() => email.focus(), 50);
     return h('main', { class: 'auth' },
-        brandPanel('One room. Your language.', 'Sign in with your organisation account to see your meetings.'),
+        brandPanel('One room. Your language.', 'Sign in to see your meetings.'),
         h('section', { class: 'auth-panel' }, h('div', { class: 'auth-card' },
             h('span', { class: 'org-chip' }, icon('apartment'), state.host, h('button', { type: 'button', onclick: changeOrganisation }, 'Change')),
             h('h2', { text: 'Sign in' }),
-            h('p', { text: 'Use the account your administrator set up for you.' }),
+            h('p', { text: 'Sign in with your personal or organisation account.' }),
             form,
             h('div', { class: 'divider', text: 'or join as a guest' }),
             guest)));
+}
+
+function personalEnrolScreen() {
+    const enrol = state.personalEnrol;
+    const verifying = !!enrol.verification;
+    const error = h('p', { class: 'error', role: 'alert' });
+    const fields = verifying
+        ? [h('p', { text: `Enter the eight-digit code sent to ${enrol.verification}.` }),
+            h('label', { class: 'field' }, 'Verification code', h('input', {
+                class: 'input', name: 'otp', autocomplete: 'one-time-code', inputmode: 'numeric', pattern: '[0-9]{8}', required: true,
+            }))]
+        : [
+            h('label', { class: 'field' }, 'Your name', h('input', { class: 'input', name: 'displayName', value: enrol.name || '', autocomplete: 'name', maxlength: 100, required: true })),
+            h('label', { class: 'field' }, 'Email', h('input', { class: 'input', name: 'email', type: 'email', value: enrol.verifiedEmail || enrol.email || '', readonly: !!enrol.verifiedEmail, autocomplete: 'email', maxlength: 255, required: true })),
+            h('label', { class: 'field' }, 'Mobile number with country code', h('input', { class: 'input', name: 'phoneNumber', type: 'tel', autocomplete: 'tel', maxlength: 24, required: true })),
+            h('p', {}, 'By creating an account, you agree to our ', h('a', { href: new URL('/terms', state.workspace).href, target: '_blank', rel: 'noreferrer' }, 'Terms'),
+                '. Read our ', h('a', { href: new URL('/privacy', state.workspace).href, target: '_blank', rel: 'noreferrer' }, 'Privacy Policy'), '.'),
+        ];
+    const submit = h('button', { class: 'btn block' }, verifying ? 'Verify and create account' : enrol.verifiedEmail ? 'Create account' : 'Send verification code');
+    const form = h('form', { onsubmit: async event => {
+        event.preventDefault(); error.textContent = '';
+        const input = Object.fromEntries(new FormData(event.currentTarget));
+        const result = await busy(submit, 'Please wait…', () => api.completePersonalSignIn(input));
+        if (!result.ok) { error.textContent = result.error || 'Sign-in could not be completed.'; return; }
+        if (result.verification) { state.personalEnrol = { verification: result.verification }; render(); return; }
+        state.personalEnrol = undefined; state.view = 'home'; await refresh();
+    } }, fields, error, submit, h('button', { class: 'btn secondary block', type: 'button', onclick: () => {
+        void api.cancelPersonalSignIn(); state.personalEnrol = undefined; render();
+    } }, 'Back to sign in'));
+    return h('main', { class: 'auth' },
+        brandPanel('One room. Your language.', 'Sign in to see your meetings.'),
+        h('section', { class: 'auth-panel' }, h('div', { class: 'auth-card' }, h('h2', { text: verifying ? 'Check your email' : 'Finish creating your account' }), form)));
 }
 
 function shell() {

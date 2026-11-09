@@ -51,11 +51,7 @@ const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API
  */
 async function loadTurnServers(): Promise<RTCIceServer[] | undefined> {
     try {
-        const signalingUrl = import.meta.env.VITE_SIGNALING_URL ? new URL(import.meta.env.VITE_SIGNALING_URL) : null;
-        const base = signalingUrl ? `${signalingUrl.protocol === 'wss:' ? 'https:' : 'http:'}//${signalingUrl.host}` : '';
-        const response = await fetch(`${base}/api/ice-servers`, { signal: AbortSignal.timeout(4000) });
-        if (!response.ok) return undefined;
-        const { iceServers } = await response.json() as { iceServers?: RTCIceServer[] };
+        const { iceServers } = await signaling.request('getIceServers') as { iceServers?: RTCIceServer[] };
         return (iceServers || []).filter(server => [server.urls].flat().some(url => /^turns?:/.test(String(url))));
     } catch { return undefined; }
 }

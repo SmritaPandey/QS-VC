@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import crypto from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
-import { billingRouter } from './billing';
+import { billingRouter, processMandateCancellations } from './billing';
 
 const user = {
     sub: '00000000-0000-4000-8000-000000000001',
@@ -380,9 +380,10 @@ it('ignores a valid Cashfree authorization event for a failed checkout without a
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(queries.some(query => query.sql.includes('UPDATE public.users SET subscription_plan = $1, trial_started_at = NOW()'))).toBe(false);
     expect(queries.some(query => query.sql.includes("SET result = 'ignored'"))).toBe(true);
+    expect(queries.some(query => query.sql.includes('INSERT INTO public.payment_mandate_cancellations'))).toBe(true);
 });
 
-it('activates one Cashfree trial after signed mandate authorization and deduplicates the webhook retry', async () => {
+it.each([true, false])('handles signed Cashfree trial authorization and retries (eligible: %s)', async eligible => {
     enableCashfree();
     const queries: Array<{ sql: string; values: unknown[] }> = [];
     let webhookInsertCount = 0;
@@ -401,7 +402,7 @@ it('activates one Cashfree trial after signed mandate authorization and deduplic
             }
             if (sql.includes('qsvc_payment_subscription_context')) return { rows: [context], rowCount: 1 };
             if (sql.includes('SELECT subscription_plan, trial_started_at, trial_ends_at')) return { rows: [], rowCount: 0 };
-            if (sql.includes('UPDATE public.users SET subscription_plan = $1, trial_started_at = NOW()')) return { rows: [{ id: user.sub }], rowCount: 1 };
+            if (sql.includes('UPDATE public.users SET subscription_plan = $1, trial_started_at = NOW()')) return { rows: eligible ? [{ id: user.sub }] : [], rowCount: eligible ? 1 : 0 };
             return { rows: [], rowCount: 1 };
         }),
         release: vi.fn(),
@@ -440,6 +441,118 @@ it('activates one Cashfree trial after signed mandate authorization and deduplic
 
     expect(webhookInsertCount).toBe(2);
     expect(queries.filter(query => query.sql.includes('UPDATE public.users SET subscription_plan = $1, trial_started_at = NOW()'))).toHaveLength(1);
-    expect(queries.some(query => query.sql.includes("UPDATE public.payment_subscriptions SET status = 'active'"))).toBe(true);
-    expect(queries.some(query => query.sql.includes("SET result = 'processed'"))).toBe(true);
+    expect(queries.some(query => query.sql.includes("UPDATE public.payment_subscriptions SET status = 'active'"))).toBe(eligible);
+    expect(queries.some(query => query.sql.includes('INSERT INTO public.payment_mandate_cancellations'))).toBe(!eligible);
+});
+
+it.each(['cancelled', 'failed', 'expired', 'overlap', 'missing-period'])('records one Cashfree capture even for a %s subscription', async scenario => {
+    enableCashfree();
+    const needsReview = ['overlap', 'missing-period'].includes(scenario);
+    const status = needsReview ? 'failed' : scenario;
+    const context = {
+        id: cashfreeSubscriptionId, tenant_id: user.tenantId, user_id: user.sub, plan: 'starter',
+        provider_plan_id: 'cashfree_plan_test', status, current_period_end: null,
+        currency: 'INR', base_amount: '499.00', tax_percent: '18', tax_amount: '89.82', total_amount: '588.82',
+        trial_checkout: false, trial_ends_at: null,
+    };
+    const queries: Array<{ sql: string; values: unknown[] }> = [];
+    const captured = new Set<unknown>();
+    const client = {
+        query: vi.fn(async (sql: string, values: unknown[] = []) => {
+            queries.push({ sql, values });
+            if (sql.includes('qsvc_payment_subscription_context')) return { rows: [context], rowCount: 1 };
+            if (sql.includes('AND id <> $3') && scenario === 'overlap') return { rows: [{ id: 'other-subscription' }], rowCount: 1 };
+            if (sql.includes('INSERT INTO public.payment_captures')) {
+                if (captured.has(values[2])) return { rows: [], rowCount: 0 };
+                captured.add(values[2]);
+            }
+            return { rows: [], rowCount: 1 };
+        }),
+        release: vi.fn(),
+    };
+    const pool = { connect: vi.fn(async () => client) };
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+        subscription_id: 'cashfree_sub_provider',
+        subscription_status: 'ACTIVE',
+        next_schedule_date: scenario === 'missing-period' ? undefined : new Date(Date.now() + 30 * 86_400_000).toISOString(),
+        plan_details: { plan_id: 'cashfree_plan_test', plan_currency: 'INR', plan_interval_type: 'MONTH',
+            plan_intervals: 1, plan_max_cycles: 100, plan_amount: 588.82 },
+        subscription_tags: { qsvc_checkout_id: cashfreeSubscriptionId },
+    }), { status: 200 })));
+    const webhook = route(makeRouter(pool), '/webhooks/cashfree');
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    for (const [index, paymentType] of ['AUTH', 'CHARGE', 'CHARGE'].entries()) {
+        const rawBody = Buffer.from(JSON.stringify({
+            type: 'SUBSCRIPTION_PAYMENT_SUCCESS', event_time: new Date(Date.now() + index * 1000).toISOString(),
+            data: { subscription_id: 'cashfree_sub_provider', payment_id: 'same_charge', payment_type: paymentType,
+                payment_status: 'SUCCESS', payment_currency: 'INR', payment_amount: 588.82 },
+        }));
+        const signature = crypto.createHmac('sha256', cashfreeWebhookSecret)
+            .update(timestamp).update(rawBody).digest('base64');
+        const res = makeResponse();
+        await webhook(
+            makeRequest({}, { 'x-webhook-signature': signature, 'x-webhook-timestamp': timestamp }, {}, rawBody) as unknown as Request,
+            res as unknown as Response,
+            vi.fn(),
+        );
+        expect(res.statusCode).toBe(200);
+        if (paymentType === 'AUTH') expect(captured.size).toBe(0);
+    }
+    const eventIds = queries.filter(query => query.sql.includes('INSERT INTO public.payment_webhook_events')).map(query => query.values[1]);
+    expect(new Set(eventIds).size).toBe(3);
+    const captures = queries.filter(query => query.sql.includes('INSERT INTO public.payment_captures'));
+    expect(captures).toHaveLength(2);
+    expect(captures[0].values).toEqual([context.id, 'cashfree', 'same_charge', 58882, 'INR']);
+    expect(captured.size).toBe(1);
+    expect(queries.filter(query => query.sql.includes('UPDATE public.users SET subscription_plan'))).toHaveLength(needsReview ? 0 : 1);
+    expect(queries.filter(query => query.sql.includes("CASE WHEN status = 'cancelled' THEN status ELSE 'active' END"))).toHaveLength(needsReview ? 0 : 1);
+    expect(queries.some(query => query.sql.includes('SET needs_review = true'))).toBe(needsReview);
+});
+
+it('does not activate a verified legacy order when its payment is already recorded', async () => {
+    enableRazorpay();
+    const paymentId = 'pay_test123';
+    const orderId = 'order_test123';
+    const checkout = {
+        id: cashfreeSubscriptionId, plan: 'starter', status: 'pending', currency: 'INR',
+        total_amount: '588.82', checkout_expires_at: new Date(Date.now() + 60_000),
+    };
+    const { pool, client } = makePool();
+    client.query.mockImplementation(async (sql) => {
+        if (sql.includes('provider_order_id = $3')) return { rows: [checkout], rowCount: 1 };
+        if (sql.includes('SELECT id FROM public.users')) return { rows: [{ id: user.sub }], rowCount: 1 };
+        if (sql.includes('INSERT INTO public.payment_captures')) return { rows: [], rowCount: 0 };
+        return { rows: [], rowCount: 1 };
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+        id: paymentId, order_id: orderId, amount: 58882, currency: 'INR', status: 'captured',
+    }), { status: 200 })));
+    const signature = crypto.createHmac('sha256', 'razorpay_test_secret').update(`${orderId}|${paymentId}`).digest('hex');
+    const res = makeResponse();
+    await route(makeRouter(pool), '/razorpay/verify-payment')(
+        makeRequest({ paymentId, orderId, signature }) as unknown as Request, res as unknown as Response, vi.fn(),
+    );
+    expect(res.statusCode).toBe(409);
+    expect(client.query.mock.calls.some(([sql]) => sql.includes('UPDATE public.users'))).toBe(false);
+});
+
+it.each(['success', 'failure', 'pending'])('confirms provider cancellation before completing the durable job (%s)', async scenario => {
+    enableCashfree();
+    const job = { subscription_id: cashfreeSubscriptionId, tenant_id: user.tenantId,
+        provider: 'cashfree', provider_subscription_id: 'provider-subscription' };
+    const { pool, queries } = makePool();
+    Object.assign(pool, { query: vi.fn().mockResolvedValue({ rows: [job] }) });
+    let cancelled = false;
+    const fetch = vi.fn(async (_url: unknown, options: RequestInit) => {
+        if (options.method === 'POST' && scenario === 'failure') throw new Error('Provider unavailable');
+        if (options.method === 'POST' && scenario === 'success') cancelled = true;
+        return new Response(JSON.stringify({ subscription_status: cancelled ? 'CANCELLED' : 'ACTIVE' }), { status: 200 });
+    });
+    vi.stubGlobal('fetch', fetch);
+    const logger = { error: vi.fn(), warn: vi.fn() };
+    await processMandateCancellations(pool as never, logger);
+    expect(fetch).toHaveBeenCalledTimes(scenario === 'failure' ? 2 : 3);
+    expect(JSON.parse(String(fetch.mock.calls[1][1].body)).action).toBe('CANCEL');
+    expect(queries.some(query => query.sql.includes('SET completed_at = NOW()'))).toBe(scenario === 'success');
+    expect(logger.error).toHaveBeenCalledTimes(scenario === 'success' ? 0 : 1);
 });

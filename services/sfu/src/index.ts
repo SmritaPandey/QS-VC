@@ -36,6 +36,7 @@ function validateBody<T>(schema: z.ZodSchema<T>) {
 }
 
 const app = express();
+app.disable('x-powered-by');
 
 // CORS: restrict origins per environment
 const allowedOrigins = process.env.CORS_ORIGINS
@@ -330,6 +331,7 @@ mountPolyBridge();
 // GLOBAL ERROR HANDLER
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+app.use((_req, res) => { res.status(404).json({ error: 'Route not found' }); });
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     logger.error(err, 'Unhandled error');
     res.status(500).json({ error: 'Internal server error' });

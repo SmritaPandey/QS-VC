@@ -1,4 +1,8 @@
 .git
+.secrets
+**/*.security.env
+**/security.env
+**/session-signing.pem
 **/node_modules
 **/dist
 **/.env

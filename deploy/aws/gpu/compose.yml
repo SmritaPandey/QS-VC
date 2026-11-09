@@ -18,13 +18,16 @@ services:
     <<: *gpu
     container_name: qsvc-asr
     build:
-      context: ../../../services/asr
+      context: ../../..
+      dockerfile: services/asr/Dockerfile
       args:
-        BASE: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
-        ONNX_RUNTIME: onnxruntime-gpu==1.20.1
+        BASE: ${ASR_BASE_IMAGE:?Set a CUDA base validated for ONNX Runtime}
+        ONNX_RUNTIME: ${ASR_ONNX_RUNTIME:-onnxruntime-gpu==1.31.1}
     environment:
       ASR_ENGINE: ${ASR_ENGINE:-hybrid}
-      ASR_MODEL: ${ASR_MODEL:-large-v3-turbo}
+      NODE_ENV: production
+      ASR_MODEL: ${ASR_MODEL:-/models/whisper}
+      ASR_INDIC_MODEL: ${ASR_INDIC_MODEL:-/models/indic}
       ASR_LANGUAGES: ${ASR_LANGUAGES:-}
       ASR_INDIC_LANGUAGES: ${ASR_INDIC_LANGUAGES:-}
       ASR_PROMPT: ${ASR_PROMPT:-QS-VC, UPSWAN, UPDESCO}
@@ -32,22 +35,26 @@ services:
       ASR_API_KEY: ${ASR_API_KEY:?Set the same ASR_API_KEY as the backend}
       HF_TOKEN: ${HF_TOKEN:-}
     ports: ["8000:8000"]
-    volumes: [asr_models:/models]
+    volumes: [asr_models:/models:ro]
   mt:
     <<: *gpu
     container_name: qsvc-mt
     build:
-      context: ../../../services/mt
+      context: ../../..
+      dockerfile: services/mt/Dockerfile
       args:
-        BASE: nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
-        TORCH_INDEX: https://download.pytorch.org/whl/cu124
+        BASE: ${MT_BASE_IMAGE:?Set a CUDA base validated for the pinned Torch release}
+        TORCH_INDEX: ${MT_TORCH_INDEX:?Set the compatible PyTorch CUDA wheel index}
     environment:
+      NODE_ENV: production
+      MT_MODEL_EN_INDIC: ${MT_MODEL_EN_INDIC:-/models/en-indic}
+      MT_MODEL_INDIC_EN: ${MT_MODEL_INDIC_EN:-/models/indic-en}
       MT_LANGUAGES: ${MT_LANGUAGES:-}
       MT_API_KEY: ${MT_API_KEY:?Set the same value as LIBRETRANSLATE_API_KEY on the backend}
       MT_GLOSSARY_FILE: /app/glossary.example.json
       MT_BEAMS: ${MT_BEAMS:-3}
     ports: ["5000:5000"]
-    volumes: [mt_models:/models]
+    volumes: [mt_models:/models:ro]
   ollama:
     <<: *gpu
     profiles: [llm]

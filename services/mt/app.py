@@ -15,6 +15,7 @@ Runs on CPU (slower) or an NVIDIA GPU. Nothing leaves the server.
 from __future__ import annotations
 
 import asyncio
+from shared.model_security import model_path, offline_models
 import json
 import os
 import re
@@ -133,10 +134,10 @@ class IndicTrans2Backend:
         from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
         import torch
 
-        name = self.models[direction]
-        tokenizer = AutoTokenizer.from_pretrained(name, trust_remote_code=True)
+        name = model_path(self.models[direction])
+        tokenizer = AutoTokenizer.from_pretrained(name, trust_remote_code=True, local_files_only=offline_models())
         dtype = torch.float16 if self.device.startswith("cuda") else torch.float32
-        model = AutoModelForSeq2SeqLM.from_pretrained(name, trust_remote_code=True, torch_dtype=dtype).to(self.device).eval()
+        model = AutoModelForSeq2SeqLM.from_pretrained(name, trust_remote_code=True, local_files_only=offline_models(), use_safetensors=True, torch_dtype=dtype).to(self.device).eval()
         self.loaded[direction] = (tokenizer, model)
         return self.loaded[direction]
 

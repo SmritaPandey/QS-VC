@@ -1,6 +1,6 @@
 # AI4Bharat IndicConformer (ai4bharat/indic-conformer-600m-multilingual). Installed when INDIC=1.
 # GPU images replace onnxruntime with onnxruntime-gpu (see Dockerfile ONNX_RUNTIME build arg).
-torch==2.5.1
-torchaudio==2.5.1
-transformers==4.46.3
-onnx==1.19.1
+torch==2.10.0
+torchaudio==2.10.0
+transformers==5.22.2
+onnx==1.23.2

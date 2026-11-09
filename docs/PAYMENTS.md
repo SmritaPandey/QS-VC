@@ -17,7 +17,7 @@ GST is displayed in checkout. Razorpay and Cashfree recurring amounts are set to
 
 ## Provider setup
 
-Apply database migrations `020` through `024` in order before deploying this auth-service build:
+Apply database migrations `020` through `025` in order before deploying this auth-service build:
 
 ```sh
 npm run db:migrate
@@ -56,6 +56,8 @@ Set `PAYPAL_ENVIRONMENT`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_WE
 Each standard plan must have one monthly regular cycle, 18% non-inclusive tax, and no setup fee. Each `*_TRIAL` plan must have one seven-day, zero-value trial cycle followed by the same monthly regular cycle. Configure PayPal's verified webhook endpoint at `https://<auth-host>/api/auth/billing/webhooks/paypal`. A browser redirect does not grant access; the server waits for a verified activation or completed sale webhook. Pending PayPal approvals retain their checkout slot until completion or successful provider cancellation; local timeout does not permit a second subscription while the old approval link remains usable.
 
 ## One-trial rule and cancellation
+
+Migration `025` records verified charges used to activate or extend access in `payment_captures`. Amounts are stored as integer minor units, keyed by provider and payment ID. The capture, webhook result and access update commit together. Mandate authorizations and trials do not create capture records. A late verified charge preserves a cancelled subscription's renewal status. The ledger starts with this release and does not backfill historical payments.
 
 The database records a single trial start per account. Choosing Starter or Pro consumes that same trial only after provider authorization succeeds. A retry, second browser tab, or later sign-in cannot start another trial. If authorization fails, the account remains eligible to try again. On trial expiration, access depends on a verified paid renewal. Cancellation removes future renewals while preserving access through the paid period or active trial end.
 

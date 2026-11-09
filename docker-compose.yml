@@ -1,6 +1,18 @@
 version: "3.9"
 
 services:
+  keycloak-db:
+    extends: { file: ./deploy/keycloak/compose.yml, service: keycloak-db }
+    volumes:
+      - keycloak-data:/var/lib/postgresql/data
+      - ./deploy/keycloak/init-db.sql:/docker-entrypoint-initdb.d/01-keycloak.sql:ro
+  keycloak:
+    extends: { file: ./deploy/keycloak/compose.yml, service: keycloak }
+    environment:
+      QSVC_SSO_AUTH_URL: ${QSVC_SSO_AUTH_URL:-http://localhost:4002}
+    volumes:
+      - ./deploy/keycloak/qsvc-realm.json:/opt/keycloak/data/import/qsvc-realm.json:ro
+    networks: [default, keycloak-db]
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   # INFRASTRUCTURE
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -52,10 +64,18 @@ services:
       - ./docker-data/minio:/data
 
   coturn:
+    entrypoint: [sh, /etc/coturn/start.sh]
+    volumes:
+      - ./deploy/turn/start.sh:/etc/coturn/start.sh:ro
+      - ./deploy/turn/peer-policy.conf:/etc/coturn/peer-policy.conf:ro
+    environment:
+      NODE_ENV: development
+      TURN_SECRET: ${TURN_SECRET:-dev-turn-secret-change-in-production}
+      TURN_REALM: ${TURN_REALM:-qsvc}
+      SFU_ANNOUNCED_IP: ${SFU_ANNOUNCED_IP:-}
+      TURN_ALLOWED_SFU_IP: ${TURN_ALLOWED_SFU_IP:-}
     image: coturn/coturn:latest
     container_name: qsvc-coturn
-    command: >
-      -n --lt-cred-mech --use-auth-secret --static-auth-secret=dev-turn-secret-change-in-production --realm=qsvc.dev --listening-port=3478 --min-port=49152 --max-port=49200 --log-file=stdout
     ports:
       - "3478:3478"
       - "3478:3478/udp"
@@ -95,6 +115,10 @@ services:
     ports:
       - "4001:4001"
     environment:
+      - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-}
+      - MEETING_POLICY_SECRET=${MEETING_POLICY_SECRET:-}
+      - INVITATION_SECRET=${INVITATION_SECRET:-}
+      - TURN_ACCESS_SECRET=${TURN_ACCESS_SECRET:-}
       - NODE_ENV=development
       - SIGNALING_PORT=4001
       - SFU_INTERNAL_URL=http://localhost:4000
@@ -105,7 +129,6 @@ services:
       - POSTGRES_DB=qsvc
       - POSTGRES_USER=qsvc
       - POSTGRES_PASSWORD=qsvc_dev_2025
-      - JWT_SECRET=dev-jwt-secret-change-in-production
       - LIBRETRANSLATE_URL=${LIBRETRANSLATE_URL:-}
       - LIBRETRANSLATE_API_KEY=${LIBRETRANSLATE_API_KEY:-}
       - CAPTION_TRANSLATION_PROVIDER=${CAPTION_TRANSLATION_PROVIDER:-}
@@ -130,6 +153,30 @@ services:
     ports:
       - "4002:4002"
     environment:
+      - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-}
+      - TURN_ACCESS_SECRET=${TURN_ACCESS_SECRET:-}
+      - QSVC_SSO_ENABLED=${QSVC_SSO_ENABLED:-false}
+      - QSVC_SSO_AUTH_URL=${QSVC_SSO_AUTH_URL:-http://localhost:4002}
+      - QSVC_SSO_WEB_URL=${QSVC_SSO_WEB_URL:-http://localhost:5173}
+      - QSVC_KEYCLOAK_ISSUER=${QSVC_KEYCLOAK_ISSUER:-http://localhost:8085/realms/qsvc}
+      - QSVC_KEYCLOAK_INTERNAL_URL=${QSVC_KEYCLOAK_INTERNAL_URL:-http://keycloak:8080}
+      - QSVC_KEYCLOAK_CLIENT_SECRET=${QSVC_KEYCLOAK_CLIENT_SECRET:-}
+      - QSVC_KEYCLOAK_ADMIN_CLIENT_ID=${QSVC_KEYCLOAK_ADMIN_CLIENT_ID:-qsvc-idp-admin}
+      - QSVC_KEYCLOAK_ADMIN_CLIENT_SECRET=${QSVC_KEYCLOAK_ADMIN_CLIENT_SECRET:-}
+      - QSVC_SSO_IDP_HOSTS=${QSVC_SSO_IDP_HOSTS:-}
+      - QSVC_DIGILOCKER_ENABLED=${QSVC_DIGILOCKER_ENABLED:-false}
+      - QSVC_DIGILOCKER_AUTHORIZE_URL=${QSVC_DIGILOCKER_AUTHORIZE_URL:-}
+      - QSVC_DIGILOCKER_TOKEN_URL=${QSVC_DIGILOCKER_TOKEN_URL:-}
+      - QSVC_DIGILOCKER_USER_URL=${QSVC_DIGILOCKER_USER_URL:-}
+      - QSVC_DIGILOCKER_CLIENT_ID=${QSVC_DIGILOCKER_CLIENT_ID:-}
+      - QSVC_DIGILOCKER_CLIENT_SECRET=${QSVC_DIGILOCKER_CLIENT_SECRET:-}
+      - QSVC_DIGILOCKER_SCOPE=${QSVC_DIGILOCKER_SCOPE:-}
+      - QSVC_GOOGLE_CLIENT_ID=${QSVC_GOOGLE_CLIENT_ID:-}
+      - QSVC_GOOGLE_CLIENT_SECRET=${QSVC_GOOGLE_CLIENT_SECRET:-}
+      - QSVC_MICROSOFT_CLIENT_ID=${QSVC_MICROSOFT_CLIENT_ID:-}
+      - QSVC_MICROSOFT_CLIENT_SECRET=${QSVC_MICROSOFT_CLIENT_SECRET:-}
+      - QSVC_EMAIL_API_KEY=${QSVC_EMAIL_API_KEY:-}
+      - QSVC_EMAIL_FROM=${QSVC_EMAIL_FROM:-}
       - NODE_ENV=development
       - AUTH_PORT=4002
       - POSTGRES_HOST=postgres
@@ -137,7 +184,6 @@ services:
       - POSTGRES_DB=qsvc
       - POSTGRES_USER=qsvc
       - POSTGRES_PASSWORD=qsvc_dev_2025
-      - JWT_SECRET=dev-jwt-secret-change-in-production
       - JWT_EXPIRY=24h
       - PAYMENTS_ENABLED=${PAYMENTS_ENABLED:-false}
       - PAYMENT_TERMS_CONFIRMED=${PAYMENT_TERMS_CONFIRMED:-false}
@@ -178,6 +224,9 @@ services:
     ports:
       - "4003:4003"
     environment:
+      - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-}
+      - MEETING_POLICY_SECRET=${MEETING_POLICY_SECRET:-}
+      - INVITATION_SECRET=${INVITATION_SECRET:-}
       - NODE_ENV=development
       - MEETING_PORT=4003
       - POSTGRES_HOST=postgres
@@ -185,7 +234,6 @@ services:
       - POSTGRES_DB=qsvc
       - POSTGRES_USER=qsvc
       - POSTGRES_PASSWORD=qsvc_dev_2025
-      - JWT_SECRET=dev-jwt-secret-change-in-production
       - WEB_URL=http://localhost:5173
     depends_on:
       postgres:
@@ -235,13 +283,17 @@ services:
   asr:
     profiles: ["ai"]
     build:
-      context: ./services/asr
+      context: .
+      dockerfile: services/asr/Dockerfile
       args:
         BASE: ${ASR_BASE_IMAGE:-python:3.11-slim}
-        ONNX_RUNTIME: ${ASR_ONNX_RUNTIME:-onnxruntime==1.20.1}
+        ONNX_RUNTIME: ${ASR_ONNX_RUNTIME:-onnxruntime==1.31.1}
     container_name: qsvc-asr
     environment:
-      - ASR_MODEL=${ASR_MODEL:-}
+      - NODE_ENV=development
+      - QSVC_ALLOW_UNVERIFIED_MODELS=${QSVC_ALLOW_UNVERIFIED_MODELS:-false}
+      - ASR_MODEL=${ASR_MODEL:-/models/whisper}
+      - ASR_INDIC_MODEL=${ASR_INDIC_MODEL:-/models/indic}
       - ASR_LANGUAGES=${ASR_LANGUAGES:-}
       - ASR_PROMPT=${ASR_PROMPT:-}
       - ASR_API_KEY=${ASR_API_KEY:-}
@@ -257,11 +309,16 @@ services:
   mt:
     profiles: ["ai"]
     build:
-      context: ./services/mt
+      context: .
+      dockerfile: services/mt/Dockerfile
       args:
         BASE: ${MT_BASE_IMAGE:-python:3.11-slim}
     container_name: qsvc-mt
     environment:
+      - NODE_ENV=development
+      - QSVC_ALLOW_UNVERIFIED_MODELS=${QSVC_ALLOW_UNVERIFIED_MODELS:-false}
+      - MT_MODEL_EN_INDIC=${MT_MODEL_EN_INDIC:-/models/en-indic}
+      - MT_MODEL_INDIC_EN=${MT_MODEL_INDIC_EN:-/models/indic-en}
       - MT_LANGUAGES=${MT_LANGUAGES:-}
       - MT_API_KEY=${LIBRETRANSLATE_API_KEY:-}
       - MT_GLOSSARY_FILE=/app/glossary.example.json
@@ -271,5 +328,10 @@ services:
     # deploy: { resources: { reservations: { devices: [ { driver: nvidia, count: 1, capabilities: [gpu] } ] } } }
 
 volumes:
+  keycloak-data:
   asr_models:
   mt_models:
+
+networks:
+  keycloak-db:
+    internal: true

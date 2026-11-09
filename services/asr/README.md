@@ -6,11 +6,15 @@ partial (live) and final captions. Works in Chrome, Edge, Firefox, Safari and th
 Audio is processed in memory and never written to disk.
 
 ## Run
+Production loading requires reviewed local model bundles and SHA-256 manifests.
+See [security deployment steps](../../docs/SECURITY_REMEDIATION_2026-11.md#ai-models).
+Remote model code is executable code: review it before creating a manifest.
+
 ```sh
-docker compose --profile ai up -d asr           # first start downloads the Whisper model
+docker compose --profile ai up -d asr           # requires reviewed local model bundles
 # signaling: ASR_URL=http://asr:8000   (optional ASR_API_KEY on both sides)
 ```
-Without Docker: `pip install -r requirements.txt && uvicorn app:app --port 8000`.
+Without Docker, run from the repository root: `python -m uvicorn services.asr.app:app --port 8000` after installing `services/asr/requirements.txt`.
 
 ## Sizing (rule of thumb, verify on your hardware)
 | Hardware | Model | Live speakers at once |

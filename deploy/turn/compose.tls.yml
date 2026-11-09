@@ -1,0 +1,14 @@
+# Merge after the deployment profile. Paths resolve against its project directory.
+services:
+  auth:
+    environment:
+      TURN_SERVERS: turns:${TURN_HOST:-${DOMAIN}}:5349?transport=tcp,turn:${TURN_HOST:-${DOMAIN}}:3478?transport=udp
+      STUN_SERVERS: stun:${TURN_HOST:-${DOMAIN}}:3478
+  coturn:
+    volumes:
+      - ${TURN_CERT_FILE:?Set the full-chain TURN certificate file}:/etc/coturn/tls/fullchain.pem:ro
+      - ${TURN_KEY_FILE:?Set the TURN private-key file}:/etc/coturn/tls/privkey.pem:ro
+    ports:
+      - "5349:5349"
+    environment:
+      QSVC_TURN_TLS: 'true'

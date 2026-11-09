@@ -9,6 +9,12 @@ build/
 
 # Environment
 .env
+.secrets/
+__pycache__/
+.pytest_cache/
+*.security.env
+**/security.env
+**/session-signing.pem
 .env.local
 .env.*.local
 

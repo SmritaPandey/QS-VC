@@ -39,34 +39,11 @@
     @media (prefers-reduced-motion: reduce) { .boot-ring, .boot-play, .boot-tail, .boot-wordmark, .boot-lines>span { animation: none; } .boot-lines>span:first-child { opacity: 1; } .boot-lines>span:not(:first-child) { display: none; } }
     @media (forced-colors: active) { .boot-wordmark { background: none; -webkit-text-fill-color: currentColor; } }
   </style>
-  <script>
-    document.documentElement.classList.add('qsvc-boot');
-    var qsvcBootStarted = performance.now();
-    window.addEventListener('qsvc:ready', function () {
-      clearTimeout(window.qsvcBootTimeout);
-      var remaining = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-        ? 0 : Math.max(0, 3000 - (performance.now() - qsvcBootStarted));
-      setTimeout(function () {
-        document.documentElement.classList.remove('qsvc-boot');
-        document.getElementById('qsvc-startup')?.remove();
-      }, remaining);
-    }, { once: true });
-    window.qsvcBootTimeout = setTimeout(function () {
-      document.documentElement.classList.remove('qsvc-boot');
-      var overlay = document.getElementById('qsvc-startup');
-      if (!overlay) return;
-      overlay.setAttribute('data-slow', '');
-      overlay.querySelector('[data-boot-lines]').hidden = true;
-      overlay.querySelector('[data-boot-status]').classList.remove('boot-sr-only');
-      overlay.querySelector('[data-boot-status]').textContent = 'Taking longer than expected. Reload or continue with available content.';
-      overlay.querySelector('[data-boot-recovery]').hidden = false;
-      overlay.querySelector('[data-boot-continue]').hidden = !document.getElementById('root')?.hasChildNodes();
-    }, 8000);
-  </script>
+  <script src="/startup.js"></script>
 </head>
 
 <body>
-  <div id="qsvc-startup"><div class="boot-content"><div class="boot-mark" aria-hidden="true"><svg class="boot-symbol" viewBox="0 0 64 64" focusable="false"><defs><linearGradient id="boot-ring-gradient" x1="12" y1="5" x2="52" y2="60" gradientUnits="userSpaceOnUse"><stop stop-color="#5141BE"/><stop offset="1" stop-color="#6323AA"/></linearGradient><linearGradient id="boot-play-gradient" x1="22" y1="32" x2="44" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#20528A"/><stop offset=".55" stop-color="#079C9A"/><stop offset="1" stop-color="#20528A"/></linearGradient></defs><path class="boot-ring" d="M47 50 A25 25 0 1 1 53 43" fill="none" stroke="url(#boot-ring-gradient)" stroke-width="6"/><path class="boot-play" d="M23 21 Q22 20 22 23 L22 42 Q22 44 24 43 L44 34 Q47 32.5 44 31 Z" fill="url(#boot-play-gradient)"/><path class="boot-tail" d="M44 47 Q42 45 41 48 L49 61 Q50 63 52 61 L61 55 Q63 54 60 52 L46 46 Z" fill="url(#boot-ring-gradient)" stroke="#F5F8FA" stroke-width="1.5"/></svg><span class="boot-wordmark">QS-VC</span></div><div class="boot-lines" data-boot-lines aria-hidden="true"><span>Opening QS-VC…</span><span>Your next conversation starts here.</span><span>A little more connection.</span></div><p class="boot-sr-only" role="status" data-boot-status>Opening QS-VC…</p><div data-boot-recovery hidden><a href="">Reload page</a><button data-boot-continue onclick="document.getElementById('qsvc-startup').remove()">Continue</button></div></div></div>
+  <div id="qsvc-startup"><div class="boot-content"><div class="boot-mark" aria-hidden="true"><svg class="boot-symbol" viewBox="0 0 64 64" focusable="false"><defs><linearGradient id="boot-ring-gradient" x1="12" y1="5" x2="52" y2="60" gradientUnits="userSpaceOnUse"><stop stop-color="#5141BE"/><stop offset="1" stop-color="#6323AA"/></linearGradient><linearGradient id="boot-play-gradient" x1="22" y1="32" x2="44" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#20528A"/><stop offset=".55" stop-color="#079C9A"/><stop offset="1" stop-color="#20528A"/></linearGradient></defs><path class="boot-ring" d="M47 50 A25 25 0 1 1 53 43" fill="none" stroke="url(#boot-ring-gradient)" stroke-width="6"/><path class="boot-play" d="M23 21 Q22 20 22 23 L22 42 Q22 44 24 43 L44 34 Q47 32.5 44 31 Z" fill="url(#boot-play-gradient)"/><path class="boot-tail" d="M44 47 Q42 45 41 48 L49 61 Q50 63 52 61 L61 55 Q63 54 60 52 L46 46 Z" fill="url(#boot-ring-gradient)" stroke="#F5F8FA" stroke-width="1.5"/></svg><span class="boot-wordmark">QS-VC</span></div><div class="boot-lines" data-boot-lines aria-hidden="true"><span>Opening QS-VC…</span><span>Your next conversation starts here.</span><span>A little more connection.</span></div><p class="boot-sr-only" role="status" data-boot-status>Opening QS-VC…</p><div data-boot-recovery hidden><a href="">Reload page</a><button data-boot-continue>Continue</button></div></div></div>
   <noscript><style>html.qsvc-boot #root { visibility: visible; } #qsvc-startup { display: none; }</style><p>QS-VC needs JavaScript to open meetings. Enable it and reload this page.</p></noscript>
   <div id="root"></div>
   <script type="module" src="/src/main.tsx"></script>

@@ -6,11 +6,15 @@ signaling server uses it through the existing `LIBRETRANSLATE_URL` setting. Engl
 indic-indic model is set. Caption text never leaves your network.
 
 ## Run
+Production loading requires reviewed local model bundles and SHA-256 manifests.
+See [security deployment steps](../../docs/SECURITY_REMEDIATION_2026-11.md#ai-models).
+Remote model code is executable code: review it before creating a manifest.
+
 ```sh
-docker compose --profile ai up -d mt          # first start downloads ~2 GB of models into the mt-models volume
+docker compose --profile ai up -d mt          # requires reviewed local model bundles
 # signaling: LIBRETRANSLATE_URL=http://mt:5000   (optional MT_API_KEY on both sides → LIBRETRANSLATE_API_KEY)
 ```
-Without Docker: `pip install -r requirements.txt && uvicorn app:app --port 5000`.
+Without Docker, run from the repository root: `python -m uvicorn services.mt.app:app --port 5000` after installing `services/mt/requirements.txt`.
 
 ## Settings
 | Variable | Default | Meaning |

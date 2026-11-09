@@ -14,6 +14,9 @@ import PreMeeting from './pages/PreMeeting';
 import MeetingRoom from './pages/MeetingRoom';
 import MeetingEnd from './pages/MeetingEnd';
 import RecordingPlayback from './pages/RecordingPlayback';
+import OrganisationSso from './pages/OrganisationSso';
+import SsoComplete from './pages/SsoComplete';
+import PersonalSignInComplete from './pages/PersonalSignInComplete';
 import AdminDashboard from './pages/AdminDashboard';
 import ScheduleMeeting from './pages/ScheduleMeeting';
 import { EntitlementsProvider } from './lib/entitlements';
@@ -51,6 +54,9 @@ export default function App() {
 
                 {/* Application (meeting launcher) */}
                 <Route path="/login" element={<Login />} /><Route path="/signup" element={<Signup />} />
+                <Route path="/sso/personal/complete" element={<PersonalSignInComplete />} />
+                <Route path="/sso/complete" element={<SsoComplete />} />
+                <Route path="/organisation/sso" element={<OrganisationSso />} />
                 <Route path="/app" element={<Landing />} />
                 <Route path="/schedule" element={<Gate feature="meeting_scheduling"><ScheduleMeeting /></Gate>} />
                 <Route path="/meeting/:meetingCode/preview" element={<PreMeeting />} />

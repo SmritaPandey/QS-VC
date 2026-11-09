@@ -1,3 +1,4 @@
+import { serviceSecret } from '../../../shared/service-secrets.cjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 const policySchema = z.object({ hostId: z.string().nullable(), status: z.string(), settings: z.object({
@@ -6,7 +7,7 @@ const policySchema = z.object({ hostId: z.string().nullable(), status: z.string(
 }) });
 export async function loadMeetingPolicy(code: string) {
     const base = process.env.MEETING_INTERNAL_URL || 'http://localhost:4003';
-    const token = jwt.sign({}, process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', expiresIn: 30 });
+    const token = jwt.sign({}, serviceSecret('MEETING_POLICY_SECRET'), { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', expiresIn: 30 });
     const response = await fetch(`${base}/api/internal/meetings/${encodeURIComponent(code)}`, { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(4000) });
     if (response.status === 404) return null;
     if (!response.ok) throw new Error('Meeting access could not be verified. Please retry.');
@@ -28,7 +29,7 @@ export async function loadMeetingPolicy(code: string) {
 /** Tell the meeting service the host started or ended the meeting (best effort; never blocks the call). */
 export async function reportMeetingStatus(code: string, status: 'active' | 'ended'): Promise<void> {
     const base = process.env.MEETING_INTERNAL_URL || 'http://localhost:4003';
-    const token = jwt.sign({}, process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', expiresIn: 30 });
+    const token = jwt.sign({}, serviceSecret('MEETING_POLICY_SECRET'), { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', expiresIn: 30 });
     try {
         await fetch(`${base}/api/internal/meetings/${encodeURIComponent(code)}/status`, {
             method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
@@ -50,7 +51,7 @@ export async function verifySignalingAccess(
     opts: { userId?: string; guestToken?: string; inviteToken?: string }
 ): Promise<SignalingAccessResult | null> {
     const base = process.env.MEETING_INTERNAL_URL || 'http://localhost:4003';
-    const token = jwt.sign({}, process.env.JWT_SECRET || 'dev-jwt-secret-change-in-production', {
+    const token = jwt.sign({}, serviceSecret('MEETING_POLICY_SECRET'), {
         audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', expiresIn: 30,
     });
     try {

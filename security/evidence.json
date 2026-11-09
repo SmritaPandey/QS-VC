@@ -1,1 +1,22 @@
-[]
+[
+  {
+    "id": "nov-2026-local-checks-public",
+    "deployment": "public",
+    "revision": "d922f8c07dce9827de3d09923ab7645b542ba54b+working-tree",
+    "artifact": "docs/SECURITY_REMEDIATION_2026-11.md",
+    "collectedBy": "Codex local implementation checks",
+    "collectedOn": "2026-11-09T08:33:17.739212+00:00",
+    "result": "pending",
+    "note": "Independent review and deployed-release retest are required; no certificate inferred."
+  },
+  {
+    "id": "nov-2026-local-checks-intranet",
+    "deployment": "intranet",
+    "revision": "d922f8c07dce9827de3d09923ab7645b542ba54b+working-tree",
+    "artifact": "docs/SECURITY_REMEDIATION_2026-11.md",
+    "collectedBy": "Codex local implementation checks",
+    "collectedOn": "2026-11-09T08:33:17.739212+00:00",
+    "result": "pending",
+    "note": "Independent review and deployed-release retest are required; no certificate inferred."
+  }
+]

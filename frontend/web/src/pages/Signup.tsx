@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
+import PersonalSignInButtons from '../components/PersonalSignInButtons';
 import IdentityOptions from '../components/IdentityOptions';
 import ActionContents from '../components/ActionContents';
 import { AUTH_API, beginSignIn, nextPath } from '../lib/session';
@@ -57,6 +58,7 @@ export default function Signup() {
                 {error && <p role="alert">{error}</p>}
                 <p>By creating an account, you agree to our <Link to="/terms">Terms</Link>. Read our <Link to="/privacy">Privacy Policy</Link>.</p>
                 <button className="public-primary qsvc-action" disabled={busy}><ActionContents>{busy ? 'Creating account…' : 'Create account'}</ActionContents></button>
+                <PersonalSignInButtons disabled={busy} />
                 <IdentityOptions />
                 <p>Already have an account? <Link to={`/login${location.search}`}>Sign in</Link></p>
             </form>

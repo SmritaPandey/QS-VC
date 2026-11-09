@@ -29,3 +29,4 @@ CMD ["node", "services/auth/dist/index.js"]
 FROM nginx:alpine AS web
 COPY --from=build /opt/qsvc/frontend/web/dist /usr/share/nginx/html
 COPY frontend/web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY frontend/web/security-headers.conf /etc/nginx/qsvc-security-headers.conf

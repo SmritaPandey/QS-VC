@@ -15,13 +15,15 @@ services:
     container_name: qsvc-asr
     image: qsvc-asr:cpu
     build:
-      context: ../../../services/asr
+      context: ../../..
+      dockerfile: services/asr/Dockerfile
       args:
         INDIC: '0'                    # IndicConformer does not fit in 8 GiB next to translation
     environment:
       ASR_ENGINE: whisper
       ASR_DEVICE: cpu
-      ASR_MODEL: ${ASR_MODEL:-small}  # "base" is faster but less accurate
+      NODE_ENV: production
+      ASR_MODEL: ${ASR_MODEL:-/models/whisper}  # "base" is faster but less accurate
       ASR_COMPUTE_TYPE: int8
       ASR_CPU_THREADS: '2'
       ASR_BEAM_SIZE: ${ASR_BEAM_SIZE:-2}
@@ -33,17 +35,21 @@ services:
       ASR_PROMPT: ${ASR_PROMPT:-QS-VC, UPSWAN, UPDESCO}
       ASR_API_KEY: ${ASR_API_KEY:?Set the same ASR_API_KEY as the backend}
     ports: ["8000:8000"]
-    volumes: [asr_models:/models]
+    volumes: [asr_models:/models:ro]
     mem_limit: 2g
   mt:
     <<: *app
     container_name: qsvc-mt
     image: qsvc-mt:cpu
     build:
-      context: ../../../services/mt
+      context: ../../..
+      dockerfile: services/mt/Dockerfile
       args:
         TORCH_INDEX: https://download.pytorch.org/whl/cpu
     environment:
+      NODE_ENV: production
+      MT_MODEL_EN_INDIC: ${MT_MODEL_EN_INDIC:-/models/en-indic}
+      MT_MODEL_INDIC_EN: ${MT_MODEL_INDIC_EN:-/models/indic-en}
       MT_DEVICE: cpu
       MT_LANGUAGES: ${MT_LANGUAGES:-en,hi,bn,ta,te,mr,gu,kn,ml,pa,or,ur}
       MT_API_KEY: ${MT_API_KEY:?Set the same value as LIBRETRANSLATE_API_KEY on the backend}
@@ -53,7 +59,7 @@ services:
       OMP_NUM_THREADS: '1'            # leave the second core for speech recognition
       MKL_NUM_THREADS: '1'
     ports: ["5000:5000"]
-    volumes: [mt_models:/models]
+    volumes: [mt_models:/models:ro]
     mem_limit: 4500m
 volumes:
   asr_models:

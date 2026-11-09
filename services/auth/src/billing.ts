@@ -46,6 +46,50 @@ const PROVIDER_TIMEOUT_MS = 8000;
 const CHECKOUT_TTL_MS = 30 * 60 * 1000;
 const MAX_BILLING_CYCLES = 100;
 
+async function enqueueMandateCancellation(client: PoolClient, context: BillingContext) {
+    await client.query(`INSERT INTO public.payment_mandate_cancellations (subscription_id, tenant_id)
+        VALUES ($1, $2) ON CONFLICT (subscription_id) DO NOTHING`, [context.id, context.tenant_id]);
+}
+
+export async function processMandateCancellations(pool: Pool, logger: Logger) {
+    const jobs = await pool.query('SELECT * FROM public.qsvc_claim_mandate_cancellations()');
+    for (const job of jobs.rows) {
+        try {
+            const id = encodeURIComponent(job.provider_subscription_id);
+            if (job.provider === 'razorpay') {
+                let current = await razorpayRequest(`/subscriptions/${id}`, 'GET');
+                if (!['cancelled', 'completed', 'expired'].includes(current.status)) {
+                    await razorpayRequest(`/subscriptions/${id}/cancel`, 'POST', { cancel_at_cycle_end: false });
+                    current = await razorpayRequest(`/subscriptions/${id}`, 'GET');
+                }
+                if (!['cancelled', 'completed', 'expired'].includes(current.status)) throw new Error('Cancellation not yet confirmed');
+            } else if (job.provider === 'paypal') {
+                let current = await paypalRequest(`/v1/billing/subscriptions/${id}`, 'GET');
+                if (!['CANCELLED', 'EXPIRED'].includes(current.status)) {
+                    await paypalRequest(`/v1/billing/subscriptions/${id}/cancel`, 'POST', { reason: 'Trial authorization could not be applied.' });
+                    current = await paypalRequest(`/v1/billing/subscriptions/${id}`, 'GET');
+                }
+                if (!['CANCELLED', 'EXPIRED'].includes(current.status)) throw new Error('Cancellation not yet confirmed');
+            } else if (job.provider === 'cashfree') {
+                let current = await cashfreeRequest(`/subscriptions/${id}`, 'GET');
+                if (!['CANCELLED', 'CUSTOMER_CANCELLED', 'COMPLETED', 'EXPIRED'].includes(current.subscription_status)) {
+                    await cashfreeRequest(`/subscriptions/${id}/manage`, 'POST', {
+                        subscription_id: job.provider_subscription_id, action: 'CANCEL',
+                    }, crypto.randomUUID());
+                    current = await cashfreeRequest(`/subscriptions/${id}`, 'GET');
+                }
+                if (!['CANCELLED', 'CUSTOMER_CANCELLED', 'COMPLETED', 'EXPIRED'].includes(current.subscription_status)) throw new Error('Cancellation not yet confirmed');
+            } else throw new Error('Unknown cancellation provider');
+            await inTenant(pool, job.tenant_id, client => client.query(
+                'UPDATE public.payment_mandate_cancellations SET completed_at = NOW() WHERE subscription_id = $1 AND tenant_id = $2',
+                [job.subscription_id, job.tenant_id],
+            ));
+        } catch {
+            logger.error({ subscriptionId: job.subscription_id, provider: job.provider }, 'Provider mandate cancellation pending; retry scheduled');
+        }
+    }
+}
+
 function planKey(plan: string): PlanKey | null {
     return plan === 'Starter' || plan === 'starter' ? 'starter' : plan === 'Pro' || plan === 'pro' ? 'pro' : null;
 }
@@ -368,6 +412,22 @@ function cashfreeWebhookValid(rawBody: Buffer, signature: string | undefined, ti
     return safeCompareBase64(signature, expected);
 }
 
+async function recordCapture(
+    client: PoolClient,
+    subscriptionId: string,
+    provider: Provider,
+    paymentId: string,
+    amountMinor: number,
+    currency: string,
+) {
+    const inserted = await client.query(
+        `INSERT INTO public.payment_captures (subscription_id, provider, provider_payment_id, amount_minor, currency)
+         VALUES ($1, $2, $3, $4, $5) ON CONFLICT (provider, provider_payment_id) DO NOTHING`,
+        [subscriptionId, provider, paymentId, amountMinor, currency],
+    );
+    return inserted.rowCount === 1;
+}
+
 async function applyWebhook(
     pool: Pool,
     provider: Provider,
@@ -405,7 +465,8 @@ async function applyWebhook(
         }
         const context = mapped.rows[0];
         await client.query("SELECT set_config('app.current_tenant', $1, true)", [context.tenant_id]);
-        if (context.status === 'failed' || (context.status === 'expired' && !context.current_period_end)) {
+        if (!paid && (context.status === 'failed' || (context.status === 'expired' && !context.current_period_end))) {
+            if (trialAuthorized) await enqueueMandateCancellation(client, context);
             await client.query("UPDATE public.payment_webhook_events SET result = 'ignored', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2", [provider, eventId, context.tenant_id]);
             await client.query('COMMIT');
             return 'ignored' as const;
@@ -435,7 +496,8 @@ async function applyWebhook(
                         && verifiedPlan!.totalCycles === MAX_BILLING_CYCLES
                         && decimalToMinor(String(verifiedPlan!.amount), storedCurrency) === decimalToMinor(context.total_amount, storedCurrency));
 
-        const paidAmountValid = paid && verifiedPaidAmountMinor !== null && verifiedPaidCurrency?.toUpperCase() === storedCurrency
+        const paidAmountValid = paid && Boolean(paymentId?.trim()) && paymentId!.length <= 255
+            && verifiedPaidAmountMinor !== null && verifiedPaidAmountMinor > 0 && verifiedPaidCurrency?.toUpperCase() === storedCurrency
             && verifiedPaidAmountMinor === decimalToMinor(context.total_amount, storedCurrency);
         if ((paid || trialAuthorized) && (!storedAmountsValid || !providerPlanValid || (paid && !paidAmountValid))) {
             await client.query("UPDATE public.payment_webhook_events SET result = 'ignored', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2", [provider, eventId, context.tenant_id]);
@@ -488,6 +550,7 @@ async function applyWebhook(
                 `UPDATE public.payment_subscriptions SET status = 'failed', updated_at = NOW()
                  WHERE id = $1 AND tenant_id = $2 AND status IN ('creating', 'pending')`, [context.id, context.tenant_id],
             );
+            await enqueueMandateCancellation(client, context);
             await client.query(
                 "UPDATE public.payment_webhook_events SET result = 'ignored', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2",
                 [provider, eventId, context.tenant_id],
@@ -496,9 +559,30 @@ async function applyWebhook(
             return 'ignored' as const;
         }
 
-        if (paid && periodEnd && periodEnd.getTime() > Date.now()) {
+        if (paid) {
+            if (!await recordCapture(client, context.id, provider, paymentId!, verifiedPaidAmountMinor!, storedCurrency)) {
+                await client.query(
+                    "UPDATE public.payment_webhook_events SET result = 'ignored', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2",
+                    [provider, eventId, context.tenant_id],
+                );
+                await client.query('COMMIT');
+                return 'duplicate' as const;
+            }
+            await client.query('SELECT id FROM public.users WHERE id = $1 AND tenant_id = $2 FOR UPDATE', [context.user_id, context.tenant_id]);
+            const otherSubscription = await client.query(
+                `SELECT id FROM public.payment_subscriptions WHERE user_id = $1 AND tenant_id = $2 AND id <> $3
+                 AND status IN ('creating', 'pending', 'active', 'past_due') LIMIT 1`, [context.user_id, context.tenant_id, context.id],
+            );
+            if (!periodEnd || periodEnd.getTime() <= Date.now() || otherSubscription.rows.length) {
+                await client.query(`UPDATE public.payment_captures SET needs_review = true, review_reason = $3
+                    WHERE provider = $1 AND provider_payment_id = $2`,
+                    [provider, paymentId, otherSubscription.rows.length ? 'overlapping_subscription' : 'missing_current_period']);
+                await client.query("UPDATE public.payment_webhook_events SET result = 'processed', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2", [provider, eventId, context.tenant_id]);
+                await client.query('COMMIT');
+                return 'processed' as const;
+            }
             await client.query(
-                `UPDATE public.payment_subscriptions SET status = 'active',
+                `UPDATE public.payment_subscriptions SET status = CASE WHEN status = 'cancelled' THEN status ELSE 'active' END,
                     current_period_end = GREATEST(COALESCE(current_period_end, $3), $3),
                     last_provider_payment_id = COALESCE($4, last_provider_payment_id), updated_at = NOW()
                  WHERE id = $1 AND tenant_id = $2`,
@@ -528,6 +612,7 @@ async function applyWebhook(
                      WHERE id = $2 AND tenant_id = $3 AND status <> 'expired'`,
                     [nextStatus, context.id, context.tenant_id],
                 );
+                if (nextStatus === 'failed') await enqueueMandateCancellation(client, context);
             }
             await client.query(
                 "UPDATE public.payment_webhook_events SET result = 'processed', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2",
@@ -896,6 +981,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     [user.sub, user.tenantId],
                 );
                 if (!account.rowCount) return null;
+                if (!await recordCapture(client, current.id, 'razorpay', paymentId, expectedAmount, String(checkout.currency).toUpperCase())) return null;
                 const updated = await client.query(
                     `UPDATE public.payment_subscriptions SET status = 'active', last_provider_payment_id = $1,
                         current_period_end = NOW() + INTERVAL '30 days', updated_at = NOW()
@@ -904,7 +990,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     [paymentId, current.id, user.tenantId, user.sub],
                 );
                 const currentPeriodEnd = updated.rows[0]?.current_period_end;
-                if (!currentPeriodEnd) return null;
+                if (!currentPeriodEnd) throw new Error('Verified order could not be activated');
                 const userUpdate = await client.query(
                     `UPDATE public.users SET subscription_plan = $1,
                         subscription_expires_at = GREATEST(COALESCE(subscription_expires_at, $2), $2), updated_at = NOW()
@@ -1045,7 +1131,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                 if (verified.status === 'active' && typeof verified.current_end === 'number') periodEnd = new Date(verified.current_end * 1000);
                 if (paid) {
                     const paymentSubscriptionId = verifiedPayment?.subscription_id || payment?.subscription_id;
-                    if (verifiedPayment?.status !== 'captured' || paymentSubscriptionId !== subscriptionId
+                    if (verifiedPayment?.id !== paymentId || verifiedPayment?.status !== 'captured' || paymentSubscriptionId !== subscriptionId
                         || verifiedPayment?.currency !== verifiedPlan?.currency
                         || !verifiedPlan || Number(verifiedPayment?.amount) !== verifiedPlan.amountMinor) {
                         periodEnd = null;
@@ -1059,7 +1145,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     && Boolean(verifiedCheckoutId) && typeof verifiedPlan?.id === 'string';
                 if (trialAuthorized && typeof verified.start_at === 'number') verifiedTrialEndsAt = new Date(verified.start_at * 1000);
             }
-            await applyWebhook(pool, 'razorpay', eventId, event.event, rawBody, subscriptionId, paid && Boolean(periodEnd), periodEnd,
+            await applyWebhook(pool, 'razorpay', eventId, event.event, rawBody, subscriptionId, paid, periodEnd,
                 paymentId, verifiedPlan, verifiedCheckoutId, trialAuthorized, verifiedPaidAmountMinor, verifiedPaidCurrency, verifiedTrialEndsAt);
             res.status(200).json({ received: true });
         } catch (error) {
@@ -1142,7 +1228,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     if (!Number.isNaN(trialStart.getTime())) verifiedTrialEndsAt = new Date(trialStart.getTime() + 7 * 24 * 60 * 60 * 1000);
                 }
             }
-            await applyWebhook(pool, 'paypal', event.id, event.event_type, rawBody, subscriptionId, paid && Boolean(periodEnd), periodEnd,
+            await applyWebhook(pool, 'paypal', event.id, event.event_type, rawBody, subscriptionId, paid, periodEnd,
                 paymentId, verifiedPlan, verifiedCheckoutId, trialAuthorized, verifiedPaidAmountMinor, verifiedPaidCurrency, verifiedTrialEndsAt);
             res.status(200).json({ received: true });
         } catch (error) {
@@ -1198,6 +1284,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
             const trialAuthorized = authStatusEvent && authorizationStatus === 'ACTIVE'
                 && subscriptionStatus === 'ACTIVE' && Boolean(verifiedCheckoutId);
             const paid = event.type === 'SUBSCRIPTION_PAYMENT_SUCCESS'
+                && data.payment_type !== 'AUTH'
                 && String(data.payment_status || '').toUpperCase() === 'SUCCESS';
             const paymentAmount = data.payment_amount;
             const paymentCurrency = typeof data.payment_currency === 'string' ? data.payment_currency.toUpperCase() : null;
@@ -1218,7 +1305,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
             const paymentId = typeof data.payment_id === 'string' ? data.payment_id
                 : typeof data.cf_payment_id === 'string' ? data.cf_payment_id : null;
             await applyWebhook(pool, 'cashfree', eventId, `${event.type}${statusSuffix}`, rawBody,
-                subscriptionId, paid && Boolean(periodEnd), periodEnd, paymentId, verifiedPlan, verifiedCheckoutId,
+                subscriptionId, paid, periodEnd, paymentId, verifiedPlan, verifiedCheckoutId,
                 trialAuthorized, verifiedPaidAmountMinor, paymentCurrency, cashfreeDate(verified.subscription_first_charge_time));
             res.status(200).json({ received: true });
         } catch (error) {

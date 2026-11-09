@@ -236,7 +236,7 @@
         "MetadataOptions": {
           "HttpTokens": "required",
           "HttpEndpoint": "enabled",
-          "HttpPutResponseHopLimit": 2
+          "HttpPutResponseHopLimit": 1
         },
         "NetworkInterfaces": [
           {

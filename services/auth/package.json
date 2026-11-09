@@ -16,7 +16,9 @@
         "dotenv": "^16.4.0",
         "express": "^4.21.0",
         "express-rate-limit": "^8.7.3",
+        "jose": "^6.2.16",
         "jsonwebtoken": "^9.0.0",
+        "openid-client": "^6.8.9",
         "pg": "^8.13.0",
         "pino": "^9.6.0",
         "pino-pretty": "^13.0.0",
@@ -35,5 +37,13 @@
         "typescript": "^5.7.0",
         "vitest": "^4.0.18"
     },
-    "overrides": { "express": { "qs": "^6.17.1" }, "proxy-addr": "^2.0.8", "qs": "^6.17.1", "tar": "^7.5.22", "ws": "^8.22.1" }
+    "overrides": {
+        "express": {
+            "qs": "^6.17.1"
+        },
+        "proxy-addr": "^2.0.8",
+        "qs": "^6.17.1",
+        "tar": "^7.5.22",
+        "ws": "^8.22.1"
+    }
 }
