@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getToken } from '../lib/session';
+import '../styles/invite-modal.css';
 
 export const AUTH_API = import.meta.env.VITE_AUTH_URL || '';
 export const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
@@ -258,31 +259,50 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
 
     if (!open) return null;
 
+    const closeDialog = () => {
+        dialogRef.current?.close();
+        onClose();
+    };
+
     return (
         <dialog
             ref={dialogRef}
             className="invite-dialog"
             aria-labelledby="invite-modal-title"
-            onCancel={(e) => { e.preventDefault(); onClose(); }}
+            onCancel={(e) => { e.preventDefault(); closeDialog(); }}
         >
             <div className="invite-modal-content">
                 <div className="invite-modal-header">
                     <div className="invite-title-row">
                         <span className="mi invite-header-icon" aria-hidden="true">person_add</span>
                         <div>
-                            <h2 id="invite-modal-title">Invite to {meetingTitle || 'Meeting'}</h2>
+                            <h2 id="invite-modal-title" title={`Invite to ${meetingTitle || 'Meeting'}`}>Invite to {meetingTitle || 'Meeting'}</h2>
                             <p className="invite-code-pill">Code: <strong>{meetingCode}</strong></p>
                         </div>
                     </div>
-                    <button type="button" className="invite-modal-close" aria-label="Close invite modal" onClick={onClose}>
+                    <button type="button" className="invite-modal-close" aria-label="Close invite modal" onClick={closeDialog}>
                         <span className="mi" aria-hidden="true">close</span>
                     </button>
                 </div>
 
-                <div className="invite-tabs-bar" role="tablist">
+                <div className="invite-tabs-bar" role="tablist" aria-label="Invitation methods"
+                    onKeyDown={event => {
+                        const tabs: TabType[] = ['members', 'guest', 'copy'];
+                        const index = tabs.indexOf(activeTab);
+                        const next = event.key === 'ArrowRight' ? tabs[(index + 1) % tabs.length]
+                            : event.key === 'ArrowLeft' ? tabs[(index + tabs.length - 1) % tabs.length]
+                                : event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs[2] : null;
+                        if (!next) return;
+                        event.preventDefault();
+                        setActiveTab(next);
+                        document.getElementById(`invite-tab-${next}`)?.focus();
+                    }}>
                     <button
                         type="button"
                         role="tab"
+                        id="invite-tab-members"
+                        aria-controls="invite-panel-members"
+                        tabIndex={activeTab === 'members' ? 0 : -1}
                         aria-selected={activeTab === 'members'}
                         className={`invite-tab-btn ${activeTab === 'members' ? 'active' : ''}`}
                         onClick={() => setActiveTab('members')}
@@ -293,6 +313,9 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
                     <button
                         type="button"
                         role="tab"
+                        id="invite-tab-guest"
+                        aria-controls="invite-panel-guest"
+                        tabIndex={activeTab === 'guest' ? 0 : -1}
                         aria-selected={activeTab === 'guest'}
                         className={`invite-tab-btn ${activeTab === 'guest' ? 'active' : ''}`}
                         onClick={() => setActiveTab('guest')}
@@ -303,6 +326,9 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
                     <button
                         type="button"
                         role="tab"
+                        id="invite-tab-copy"
+                        aria-controls="invite-panel-copy"
+                        tabIndex={activeTab === 'copy' ? 0 : -1}
                         aria-selected={activeTab === 'copy'}
                         className={`invite-tab-btn ${activeTab === 'copy' ? 'active' : ''}`}
                         onClick={() => setActiveTab('copy')}
@@ -314,12 +340,13 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
 
                 {/* TAB 1: REGISTERED MEMBERS */}
                 {activeTab === 'members' && (
-                    <div className="invite-tab-panel" role="tabpanel">
+                    <div className="invite-tab-panel" role="tabpanel" id="invite-panel-members" aria-labelledby="invite-tab-members">
                         <div className="member-search-bar">
                             <span className="mi" aria-hidden="true">search</span>
                             <input
                                 type="text"
                                 className="member-search-input"
+                                aria-label="Search members by name or email"
                                 placeholder="Search by name or email in your organisation…"
                                 value={searchQuery}
                                 onChange={e => setSearchQuery(e.target.value)}
@@ -378,8 +405,10 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
                                 {searchResults.map(user => {
                                     const isSelected = selectedUsers.has(user.id);
                                     return (
-                                        <div
+                                        <button
+                                            type="button"
                                             key={user.id}
+                                            aria-pressed={isSelected}
                                             className={`user-result-row ${isSelected ? 'selected' : ''}`}
                                             onClick={() => toggleSelectUser(user)}
                                         >
@@ -393,7 +422,7 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
                                             <span className="mi select-checkbox" aria-hidden="true">
                                                 {isSelected ? 'check_box' : 'check_box_outline_blank'}
                                             </span>
-                                        </div>
+                                        </button>
                                     );
                                 })}
                             </div>
@@ -458,7 +487,7 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
 
                 {/* TAB 2: GUEST INVITATION */}
                 {activeTab === 'guest' && (
-                    <div className="invite-tab-panel" role="tabpanel">
+                    <div className="invite-tab-panel" role="tabpanel" id="invite-panel-guest" aria-labelledby="invite-tab-guest">
                         <div className="guest-token-creator-card">
                             <h3>Create a Secure Guest Link</h3>
                             <p className="card-lead">
@@ -514,7 +543,7 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
                             <div className="latest-link-box">
                                 <label>New Guest Joining Link:</label>
                                 <div className="link-copy-row">
-                                    <input type="text" readOnly value={latestGuestUrl} className="link-display-input" />
+                                    <input type="text" readOnly value={latestGuestUrl} className="link-display-input" aria-label="Guest joining link" />
                                     <button
                                         type="button"
                                         className="btn-copy-action"
@@ -602,7 +631,7 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
 
                 {/* TAB 3: COPY MEETING LINK */}
                 {activeTab === 'copy' && (
-                    <div className="invite-tab-panel" role="tabpanel">
+                    <div className="invite-tab-panel" role="tabpanel" id="invite-panel-copy" aria-labelledby="invite-tab-copy">
                         <div className="copy-link-card">
                             <div className="copy-link-icon-bubble">
                                 <span className="mi" aria-hidden="true">share</span>
@@ -613,7 +642,7 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
                             </p>
 
                             <div className="link-copy-row">
-                                <input type="text" readOnly value={standardLink} className="link-display-input" />
+                                <input type="text" readOnly value={standardLink} className="link-display-input" aria-label="Meeting joining link" />
                                 <button
                                     type="button"
                                     className="btn-copy-action primary"

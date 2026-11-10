@@ -28,5 +28,8 @@ describe('InviteModal', () => {
         expect(markup).toContain('Guest Link');
         expect(markup).toContain('Copy Meeting Link');
         expect(markup).toContain('Search by name or email');
+        expect(markup).toContain('aria-label="Search members by name or email"');
+        expect(markup).toContain('id="invite-tab-members" aria-controls="invite-panel-members" tabindex="0"');
+        expect(markup).toContain('id="invite-panel-members" aria-labelledby="invite-tab-members"');
     });
 });

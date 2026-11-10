@@ -30,7 +30,7 @@ export function groupHosted(meetings: HostedMeeting[], now = Date.now()) {
     return { live, upcoming, past };
 }
 
-function Row({ meeting, label, onCancelled, onExpired }: { meeting: HostedMeeting; label: string; onCancelled: () => void; onExpired: () => void }) {
+export function HostedMeetingRow({ meeting, label, onCancelled, onExpired }: { meeting: HostedMeeting; label: string; onCancelled: () => void; onExpired: () => void }) {
     const [copied, setCopied] = useState(false);
     const start = when(meeting);
     const link = `${window.location.origin}/meeting/${encodeURIComponent(meeting.meetingCode)}/preview${meeting.inviteToken ? `?invite=${encodeURIComponent(meeting.inviteToken)}` : ''}`;
@@ -42,8 +42,9 @@ function Row({ meeting, label, onCancelled, onExpired }: { meeting: HostedMeetin
             <p><span className="workspace-code">{meeting.meetingCode}</span><span className="workspace-status">{label}</span></p>
         </div>
         <div className="workspace-row-actions">
-            {meeting.scheduledStart && meeting.status === 'waiting' && <CancelScheduledMeeting id={meeting.id}
-                title={meeting.title || meeting.meetingCode} onCancelled={onCancelled} onExpired={onExpired} />}
+            {(meeting.status === 'waiting' || meeting.status === 'active') && <CancelScheduledMeeting id={meeting.id}
+                title={meeting.title || meeting.meetingCode} meetingCode={meeting.meetingCode}
+                instant={!meeting.scheduledStart} active={meeting.status === 'active'} onCancelled={onCancelled} onExpired={onExpired} />}
             <button type="button" className="workspace-row-join workspace-row-secondary" aria-label={`Copy invite link for ${meeting.title || meeting.meetingCode}`} onClick={() => { void navigator.clipboard?.writeText(link).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1800); }).catch(() => {}); }}>
                 <span className="mi mi-sm" aria-hidden="true">{copied ? 'check' : 'link'}</span>{copied ? 'Copied' : 'Copy link'}
             </button>
@@ -61,9 +62,11 @@ export default function HostedMeetings({ onExpired }: { onExpired: () => void })
     const [error, setError] = useState('');
     const [refresh, setRefresh] = useState(0);
     const [notice, setNotice] = useState('');
-    const cancelled = (id: string) => {
-        setMeetings(items => items.filter(item => item.id !== id));
-        setNotice('Meeting cancelled.');
+    const cancelled = (meeting: HostedMeeting) => {
+        setMeetings(items => meeting.status === 'active'
+            ? items.map(item => item.id === meeting.id ? { ...item, status: 'ended', actualEnd: new Date().toISOString() } : item)
+            : items.filter(item => item.id !== meeting.id));
+        setNotice(meeting.status === 'active' ? 'Meeting ended for everyone.' : 'Meeting cancelled.');
         setRefresh(value => value + 1);
     };
     const [summary, setSummary] = useState<{ links: number; scheduled: number; active: number } | null>(null);
@@ -125,12 +128,12 @@ export default function HostedMeetings({ onExpired }: { onExpired: () => void })
         {notice && <p role="status">{notice}</p>}
         {filter === 'live' && !live.length && <p className="workspace-group-empty">You have no live meetings.</p>}
         {filter === 'past' && !past.length && <p className="workspace-group-empty">You have no past meetings.</p>}
-        {(filter === 'all' || filter === 'live') && live.length > 0 && <section aria-labelledby="hosted-live"><h3 id="hosted-live" className="workspace-group-title"><span className="workspace-live-dot" aria-hidden="true" />Live now</h3>{live.map(m => <Row key={m.id} meeting={m} onCancelled={() => cancelled(m.id)} onExpired={onExpired} label="In progress" />)}</section>}
+        {(filter === 'all' || filter === 'live') && live.length > 0 && <section aria-labelledby="hosted-live"><h3 id="hosted-live" className="workspace-group-title"><span className="workspace-live-dot" aria-hidden="true" />Live now</h3>{live.map(m => <HostedMeetingRow key={m.id} meeting={m} onCancelled={() => cancelled(m)} onExpired={onExpired} label="In progress" />)}</section>}
         {(filter === 'all' || filter === 'upcoming') && <section aria-labelledby="hosted-upcoming"><h3 id="hosted-upcoming" className="workspace-group-title">Upcoming ({upcoming.length})</h3>
-            {upcoming.length ? upcoming.map(m => <Row key={m.id} meeting={m} onCancelled={() => cancelled(m.id)} onExpired={onExpired} label="Scheduled" />) : <p className="workspace-group-empty">Nothing scheduled. <Link to="/schedule">Schedule a meeting</Link></p>}
+            {upcoming.length ? upcoming.map(m => <HostedMeetingRow key={m.id} meeting={m} onCancelled={() => cancelled(m)} onExpired={onExpired} label="Scheduled" />) : <p className="workspace-group-empty">Nothing scheduled. <Link to="/schedule">Schedule a meeting</Link></p>}
         </section>}
         {(filter === 'all' || filter === 'past') && past.length > 0 && <section aria-labelledby="hosted-past"><h3 id="hosted-past" className="workspace-group-title">Past and instant ({past.length})</h3>
-            {shownPast.map(m => <Row key={m.id} meeting={m} onCancelled={() => cancelled(m.id)} onExpired={onExpired} label={m.status === 'ended' ? 'Ended' : 'Not started'} />)}
+            {shownPast.map(m => <HostedMeetingRow key={m.id} meeting={m} onCancelled={() => cancelled(m)} onExpired={onExpired} label={m.status === 'ended' ? 'Ended' : 'Not started'} />)}
             {past.length > shownPast.length && <button className="workspace-load-more qsvc-action qsvc-action--secondary" onClick={() => setShowAllPast(true)}><ActionContents>Show all {past.length}</ActionContents></button>}
         </section>}
     </div>;

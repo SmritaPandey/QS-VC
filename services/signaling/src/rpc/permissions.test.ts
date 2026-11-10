@@ -1,6 +1,7 @@
 vi.mock('../meeting-policy.js', () => ({
     loadMeetingPolicy: vi.fn().mockResolvedValue(null),
     reportMeetingStatus: vi.fn().mockResolvedValue(undefined),
+    endHostedMeetingStatus: vi.fn().mockResolvedValue(undefined),
     verifySignalingAccess: vi.fn().mockResolvedValue({ allowed: true, isGuest: false })
 }));
 import { describe, it, expect, vi } from 'vitest';
@@ -22,13 +23,332 @@ import { roomManager } from '../room-manager.js';
 import { sfuClient } from '../sfu-client.js';
 import { admittedPeerIceServers } from '../turn.js';
 import meetingInvitation from '../../../../shared/meeting-invitation.cjs';
+import { loadMeetingPolicy, endHostedMeetingStatus, verifySignalingAccess } from '../meeting-policy.js';
 
 const socket = () => ({ readyState: 1, send: vi.fn(), close: vi.fn() });
 // Test browsers support encrypted media unless a test says otherwise (end-to-end encryption is on by default).
 const rpc = (ws: any, state: any, method: string, params: any = {}) =>
     handleRpcMessage(ws, { jsonrpc: '2.0', id: 1, method, params: method === 'joinRoom' ? { supportsE2EE: true, ...params } : params }, state);
 
+async function ownedWaitingRoom() {
+    const code = `CANCEL-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+    const room = roomManager.getOrCreateRoom(code);
+    room.ownerUserId = 'owner';
+    const ws = socket(), waiting: any = {};
+    await rpc(ws, waiting, 'joinRoom', { meetingCode: code, displayName: 'Waiting guest' });
+    const dashboard = { authUser: { sub: 'owner', tenantId: 'tenant' }, expectedMeetingCode: code };
+    return { code, room, ws, waiting, dashboard };
+}
+
 describe('production meeting permissions', () => {
+    it('disconnects waiting instant guests only after dashboard cancellation is persisted', async () => {
+        const { code, room, ws, waiting, dashboard } = await ownedWaitingRoom();
+        let saved!: () => void;
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'waiting', settings: {} } as any);
+        vi.mocked(endHostedMeetingStatus).mockImplementationOnce(() => new Promise<void>(resolve => { saved = resolve; }));
+        const result = rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code, action: 'cancel' });
+        await vi.waitFor(() => expect(saved).toBeTypeOf('function'));
+        expect(ws.close).not.toHaveBeenCalled();
+        expect(room.waitingRoom.size).toBe(1);
+        saved();
+        expect((await result)?.result).toEqual({ cancelled: true });
+        expect(endHostedMeetingStatus).toHaveBeenCalledWith(code, 'owner', 'tenant', 'cancel');
+        expect(ws.send.mock.calls.map(([raw]) => JSON.parse(raw))).toContainEqual(expect.objectContaining({ method: 'rejected', params: { reason: 'Host cancelled the meeting' } }));
+        expect(ws.close).toHaveBeenCalledWith(4000, 'Meeting cancelled');
+        expect(room.waitingRoom.size).toBe(0);
+        await handlePeerDisconnect(waiting);
+    });
+
+    it.each(['storage failure', 'non-host', 'cross-tenant'])('keeps waiting guests connected when cancellation fails: %s', async failure => {
+        const { code, room, ws, waiting, dashboard } = await ownedWaitingRoom();
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'waiting', settings: {} } as any);
+        if (failure === 'non-host') dashboard.authUser.sub = 'participant';
+        else {
+            if (failure === 'cross-tenant') dashboard.authUser.tenantId = 'other-tenant';
+            vi.mocked(endHostedMeetingStatus).mockRejectedValueOnce(new Error('Cancellation not confirmed'));
+        }
+        expect((await rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code, action: 'cancel' }))?.error).toBeDefined();
+        expect(ws.close).not.toHaveBeenCalled();
+        expect(room.waitingRoom.size).toBe(1);
+        await handlePeerDisconnect(waiting);
+    });
+
+    it.each(['policy', 'access'])('rejects a delayed %s result from a join begun before dashboard cancellation', async stage => {
+        const { code, room, waiting, dashboard } = await ownedWaitingRoom();
+        let complete!: (value: any) => void;
+        const delayed = vi.fn(() => new Promise<any>(resolve => { complete = resolve; }));
+        if (stage === 'policy') vi.mocked(loadMeetingPolicy).mockImplementationOnce(delayed);
+        else vi.mocked(verifySignalingAccess).mockImplementationOnce(delayed);
+        const newcomer: any = {};
+        const joining = rpc(socket(), newcomer, 'joinRoom', { meetingCode: code, displayName: 'Late guest' });
+        await vi.waitFor(() => expect(complete).toBeTypeOf('function'));
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'waiting', settings: {} } as any);
+        expect((await rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code, action: 'cancel' }))?.result).toEqual({ cancelled: true });
+        complete(stage === 'policy' ? { hostId: 'owner', status: 'waiting', settings: {} } : { valid: true });
+        expect((await joining)?.error?.message).toContain('cancelled');
+        expect(newcomer.peerId).toBeUndefined();
+        expect(room.waitingRoom.size).toBe(0);
+        await handlePeerDisconnect(waiting);
+    });
+
+    it('allows a lost cancellation acknowledgement to be retried safely', async () => {
+        const code = 'CANCEL-RETRY';
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'cancelled', settings: {} } as any);
+        expect((await rpc(socket(), { authUser: { sub: 'owner', tenantId: 'tenant' }, expectedMeetingCode: code }, 'endHostedMeeting', { meetingCode: code, action: 'cancel' }))?.result).toEqual({ cancelled: true });
+        expect(loadMeetingPolicy).toHaveBeenCalledWith(code, true);
+    });
+
+    it('lets a ticket-bound persisted organiser end a live meeting without joining, disconnecting attendees and waiters', async () => {
+        const hostWs = socket(), guestWs = socket(), waitingWs = socket(), dashboardWs = socket();
+        const host: any = {}, guest: any = {}, waiting: any = {};
+        const code = `DASH-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+        await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+        await rpc(guestWs, guest, 'joinRoom', { meetingCode: code, displayName: 'Guest' });
+        await rpc(hostWs, host, 'admitPeer', { targetPeerId: guest.peerId });
+        await rpc(waitingWs, waiting, 'joinRoom', { meetingCode: code, displayName: 'Waiting' });
+        const room = roomManager.getRoom(host.roomId)!;
+        room.ownerUserId = 'owner';
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', tenantId: 'tenant', status: 'active', settings: {} } as any);
+        const dashboard = { authUser: { sub: 'owner', tenantId: 'tenant' }, expectedMeetingCode: code };
+        expect((await rpc(dashboardWs, dashboard, 'endHostedMeeting', { meetingCode: code }))?.result).toEqual({ ended: true });
+        expect(endHostedMeetingStatus).toHaveBeenCalledWith(code, 'owner', 'tenant', 'end');
+        for (const ws of [hostWs, guestWs]) {
+            expect(ws.send.mock.calls.some(([raw]) => JSON.parse(raw).method === 'meetingEnded')).toBe(true);
+            expect(ws.close).toHaveBeenCalledWith(4000, 'Meeting ended');
+        }
+        expect(waitingWs.send.mock.calls.some(([raw]) => JSON.parse(raw).method === 'rejected')).toBe(true);
+        expect(waitingWs.close).toHaveBeenCalledWith(4000, 'Meeting ended');
+        expect(room.peers.size).toBe(0); expect(room.waitingRoom.size).toBe(0); expect(room.hostStarted).toBe(false);
+        expect(dashboardWs.close).not.toHaveBeenCalled();
+        await handlePeerDisconnect(host); await handlePeerDisconnect(guest); await handlePeerDisconnect(waiting);
+    });
+
+    it.each([
+        {},
+        { authUser: { sub: 'owner', tenantId: 'tenant' } },
+        { authUser: { sub: 'owner', tenantId: 'tenant' }, expectedMeetingCode: 'OTHER-CODE' },
+        { authUser: { sub: 'participant', tenantId: 'tenant' }, expectedMeetingCode: 'ABC-123' },
+        { authUser: { sub: 'participant', tenantId: 'tenant', role: 'admin' }, expectedMeetingCode: 'ABC-123' },
+    ])('rejects dashboard ending without the persisted organiser, tenant and exact ticket binding: %s', async state => {
+        const calls = vi.mocked(endHostedMeetingStatus).mock.calls.length;
+        vi.mocked(loadMeetingPolicy).mockResolvedValue({ hostId: 'owner', tenantId: 'tenant', status: 'active', settings: {} } as any);
+        try {
+            expect((await rpc(socket(), state, 'endHostedMeeting', { meetingCode: 'ABC-123' }))?.error?.code).toBe(-32005);
+            expect(endHostedMeetingStatus).toHaveBeenCalledTimes(calls);
+        } finally { vi.mocked(loadMeetingPolicy).mockResolvedValue(null); }
+    });
+
+    it('passes the verified tenant to storage and rejects a cross-tenant organiser spoof', async () => {
+        const state = { authUser: { sub: 'owner', tenantId: 'other-tenant' }, expectedMeetingCode: 'ABC-123' };
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'active', settings: {} } as any);
+        vi.mocked(endHostedMeetingStatus).mockRejectedValueOnce(new Error('Active meeting not found or not owned by you'));
+        const result = await rpc(socket(), state, 'endHostedMeeting', { meetingCode: 'ABC-123' });
+        expect(result?.error?.message).toContain('not owned by you');
+        expect(endHostedMeetingStatus).toHaveBeenLastCalledWith('ABC-123', 'owner', 'other-tenant', 'end');
+    });
+
+    it('does not disconnect an active room when its end status cannot be saved', async () => {
+        const ws = socket(), host: any = {};
+        const code = `FAIL-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+        await rpc(ws, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', tenantId: 'tenant', status: 'active', settings: {} } as any);
+        vi.mocked(endHostedMeetingStatus).mockRejectedValueOnce(new Error('Storage unavailable'));
+        const dashboard = { authUser: { sub: 'owner', tenantId: 'tenant' }, expectedMeetingCode: code };
+        expect((await rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code }))?.error?.message).toBe('Storage unavailable');
+        expect(ws.close).not.toHaveBeenCalled();
+        expect(roomManager.getRoom(host.roomId)?.peers.size).toBe(1);
+        await handlePeerDisconnect(host);
+    });
+
+    it('repeats a confirmed end safely, but rejects waiting meetings', async () => {
+        const state = { authUser: { sub: 'owner', tenantId: 'tenant' }, expectedMeetingCode: 'ABC-123' };
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', tenantId: 'tenant', status: 'ended', settings: {} } as any);
+        expect((await rpc(socket(), state, 'endHostedMeeting', { meetingCode: 'ABC-123' }))?.result).toEqual({ ended: true });
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', tenantId: 'tenant', status: 'waiting', settings: {} } as any);
+        expect((await rpc(socket(), state, 'endHostedMeeting', { meetingCode: 'ABC-123' }))?.error?.code).toBe(-32005);
+    });
+
+    it('does not register a host whose media setup finishes after the meeting ended', async () => {
+        const ws = socket(), host: any = {}, joining: any = { authUser: { sub: 'owner' } };
+        const code = `RACE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+        await rpc(ws, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+        const room = roomManager.getRoom(host.roomId)!;
+        room.ownerUserId = 'owner';
+        let finish!: (value: unknown) => void;
+        vi.mocked(sfuClient.getRtpCapabilities).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }) as any);
+        const result = rpc(socket(), joining, 'joinRoom', { meetingCode: code, displayName: 'Owner', supportsE2EE: true });
+        await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+        await rpc(ws, host, 'endMeeting');
+        finish({ rtpCapabilities: {} });
+        expect((await result)?.error?.message).toContain('ended');
+        expect(room.peers.size).toBe(0);
+        expect(joining.peerId).toBeUndefined();
+        await handlePeerDisconnect(host);
+    });
+
+    it('rejects a delayed active-policy response from a join begun before the meeting ended', async () => {
+        const code = `ACTIVE-RACE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+        const host: any = {}, hostWs = socket();
+        await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+        const room = roomManager.getRoom(host.roomId)!;
+        room.ownerUserId = 'owner';
+        let loaded!: (value: any) => void;
+        vi.mocked(loadMeetingPolicy).mockImplementationOnce(() => new Promise(resolve => { loaded = resolve; }));
+        const newcomer: any = { authUser: { sub: 'owner' } };
+        const joining = rpc(socket(), newcomer, 'joinRoom', { meetingCode: code, displayName: 'Returning owner' });
+        await vi.waitFor(() => expect(loaded).toBeTypeOf('function'));
+        await rpc(hostWs, host, 'endMeeting');
+        loaded({ hostId: 'owner', status: 'active', settings: {} });
+        expect((await joining)?.error?.message).toContain('ended');
+        expect(newcomer.peerId).toBeUndefined();
+        expect(room.peers.size).toBe(0);
+        await handlePeerDisconnect(host);
+    });
+
+    it('shares concurrent dashboard teardown and permits a fresh host restart only after it finishes', async () => {
+        const code = `END-RACE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+        const host: any = {}, hostWs = socket();
+        await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+        const room = roomManager.getRoom(host.roomId)!;
+        room.ownerUserId = 'owner';
+        let removed!: () => void;
+        const removeCalls = vi.mocked(sfuClient.removePeer).mock.calls.length;
+        vi.mocked(sfuClient.removePeer).mockImplementationOnce(() => new Promise<void>(resolve => { removed = resolve; }) as any);
+        const policy = { hostId: 'owner', status: 'active', settings: {} } as any;
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce(policy).mockResolvedValueOnce(policy);
+        const dashboard = { authUser: { sub: 'owner', tenantId: 'tenant' }, expectedMeetingCode: code };
+        const first = rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code });
+        const second = rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code });
+        await vi.waitFor(() => expect(removed).toBeTypeOf('function'));
+        await Promise.resolve();
+        expect(sfuClient.removePeer).toHaveBeenCalledTimes(removeCalls + 1);
+        let secondFinished = false;
+        void second.then(() => { secondFinished = true; });
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ ...policy, status: 'ended' });
+        const early: any = { authUser: { sub: 'owner' } };
+        expect((await rpc(socket(), early, 'joinRoom', { meetingCode: code, displayName: 'Too soon' }))?.error).toBeDefined();
+        expect(secondFinished).toBe(false);
+        removed();
+        expect((await first)?.result).toEqual({ ended: true });
+        expect((await second)?.result).toEqual({ ended: true });
+        expect(room.peers.size).toBe(0);
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ ...policy, status: 'ended' });
+        const restarted: any = { authUser: { sub: 'owner' } }, restartedWs = socket();
+        expect((await rpc(restartedWs, restarted, 'joinRoom', { meetingCode: code, displayName: 'Restarted owner' }))?.result?.role).toBe('host');
+        expect(room.peers.has(restarted.peerId)).toBe(true);
+        expect(restartedWs.close).not.toHaveBeenCalled();
+        await handlePeerDisconnect(host); await handlePeerDisconnect(restarted);
+    });
+
+    it('keeps the dashboard persistence guard when an in-room end finishes first', async () => {
+        const code = `SAVE-RACE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+        const host: any = {}, hostWs = socket();
+        await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+        roomManager.getRoom(host.roomId)!.ownerUserId = 'owner';
+        const policy = { hostId: 'owner', status: 'active', settings: {} } as any;
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce(policy).mockResolvedValueOnce(policy);
+        let saved!: () => void;
+        const saveCalls = vi.mocked(endHostedMeetingStatus).mock.calls.length;
+        vi.mocked(endHostedMeetingStatus).mockImplementationOnce(() => new Promise<void>(resolve => { saved = resolve; }));
+        const dashboard = { authUser: { sub: 'owner', tenantId: 'tenant' }, expectedMeetingCode: code };
+        const first = rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code });
+        const second = rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code });
+        await vi.waitFor(() => expect(saved).toBeTypeOf('function'));
+        await rpc(hostWs, host, 'endMeeting');
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ ...policy, status: 'ended' });
+        const early: any = { authUser: { sub: 'owner' } };
+        expect((await rpc(socket(), early, 'joinRoom', { meetingCode: code, displayName: 'Early restart' }))?.error).toBeDefined();
+        expect(endHostedMeetingStatus).toHaveBeenCalledTimes(saveCalls + 1);
+        saved();
+        expect((await first)?.result).toEqual({ ended: true });
+        expect((await second)?.result).toEqual({ ended: true });
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ ...policy, status: 'ended' });
+        const restarted: any = { authUser: { sub: 'owner' } };
+        expect((await rpc(socket(), restarted, 'joinRoom', { meetingCode: code, displayName: 'Fresh restart' }))?.result?.role).toBe('host');
+        await handlePeerDisconnect(host); await handlePeerDisconnect(restarted);
+    });
+
+    it('does not save or tear down a fresh run after a dashboard policy lookup for the old run finishes late', async () => {
+        const code = `CONTROL-RACE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+        const host: any = {}, hostWs = socket();
+        await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+        const room = roomManager.getRoom(host.roomId)!;
+        room.ownerUserId = 'owner';
+        let loaded!: (value: any) => void;
+        vi.mocked(loadMeetingPolicy).mockImplementationOnce(() => new Promise(resolve => { loaded = resolve; }));
+        const saveCalls = vi.mocked(endHostedMeetingStatus).mock.calls.length;
+        const dashboard = { authUser: { sub: 'owner', tenantId: 'tenant' }, expectedMeetingCode: code };
+        const ending = rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code });
+        await vi.waitFor(() => expect(loaded).toBeTypeOf('function'));
+        await rpc(hostWs, host, 'endMeeting');
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'ended', settings: {} } as any);
+        const restarted: any = { authUser: { sub: 'owner' } }, restartedWs = socket();
+        await rpc(restartedWs, restarted, 'joinRoom', { meetingCode: code, displayName: 'New run' });
+        loaded({ hostId: 'owner', status: 'active', settings: {} });
+        expect((await ending)?.error?.message).toContain('changed');
+        expect(endHostedMeetingStatus).toHaveBeenCalledTimes(saveCalls);
+        expect(room.peers.has(restarted.peerId)).toBe(true);
+        expect(restartedWs.close).not.toHaveBeenCalled();
+        await handlePeerDisconnect(host); await handlePeerDisconnect(restarted);
+    });
+
+    it.each(['guest', 'owner'])('blocks a stale %s policy response when cancellation happens before the first room is created', async actor => {
+        const code = `EMPTY-RACE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+        expect(roomManager.getRoomByCode(code)).toBeUndefined();
+        let loaded!: (value: any) => void;
+        vi.mocked(loadMeetingPolicy).mockImplementationOnce(() => new Promise(resolve => { loaded = resolve; }));
+        const joiningState: any = actor === 'owner' ? { authUser: { sub: 'owner' } } : {};
+        const joining = rpc(socket(), joiningState, 'joinRoom', { meetingCode: code, displayName: 'Old lookup' });
+        await vi.waitFor(() => expect(loaded).toBeTypeOf('function'));
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'waiting', settings: {} } as any);
+        const dashboard = { authUser: { sub: 'owner', tenantId: 'tenant' }, expectedMeetingCode: code };
+        expect((await rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code, action: 'cancel' }))?.result).toEqual({ cancelled: true });
+        loaded({ hostId: 'owner', status: 'waiting', settings: {} });
+        expect((await joining)?.error?.message).toContain('cancelled');
+        expect(joiningState.peerId).toBeUndefined();
+        expect(roomManager.getRoomByCode(code)?.peers.size).toBe(0);
+        expect(roomManager.getRoomByCode(code)?.waitingRoom.size).toBe(0);
+    });
+
+    it.each(['saved', 'failed'])('evicts an unused dashboard reservation after its grace period: %s', async outcome => {
+        vi.useFakeTimers();
+        try {
+            const code = `EVICT-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+            vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'waiting', settings: {} } as any);
+            if (outcome === 'failed') vi.mocked(endHostedMeetingStatus).mockRejectedValueOnce(new Error('Storage unavailable'));
+            const dashboard = { authUser: { sub: 'owner', tenantId: 'tenant' }, expectedMeetingCode: code };
+            await rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code, action: 'cancel' });
+            expect(roomManager.getRoomByCode(code)).toBeDefined();
+            await vi.advanceTimersByTimeAsync(59999);
+            expect(roomManager.getRoomByCode(code)).toBeDefined();
+            await vi.advanceTimersByTimeAsync(1);
+            expect(roomManager.getRoomByCode(code)).toBeUndefined();
+        } finally { vi.useRealTimers(); }
+    });
+
+    it('refreshes an old empty-room expiry while a confirmed dashboard operation is pending', async () => {
+        vi.useFakeTimers();
+        try {
+            const code = `RETAIN-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+            const room = roomManager.getOrCreateRoom(code);
+            room.ownerUserId = 'owner';
+            roomManager.scheduleEmptyRoomCleanup(room.id);
+            await vi.advanceTimersByTimeAsync(59999);
+            vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'waiting', settings: {} } as any);
+            let saved!: () => void;
+            vi.mocked(endHostedMeetingStatus).mockImplementationOnce(() => new Promise<void>(resolve => { saved = resolve; }));
+            const dashboard = { authUser: { sub: 'owner', tenantId: 'tenant' }, expectedMeetingCode: code };
+            const result = rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code, action: 'cancel' });
+            await Promise.resolve();
+            expect(saved).toBeTypeOf('function');
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(roomManager.getRoomByCode(code)).toBe(room);
+            saved(); await result;
+            await vi.advanceTimersByTimeAsync(60000);
+            expect(roomManager.getRoomByCode(code)).toBeUndefined();
+        } finally { vi.useRealTimers(); }
+    });
+
     it('only issues relay credentials to the admitted socket, caching repeated requests', async () => {
         vi.mocked(admittedPeerIceServers).mockClear();
         const hostWs = socket(), waitingWs = socket(), host: any = {}, waiting: any = {};

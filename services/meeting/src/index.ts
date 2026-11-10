@@ -21,6 +21,7 @@ import { normalizeMeetingSettings } from './meeting-settings.js';
 import meetingInvitation from '../../../shared/meeting-invitation.cjs';
 import { transcriptAsSrt, transcriptAsText, transcriptBody } from './transcripts.js';
 import crypto from 'node:crypto';
+import { endHostedMeeting } from './cancel-meeting.js';
 
 const { createMeetingInviteToken } = meetingInvitation;
 
@@ -320,6 +321,8 @@ app.post('/api/meetings/problem-reports', express.json({ limit: '24kb' }), async
 });
 
 // Signaling reports that the host started or ended the meeting (service-to-service only).
+app.post('/api/internal/meetings/:code/end', endHostedMeeting(pool));
+
 app.post('/api/internal/meetings/:code/status', express.json(), async (req, res) => {
     try {
         jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), serviceSecret('MEETING_POLICY_SECRET'), { algorithms: ['HS256'], audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', maxAge: 30 });

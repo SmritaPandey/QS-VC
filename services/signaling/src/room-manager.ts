@@ -33,6 +33,7 @@ export interface PeerState {
 
 export interface VerifiedSignalingUser {
     sub: string;
+    tenantId?: string;
     role?: string;
     plan?: Plan;
     status?: 'trial_active' | 'trial_expired' | 'paid_active' | 'enterprise_pending' | 'enterprise_approved' | 'enterprise_rejected';
@@ -137,6 +138,7 @@ const DEFAULT_SETTINGS: RoomSettings = {
 export class RoomManager {
     private rooms: Map<string, RoomState> = new Map();
     private codeToRoomId: Map<string, string> = new Map();
+    private emptyRoomTimers = new WeakMap<RoomState, ReturnType<typeof setTimeout>>();
 
     /** Create or get a room by meeting code. */
     getOrCreateRoom(meetingCode: string, settings?: Partial<RoomSettings>): RoomState {
@@ -359,6 +361,26 @@ export class RoomManager {
         return next;
     }
 
+    scheduleEmptyRoomCleanup(roomId: string): void {
+        const room = this.rooms.get(roomId);
+        if (!room) return;
+        const previous = this.emptyRoomTimers.get(room);
+        if (previous) clearTimeout(previous);
+        this.emptyRoomTimers.delete(room);
+        if (room.peers.size === 0 && room.waitingRoom.size === 0) {
+            const timer = setTimeout(() => {
+                this.emptyRoomTimers.delete(room);
+                const r = this.rooms.get(roomId);
+                if (r && r.peers.size === 0 && r.waitingRoom.size === 0) {
+                    this.rooms.delete(roomId);
+                    this.codeToRoomId.delete(room.meetingCode);
+                    logger.info(`Room ${room.meetingCode} removed (empty)`);
+                }
+            }, 60000);
+            this.emptyRoomTimers.set(room, timer);
+        }
+    }
+
     removePeer(roomId: string, peerId: string): PeerState | undefined {
         const room = this.rooms.get(roomId);
         if (!room) return undefined;
@@ -397,16 +419,7 @@ export class RoomManager {
 
         if (room.peers.size === 0) room.hostPeerId = null;
 
-        if (room.peers.size === 0 && room.waitingRoom.size === 0) {
-            setTimeout(() => {
-                const r = this.rooms.get(roomId);
-                if (r && r.peers.size === 0 && r.waitingRoom.size === 0) {
-                    this.rooms.delete(roomId);
-                    this.codeToRoomId.delete(room.meetingCode);
-                    logger.info(`Room ${room.meetingCode} removed (empty)`);
-                }
-            }, 60000);
-        }
+        this.scheduleEmptyRoomCleanup(roomId);
         if (room.peers.size === 0 && room.ownerUserId && room.settings.waitingRoomEnabled) {
             // Everyone in the call left; the next person in must wait for the host again.
             room.hostStarted = false;

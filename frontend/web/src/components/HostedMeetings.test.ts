@@ -1,5 +1,8 @@
 import { it, expect } from 'vitest';
-import { groupHosted, type HostedMeeting } from './HostedMeetings';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { MemoryRouter } from 'react-router-dom';
+import { groupHosted, HostedMeetingRow, type HostedMeeting } from './HostedMeetings';
 
 it('groups hosted meetings into live, upcoming and past', () => {
     const now = Date.parse('2026-11-04T10:00:00Z');
@@ -11,4 +14,23 @@ it('groups hosted meetings into live, upcoming and past', () => {
     expect(live.map(x => x.id)).toEqual(['live']);
     expect(upcoming.map(x => x.id)).toEqual(['soon', 'later']);
     expect(past.map(x => x.id).sort()).toEqual(['done', 'instant']);
+});
+
+it.each([
+    ['waiting', undefined, 'Cancel meeting'],
+    ['waiting', '2026-11-11T10:00:00Z', 'Cancel meeting'],
+    ['active', undefined, 'End meeting'],
+    ['active', '2026-11-11T10:00:00Z', 'End meeting'],
+    ['ended', undefined, null],
+])('offers the right action for %s meetings (scheduled start: %s)', (status, scheduledStart, action) => {
+    const meeting: HostedMeeting = { id: 'meeting', meetingCode: 'ABC-123', title: 'Team call', status, scheduledStart, createdAt: '2026-11-10T10:00:00Z' };
+    const oldWindow = globalThis.window;
+    Object.assign(globalThis, { window: { location: { origin: 'https://example.com' } } });
+    try {
+        const html = renderToStaticMarkup(createElement(MemoryRouter, {}, createElement(HostedMeetingRow, {
+            meeting, label: status, onCancelled: () => {}, onExpired: () => {},
+        })));
+        if (action) expect(html).toContain(`>${action}</button>`);
+        else { expect(html).not.toContain('>End meeting</button>'); expect(html).not.toContain('>Cancel meeting</button>'); expect(html).toContain('Recordings'); }
+    } finally { Object.assign(globalThis, { window: oldWindow }); }
 });
