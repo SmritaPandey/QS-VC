@@ -2,7 +2,11 @@ const { readFileSync } = require('node:fs');
 
 // One deployment has one database; never silently fail over writes to another site.
 function databaseConfig(env = process.env) {
-    const url = env.DATABASE_URL ? new URL(env.DATABASE_URL) : null;
+    let url = null;
+    if (env.DATABASE_URL) {
+        try { url = new URL(env.DATABASE_URL); }
+        catch { throw new Error('DATABASE_URL is invalid. URL-encode special characters in database credentials.'); }
+    }
     const host = url ? url.hostname : (env.POSTGRES_HOST || 'localhost');
     const local = ['localhost', '127.0.0.1', '::1', '[::1]', 'postgres'].includes(host);
     const tls = env.POSTGRES_SSL || (local ? 'disable' : 'verify-full');

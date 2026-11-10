@@ -27,4 +27,19 @@ describe('deployment database configuration', () => {
         expect(() => databaseConfig({ POSTGRES_SSL: 'no-verify' })).toThrow();
         expect(() => databaseConfig({ POSTGRES_HOST: 'db.example.test', POSTGRES_CA_FILE: '/nonexistent/qsvc-ca.pem' })).toThrow();
     });
+    it('rejects malformed connection URLs without exposing credentials in the error', () => {
+        const secret = 'test-password#with-hash';
+        try {
+            databaseConfig({ DATABASE_URL: `postgresql://user:${secret}@db.example.test/qsvc` });
+            expect.fail('Malformed credentials should be rejected');
+        } catch (error) {
+            expect(error).toBeInstanceOf(Error);
+            expect(String(error)).toContain('URL-encode');
+            expect(String(error)).not.toContain(secret);
+            expect(error).not.toHaveProperty('input');
+            expect(error).not.toHaveProperty('cause');
+        }
+        const config = databaseConfig({ DATABASE_URL: `postgresql://user:${encodeURIComponent(secret)}@db.example.test/qsvc` });
+        expect(decodeURIComponent(new URL(config.connectionString!).password)).toBe(secret);
+    });
 });
