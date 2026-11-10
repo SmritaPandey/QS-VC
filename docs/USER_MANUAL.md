@@ -463,7 +463,7 @@ All variables have sensible **defaults for local development**. Override for pro
 | `SFU_ANNOUNCED_IP` | 127.0.0.1 | WebRTC announced IP |
 | `SFU_NUM_WORKERS` | 2 | mediasoup workers |
 | `SFU_MIN_PORT` | 40000 | RTC port range start |
-| `SFU_MAX_PORT` | 49999 | RTC port range end |
+| `SFU_MAX_PORT` | 40100 | RTC port range end |
 
 ---
 

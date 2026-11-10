@@ -26,7 +26,7 @@ export const config = {
             'svc',
         ] as msTypes.WorkerLogTag[],
         rtcMinPort: parseInt(process.env.SFU_MIN_PORT || '40000', 10),
-        rtcMaxPort: parseInt(process.env.SFU_MAX_PORT || '49999', 10),
+        rtcMaxPort: parseInt(process.env.SFU_MAX_PORT || '40100', 10),
     },
 
     // Router: supported media codecs

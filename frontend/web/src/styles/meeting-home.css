@@ -33,10 +33,10 @@
 .meeting-home .workspace-start h1 { max-width:13ch; margin:0 0 24px; font-size:clamp(36px,3.7vw,52px); font-weight:500; line-height:1.12; letter-spacing:-.035em; text-wrap:balance; color:var(--text-primary); background:none; -webkit-text-fill-color:currentColor; }
 .meeting-home .workspace-start-copy { max-width:38ch; margin:0 0 36px; font-size:18px; font-weight:400; line-height:1.6; }
 .meeting-home-start-actions { display:flex; align-items:flex-end; flex-wrap:wrap; gap:20px; }
-.meeting-home .workspace-new { width:184px; flex:none; }
+.meeting-home .workspace-new { width:208px; flex:none; }
 .meeting-home .workspace-new summary { padding:0; min-height:56px; border-radius:10px; }
-.meeting-home .workspace-new summary.qsvc-action.qsvc-action.qsvc-action { min-width:0; width:184px; }
-.meeting-home .workspace-new summary.qsvc-action .qsvc-action__inner { padding:14px 16px; min-height:56px; gap:10px; font-size:16px; }
+.meeting-home .workspace-new summary.qsvc-action.qsvc-action.qsvc-action { min-width:0; width:208px; }
+.meeting-home .workspace-new summary.qsvc-action .qsvc-action__inner { padding:14px 16px; min-height:56px; gap:10px; font-size:16px; white-space:nowrap; }
 .meeting-home .workspace-new .workspace-dropdown { left:0; right:auto; min-width:248px; }
 .meeting-home .workspace-new .workspace-dropdown :is(button,a) { font-size:16px; }
 .meeting-home .workspace-join-section { flex:1 1 260px; min-width:0; margin:0; }
