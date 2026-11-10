@@ -7,9 +7,9 @@ export function translationFailure(error: unknown): SpeechDiagnostic {
         return { gate: 'consent', message: 'The speaker has not allowed Google Cloud translation for this caption.' };
     }
     if (message.includes('Language pair unavailable')) {
-        return { gate: 'translation', message: 'The server does not support this source and target language pair.' };
+        return { gate: 'translation', message: 'Translation is unavailable for this language pair.' };
     }
-    return { gate: 'translation', message: 'The server could not translate this segment into your selected language.' };
+    return { gate: 'translation', message: 'This caption could not be translated into your selected language.' };
 }
 
 export function playbackFailure(code: string): SpeechDiagnostic {
@@ -17,6 +17,6 @@ export function playbackFailure(code: string): SpeechDiagnostic {
         return { gate: 'voice', message: 'The matching device voice is unavailable.' };
     }
     return { gate: 'output', message: code === 'audio-hardware'
-        ? 'The browser reported a problem with its audio output device.'
+        ? 'Check your selected audio output device.'
         : 'The browser could not start or complete translated playback. Check its audio output and permissions.' };
 }

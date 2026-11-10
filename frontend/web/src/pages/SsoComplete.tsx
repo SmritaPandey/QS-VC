@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { beginSignIn, nextPath } from '../lib/session';
-import { ssoRequest } from '../lib/sso';
+import { SignInRequestError, ssoRequest } from '../lib/sso';
 
 export default function SsoComplete() {
     const navigate = useNavigate();
@@ -19,12 +19,13 @@ export default function SsoComplete() {
             }
             if (result.get('error') === 'digilocker_failed') {
                 sessionStorage.removeItem('qsvc-digilocker');
-                throw new Error('DigiLocker consent could not be verified. Return to sign-in settings and try again.');
+                setMessage('DigiLocker could not be connected. Return to sign-in settings and try again.');
+                return;
             }
             if (result.has('digilocker')) {
                 const verifier = sessionStorage.getItem('qsvc-digilocker');
                 sessionStorage.removeItem('qsvc-digilocker');
-                if (!verifier) throw new Error('Start DigiLocker consent from this browser tab.');
+                if (!verifier) { setMessage('Return to sign-in settings to connect DigiLocker again.'); return; }
                 await ssoRequest('digilocker/complete', 'POST', { code: result.get('digilocker'), verifier }, true);
                 setMessage('DigiLocker connected. QS-VC saved your DigiLocker ID and consent time.');
                 return;
@@ -37,7 +38,7 @@ export default function SsoComplete() {
             const { token } = await ssoRequest<{ token: string }>('exchange', 'POST', { code: result.get('code'), verifier });
             if (finish(token)) navigate(nextPath(search), { replace: true });
         }
-        void complete().catch(error => setMessage(error instanceof Error ? error.message : 'Sign-in could not be verified.'));
+        void complete().catch(error => setMessage(error instanceof SignInRequestError ? error.message : 'Sign-in could not be completed. Return to sign in and try again.'));
     }, [navigate]);
     return <main className="public-site public-container public-auth-layout">
         <div className="public-auth-copy">

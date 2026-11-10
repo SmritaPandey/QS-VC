@@ -10,13 +10,16 @@ export type CurrencyRatesState = {
     rateDate: string | null;
     status: 'loading' | 'refreshing' | 'ready' | 'stale' | 'error';
     setCurrency: (currency: DisplayCurrency) => void;
-    refresh: () => void;
 };
 
 type CachedRates = { rates: CurrencyRates; dates: Partial<Record<DisplayCurrency, string>>; date: string; fetchedAt: number };
 const CURRENCY_KEY = 'qsvc:display-currency';
 const RATES_KEY = 'qsvc:currency-rates:inr:v1';
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const RETRY_DELAY_MS = 15 * 60 * 1000;
+let memoryCache: CachedRates | null = null;
+let pendingRates: Promise<CachedRates> | null = null;
+let retryAfter = 0;
 const currencySet = new Set<string>(DISPLAY_CURRENCIES);
 
 function readStorage(key: string) {
@@ -35,7 +38,7 @@ function readCachedRates(): CachedRates | null {
     try {
         const value = JSON.parse(raw) as Partial<CachedRates>;
         if (typeof value.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value.date)
-            || typeof value.fetchedAt !== 'number' || value.fetchedAt > Date.now() + 60_000
+            || typeof value.fetchedAt !== 'number' || !Number.isFinite(value.fetchedAt) || value.fetchedAt < 0 || value.fetchedAt > Date.now() + 60_000
             || !value.rates || typeof value.rates !== 'object' || !value.dates || typeof value.dates !== 'object') return null;
         const rates: CurrencyRates = { INR: 1 };
         const dates: Partial<Record<DisplayCurrency, string>> = {};
@@ -58,69 +61,105 @@ function savedCurrency(): DisplayCurrency {
     return value && currencySet.has(value) ? value as DisplayCurrency : 'INR';
 }
 
+function currentRates() {
+    const stored = readCachedRates();
+    if (stored && (!memoryCache || stored.fetchedAt > memoryCache.fetchedAt)) memoryCache = stored;
+    return memoryCache;
+}
+
+function loadRates(): Promise<CachedRates> {
+    if (pendingRates) return pendingRates;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 10_000);
+    const quotes = DISPLAY_CURRENCIES.filter(code => code !== 'INR').join(',');
+    pendingRates = fetch(`https://api.frankfurter.dev/v2/rates?base=INR&quotes=${encodeURIComponent(quotes)}`, {
+        cache: 'no-store', signal: controller.signal,
+    }).then(async response => {
+        if (!response.ok) throw new Error('Reference rates are unavailable.');
+        const rows: unknown = await response.json();
+        if (controller.signal.aborted || !Array.isArray(rows) || rows.length === 0) throw new Error('Reference rates are unavailable.');
+        const rates: CurrencyRates = { INR: 1 };
+        const dates: Partial<Record<DisplayCurrency, string>> = {};
+        let latestDate = '';
+        for (const row of rows) {
+            if (row?.base !== 'INR' || typeof row?.quote !== 'string'
+                || row.quote === 'INR' || !currencySet.has(row.quote) || typeof row?.rate !== 'number'
+                || !Number.isFinite(row.rate) || row.rate <= 0
+                || typeof row?.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.date)) continue;
+            if (row.date > latestDate) latestDate = row.date;
+            rates[row.quote as DisplayCurrency] = row.rate;
+            dates[row.quote as DisplayCurrency] = row.date;
+        }
+        if (!latestDate || Object.keys(rates).length < 3 || controller.signal.aborted) throw new Error('Reference rates are incomplete.');
+        const next: CachedRates = { date: latestDate, fetchedAt: Date.now(), rates, dates };
+        memoryCache = next;
+        retryAfter = 0;
+        saveStorage(RATES_KEY, JSON.stringify(next));
+        return next;
+    }).catch(error => {
+        retryAfter = Date.now() + RETRY_DELAY_MS;
+        throw error;
+    }).finally(() => {
+        window.clearTimeout(timeout);
+        pendingRates = null;
+    });
+    return pendingRates;
+}
+
 export function useCurrencyRates(): CurrencyRatesState {
     const [currency, setCurrencyValue] = useState<DisplayCurrency>(savedCurrency);
-    const [cached, setCached] = useState<CachedRates | null>(readCachedRates);
-    const [status, setStatus] = useState<CurrencyRatesState['status']>(() => readCachedRates() ? 'ready' : 'loading');
-    const [refreshKey, setRefreshKey] = useState(0);
+    const [cached, setCached] = useState<CachedRates | null>(currentRates);
+    const [status, setStatus] = useState<CurrencyRatesState['status']>(() => currentRates() ? 'ready' : 'loading');
 
     useEffect(() => {
-        const existing = readCachedRates();
-        if (existing) setCached(existing);
-        if (existing && Date.now() - existing.fetchedAt < CACHE_TTL_MS && refreshKey === 0) {
-            setStatus('ready');
-            return;
-        }
-
-        const controller = new AbortController();
-        const timeout = window.setTimeout(() => {
-            controller.abort();
-            setStatus(existing ? 'stale' : 'error');
-        }, 10_000);
-        setStatus(existing ? 'refreshing' : 'loading');
-        const quotes = DISPLAY_CURRENCIES.filter(code => code !== 'INR').join(',');
-        void fetch(`https://api.frankfurter.dev/v2/rates?base=INR&quotes=${encodeURIComponent(quotes)}`, {
-            cache: 'no-store', signal: controller.signal,
-        }).then(async response => {
-            if (!response.ok) throw new Error('Reference rates are unavailable.');
-            const rows: unknown = await response.json();
-            if (controller.signal.aborted || !Array.isArray(rows) || rows.length === 0) throw new Error('Reference rates are unavailable.');
-            const rates: CurrencyRates = { INR: 1 };
-            const dates: Partial<Record<DisplayCurrency, string>> = {};
-            let latestDate = '';
-            for (const row of rows) {
-                if (row?.base !== 'INR' || typeof row?.quote !== 'string'
-                    || !currencySet.has(row.quote) || typeof row?.rate !== 'number'
-                    || !Number.isFinite(row.rate) || row.rate <= 0
-                    || typeof row?.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(row.date)) continue;
-                if (row.date > latestDate) latestDate = row.date;
-                rates[row.quote as DisplayCurrency] = row.rate;
-                dates[row.quote as DisplayCurrency] = row.date;
+        let active = true;
+        let running = false;
+        let timer = 0;
+        const update = async () => {
+            if (!active || running) return;
+            running = true;
+            window.clearTimeout(timer);
+            const existing = currentRates();
+            setCached(existing);
+            try {
+                if (existing && Date.now() - existing.fetchedAt < CACHE_TTL_MS) setStatus('ready');
+                else if (Date.now() < retryAfter) setStatus(existing ? 'stale' : 'error');
+                else {
+                    setStatus(existing ? 'refreshing' : 'loading');
+                    const next = await loadRates();
+                    if (active) { setCached(next); setStatus('ready'); }
+                }
+            } catch {
+                if (active) setStatus(currentRates() ? 'stale' : 'error');
+            } finally {
+                running = false;
+                if (active) {
+                    const refreshAt = Math.max((currentRates()?.fetchedAt || 0) + CACHE_TTL_MS, retryAfter);
+                    timer = window.setTimeout(() => void update(), Math.max(1000, refreshAt - Date.now()));
+                }
             }
-            if (!latestDate || Object.keys(rates).length < 3 || controller.signal.aborted) throw new Error('Reference rates are incomplete.');
-            const next: CachedRates = { date: latestDate, fetchedAt: Date.now(), rates, dates };
-            setCached(next);
-            saveStorage(RATES_KEY, JSON.stringify(next));
-            setStatus('ready');
-        }).catch(() => {
-            if (!controller.signal.aborted) setStatus(existing ? 'stale' : 'error');
-        });
-        return () => {
-            window.clearTimeout(timeout);
-            controller.abort();
         };
-    }, [refreshKey]);
+        const refreshIfStale = () => { void update(); };
+        void update();
+        window.addEventListener('focus', refreshIfStale);
+        window.addEventListener('online', refreshIfStale);
+        return () => {
+            active = false;
+            window.clearTimeout(timer);
+            window.removeEventListener('focus', refreshIfStale);
+            window.removeEventListener('online', refreshIfStale);
+        };
+    }, []);
 
     const setCurrency = useCallback((next: DisplayCurrency) => {
         if (!currencySet.has(next) || (next !== 'INR' && !cached?.rates[next])) return;
         setCurrencyValue(next);
         saveStorage(CURRENCY_KEY, next);
     }, [cached]);
-    const refresh = useCallback(() => setRefreshKey(value => value + 1), []);
     const rates = cached?.rates || { INR: 1 as const };
     const displayCurrency = rates[currency] ? currency : 'INR';
 
-    return { currency, displayCurrency, rates, rateDate: (displayCurrency !== 'INR' ? cached?.dates[displayCurrency] : null) || cached?.date || null, status, setCurrency, refresh };
+    return { currency, displayCurrency, rates, rateDate: (displayCurrency !== 'INR' ? cached?.dates[displayCurrency] : null) || cached?.date || null, status, setCurrency };
 }
 
 export function formatConvertedAmount(amountInInr: number, currency: DisplayCurrency, rates: CurrencyRates) {

@@ -1,4 +1,5 @@
-export type PaidPlanKey = 'starter' | 'pro';
+export type PaidPlanKey = 'basic' | 'starter' | 'pro' | 'business';
+export type BillingPeriod = 'monthly' | 'annual';
 export interface PlanPrice {
     baseAmountMinor: number;
     currency: 'INR';
@@ -7,5 +8,7 @@ export interface PlanPrice {
     totalAmountMinor: number;
 }
 export const GST_PERCENT: 18;
-export const PLAN_PRICES: Readonly<Record<PaidPlanKey, Readonly<{ baseAmountMinor: number; currency: 'INR' }>>>;
-export function getPlanPrice(plan: PaidPlanKey): PlanPrice | null;
+export const TRIAL_DAYS: 14;
+export const PAID_PLAN_NAMES: readonly ['Basic', 'Starter', 'Pro', 'Business'];
+export const PLAN_PRICES: Readonly<Record<PaidPlanKey, Readonly<Record<BillingPeriod, number>>>>;
+export function getPlanPrice(plan: PaidPlanKey, billing?: BillingPeriod): PlanPrice | null;

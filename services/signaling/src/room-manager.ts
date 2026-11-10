@@ -1,3 +1,4 @@
+import type { Plan } from '../../../shared/entitlements.cjs';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from './logger.js';
 
@@ -33,7 +34,7 @@ export interface PeerState {
 export interface VerifiedSignalingUser {
     sub: string;
     role?: string;
-    plan?: 'guest' | 'starter_trial' | 'starter' | 'pro_trial' | 'pro' | 'enterprise';
+    plan?: Plan;
     status?: 'trial_active' | 'trial_expired' | 'paid_active' | 'enterprise_pending' | 'enterprise_approved' | 'enterprise_rejected';
     privateConversationLimitMs?: number | null;
 }

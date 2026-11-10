@@ -170,18 +170,18 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
                     assignedRole,
                 }),
             });
-            const data = await res.json();
             if (res.ok) {
+                const data = await res.json();
                 setMemberMessage({ text: `Sent ${data.created} invitation(s) successfully.`, type: 'success' });
                 setSelectedUsers(new Map());
                 setSearchQuery('');
                 setSearchResults([]);
                 void loadInvitations();
             } else {
-                setMemberMessage({ text: data.error || 'Failed to send invitations', type: 'error' });
+                setMemberMessage({ text: res.status === 401 ? 'Sign in again to send invitations.' : 'Invitations could not be sent. Try again.', type: 'error' });
             }
-        } catch (err: any) {
-            setMemberMessage({ text: err.message || 'Network error', type: 'error' });
+        } catch {
+            setMemberMessage({ text: 'Invitations could not be sent. Try again.', type: 'error' });
         } finally {
             setSendingInvite(false);
         }
@@ -211,16 +211,16 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
                 headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ expiresInHours, maxUses }),
             });
-            const data = await res.json();
             if (res.ok) {
+                const data = await res.json();
                 setLatestGuestUrl(data.guestUrl);
-                setGuestMessage({ text: 'Unique guest link generated. Hashed for security.', type: 'success' });
+                setGuestMessage({ text: 'Your guest link is ready to share.', type: 'success' });
                 void loadGuestTokens();
             } else {
-                setGuestMessage({ text: data.error || 'Failed to generate guest link', type: 'error' });
+                setGuestMessage({ text: res.status === 401 ? 'Sign in again to create a guest link.' : 'The guest link could not be created. Try again.', type: 'error' });
             }
-        } catch (err: any) {
-            setGuestMessage({ text: err.message || 'Network error', type: 'error' });
+        } catch {
+            setGuestMessage({ text: 'The guest link could not be created. Try again.', type: 'error' });
         } finally {
             setGeneratingGuestToken(false);
         }
@@ -462,7 +462,7 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
                         <div className="guest-token-creator-card">
                             <h3>Create a Secure Guest Link</h3>
                             <p className="card-lead">
-                                External guests can join without creating an account. The token is stored as a cryptographic hash on the server.
+                                Invite guests who don’t have a QS-VC account.
                             </p>
 
                             <div className="guest-options-grid">
@@ -550,11 +550,11 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
                         )}
 
                         <div className="existing-guest-tokens-area">
-                            <h4 className="subheading">Active & Past Guest Tokens ({guestTokens.length})</h4>
+                            <h4 className="subheading">Active and past guest links ({guestTokens.length})</h4>
                             {loadingGuestTokens ? (
-                                <p className="loading-note">Loading guest tokens…</p>
+                                <p className="loading-note">Loading guest links…</p>
                             ) : guestTokens.length === 0 ? (
-                                <p className="empty-invitations-note">No guest tokens generated yet.</p>
+                                <p className="empty-invitations-note">No guest links yet.</p>
                             ) : (
                                 <div className="invitations-table-wrapper">
                                     <table className="invitations-table">
@@ -635,10 +635,6 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
                                 <div className="summary-item">
                                     <span className="summary-label">Meeting Code:</span>
                                     <span className="summary-val code">{meetingCode}</span>
-                                </div>
-                                <div className="summary-item">
-                                    <span className="summary-label">Security:</span>
-                                    <span className="summary-val">Signed Token Authentication</span>
                                 </div>
                             </div>
                         </div>

@@ -52,6 +52,7 @@
 .payment-status--success { background: color-mix(in srgb, var(--accent-success) 14%, var(--bg-primary)); color: var(--text-primary); }
 .payment-status--success > .mi { color: var(--accent-success); }
 .payment-status--error { background: color-mix(in srgb, var(--accent-danger) 12%, var(--bg-primary)); color: var(--text-primary); }
+.payment-status--error > p { font-size: 16px; }
 .payment-status--error > .mi { color: var(--accent-danger); }
 .payment-auth-actions { display: grid; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; min-width: 0; width: 100%; max-width: 100%; margin-top: 12px; }
 .payment-auth-actions a { display: inline-flex; box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; min-height: 44px; align-items: center; justify-content: center; padding: 10px 12px; border-radius: 999px; font-size: 16px; line-height: 1.4; text-align: center; text-decoration: none; white-space: nowrap; }
@@ -60,6 +61,7 @@
 .public-site .payment-auth-actions a:focus-visible { box-shadow: 0 0 0 2px var(--bg-primary), 0 0 0 4px var(--accent-primary) !important; }
 .payment-cancel { display: inline-flex; width: 100%; min-height: 48px; align-items: center; justify-content: center; margin-top: 12px; padding: 8px 12px; border: 1px solid var(--border-tone, #d5e0e5); border-radius: 999px; background: transparent; color: var(--text-secondary); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .payment-cancel:disabled { cursor: wait; opacity: .6; }
+.payment-retry { grid-column: 2; justify-self: start; width: auto; }
 .payment-cancel-note { margin: 12px 0 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; text-align: center; }
 .payment-contact { display: flex; min-height: 44px; align-items: center; justify-content: center; margin-top: 14px; padding: 8px 12px; text-align: center; }
 .payment-admin-access { max-width: 720px; margin: 24px auto; padding: 32px; border: 1px solid var(--border-tone, #d5e0e5); border-radius: 20px; background: var(--bg-secondary); }

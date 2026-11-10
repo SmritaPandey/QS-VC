@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import ActionContents from './ActionContents';
-import { browserProof, ssoRequest } from '../lib/sso';
+import { browserProof, SignInRequestError, ssoRequest } from '../lib/sso';
 
 type Provider = 'google' | 'microsoft';
 const names = { google: 'Google', microsoft: 'Microsoft' };
@@ -32,7 +32,7 @@ export default function PersonalSignInButtons({ link = false, disabled = false, 
             sessionStorage.setItem('qsvc-personal-sign-in', JSON.stringify({ verifier, search, link }));
             window.location.assign(url);
         } catch (reason) {
-            setError(reason instanceof Error ? reason.message : 'Sign-in could not be started.');
+            setError(reason instanceof SignInRequestError ? reason.message : 'Sign-in could not be started. Please try again.');
             setBusy(false);
         }
     }
@@ -48,7 +48,7 @@ export default function PersonalSignInButtons({ link = false, disabled = false, 
         </div>
         {onOrganisationSignIn && <>
             <button type="button" className="qsvc-action qsvc-action--secondary" disabled={busy || disabled} onClick={onOrganisationSignIn}>
-                <ActionContents>Organisation SSO / SAML</ActionContents>
+                <ActionContents>Organisation sign-in</ActionContents>
             </button>
             {providers && providers.length < visibleProviders.length && <p>
                 {visibleProviders.filter(provider => !providers.includes(provider)).map(provider => names[provider]).join(' and ')} sign-in is unavailable on this workspace.

@@ -63,17 +63,19 @@ export default function PreMeeting() {
             body: JSON.stringify({ guestToken }),
             signal: controller.signal
         })
-            .then(async res => {
+            .then(res => {
+                if (controller.signal.aborted) return;
                 if (!res.ok) {
-                    const data = await res.json().catch(() => ({}));
                     setGuestTokenStatus('invalid');
-                    setGuestTokenError(data.error || 'This guest link is invalid or expired.');
+                    setGuestTokenError(res.status >= 500
+                        ? 'This guest link could not be checked. Try opening it again.'
+                        : 'This guest link may have expired. Ask the host for a new link.');
                 } else {
                     setGuestTokenStatus('valid');
                 }
             })
             .catch(() => {
-                setGuestTokenStatus('valid');
+                if (!controller.signal.aborted) setGuestTokenStatus('valid');
             });
         return () => controller.abort();
     }, [guestToken, meetingCode]);

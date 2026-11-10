@@ -31,12 +31,23 @@ export default function Login() {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ email: fields.get('email'), password: fields.get('password'), tenantSlug: fields.get('tenantSlug') || undefined }),
             });
-            const data = await response.json();
-            if (!response.ok || typeof data.token !== 'string' || !data.token) throw new Error(data.error || 'Sign in failed. Please try again.');
+            const data = await response.json().catch(() => null);
+            if (response.status === 401) { setError('Check your email and password, then try again.'); return; }
+            if (response.status === 403) {
+                setError(data?.code === 'SSO_REQUIRED'
+                    ? 'Use your organisation sign-in for this email address.'
+                    : 'You don’t have access to this workspace. Contact your administrator.');
+                return;
+            }
+            if (response.status === 429) { setError('Too many attempts. Wait a few minutes and try again.'); return; }
+            if (!response.ok || typeof data?.token !== 'string' || !data.token) {
+                setError('Sign-in is unavailable right now. Please try again.');
+                return;
+            }
             if (!completeSignIn(data.token)) return;
             navigate(nextPath(location.search, data.user?.role === 'admin' ? '/admin' : '/app'), { replace: true });
-        } catch (reason) {
-            setError(reason instanceof Error ? reason.message : 'Cannot reach sign in. Please try again.');
+        } catch {
+            setError('Sign-in is unavailable right now. Please try again.');
         } finally { setBusy(undefined); }
     }
     async function startSSO() {
@@ -49,8 +60,8 @@ export default function Login() {
             const result = await ssoRequest<{ url: string }>('start', 'POST', { email, challenge });
             sessionStorage.setItem('qsvc-sso', JSON.stringify({ verifier, search: location.search }));
             window.location.assign(result.url);
-        } catch (reason) {
-            setError(reason instanceof Error ? reason.message : 'Organisation sign-in is unavailable.');
+        } catch {
+            setError('Organisation sign-in could not start. Check your work email and try again.');
             setBusy(undefined);
         }
     }

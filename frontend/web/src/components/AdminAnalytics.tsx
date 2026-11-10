@@ -155,14 +155,14 @@ export default function AdminAnalytics({ onManageAccess }: { onManageAccess?: ()
             if (getToken() !== token) return;
             if (response.status === 401) { clearSession(token); return; }
             if (!response.ok) {
-                const body = await response.json().catch(() => null) as { error?: unknown } | null;
-                throw new Error(typeof body?.error === 'string' ? body.error : 'The financial entry could not be saved. Try again.');
+                setLedgerError(response.status === 400 ? 'Check the entry details and try again.' : 'The financial entry could not be saved. Try again.');
+                return;
             }
             form.reset();
             setLedgerMessage('Entry saved for all platform admins.');
             setAttempt(value => value + 1);
-        } catch (reason) {
-            if (getToken() === token) setLedgerError(reason instanceof Error ? reason.message : 'The financial entry could not be saved.');
+        } catch {
+            if (getToken() === token) setLedgerError('The financial entry could not be saved. Try again.');
         } finally { setSaving(false); }
     }
 
@@ -179,7 +179,7 @@ export default function AdminAnalytics({ onManageAccess }: { onManageAccess?: ()
     return <section className="admin-analytics" aria-labelledby="admin-analytics-title">
         <header className="admin-analytics-header">
             <div><p className="admin-analytics-kicker">Platform admin overview</p><h1 id="admin-analytics-title">Global activity and finances</h1>
-                <p>Shared across platform admins using this deployment’s database. Calendar quarters use UTC.</p></div>
+                <p>Platform admins see the same totals. Calendar quarters use UTC.</p></div>
             <div className="admin-analytics-controls">
                 <label>Reporting period <select value={quarters} onChange={event => setQuarters(Number(event.target.value))}>
                     <option value={4}>Last 4 quarters</option><option value={8}>Last 8 quarters</option><option value={12}>Last 12 quarters</option>
@@ -190,10 +190,10 @@ export default function AdminAnalytics({ onManageAccess }: { onManageAccess?: ()
         {error ? <p role="alert">{error} <button type="button" onClick={() => setAttempt(value => value + 1)}>Retry</button></p>
             : !data ? <p role="status">Loading shared platform analytics…</p> : <>
                 <p className="admin-analytics-updated" role="status">Updated {new Date(data.generatedAt).toLocaleString()}</p>
-                <dl className="admin-analytics-counters" aria-label="Global database totals">
+                <dl className="admin-analytics-counters" aria-label="Global activity totals">
                     <div><dt>Active organisations</dt><dd><Counter value={data.totals.activeOrganisations} /></dd></div>
                     <div><dt>Active user accounts</dt><dd><Counter value={data.totals.activeUsers} /></dd></div>
-                    <div><dt>Meeting records created</dt><dd><Counter value={data.totals.meetingsCreated} /></dd></div>
+                    <div><dt>Meetings created</dt><dd><Counter value={data.totals.meetingsCreated} /></dd></div>
                     <div><dt>Active Quantum-Premise access seats</dt><dd><Counter value={data.totals.activeEnterpriseAccessSeats} /></dd></div>
                     <div><dt>Desktop app activations</dt><dd><Counter value={data.totals.desktopAppActivations} /></dd></div>
                 </dl>
@@ -208,7 +208,7 @@ export default function AdminAnalytics({ onManageAccess }: { onManageAccess?: ()
                         </li>)}</ul>
                     </section>
                     <section aria-labelledby="admin-status-title"><h2 id="admin-status-title">Meeting record status</h2>
-                        <p>Stored meeting states, not live SFU presence.</p>
+                        <p>Meeting status totals for the selected reporting period.</p>
                         {statusTotal > 0 ? <div className="admin-analytics-breakdown">
                             <div className="admin-analytics-donut" aria-hidden="true" style={{ background: `conic-gradient(${segments?.join(',')})` }} />
                             <ul>{data.meetingStatuses.map((item, index) => <li key={item.status}>

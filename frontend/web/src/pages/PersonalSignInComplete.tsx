@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { beginSignIn, nextPath } from '../lib/session';
-import { ssoRequest } from '../lib/sso';
+import { SignInRequestError, ssoRequest } from '../lib/sso';
 import SiteNav from '../components/SiteNav';
 
 type Enrolment = { code: string; name: string; email?: string; verifiedEmail?: string };
@@ -47,7 +47,7 @@ export default function PersonalSignInComplete() {
             if (!request.link) finishSignIn.current = beginSignIn();
             apply(await ssoRequest<Result>('personal/exchange', 'POST', { code: params.get('code'), verifier: request.verifier }, request.link));
         }
-        void complete().catch(reason => { setMessage(''); setError(reason.message); }).finally(() => setBusy(false));
+        void complete().catch(reason => { setMessage(''); setError(reason instanceof SignInRequestError ? reason.message : 'Sign-in could not be completed. Return to sign in and try again.'); }).finally(() => setBusy(false));
         // This callback consumes a one-time proof.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [navigate]);
@@ -62,7 +62,7 @@ export default function PersonalSignInComplete() {
             apply(await ssoRequest<Result>(route, 'POST', {
                 ...fields, code: verification?.code ?? enrol?.code, verifier: attempt.current.verifier,
             }));
-        } catch (reason) { setError(reason instanceof Error ? reason.message : 'Sign-in could not be completed.'); }
+        } catch (reason) { setError(reason instanceof SignInRequestError ? reason.message : 'Sign-in could not be completed. Please try again.'); }
         finally { setBusy(false); }
     }
 

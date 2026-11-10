@@ -181,7 +181,7 @@ export default function Landing() {
             await signOut();
             navigate('/login', { replace: true, state: { notice: 'You’ve signed out. Sign in again or join a meeting as a guest.' } });
         }
-        catch (error) { setSessionError(error instanceof Error ? error.message : 'Sign out failed.'); }
+        catch { setSessionError('Sign out could not finish. Check your connection and try again.'); }
         finally { setSigningOut(false); }
     };
 

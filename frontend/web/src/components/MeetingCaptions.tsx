@@ -75,14 +75,14 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     useEffect(() => {
         if (!connected) return;
         let active = true;
-        setCapabilityError('Checking translation server…');
+        setCapabilityError('Checking available caption languages…');
         signaling.request('translationCapabilities').then((result: Capabilities) => {
             if (!active) return;
             setCapabilities(result);
             setServerUpToDate(Boolean(result.transcript));
             setTranscriptSaving(Boolean(result.transcript?.saving));
-            setCapabilityError(result.configured ? '' : 'Translation server is not configured. Original captions are available.');
-        }).catch(() => { if (active) setCapabilityError('Translation server is unavailable. Original captions are available.'); });
+            setCapabilityError(result.configured ? '' : 'Translated captions are unavailable. You can still view original captions.');
+        }).catch(() => { if (active) setCapabilityError('Translated captions are unavailable. You can still view original captions.'); });
         const offTranscript = signaling.on('transcriptStateChanged', (params: { saving: boolean }) => setTranscriptSaving(Boolean(params?.saving)));
         return () => { active = false; offTranscript(); };
     }, [connected]);
@@ -110,7 +110,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
                 language: asrLanguage, getTrack: () => getMicTrack?.() || null,
                 onError: message => { if (active) { setStatus(message); onShareSpeechChange(false); } },
             });
-            setStatus('Sharing speech captions. Audio is processed by your organisation’s QS-VC speech server.');
+            setStatus('You’re sharing your speech as captions.');
             const stop = () => { active = false; engine.stop(); };
             stopRecognition.current = stop;
             void engine.start();
@@ -198,8 +198,8 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     const toggleTranscript = (enabled: boolean) => {
         signaling.request('setTranscriptSaving', { enabled }).then(result => setTranscriptSaving(Boolean(result?.saving)))
             .catch((error: Error) => {
-                if (/method not found/i.test(error.message || '')) { setServerUpToDate(false); setStatus('The meeting server needs the latest update before transcripts can be saved.'); return; }
-                setStatus(error.message || 'Could not change transcript saving.');
+                if (/method not found/i.test(error.message || '')) { setServerUpToDate(false); setStatus('Transcript saving is unavailable in this meeting.'); return; }
+                setStatus('Could not change transcript saving. Try again.');
             });
     };
     const download = async (format: 'txt' | 'srt') => {
@@ -214,7 +214,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
         try {
             const result = await signaling.request('generateMinutes', {}) as { minutes: string };
             setMinutes(result.minutes); setStatus('Minutes are ready. They are saved with the transcript.');
-        } catch (error) { setStatus(error instanceof Error ? error.message : 'Could not create minutes.'); }
+        } catch { setStatus('Could not create minutes. Try again.'); }
         finally { setMinutesBusy(false); }
     };
 
@@ -235,15 +235,15 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
             {serverAsr && capabilities.asr?.autoDetect !== false && <label className="caption-toggle"><input type="checkbox" checked={autoDetect} onChange={event => setAutoDetect(event.target.checked)} />Detect my language automatically (for mixed-language speech)</label>}
             {!serverAsr && <button type="button" className="btn-text" onClick={onUseDetectedLanguage}>Use browser or region suggestion</button>}
             <p>{serverAsr
-                ? 'Your meeting microphone is sent to your organisation’s QS-VC speech server for captions. It is not sent to an outside company.'
+                ? 'Your organisation’s QS-VC workspace processes your microphone audio for captions without sending it to an outside company.'
                 : 'Browser speech recognition may send audio to your browser’s provider. It uses the browser’s microphone, which may differ from your selected meeting device. Only enable it if you agree.'} Captions are shared with this meeting{transcriptSaving ? ' and the host is saving a transcript.' : ' and aren’t saved by QS-VC.'}</p>
             <label className="caption-toggle"><input type="checkbox" checked={shareSpeech} disabled={!connected || !recognitionSupported} onChange={event => { if (!event.target.checked) stopRecognition.current(); setShareSpeech(event.target.checked); setStatus(''); }} />Share my speech as captions</label>
             {capabilities.processing === 'google-cloud' && capabilities.configured && <label className="caption-toggle"><input type="checkbox" checked={allowGoogleTranslation} onChange={event => setAllowGoogleTranslation(event.target.checked)} />Allow Google Cloud to translate my shared caption text</label>}
-            <p className="caption-settings-note">{!recognitionSupported ? 'Speech recognition is unavailable in this browser. You can still receive captions.' : audioMuted && shareSpeech ? 'Recognition is paused while your microphone is muted.' : translatedSpeaking && shareSpeech ? 'Recognition is paused while translated audio plays.' : serverAsr ? `Speaking: ${asrLanguage === 'auto' ? 'detected automatically' : name(asrLanguage, asrLanguage)} · server recognition${capabilities.asr?.model ? ` (${capabilities.asr.model})` : ''}.` : `Speaking: ${name(speakingLanguage, speakingLanguage)}. Recognition support depends on your browser.`}</p>
+            <p className="caption-settings-note">{!recognitionSupported ? 'Speech recognition is unavailable in this browser. You can still receive captions.' : audioMuted && shareSpeech ? 'Recognition is paused while your microphone is muted.' : translatedSpeaking && shareSpeech ? 'Recognition is paused while translated audio plays.' : serverAsr ? `Speaking: ${asrLanguage === 'auto' ? 'detected automatically' : name(asrLanguage, asrLanguage)}.` : `Speaking: ${name(speakingLanguage, speakingLanguage)}. Recognition support depends on your browser.`}</p>
             <label className="caption-toggle"><input type="checkbox" checked={showCaptions} onChange={event => setShowCaptions(event.target.checked)} />Show meeting captions</label>
             <label htmlFor="caption-output-language">Caption language</label>
             <select id="caption-output-language" value={captionLanguage} onChange={event => { setCaptionLanguage(event.target.value); setCaptions([]); }}><option value="original">Original language</option>{outputs.map(lang => <option value={lang.code} key={lang.code}>{name(lang.code, lang.name)}</option>)}</select>
-            <p className="caption-settings-note">Each line is translated once on the meeting server and sent to everyone who chose that language.</p>
+            <p className="caption-settings-note">Your caption language choice applies only to what you see.</p>
             <label htmlFor="heard-output-language">Hear translated audio in</label>
             <select id="heard-output-language" value={hearLanguage} onChange={event => { setVoiceEnabled(false); setHearLanguage(event.target.value); }}><option value="">Choose a language</option>{outputs.map(lang => <option value={lang.code} key={lang.code} disabled={!hasVoice(lang.code)}>{name(lang.code, lang.name)}{hasVoice(lang.code) ? '' : ' · no device voice'}</option>)}</select>
             <label className="caption-toggle"><input type="checkbox" checked={voiceEnabled} disabled={!connected || !hearLanguage || !hasVoice(hearLanguage)} onChange={event => { setVoiceEnabled(event.target.checked); setStatus(''); }} />Listen to translated speech</label>
@@ -252,7 +252,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
                 {voiceDiagnostic.message} Original meeting audio stays on.
             </div>}
             <h3 className="caption-settings-subhead">Transcript</h3>
-            {!serverUpToDate && <p className="caption-settings-note" role="status">This meeting server is running an older version. Transcripts, minutes and translated captions need the updated signaling service — ask your administrator to restart or redeploy it.</p>}
+            {!serverUpToDate && <p className="caption-settings-note" role="status">Transcript saving is unavailable in this meeting.</p>}
             {serverUpToDate && isHost && <label className="caption-toggle"><input type="checkbox" checked={transcriptSaving} disabled={!connected} onChange={event => toggleTranscript(event.target.checked)} />Save transcript of this meeting (everyone is told)</label>}
             {serverUpToDate && !isHost && <p className="caption-settings-note">{transcriptSaving ? 'The host is saving a transcript of shared captions.' : 'The host can save a transcript of shared captions.'}</p>}
             {transcriptSaving && <div className="caption-actions">

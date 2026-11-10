@@ -21,7 +21,7 @@ const userDirectoryQuery = z.object({
     limit: z.coerce.number().int().min(1).max(100).default(50),
     offset: z.coerce.number().int().min(0).max(1_000_000).default(0),
     search: z.string().trim().max(100).default(''),
-    plan: z.enum(['admin', 'guest', 'starter_trial', 'pro_trial', 'trial_expired', 'starter', 'pro', 'paid_expired', 'enterprise']).optional(),
+    plan: z.enum(['admin', 'guest', 'basic_trial', 'starter_trial', 'pro_trial', 'business_trial', 'trial_expired', 'basic', 'starter', 'pro', 'business', 'paid_expired', 'enterprise']).optional(),
     role: z.enum(['all', 'admin', 'user', 'guest']).default('all'),
 });
 

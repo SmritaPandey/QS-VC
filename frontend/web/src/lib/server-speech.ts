@@ -62,12 +62,12 @@ export class ServerSpeechEngine {
             const silent = context.createGain(); silent.gain.value = 0; this.node.connect(silent).connect(context.destination);
             if (context.state === 'suspended') await context.resume().catch(() => {});
             this.unsubscribe.push(
-                signaling.on('asrStopped', () => { if (this.active) { this.stop(); this.options.onError?.('Speech recognition stopped on the server. Turn captions on again to retry.'); } }),
-                signaling.on('asrError', (params: { message?: string }) => { if (this.active) { this.stop(); this.options.onError?.(params?.message || 'Speech recognition stopped.'); } }),
+                signaling.on('asrStopped', () => { if (this.active) { this.stop(); this.options.onError?.('Speech recognition stopped. Turn captions on again to retry.'); } }),
+                signaling.on('asrError', () => { if (this.active) { this.stop(); this.options.onError?.('Speech recognition stopped. Turn captions on again to retry.'); } }),
             );
-        } catch (error) {
+        } catch {
             this.stop();
-            this.options.onError?.(error instanceof Error ? error.message : 'Server speech recognition is unavailable.');
+            this.options.onError?.('Speech recognition is unavailable. Turn captions on again to retry.');
         }
     }
 

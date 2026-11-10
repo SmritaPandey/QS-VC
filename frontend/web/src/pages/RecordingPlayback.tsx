@@ -30,7 +30,9 @@ export default function RecordingPlayback() {
             if (!mounted.current) return;
             if (shareToken) setVideo(result.url);
             else { setRecordings(result.recordings); setNextCursor(result.nextCursor); }
-        }).catch(reason => { if (!controller.signal.aborted) setError(reason.message); })
+        }).catch(() => {
+            if (!controller.signal.aborted) setError(shareToken ? 'This recording could not be opened. Check the link or ask the host for a new one.' : 'Could not load recordings. Try again.');
+        })
             .finally(() => { if (mounted.current) setLoading(false); });
         return () => { mounted.current = false; controller.abort(); };
     }, [base, shareToken]);
@@ -64,7 +66,10 @@ export default function RecordingPlayback() {
                 await recordingRequest(`${path}/share`, { method: 'DELETE' });
                 setShareUrl(''); setSharing(''); setNotice('Sharing disabled. An already opened video link may work for up to five minutes.');
             }
-        } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not finish. Try again.'); }
+        } catch {
+            const actions = { play: 'play the recording', download: 'download the recording', delete: 'delete the recording', share: 'create a share link', revoke: 'disable sharing' };
+            setError(`Could not ${actions[kind]}. Try again.`);
+        }
         finally { if (mounted.current) setBusy(''); }
     };
     return <div className="public-site recordings-page"><SiteNav /><main id="main-content" className="recordings-shell">
@@ -73,7 +78,7 @@ export default function RecordingPlayback() {
         {pending && <section className="recordings-message" aria-label="Unsaved recording"><h2>Recording waiting to save</h2><p>Keep this tab open. This copy is only in memory until upload succeeds.</p><details className="recordings-actions"><summary aria-label="Unsaved recording actions"><span className="mi" aria-hidden="true">more_horiz</span></summary><div className="recordings-menu"><button type="button" disabled={!!busy} onClick={async () => {
             setBusy('pending'); setError('');
             try { await recordingManager.uploadRecording(pending.meetingCode, pending.blob, pending.id); recordingManager.pending = null; setPending(null); setNotice('Recording saved. Reload to refresh the list.'); }
-            catch (reason) { setError(reason instanceof Error ? reason.message : 'Upload failed. Try again.'); }
+            catch { setError('The recording could not be saved. Try again.'); }
             finally { setBusy(''); }
         }}>Retry saving</button><button type="button" onClick={() => recordingManager.downloadLocally(pending.blob, `QS-VC-${pending.meetingCode}.${pending.format}`)}>Download unsaved copy</button><button type="button" onClick={() => { if (window.confirm('Discard the unsaved recording? This copy cannot be recovered.')) { recordingManager.pending = null; setPending(null); } }}>Discard unsaved copy</button></div></details></section>}
         {loading && <p role="status">Loading recordings…</p>}
@@ -96,7 +101,7 @@ export default function RecordingPlayback() {
         {!shareToken && nextCursor && <button type="button" disabled={!!busy} onClick={async () => {
             setBusy('page'); setError('');
             try { const result = await recordingRequest(`meeting/${base}?cursor=${encodeURIComponent(nextCursor)}`); setRecordings(current => [...current, ...result.recordings].filter((item, index, all) => all.findIndex(other => other.id === item.id) === index)); setNextCursor(result.nextCursor); }
-            catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not load recordings.'); }
+            catch { setError('Could not load more recordings. Try again.'); }
             finally { setBusy(''); }
         }}>Load more recordings</button>}
     </main></div>;

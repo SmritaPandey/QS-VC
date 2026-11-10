@@ -18,9 +18,9 @@
 
 /* Match the shared light workspace without nesting a second form card. */
 .intranet-page .public-page-intro { max-width:780px; margin-inline:auto; text-align:center; }
-.intranet-page .public-page-intro h1 { font-size:clamp(32px,4.4vw,56px); }
+.intranet-page .public-page-intro h1 { font-size:clamp(32px,4.4vw,56px); font-weight:500; }
 .intranet-page .service-card { background:linear-gradient(155deg,var(--bg-secondary),var(--bg-primary)); }
-.intranet-page .service-card h2 { font-size:26px; }
+.intranet-page .service-card h2 { font-size:26px; font-weight:500; }
 .intranet-page .service-card h3 { margin-bottom:8px; }
 .intranet-page .public-auth-form { border:0; border-radius:0; padding:0; }
 .intranet-page .public-auth-form input { border:1px solid var(--border-tone, #cad9df); border-radius:12px; }

@@ -54,8 +54,8 @@ interface UserRecord {
 type UserDirectory = { totalUsers: number; total: number; planCounts: Record<string, number>; users: UserRecord[] };
 const USER_PAGE_SIZE = 50;
 const userPlanLabels: Record<string, string> = {
-    admin: 'Admin', guest: 'Free', starter_trial: 'Starter trial', pro_trial: 'Pro trial', trial_expired: 'Trial expired',
-    starter: 'Starter', pro: 'Pro', paid_expired: 'Expired', enterprise: 'Enterprise',
+    admin: 'Admin', guest: 'Free', basic_trial: 'Basic trial', business_trial: 'Business trial', starter_trial: 'Starter trial', pro_trial: 'Pro trial', trial_expired: 'Trial expired',
+    basic: 'Basic', starter: 'Starter', pro: 'Pro', business: 'Business', paid_expired: 'Expired', enterprise: 'Enterprise',
 };
 
 function formatBillingAmount(amount: string, currency: string) {
@@ -185,9 +185,9 @@ const AdminDashboard: React.FC = () => {
             setPlanCounts(data.planCounts || {});
             setStats(prev => ({ ...prev, totalUsers: data.totalUsers || 0 }));
             setUserDirectoryError('');
-        }).catch(error => {
+        }).catch(() => {
             if (controller.signal.aborted) return;
-            setUserDirectoryError(error instanceof Error ? error.message : 'The admin account directory is unavailable.');
+            setUserDirectoryError('The account directory is unavailable. Try again.');
         });
         return () => controller.abort();
     }, [userPage, userPlanFilter, userRoleFilter, userSearchQuery]);
@@ -442,64 +442,19 @@ const AdminDashboard: React.FC = () => {
                 {/* ━━━ SYSTEM TAB ━━━ */}
                 {activeTab === 'system' && (
                     <div className="admin-system">
-                        <h2>System Configuration</h2>
+                        <h2>Service status</h2>
 
                         <div className="system-sections">
                             <section className="system-section">
-                                <h3>Service Endpoints</h3>
-                                <div className="config-grid">
-                                    <div className="config-item">
-                                        <span className="config-key">Signaling</span>
-                                        <code className="config-value">{SIGNALING_URL}</code>
-                                    </div>
-                                    <div className="config-item">
-                                        <span className="config-key">Auth</span>
-                                        <code className="config-value">{AUTH_URL}</code>
-                                    </div>
-                                    <div className="config-item">
-                                        <span className="config-key">Meeting</span>
-                                        <code className="config-value">{MEETING_URL}</code>
-                                    </div>
-                                    <div className="config-item">
-                                        <span className="config-key">Recording</span>
-                                        <code className="config-value">{RECORDING_URL}</code>
-                                    </div>
-                                </div>
-                            </section>
-
-                            <section className="system-section">
-                                <h3>Health Checks</h3>
+                                <h3>Availability</h3>
                                 <div className="health-grid">
-                                    <HealthDot status={stats.sfuHealth} label="SFU Media Engine" />
-                                    <HealthDot status={stats.signalingHealth} label="Signaling Server" />
-                                    <HealthDot status={stats.authHealth} label="Auth Service" />
-                                    <HealthDot status={stats.recordingHealth} label="Recording Service" />
+                                    <HealthDot status={stats.sfuHealth} label="Meeting audio and video" />
+                                    <HealthDot status={stats.signalingHealth} label="Meeting connection" />
+                                    <HealthDot status={stats.authHealth} label="Sign-in" />
+                                    <HealthDot status={stats.recordingHealth} label="Recordings" />
                                 </div>
                             </section>
 
-                            <section className="system-section">
-                                <h3>Feature Flags</h3>
-                                <div className="feature-flags">
-                                    {[
-                                        { name: 'Virtual Background', enabled: true },
-                                        { name: 'Noise Suppression', enabled: true },
-                                        { name: 'Live Captions', enabled: true },
-                                        { name: 'End-to-End Encryption', enabled: true },
-                                        { name: 'Meeting Recording', enabled: true },
-                                        { name: 'Screen Sharing', enabled: true },
-                                        { name: 'Chat', enabled: true },
-                                        { name: 'Reactions', enabled: true },
-                                    ].map(flag => (
-                                        <div key={flag.name} className="flag-item">
-                                            <span>{flag.name}</span>
-                                            <span className={`flag-status ${flag.enabled ? 'enabled' : 'disabled'}`}>
-                                                <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '4px' }}>{flag.enabled ? 'check_circle' : 'cancel'}</span>
-                                                {flag.enabled ? 'Enabled' : 'Disabled'}
-                                            </span>
-                                        </div>
-                                    ))}
-                                </div>
-                            </section>
                         </div>
                     </div>
                 )}

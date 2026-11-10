@@ -5,18 +5,17 @@ import crypto from 'node:crypto';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
 import { getEntitlements, PLAN_LEVEL } from '../../../shared/entitlements.cjs';
-import { GST_PERCENT, getPlanPrice } from '../../../shared/payment-pricing.mjs';
+import { GST_PERCENT, PAID_PLAN_NAMES, TRIAL_DAYS, getPlanPrice, type BillingPeriod, type PaidPlanKey as PlanKey } from '../../../shared/payment-pricing.mjs';
 import { effectiveRole } from './platform-admins.js';
 
 type Provider = 'razorpay' | 'paypal' | 'cashfree';
-type PlanKey = 'starter' | 'pro';
 type BillingUser = JwtPayload & { sub: string; tenantId: string; email: string; role: string };
 type Logger = { warn: (object: unknown, message?: string) => void; error: (object: unknown, message?: string) => void };
 type BillingContext = {
     id: string; tenant_id: string; user_id: string; plan: PlanKey; provider_plan_id: string;
     status: string; current_period_end: Date | null; currency: string; base_amount: string;
     tax_percent: string; tax_amount: string; total_amount: string; trial_checkout: boolean;
-    trial_ends_at: Date | null;
+    trial_ends_at: Date | null; trial_days: number; billing_period: BillingPeriod;
 };
 type ProviderPlanSnapshot = {
     id: string; currency: string; intervalUnit: string; intervalCount: number;
@@ -27,9 +26,11 @@ type ProviderPlanSnapshot = {
 
 const checkoutSchema = z.object({
     provider: z.enum(['razorpay', 'paypal', 'cashfree']),
-    plan: z.enum(['Starter', 'Pro']),
+    plan: z.enum(PAID_PLAN_NAMES),
+    billing: z.enum(['monthly', 'annual']).default('monthly'),
     trial: z.boolean(),
     mandateConsent: z.literal(true),
+    quote: z.object({ currency: z.string().regex(/^[A-Z]{3}$/), totalAmount: z.string().regex(/^\d+(?:\.\d{1,6})?$/) }).optional(),
 });
 const razorpayVerifySchema = z.object({
     paymentId: z.string().regex(/^pay_[A-Za-z0-9]+$/),
@@ -91,7 +92,16 @@ export async function processMandateCancellations(pool: Pool, logger: Logger) {
 }
 
 function planKey(plan: string): PlanKey | null {
-    return plan === 'Starter' || plan === 'starter' ? 'starter' : plan === 'Pro' || plan === 'pro' ? 'pro' : null;
+    const key = plan.toLowerCase();
+    return PAID_PLAN_NAMES.some(name => name.toLowerCase() === key) ? key as PlanKey : null;
+}
+
+function planName(plan: PlanKey) {
+    return PAID_PLAN_NAMES.find(name => name.toLowerCase() === plan)!;
+}
+
+function billingCycles(provider: Provider, billing: BillingPeriod) {
+    return billing === 'annual' ? 12 : provider === 'paypal' ? 0 : MAX_BILLING_CYCLES;
 }
 
 function paymentsEnabled() { return process.env.PAYMENTS_ENABLED === 'true' && process.env.PAYMENT_TERMS_CONFIRMED === 'true'; }
@@ -101,9 +111,8 @@ function paypalBaseUrl() {
         : 'https://api-m.sandbox.paypal.com';
 }
 function razorpayConfigured() { return paymentsEnabled() && Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET); }
-function razorpaySubscriptionsConfigured() {
-    return razorpayConfigured() && Boolean(process.env.RAZORPAY_WEBHOOK_SECRET
-        && process.env.RAZORPAY_PLAN_STARTER && process.env.RAZORPAY_PLAN_PRO);
+function razorpaySubscriptionsConfigured(plan: PlanKey, billing: BillingPeriod) {
+    return razorpayConfigured() && Boolean(process.env.RAZORPAY_WEBHOOK_SECRET && providerPlanId('razorpay', plan, billing));
 }
 function cashfreeConfigured() {
     const publicAuthUrlConfigured = process.env.NODE_ENV !== 'production'
@@ -111,13 +120,10 @@ function cashfreeConfigured() {
     return paymentsEnabled() && publicAuthUrlConfigured
         && Boolean(process.env.CASHFREE_CLIENT_ID && process.env.CASHFREE_CLIENT_SECRET);
 }
-function paypalConfigured() {
+function paypalConfigured(plan: PlanKey, billing: BillingPeriod, trial = false) {
     return paymentsEnabled() && Boolean(process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET
-        && process.env.PAYPAL_WEBHOOK_ID && process.env.PAYPAL_PLAN_STARTER && process.env.PAYPAL_PLAN_PRO
-        && process.env.PAYPAL_STARTER_BASE_AMOUNT && process.env.PAYPAL_PRO_BASE_AMOUNT && process.env.PAYPAL_CURRENCY);
-}
-function paypalTrialConfigured() {
-    return paypalConfigured() && Boolean(process.env.PAYPAL_PLAN_STARTER_TRIAL && process.env.PAYPAL_PLAN_PRO_TRIAL);
+        && process.env.PAYPAL_WEBHOOK_ID && providerPlanId('paypal', plan, billing, trial)
+        && paypalConfiguredAmount(plan, billing) && process.env.PAYPAL_CURRENCY);
 }
 function cashfreeBaseUrl() {
     return process.env.CASHFREE_ENVIRONMENT === 'production'
@@ -133,15 +139,22 @@ function cashfreeDate(value: unknown): Date | null {
     const date = new Date(zoned);
     return Number.isNaN(date.getTime()) ? null : date;
 }
-function providerPlanId(provider: Provider, plan: PlanKey, trial = false): string {
-    const key = provider === 'razorpay'
-        ? plan === 'starter' ? 'RAZORPAY_PLAN_STARTER' : 'RAZORPAY_PLAN_PRO'
-        : provider === 'paypal'
-            ? trial
-                ? plan === 'starter' ? 'PAYPAL_PLAN_STARTER_TRIAL' : 'PAYPAL_PLAN_PRO_TRIAL'
-                : plan === 'starter' ? 'PAYPAL_PLAN_STARTER' : 'PAYPAL_PLAN_PRO'
-            : '';
-    return process.env[key] || '';
+function nextCalendarMonth(date: Date) {
+    const next = new Date(date);
+    const day = next.getUTCDate();
+    next.setUTCDate(1);
+    next.setUTCMonth(next.getUTCMonth() + 1);
+    const daysInMonth = new Date(Date.UTC(next.getUTCFullYear(), next.getUTCMonth() + 1, 0)).getUTCDate();
+    next.setUTCDate(Math.min(day, daysInMonth));
+    return next;
+}
+
+function providerPlanId(provider: 'razorpay' | 'paypal', plan: PlanKey, billing: BillingPeriod, trial = false): string {
+    const term = billing === 'annual' ? '_ANNUAL' : '';
+    // New trial plans must explicitly be configured for 14 days. Legacy subscriptions
+    // are still verified against the provider plan and terms stored on their row.
+    const trialSuffix = provider === 'paypal' && trial ? '_TRIAL_14' : '';
+    return process.env[`${provider.toUpperCase()}_PLAN_${plan.toUpperCase()}${term}${trialSuffix}`] || '';
 }
 
 function currencyDigits(currency: string): number {
@@ -165,27 +178,29 @@ function minorToDecimal(amount: number, currency: string): string {
     return (amount / divisor).toFixed(digits);
 }
 
-function paypalConfiguredAmount(plan: PlanKey): string {
-    return process.env[plan === 'starter' ? 'PAYPAL_STARTER_BASE_AMOUNT' : 'PAYPAL_PRO_BASE_AMOUNT'] || '';
+function paypalConfiguredAmount(plan: PlanKey, billing: BillingPeriod): string {
+    const term = billing === 'annual' ? '_ANNUAL' : '';
+    return process.env[`PAYPAL_${plan.toUpperCase()}${term}_BASE_AMOUNT`] || '';
 }
 
-function publicOptions(plan: PlanKey) {
-    const price = getPlanPrice(plan);
+function publicOptions(plan: PlanKey, billing: BillingPeriod) {
+    const price = getPlanPrice(plan, billing);
     if (!price) return null;
     const razorpay = {
-        enabled: razorpaySubscriptionsConfigured(),
-        trialEnabled: razorpaySubscriptionsConfigured(),
-        maxBillingCycles: MAX_BILLING_CYCLES,
+        enabled: razorpaySubscriptionsConfigured(plan, billing),
+        trialEnabled: razorpaySubscriptionsConfigured(plan, billing),
+        maxBillingCycles: billingCycles('razorpay', billing),
         currency: price.currency,
         baseAmount: minorToDecimal(price.baseAmountMinor, price.currency),
         taxAmount: minorToDecimal(price.taxAmountMinor, price.currency),
         totalAmount: minorToDecimal(price.totalAmountMinor, price.currency),
         taxPercent: GST_PERCENT,
     };
-    let paypal = { enabled: paypalConfigured(), trialEnabled: paypalTrialConfigured(), maxBillingCycles: null, currency: (process.env.PAYPAL_CURRENCY || '').toUpperCase(), baseAmount: '', taxAmount: '', totalAmount: '', taxPercent: GST_PERCENT };
-    if (paypal.enabled) {
+    let paypal = { enabled: paypalConfigured(plan, billing), trialEnabled: paypalConfigured(plan, billing, true), maxBillingCycles: billingCycles('paypal', billing) || null, currency: (process.env.PAYPAL_CURRENCY || '').toUpperCase(), baseAmount: '', taxAmount: '', totalAmount: '', taxPercent: GST_PERCENT };
+    if (paypal.enabled || paypal.trialEnabled) {
         try {
-            const baseMinor = decimalToMinor(paypalConfiguredAmount(plan), paypal.currency);
+            const baseMinor = decimalToMinor(paypalConfiguredAmount(plan, billing), paypal.currency);
+            if (baseMinor <= 0 || (paypal.currency === price.currency && baseMinor !== price.baseAmountMinor)) throw new Error('Invalid PayPal rate');
             const taxMinor = Math.round(baseMinor * GST_PERCENT / 100);
             paypal = {
                 ...paypal,
@@ -194,13 +209,13 @@ function publicOptions(plan: PlanKey) {
                 totalAmount: minorToDecimal(baseMinor + taxMinor, paypal.currency),
             };
         } catch {
-            paypal = { ...paypal, enabled: false };
+            paypal = { ...paypal, enabled: false, trialEnabled: false };
         }
     }
     const cashfree = {
         enabled: cashfreeConfigured() && price.currency === 'INR',
         trialEnabled: cashfreeConfigured() && price.currency === 'INR',
-        maxBillingCycles: MAX_BILLING_CYCLES,
+        maxBillingCycles: billingCycles('cashfree', billing),
         currency: price.currency,
         baseAmount: minorToDecimal(price.baseAmountMinor, price.currency),
         taxAmount: minorToDecimal(price.taxAmountMinor, price.currency),
@@ -208,7 +223,7 @@ function publicOptions(plan: PlanKey) {
         taxPercent: GST_PERCENT,
         paymentMethods: ['UPI AutoPay (BHIM and other UPI apps)', 'Credit/debit card'],
     };
-    return { paymentsEnabled: paymentsEnabled(), taxPercent: GST_PERCENT, trialDays: 7, providers: { razorpay, paypal, cashfree } };
+    return { paymentsEnabled: paymentsEnabled(), taxPercent: GST_PERCENT, trialDays: TRIAL_DAYS, billing, providers: { razorpay, paypal, cashfree } };
 }
 
 async function inTenant<T>(pool: Pool, tenantId: string, action: (client: PoolClient) => Promise<T>): Promise<T> {
@@ -294,9 +309,9 @@ async function cashfreeRequest(path: string, method: string, body?: unknown, ide
     return readJson(response);
 }
 
-async function validateRazorpayPlan(plan: PlanKey) {
-    const expected = getPlanPrice(plan)!;
-    const configuredId = providerPlanId('razorpay', plan);
+async function validateRazorpayPlan(plan: PlanKey, billing: BillingPeriod) {
+    const expected = getPlanPrice(plan, billing)!;
+    const configuredId = providerPlanId('razorpay', plan, billing);
     const details = await razorpayRequest(`/plans/${encodeURIComponent(configuredId)}`, 'GET');
     if (details.id !== configuredId || details.period !== 'monthly' || Number(details.interval) !== 1
         || details.item?.currency !== expected.currency || Number(details.item?.amount) !== expected.totalAmountMinor) {
@@ -306,10 +321,10 @@ async function validateRazorpayPlan(plan: PlanKey) {
         taxAmount: expected.taxAmountMinor / 100, totalAmount: expected.totalAmountMinor / 100 };
 }
 
-async function validatePayPalPlan(plan: PlanKey, trial: boolean) {
-    const configuredId = providerPlanId('paypal', plan, trial);
+async function validatePayPalPlan(plan: PlanKey, billing: BillingPeriod, trial: boolean) {
+    const configuredId = providerPlanId('paypal', plan, billing, trial);
     const expectedCurrency = String(process.env.PAYPAL_CURRENCY || '').toUpperCase();
-    const expectedBaseMinor = decimalToMinor(paypalConfiguredAmount(plan), expectedCurrency);
+    const expectedBaseMinor = decimalToMinor(paypalConfiguredAmount(plan, billing), expectedCurrency);
     const details = await paypalRequest(`/v1/billing/plans/${encodeURIComponent(configuredId)}`, 'GET');
     const cycles = Array.isArray(details.billing_cycles) ? details.billing_cycles : [];
     const cycle = cycles.find((item: any) => item.tenure_type === 'REGULAR');
@@ -320,13 +335,15 @@ async function validatePayPalPlan(plan: PlanKey, trial: boolean) {
         || !Array.isArray(details.billing_cycles) || details.billing_cycles.length !== (trial ? 2 : 1)
         || Boolean(trialCycle) !== trial
         || (trial && (trialCycle?.frequency?.interval_unit !== 'DAY'
-            || Number(trialCycle?.frequency?.interval_count) !== 7
+            || Number(trialCycle?.frequency?.interval_count) !== TRIAL_DAYS
             || Number(trialCycle?.total_cycles) !== 1
             || Number(trialCycle?.pricing_scheme?.fixed_price?.value || 0) !== 0))
-        || Number(details.payment_preferences?.setup_fee?.value || 0) > 0
+        || Number(details.payment_preferences?.setup_fee?.value || 0) !== 0
         || cycle?.frequency?.interval_unit !== 'MONTH' || Number(cycle?.frequency?.interval_count) !== 1
-        || Number(cycle?.total_cycles) !== 0
+        || Number(cycle?.total_cycles) !== billingCycles('paypal', billing)
         || actualCurrency !== expectedCurrency || typeof actualAmount?.value !== 'string'
+        || expectedBaseMinor <= 0
+        || (expectedCurrency === 'INR' && expectedBaseMinor !== getPlanPrice(plan, billing)!.baseAmountMinor)
         || decimalToMinor(actualAmount.value, actualCurrency) !== expectedBaseMinor
         || String(details.taxes?.percentage) !== String(GST_PERCENT) || details.taxes?.inclusive !== false) {
         throw new Error('The PayPal plan must be active, monthly, match its configured amount, and add 18% GST.');
@@ -340,7 +357,7 @@ async function validatePayPalPlan(plan: PlanKey, trial: boolean) {
     };
 }
 
-function makeReturnUrl(result: 'return' | 'cancel', plan: PlanKey, provider: Provider, checkoutId?: string, trial = false) {
+function makeReturnUrl(result: 'return' | 'cancel', plan: PlanKey, provider: Provider, checkoutId?: string, trial = false, billing: BillingPeriod = 'monthly') {
     const origin = process.env.PAYMENT_RETURN_URL || process.env.WEB_URL
         || (process.env.DOMAIN ? `https://${process.env.DOMAIN}` : 'http://localhost:5173');
     const base = new URL(origin);
@@ -348,7 +365,8 @@ function makeReturnUrl(result: 'return' | 'cancel', plan: PlanKey, provider: Pro
         throw new Error('Payment return URL must be an HTTPS URL without credentials in production.');
     }
     const url = new URL('/payment', base.origin);
-    url.searchParams.set('plan', plan === 'starter' ? 'Starter' : 'Pro');
+    url.searchParams.set('plan', planName(plan));
+    url.searchParams.set('billing', billing);
     url.searchParams.set('provider', provider);
     url.searchParams.set('result', result);
     if (checkoutId) url.searchParams.set('checkoutId', checkoutId);
@@ -356,7 +374,7 @@ function makeReturnUrl(result: 'return' | 'cancel', plan: PlanKey, provider: Pro
     return url.toString();
 }
 
-function makeCashfreeReturnUrl(checkoutId: string, plan: PlanKey, trial: boolean) {
+function makeCashfreeReturnUrl(checkoutId: string, plan: PlanKey, trial: boolean, billing: BillingPeriod) {
     const apiOrigin = process.env.AUTH_PUBLIC_URL || process.env.VITE_AUTH_URL || 'http://localhost:4002';
     const base = new URL(apiOrigin);
     if (base.username || base.password || (process.env.NODE_ENV === 'production' && base.protocol !== 'https:')) {
@@ -364,7 +382,8 @@ function makeCashfreeReturnUrl(checkoutId: string, plan: PlanKey, trial: boolean
     }
     const url = new URL('/api/auth/billing/cashfree/return', base.origin);
     url.searchParams.set('checkoutId', checkoutId);
-    url.searchParams.set('plan', plan === 'starter' ? 'Starter' : 'Pro');
+    url.searchParams.set('plan', planName(plan));
+    url.searchParams.set('billing', billing);
     if (trial) url.searchParams.set('trial', '1');
     return url.toString();
 }
@@ -464,6 +483,8 @@ async function applyWebhook(
             return 'ignored' as const;
         }
         const context = mapped.rows[0];
+        const trialDays = context.trial_days ?? 7;
+        const expectedCycles = billingCycles(provider, context.billing_period ?? 'monthly');
         await client.query("SELECT set_config('app.current_tenant', $1, true)", [context.tenant_id]);
         if (!paid && (context.status === 'failed' || (context.status === 'expired' && !context.current_period_end))) {
             if (trialAuthorized) await enqueueMandateCancellation(client, context);
@@ -484,16 +505,17 @@ async function applyWebhook(
             && (provider === 'razorpay'
                 ? verifiedPlan!.intervalUnit === 'monthly'
                     && verifiedPlan!.amountMinor === decimalToMinor(context.total_amount, storedCurrency)
+                    && (trialDays === 7 || verifiedPlan!.totalCycles === expectedCycles)
                 : provider === 'paypal' ? verifiedPlan!.intervalUnit === 'MONTH'
-                    && verifiedPlan!.totalCycles === 0
+                    && verifiedPlan!.totalCycles === expectedCycles
                     && verifiedPlan!.hasTrial === context.trial_checkout
-                    && (!context.trial_checkout || verifiedPlan!.trialDays === 7)
+                    && (!context.trial_checkout || verifiedPlan!.trialDays === trialDays)
                     && Number(verifiedPlan!.taxPercent) === GST_PERCENT
                     && verifiedPlan!.taxInclusive === false
                     && Number(verifiedPlan!.setupFee || 0) === 0
                     && decimalToMinor(String(verifiedPlan!.amount), storedCurrency) === decimalToMinor(context.base_amount, storedCurrency)
                     : verifiedPlan!.intervalUnit === 'MONTH'
-                        && verifiedPlan!.totalCycles === MAX_BILLING_CYCLES
+                        && verifiedPlan!.totalCycles === expectedCycles
                         && decimalToMinor(String(verifiedPlan!.amount), storedCurrency) === decimalToMinor(context.total_amount, storedCurrency));
 
         const paidAmountValid = paid && Boolean(paymentId?.trim()) && paymentId!.length <= 255
@@ -513,7 +535,7 @@ async function applyWebhook(
         }
         if (trialAuthorized && !paid && context.trial_checkout && trialEndsAt
             && trialEndsAt.getTime() > Date.now()
-            && trialEndsAt.getTime() <= Date.now() + 8 * 24 * 60 * 60 * 1000) {
+            && trialEndsAt.getTime() <= Date.now() + (trialDays + 1) * 24 * 60 * 60 * 1000) {
             const trialPlan = `${context.plan}_trial`;
             const priorTrial = await client.query(
                 `SELECT subscription_plan, trial_started_at, trial_ends_at FROM public.users
@@ -582,7 +604,7 @@ async function applyWebhook(
                 return 'processed' as const;
             }
             await client.query(
-                `UPDATE public.payment_subscriptions SET status = CASE WHEN status = 'cancelled' THEN status ELSE 'active' END,
+                `UPDATE public.payment_subscriptions SET status = CASE WHEN status IN ('cancelled', 'expired') THEN status ELSE 'active' END,
                     current_period_end = GREATEST(COALESCE(current_period_end, $3), $3),
                     last_provider_payment_id = COALESCE($4, last_provider_payment_id), updated_at = NOW()
                  WHERE id = $1 AND tenant_id = $2`,
@@ -650,15 +672,16 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
         res.set('Cache-Control', 'no-store');
         return res.status(410).json({
             code: 'TRIAL_REQUIRES_PAYMENT_AUTHORIZATION',
-            error: 'Choose a plan and authorize a recurring payment method to start the 7-day trial. No plan fee is taken until the trial ends.',
+            error: 'Choose a plan and authorize a recurring payment method to start the 14-day trial. No plan fee is taken until the trial ends.',
         });
     });
 
     router.get('/options', (req, res) => {
         res.set('Cache-Control', 'no-store');
-        const key = planKey(String(req.query.plan || ''));
-        if (!key) return res.status(400).json({ error: 'Choose Starter or Pro.' });
-        const options = publicOptions(key);
+        const key = typeof req.query.plan === 'string' ? planKey(req.query.plan) : null;
+        const billing = z.enum(['monthly', 'annual']).default('monthly').safeParse(req.query.billing);
+        if (!key || !billing.success) return res.status(400).json({ error: 'Choose a paid plan and billing period.' });
+        const options = publicOptions(key, billing.data);
         res.json(options);
     });
 
@@ -668,7 +691,8 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
         try {
             await inTenant(pool, user.tenantId, client => client.query(
                 `UPDATE public.payment_subscriptions SET status = 'expired', updated_at = NOW()
-                 WHERE tenant_id = $1 AND user_id = $2 AND status IN ('active', 'past_due', 'cancelled')
+                 WHERE tenant_id = $1 AND user_id = $2
+                   AND (status = 'cancelled' OR (billing_mode = 'one_time' AND status = 'active'))
                    AND current_period_end IS NOT NULL AND current_period_end <= NOW()`, [user.tenantId, user.sub],
             ));
             const latest = await inTenant(pool, user.tenantId, client => client.query(
@@ -690,23 +714,26 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
         if (!parsed.success) return res.status(400).json({ error: 'Choose a plan and payment channel, then accept the recurring payment terms.' });
         const plan = planKey(parsed.data.plan)!;
         const provider = parsed.data.provider;
-        const trial = parsed.data.trial;
-        const providerReady = provider === 'razorpay'
-            ? razorpaySubscriptionsConfigured()
-            : provider === 'paypal' ? paypalConfigured() && (!trial || paypalTrialConfigured())
-                : cashfreeConfigured() && getPlanPrice(plan)?.currency === 'INR';
-        if (!providerReady) {
+        const { trial, billing } = parsed.data;
+        const cycles = billingCycles(provider, billing);
+        const option = publicOptions(plan, billing)?.providers[provider];
+        const providerReady = option && (trial ? option.trialEnabled : option.enabled);
+        if (!option || !providerReady) {
             const label = provider === 'cashfree' ? 'Cashfree UPI AutoPay' : provider === 'razorpay' ? 'Razorpay Subscriptions' : 'PayPal Subscriptions';
             return res.status(503).json({ error: `${label} is not configured for this billing option yet.` });
+        }
+        const quote = parsed.data.quote;
+        if (quote && (quote.currency !== option.currency || Number(quote.totalAmount) !== Number(option.totalAmount))) {
+            return res.status(409).json({ error: 'The payment price changed. Refresh checkout and confirm the new total.' });
         }
         let providerPlan: { id: string; currency: string; baseAmount: number | string; taxAmount: number | string; totalAmount: number | string };
         try {
             if (provider === 'razorpay') {
-                providerPlan = await validateRazorpayPlan(plan);
+                providerPlan = await validateRazorpayPlan(plan, billing);
             } else if (provider === 'paypal') {
-                providerPlan = await validatePayPalPlan(plan, trial);
+                providerPlan = await validatePayPalPlan(plan, billing, trial);
             } else {
-                const price = getPlanPrice(plan)!;
+                const price = getPlanPrice(plan, billing)!;
                 providerPlan = { id: 'cashfree_periodic_monthly', currency: price.currency,
                     baseAmount: minorToDecimal(price.baseAmountMinor, price.currency),
                     taxAmount: minorToDecimal(price.taxAmountMinor, price.currency),
@@ -719,15 +746,15 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
 
         const subscriptionId = crypto.randomUUID();
         const checkoutExpiresAt = new Date(Date.now() + CHECKOUT_TTL_MS);
-        // Reserve the authorization window so delayed approval still grants at least seven days.
-        let trialEndsAt = trial ? new Date(checkoutExpiresAt.getTime() + 7 * 24 * 60 * 60 * 1000) : null;
+        // Reserve the authorization window so delayed approval still grants at least fourteen days.
+        let trialEndsAt = trial ? new Date(checkoutExpiresAt.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000) : null;
         try {
             const attempt = await inTenant(pool, user.tenantId, async client => {
                 const account = await client.query(
                     `SELECT u.email, u.phone_number, u.role, u.subscription_plan, u.trial_started_at, u.trial_ends_at, u.subscription_expires_at,
                             u.enterprise_status, t.plan AS tenant_plan
                      FROM public.users u JOIN public.tenants t ON t.id = u.tenant_id
-                     WHERE u.id = $1 AND u.tenant_id = $2 AND u.is_active AND t.is_active`, [user.sub, user.tenantId],
+                     WHERE u.id = $1 AND u.tenant_id = $2 AND u.is_active AND t.is_active FOR UPDATE OF u`, [user.sub, user.tenantId],
                 );
                 if (!account.rows.length) throw new Error('ACCOUNT_UNAVAILABLE');
                 const row = account.rows[0];
@@ -741,7 +768,8 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                 }
                 await client.query(
                     `UPDATE public.payment_subscriptions SET status = 'expired', updated_at = NOW()
-                     WHERE tenant_id = $1 AND user_id = $2 AND status IN ('active', 'past_due', 'cancelled')
+                     WHERE tenant_id = $1 AND user_id = $2
+                       AND (status = 'cancelled' OR (billing_mode = 'one_time' AND status = 'active'))
                        AND current_period_end IS NOT NULL AND current_period_end <= NOW()`, [user.tenantId, user.sub],
                 );
                 // PayPal approval links have no matching local expiry; reserve their slot until cancelled.
@@ -753,16 +781,19 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                 );
                 const existingSubscription = await client.query(
                     `SELECT id, provider, plan, status, current_period_end, provider_subscription_id, provider_order_id,
-                            provider_session_id, billing_mode, approval_url, trial_checkout, trial_ends_at
+                            provider_session_id, billing_mode, approval_url, trial_checkout, trial_ends_at, trial_days, billing_period, provider_plan_id, total_amount
                      FROM public.payment_subscriptions
                      WHERE tenant_id = $1 AND user_id = $2
-                       AND (status IN ('creating', 'pending') OR (status IN ('active', 'past_due', 'cancelled') AND current_period_end > NOW()))
+                       AND (status IN ('creating', 'pending', 'active', 'past_due') OR (status = 'cancelled' AND current_period_end > NOW()))
                      ORDER BY created_at DESC LIMIT 1`, [user.tenantId, user.sub],
                 );
                 if (existingSubscription.rows.length) {
                     const existingRow = existingSubscription.rows[0];
                     const existingProviderReference = existingRow.provider_subscription_id;
                     if (existingRow.status === 'pending' && existingRow.provider === provider && existingRow.plan === plan
+                        && existingRow.billing_period === billing && existingRow.trial_days === TRIAL_DAYS
+                        && Number(existingRow.total_amount) === Number(providerPlan.totalAmount)
+                        && (provider === 'cashfree' || existingRow.provider_plan_id === providerPlan.id)
                         && Boolean(existingRow.trial_checkout) === trial && existingProviderReference) {
                         trialEndsAt = existingRow.trial_ends_at;
                         return {
@@ -778,31 +809,31 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     `INSERT INTO public.payment_subscriptions
                         (id, tenant_id, user_id, provider, plan, provider_plan_id, billing_mode, currency,
                          base_amount, tax_percent, tax_amount, total_amount, status, checkout_expires_at,
-                         trial_checkout, trial_ends_at, provider_subscription_id)
-                     VALUES ($1, $2, $3, $4, $5, $6, 'subscription', $7, $8, $9, $10, $11, 'creating', $12, $13, $14, $15)`,
+                         trial_checkout, trial_ends_at, provider_subscription_id, trial_days, billing_period)
+                     VALUES ($1, $2, $3, $4, $5, $6, 'subscription', $7, $8, $9, $10, $11, 'creating', $12, $13, $14, $15, $16, $17)`,
                     [subscriptionId, user.tenantId, user.sub, provider, plan, providerPlan.id,
                         providerPlan.currency, providerPlan.baseAmount, GST_PERCENT, providerPlan.taxAmount, providerPlan.totalAmount,
                         checkoutExpiresAt, trial, trialEndsAt,
-                        provider === 'cashfree' ? subscriptionId : null],
+                        provider === 'cashfree' ? subscriptionId : null, TRIAL_DAYS, billing],
                 );
                 return { id: subscriptionId, email: row.email, phone: row.phone_number, reuse: false, providerSubscriptionId: null, providerSessionId: null, approvalUrl: null };
             });
 
             if (provider === 'razorpay') {
                 if (attempt.reuse) {
-                    const price = getPlanPrice(plan)!;
+                    const price = getPlanPrice(plan, billing)!;
                     return res.json({ provider, subscription_id: attempt.providerSubscriptionId, keyId: process.env.RAZORPAY_KEY_ID,
                         email: attempt.email, plan: parsed.data.plan, amount: price.totalAmountMinor, currency: price.currency,
                         recurring: true, trialEndsAt: trialEndsAt?.toISOString() || null });
                 }
-                const price = getPlanPrice(plan)!;
+                const price = getPlanPrice(plan, billing)!;
                 const created = await razorpayRequest('/subscriptions', 'POST', {
                     plan_id: providerPlan.id,
-                    total_count: MAX_BILLING_CYCLES,
+                    total_count: cycles,
                     expire_by: Math.floor(checkoutExpiresAt.getTime() / 1000),
                     customer_notify: 1,
                     ...(trialEndsAt ? { start_at: Math.floor(trialEndsAt.getTime() / 1000) } : {}),
-                    notes: { qsvc_checkout_id: attempt.id, plan, trial_days: trial ? '7' : '0' },
+                    notes: { qsvc_checkout_id: attempt.id, plan, trial_days: trial ? String(TRIAL_DAYS) : '0' },
                 });
                 if (typeof created.id !== 'string' || !/^sub_[A-Za-z0-9]+$/.test(created.id)
                     || created.plan_id !== providerPlan.id || !['created', 'authenticated', 'active'].includes(String(created.status))) {
@@ -830,8 +861,8 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                         shipping_preference: 'NO_SHIPPING',
                         user_action: 'SUBSCRIBE_NOW',
                         payment_method: { payer_selected: 'PAYPAL', payee_preferred: 'IMMEDIATE_PAYMENT_REQUIRED' },
-                        return_url: makeReturnUrl('return', plan, provider, attempt.id, trial),
-                        cancel_url: makeReturnUrl('cancel', plan, provider, attempt.id, trial),
+                        return_url: makeReturnUrl('return', plan, provider, attempt.id, trial, billing),
+                        cancel_url: makeReturnUrl('cancel', plan, provider, attempt.id, trial, billing),
                     },
                 }, attempt.id);
                 const approval = Array.isArray(created.links) ? created.links.find((link: any) => link.rel === 'approve')?.href : null;
@@ -852,25 +883,25 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     mode: process.env.CASHFREE_ENVIRONMENT === 'production' ? 'production' : 'sandbox', email: attempt.email,
                     plan: parsed.data.plan, recurring: true, trialEndsAt: trialEndsAt?.toISOString() || null });
             }
-            const price = getPlanPrice(plan)!;
+            const price = getPlanPrice(plan, billing)!;
             const created = await cashfreeRequest('/subscriptions', 'POST', {
                 subscription_id: attempt.id,
                 customer_details: { customer_email: attempt.email, customer_phone: String(attempt.phone || '').replace(/^\+91/, '') },
                 plan_details: {
-                    plan_name: `QS-VC ${parsed.data.plan} monthly`, plan_type: 'PERIODIC',
+                    plan_name: `QS-VC ${parsed.data.plan} ${billing}`, plan_type: 'PERIODIC',
                     plan_amount: Number(providerPlan.totalAmount), plan_max_amount: Number(providerPlan.totalAmount),
-                    plan_max_cycles: MAX_BILLING_CYCLES, plan_intervals: 1, plan_currency: price.currency,
-                    plan_interval_type: 'MONTH', plan_note: 'Renews monthly; cancel any time.',
+                    plan_max_cycles: cycles, plan_intervals: 1, plan_currency: price.currency,
+                    plan_interval_type: 'MONTH', plan_note: billing === 'annual' ? 'Up to 12 monthly payments; cancel future renewals anytime.' : 'Renews monthly; cancel anytime.',
                 },
                 authorization_details: { payment_methods: ['upi', 'card'] },
                 subscription_meta: {
-                    return_url: makeCashfreeReturnUrl(attempt.id, plan, trial),
+                    return_url: makeCashfreeReturnUrl(attempt.id, plan, trial, billing),
                     notification_channel: ['EMAIL'],
                     session_id_expiry: checkoutExpiresAt.toISOString(),
                 },
-                subscription_expiry_time: new Date(Date.now() + MAX_BILLING_CYCLES * 31 * 24 * 60 * 60 * 1000).toISOString(),
+                subscription_expiry_time: new Date(Date.now() + (cycles * 31 + TRIAL_DAYS + 1) * 24 * 60 * 60 * 1000).toISOString(),
                 ...(trialEndsAt ? { subscription_first_charge_time: trialEndsAt.toISOString() } : {}),
-                subscription_tags: { qsvc_checkout_id: attempt.id, plan, trial_days: trial ? '7' : '0', psp_note: 'QS-VC monthly plan' },
+                subscription_tags: { qsvc_checkout_id: attempt.id, plan, trial_days: trial ? String(TRIAL_DAYS) : '0', psp_note: 'QS-VC monthly plan' },
             }, attempt.id);
             if (created.subscription_id !== attempt.id || typeof created.subscription_session_id !== 'string'
                 || typeof created.plan_details?.plan_id !== 'string') {
@@ -892,7 +923,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     ALREADY_ENTITLED: 'Your account already has this plan or a higher plan.',
                     EXISTING_SUBSCRIPTION: 'A subscription is already pending or active for this account.',
                     ACCOUNT_UNAVAILABLE: 'This account is unavailable for checkout.',
-                    TRIAL_ALREADY_USED: 'Your one 7-day trial is not available for this account. You can continue with a paid plan.',
+                    TRIAL_ALREADY_USED: 'Your one free trial is not available for this account. You can continue with a paid plan.',
                     PHONE_REQUIRED: 'Add an Indian mobile number to your profile before authorizing UPI AutoPay or card billing.',
                 };
                 return res.status(error.message === 'ACCOUNT_UNAVAILABLE' ? 404 : 409).json({
@@ -1014,7 +1045,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
     router.post('/razorpay/verify', async (req, res) => {
         const user = await requireUser(req, res);
         if (!user) return;
-        if (!razorpaySubscriptionsConfigured()) return res.status(503).json({ error: 'Razorpay subscription verification is not configured.' });
+        if (!razorpayConfigured() || !process.env.RAZORPAY_WEBHOOK_SECRET) return res.status(503).json({ error: 'Razorpay subscription verification is not configured.' });
         const parsed = razorpayVerifySchema.safeParse(req.body);
         if (!parsed.success) return res.status(400).json({ error: 'Invalid payment confirmation.' });
         const { paymentId, subscriptionId, signature } = parsed.data;
@@ -1056,7 +1087,10 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
         try {
             const existing = await inTenant(pool, user.tenantId, async client => {
                 const result = await client.query(
-                    `SELECT id, provider, provider_subscription_id, billing_mode, status, current_period_end
+                    `SELECT id, provider, provider_subscription_id, billing_mode, status, current_period_end,
+                            trial_checkout AND NOT EXISTS (
+                                SELECT 1 FROM public.payment_captures c WHERE c.subscription_id = payment_subscriptions.id
+                            ) AS uncharged_trial
                      FROM public.payment_subscriptions WHERE id = $1 AND tenant_id = $2 AND user_id = $3 FOR UPDATE`,
                     [parsed.data.subscriptionId, user.tenantId, user.sub],
                 );
@@ -1068,7 +1102,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
             if (!existing?.provider_subscription_id) return res.status(404).json({ error: 'Subscription was not found.' });
             if (['cancelled', 'expired', 'failed'].includes(existing.status)) return res.json({ cancelled: true, currentPeriodEnd: existing.current_period_end });
             if (existing.provider === 'razorpay') {
-                await razorpayRequest(`/subscriptions/${encodeURIComponent(existing.provider_subscription_id)}/cancel`, 'POST', { cancel_at_cycle_end: true });
+                await razorpayRequest(`/subscriptions/${encodeURIComponent(existing.provider_subscription_id)}/cancel`, 'POST', { cancel_at_cycle_end: existing.status === 'active' && !existing.uncharged_trial });
             } else if (existing.provider === 'paypal') {
                 await paypalRequest(`/v1/billing/subscriptions/${encodeURIComponent(existing.provider_subscription_id)}/cancel`, 'POST', { reason: 'Cancelled by the subscriber.' });
             } else {
@@ -1126,9 +1160,10 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                         intervalUnit: verifiedPlanDetails.period,
                         intervalCount: Number(verifiedPlanDetails.interval),
                         amountMinor: Number(verifiedPlanDetails.item.amount),
+                        totalCycles: Number(verified.total_count),
                     };
                 }
-                if (verified.status === 'active' && typeof verified.current_end === 'number') periodEnd = new Date(verified.current_end * 1000);
+                if (['active', 'completed'].includes(verified.status) && typeof verified.current_end === 'number') periodEnd = new Date(verified.current_end * 1000);
                 if (paid) {
                     const paymentSubscriptionId = verifiedPayment?.subscription_id || payment?.subscription_id;
                     if (verifiedPayment?.id !== paymentId || verifiedPayment?.status !== 'captured' || paymentSubscriptionId !== subscriptionId
@@ -1194,8 +1229,9 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                         intervalCount: Number(cycle?.frequency?.interval_count),
                         totalCycles: Number(cycle?.total_cycles),
                         hasTrial: Boolean(trialCycle),
-                        trialDays: trialCycle?.frequency?.interval_unit === 'DAY' && Number(trialCycle?.frequency?.interval_count) === 7
-                            ? 7 : undefined,
+                        trialDays: trialCycle?.frequency?.interval_unit === 'DAY' && Number(trialCycle?.total_cycles) === 1
+                            && Number(trialCycle?.pricing_scheme?.fixed_price?.value || 0) === 0
+                            ? Number(trialCycle.frequency.interval_count) : undefined,
                         taxPercent: verifiedPlanDetails.taxes?.percentage,
                         taxInclusive: verifiedPlanDetails.taxes?.inclusive,
                         setupFee: verifiedPlanDetails.payment_preferences?.setup_fee?.value || 0,
@@ -1206,6 +1242,11 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     && typeof verified.billing_info?.next_billing_time === 'string') {
                     periodEnd = new Date(verified.billing_info.next_billing_time);
                     if (Number.isNaN(periodEnd.getTime())) periodEnd = null;
+                }
+                if (paid && !periodEnd && verified.status === 'EXPIRED'
+                    && verifiedPlan?.totalCycles === 12 && typeof resource.create_time === 'string') {
+                    const paidAt = new Date(resource.create_time);
+                    if (Number.isFinite(paidAt.getTime())) periodEnd = nextCalendarMonth(paidAt);
                 }
                 const saleAmount = resource.amount?.value ?? resource.amount?.total;
                 const saleCurrency = resource.amount?.currency_code ?? resource.amount?.currency;
@@ -1222,10 +1263,10 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     verifiedPaidCurrency = String(saleCurrency);
                 }
                 trialAuthorized = trialAuthorizedEvent && verified.status === 'ACTIVE' && Boolean(verifiedCheckoutId)
-                    && Boolean(verifiedPlan?.hasTrial) && verifiedPlan?.trialDays === 7;
+                    && Boolean(verifiedPlan?.hasTrial) && [7, TRIAL_DAYS].includes(verifiedPlan?.trialDays ?? 0);
                 if (trialAuthorized && typeof verified.start_time === 'string') {
                     const trialStart = new Date(verified.start_time);
-                    if (!Number.isNaN(trialStart.getTime())) verifiedTrialEndsAt = new Date(trialStart.getTime() + 7 * 24 * 60 * 60 * 1000);
+                    if (!Number.isNaN(trialStart.getTime())) verifiedTrialEndsAt = new Date(trialStart.getTime() + verifiedPlan!.trialDays! * 24 * 60 * 60 * 1000);
                 }
             }
             await applyWebhook(pool, 'paypal', event.id, event.event_type, rawBody, subscriptionId, paid, periodEnd,
@@ -1298,6 +1339,10 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                 const parsedEnd = cashfreeDate(nextCharge);
                 if (parsedEnd && parsedEnd.getTime() > Date.now()) periodEnd = parsedEnd;
             }
+            if (paid && !periodEnd && subscriptionStatus === 'COMPLETED' && verifiedPlan?.totalCycles === 12) {
+                const paidAt = cashfreeDate(event.event_time);
+                if (paidAt) periodEnd = nextCalendarMonth(paidAt);
+            }
             const statusSuffix = event.type === 'SUBSCRIPTION_STATUS_CHANGED'
                 ? `.${subscriptionStatus}`
                 : authFailed ? '_AUTH_FAILED' : '';
@@ -1316,11 +1361,12 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
 
     router.post('/cashfree/return', express.urlencoded({ extended: false, limit: '10kb' }), (req, res) => {
         const checkout = z.string().uuid().safeParse(String(req.query.checkoutId || ''));
-        const plan = z.enum(['Starter', 'Pro']).safeParse(String(req.query.plan || ''));
-        if (!checkout.success || !plan.success) return res.status(400).send('This checkout return link is invalid.');
+        const plan = z.enum(PAID_PLAN_NAMES).safeParse(req.query.plan);
+        const billing = z.enum(['monthly', 'annual']).default('monthly').safeParse(req.query.billing);
+        if (!checkout.success || !plan.success || !billing.success) return res.status(400).send('This checkout return link is invalid.');
         // The browser return is only a navigation signal. Mandate activation is verified by the signed webhook.
         const trial = req.query.trial === '1';
-        return res.redirect(303, makeReturnUrl('return', planKey(plan.data)!, 'cashfree', checkout.data, trial));
+        return res.redirect(303, makeReturnUrl('return', planKey(plan.data)!, 'cashfree', checkout.data, trial, billing.data));
     });
 
     return router;

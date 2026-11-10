@@ -1,23 +1,27 @@
 # Payment subscriptions
 
-The payment screen starts a monthly recurring Starter or Pro subscription. A signed-in, eligible account may choose its one seven-day trial. The trial begins only after the payment provider confirms mandate authorization; the first recurring charge follows the trial. Razorpay and Cashfree reserve the 30-minute authorization window before their seven-day trial schedule, so approving near the end of checkout never shortens the free access period. Users who already used their trial can subscribe immediately. Customers can cancel future renewals at any time from checkout. Razorpay and Cashfree mandates have a maximum of 100 monthly charges; PayPal plans have an indefinite regular cycle.
+Basic, Starter, Pro and Business support recurring online checkout. Free opens the meeting app and Enterprise goes to sales. Each eligible account can start one 14-day trial after provider-confirmed mandate authorization. Existing trials keep their stored duration.
 
-Provider credentials stay on the auth service. The client receives only the public Razorpay key, Cashfree subscription session ID, or a validated PayPal approval URL. The backend stores the customer email from the signed-in profile and ignores any client-supplied amount, currency, or email.
+Monthly plans bill each month. Annual rates bill monthly for up to 12 payments, then end. Customers can cancel future renewals from checkout. Razorpay and Cashfree monthly mandates have up to 100 charges and PayPal monthly mandates continue until cancelled. The introductory Basic and Pro discounts in the pricing brief require a separate provider-backed promotion setup.
+
+Provider credentials stay on the auth service. The client receives only the public Razorpay key, Cashfree subscription session ID, or a validated PayPal approval URL. The backend stores the customer email from the signed-in profile and calculates the amount server-side. A changed quote requires the customer to reconfirm.
 
 ## Price and tax
 
-The current INR prices are ₹499 for Starter and ₹999 for Pro before 18% GST:
+These are the regular INR rates per user and per month:
 
-| Plan | Base | GST | Monthly total |
-| --- | ---: | ---: | ---: |
-| Starter | ₹499.00 | ₹89.82 | ₹588.82 |
-| Pro | ₹999.00 | ₹179.82 | ₹1,178.82 |
+| Plan | Monthly base | Monthly with GST | Annual base | Annual with GST |
+| --- | ---: | ---: | ---: | ---: |
+| Basic | ₹114.00 | ₹134.52 | ₹95.00 | ₹112.10 |
+| Starter | ₹309.00 | ₹364.62 | ₹257.00 | ₹303.26 |
+| Pro | ₹1,199.00 | ₹1,414.82 | ₹999.00 | ₹1,178.82 |
+| Business | ₹1,938.00 | ₹2,286.84 | ₹1,615.00 | ₹1,905.70 |
 
 GST is displayed in checkout. Razorpay and Cashfree recurring amounts are set to the GST-inclusive total; PayPal plans use the configured base amount and add 18% tax (`inclusive: false`). Payment amounts always come from the shared server-side price configuration.
 
 ## Provider setup
 
-Apply database migrations `020` through `025` in order before deploying this auth-service build:
+Apply pending migrations through `029_public_paid_plans.sql` with the migration role before deploying this auth-service build. It adds the new tiers and stores billing period and trial duration per subscription.
 
 ```sh
 npm run db:migrate
@@ -39,31 +43,31 @@ Set these variables on the auth service:
 - `AUTH_PUBLIC_URL` to the public HTTPS auth-service origin
 - `PAYMENT_RETURN_URL` to the public HTTPS web-app origin
 
-The integration creates a monthly periodic subscription with UPI and card authorization methods. An eligible trial sets the first charge time to seven days after the checkout authorization window closes; the signed webhook confirms mandate authorization before the account receives trial access. The payment callback is only a navigation signal. Register `https://<auth-host>/api/auth/billing/webhooks/cashfree` for subscription authorization, payment-success, payment-failure and status-change events. Cashfree webhook signatures are checked against the original request body and timestamp; exact event retries are deduplicated so a delayed provider retry can still be processed safely.
+The integration creates a monthly periodic subscription with UPI and card authorization methods. An eligible trial sets the first charge time to fourteen days after the checkout authorization window closes; the signed webhook confirms mandate authorization before the account receives trial access. The payment callback is only a navigation signal. Register `https://<auth-host>/api/auth/billing/webhooks/cashfree` for subscription authorization, payment-success, payment-failure and status-change events. Cashfree webhook signatures are checked against the original request body and timestamp; exact event retries are deduplicated so a delayed provider retry can still be processed safely.
 
 The provided merchant account must have Cashfree Subscriptions and the required payment methods enabled. The implementation does not create or simulate a payment during deployment.
 
 ### Razorpay Subscriptions
 
-Set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `RAZORPAY_PLAN_STARTER` and `RAZORPAY_PLAN_PRO`. The active monthly plans must match the GST-inclusive shared INR totals. Configure the webhook at `https://<auth-host>/api/auth/billing/webhooks/razorpay` for subscription authorization, charge, cancellation, expiry and failure events. The server verifies the checkout signature and confirms each renewal from Razorpay before applying access.
+Set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET`. Create a monthly-frequency plan at each GST-inclusive INR rate above. Set `RAZORPAY_PLAN_<TIER>` for monthly pricing and `RAZORPAY_PLAN_<TIER>_ANNUAL` for annual pricing, where `<TIER>` is `BASIC`, `STARTER`, `PRO` or `BUSINESS`. The app sets the total count to 12 for annual pricing. Configure the webhook at `https://<auth-host>/api/auth/billing/webhooks/razorpay` for subscription authorization, charge, cancellation, expiry and failure events. The server verifies the checkout signature and confirms each renewal from Razorpay before applying access.
 
-An eligible trial creates the subscription with its first billing date seven days after the 30-minute authorization window closes. The authorization link expires when that window closes. Razorpay recurring subscriptions allow up to 100 cycles in this implementation. Cancellation stops future cycles; access remains through the stored current period end.
+An eligible trial creates the subscription with its first billing date fourteen days after the 30-minute authorization window closes. The authorization link expires when that window closes. Monthly subscriptions allow up to 100 cycles. Cancellation stops future cycles; access remains through the stored current period end.
 
 ### PayPal Subscriptions
 
-Set `PAYPAL_ENVIRONMENT`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_WEBHOOK_ID`, `PAYPAL_PLAN_STARTER`, `PAYPAL_PLAN_PRO`, `PAYPAL_PLAN_STARTER_TRIAL`, `PAYPAL_PLAN_PRO_TRIAL`, `PAYPAL_CURRENCY`, `PAYPAL_STARTER_BASE_AMOUNT` and `PAYPAL_PRO_BASE_AMOUNT`.
+Set `PAYPAL_ENVIRONMENT`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`, `PAYPAL_WEBHOOK_ID` and `PAYPAL_CURRENCY`. For each tier set `PAYPAL_PLAN_<TIER>` and `PAYPAL_<TIER>_BASE_AMOUNT`, with an `_ANNUAL` suffix on the tier for annual rates. For trials use `PAYPAL_PLAN_<TIER>_TRIAL_14` or `PAYPAL_PLAN_<TIER>_ANNUAL_TRIAL_14`.
 
-Each standard plan must have one monthly regular cycle, 18% non-inclusive tax, and no setup fee. Each `*_TRIAL` plan must have one seven-day, zero-value trial cycle followed by the same monthly regular cycle. Configure PayPal's verified webhook endpoint at `https://<auth-host>/api/auth/billing/webhooks/paypal`. A browser redirect does not grant access; the server waits for a verified activation or completed sale webhook. Pending PayPal approvals retain their checkout slot until completion or successful provider cancellation; local timeout does not permit a second subscription while the old approval link remains usable.
+Create a monthly regular cycle with 18% non-inclusive tax and no setup fee. Use 0 regular cycles for monthly pricing (indefinite) or 12 for annual pricing. A trial plan adds a single 14-day, zero-value cycle before the regular cycle. Set the base amount in the merchant currency and confirm that currency in checkout. INR plans must match the INR catalog. Configure PayPal's verified webhook endpoint at `https://<auth-host>/api/auth/billing/webhooks/paypal`. A browser redirect does not grant access; the server waits for a verified activation or completed sale webhook. Pending PayPal approvals retain their checkout slot until completion or successful provider cancellation; local timeout does not permit a second subscription while the old approval link remains usable.
 
 ## One-trial rule and cancellation
 
 Migration `025` records verified charges used to activate or extend access in `payment_captures`. Amounts are stored as integer minor units, keyed by provider and payment ID. The capture, webhook result and access update commit together. Mandate authorizations and trials do not create capture records. A late verified charge preserves a cancelled subscription's renewal status. The ledger starts with this release and does not backfill historical payments.
 
-The database records a single trial start per account. Choosing Starter or Pro consumes that same trial only after provider authorization succeeds. A retry, second browser tab, or later sign-in cannot start another trial. If authorization fails, the account remains eligible to try again. On trial expiration, access depends on a verified paid renewal. Cancellation removes future renewals while preserving access through the paid period or active trial end.
+The database records a single trial start per account. Choosing any paid tier consumes that same trial only after provider authorization succeeds. A retry, second browser tab, or later sign-in cannot start another trial. If authorization fails, the account remains eligible to try again. On trial expiration, access depends on a verified paid renewal. Cancellation removes future renewals while preserving access through the paid period or active trial end.
 
 ## Changing tiers
 
-Direct mid-cycle Starter-to-Pro switching is not implemented. Checkout explains that the current renewal must be cancelled and the remaining Starter period must end before a new Pro subscription can begin, avoiding overlapping charges.
+To switch tiers, cancel the current renewal and wait for the existing access period to end. Checkout blocks overlapping subscriptions.
 
 The development fake clock affects entitlement previews only. Hosted payment schedules always use real UTC time; do not use date simulation as evidence of provider billing behavior.
 

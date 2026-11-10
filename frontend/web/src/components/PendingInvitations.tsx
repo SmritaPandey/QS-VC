@@ -92,8 +92,7 @@ export default function PendingInvitations({ onCountChange, onExpired }: Props) 
                 return;
             }
             if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                alert(err.error || 'Failed to accept invitation');
+                alert('The invitation could not be accepted. Try again.');
                 return;
             }
             // Navigate to meeting
@@ -124,8 +123,7 @@ export default function PendingInvitations({ onCountChange, onExpired }: Props) 
                 return;
             }
             if (!res.ok) {
-                const err = await res.json().catch(() => ({}));
-                alert(err.error || 'Failed to decline invitation');
+                alert('The invitation could not be declined. Try again.');
                 return;
             }
             setInvitations(prev => {

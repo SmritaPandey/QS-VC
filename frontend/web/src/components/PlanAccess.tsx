@@ -4,10 +4,15 @@ import { hasFeature, useEntitlements } from '../lib/entitlements';
 import { useSession } from '../lib/use-session';
 import type { Plan } from '../../../../shared/entitlements.cjs';
 
+function tierName(plan: Plan) {
+    const key = plan.replace(/_trial$/, '');
+    return key === 'enterprise' ? 'Quantum-Premise' : key.charAt(0).toUpperCase() + key.slice(1);
+}
+
 export function CrownBadge({ plan }: { plan: Plan }) {
-    if (plan === 'guest') return null;
-    const label = plan === 'starter' || plan === 'starter_trial' ? 'Starter' : plan === 'pro' || plan === 'pro_trial' ? 'Pro' : 'Quantum-Premise';
-    const tone = plan === 'starter' || plan === 'starter_trial' ? 'silver' : plan === 'pro' || plan === 'pro_trial' ? 'gold' : 'violet';
+    if (plan === 'guest' || plan === 'basic' || plan === 'basic_trial') return null;
+    const label = tierName(plan);
+    const tone = plan === 'starter' || plan === 'starter_trial' ? 'silver' : plan === 'enterprise' ? 'violet' : 'gold';
     return <span className={`plan-crown plan-crown--${tone}`} title={`${label} plan`} aria-label={`${label} plan`}><span className="mi" aria-hidden="true">workspace_premium</span></span>;
 }
 
@@ -18,9 +23,9 @@ export function TrialChip() {
         const timer = window.setInterval(() => tick(value => value + 1), 60_000);
         return () => window.clearInterval(timer);
     }, []);
-    if ((plan !== 'starter_trial' && plan !== 'pro_trial') || !trialEndsAt) return null;
+    if (!plan.endsWith('_trial') || !trialEndsAt) return null;
     const days = Math.max(0, Math.ceil((new Date(trialEndsAt).getTime() - Date.now()) / 86400000));
-    const tier = plan === 'pro_trial' ? 'Pro' : 'Starter';
+    const tier = tierName(plan);
     return <span className="trial-chip" aria-label={`${tier} trial, ${days} days left`}>{tier} trial · {days} {days === 1 ? 'day' : 'days'} left</span>;
 }
 
@@ -30,7 +35,7 @@ export function UpgradePrompt({ requiredPlan, onClose, blocking = false, signInR
     const dialogRef = useRef<HTMLElement>(null);
     const guest = session.status !== 'authenticated';
     const trialEnded = entitlements.status === 'trial_expired';
-    const trialTier = entitlements.plan === 'pro_trial' ? 'Pro' : 'Starter';
+    const trialTier = tierName(entitlements.plan);
     const enterprisePending = entitlements.status === 'enterprise_pending';
     const enterpriseRejected = entitlements.status === 'enterprise_rejected';
     const requiredLabel = requiredPlan === 'enterprise' ? 'Quantum-Premise' : requiredPlan.charAt(0).toUpperCase() + requiredPlan.slice(1);
@@ -122,7 +127,7 @@ export function UpgradePromptListener() {
             if (session.status === 'checking') return;
             const detail = (event as CustomEvent<{ requiredPlan?: Plan; returnTo?: string; feature?: string }>).detail;
             const plan = detail?.requiredPlan;
-            if (!plan || !['starter', 'pro', 'enterprise'].includes(plan)) return;
+            if (!plan || !['basic', 'starter', 'pro', 'business', 'enterprise'].includes(plan)) return;
             if (entitlements.isPlatformAdmin) return;
             if (typeof detail.feature === 'string' && hasFeature(entitlements, detail.feature)) return;
             const currentPath = `${location.pathname}${location.search}${location.hash}`;

@@ -78,7 +78,9 @@ export class SpeechToTextEngine {
                 if (!current() || event.error === 'no-speech') return;
                 // Permission, service and network failures need an explicit user retry.
                 this.stop();
-                if (event.error !== 'aborted') this.options.onError?.(`Speech recognition error: ${event.error}`);
+                if (event.error !== 'aborted') this.options.onError?.(event.error === 'not-allowed' || event.error === 'service-not-allowed'
+                    ? 'Allow microphone access to share captions.'
+                    : 'Speech recognition stopped. Turn captions on again to retry.');
             };
             recognition.onend = () => {
                 if (!current()) return;

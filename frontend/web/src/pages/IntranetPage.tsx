@@ -14,7 +14,7 @@ const steps = [
     { title: 'Connect to your organisation', text: 'At the office, connect to your organisation’s network. When travelling, connect to the VPN supplied by your IT team first.' },
     { title: 'Choose browser or desktop app', text: 'Approved accounts can open the workspace in a browser or download the app for Windows, Linux x64, Mac with Apple silicon, or Mac with Intel. Each connects to the same organisation-hosted service.' },
     { title: 'Check your devices and join', text: 'Sign in to your organisation’s workspace, check your camera and microphone, then join an authorised meeting. Your administrator manages access.' },
-    { title: 'Work together', text: 'Meet with video, chat and screen sharing. Use available whiteboard, polls, Q&A and notes. Language features depend on your organisation’s configuration.' },
+    { title: 'Work together', text: 'Meet with video, chat and screen sharing. Use available whiteboard, polls, Q&A and notes. Check which languages your workspace offers.' },
 ];
 type DesktopDownload = 'windows' | 'macos-arm64' | 'macos-x64' | 'linux-x64';
 type DownloadAvailability = { windows: boolean; macAppleSilicon: boolean; macIntel: boolean; linuxX64: boolean };
@@ -85,7 +85,7 @@ export default function IntranetPage() {
                     },
                     onlineDemo,
                 } }
-                : { token, error: 'The configured address does not point to a separate HTTPS workspace. Ask your administrator to update it.' });
+                : { token, error: 'We couldn’t open your workspace. Ask your administrator for the correct link.' });
         }).catch(() => {
             if (currentRequest()) setResult({ token, error: 'We couldn’t check your intranet access. Try again.' });
         });
@@ -113,16 +113,14 @@ export default function IntranetPage() {
             if (response.status === 401) { clearSession(token); return; }
             if (response.status === 403) {
                 setResult({ token });
-                throw new Error('Your account no longer has intranet access. Contact your administrator.');
+                setDownloadState({ phase: 'error', message: 'Your account no longer has intranet access. Contact your administrator.' });
+                return;
             }
-            if (response.status === 404) {
-                throw new Error('This workspace’s download route is missing. Refresh the page; if it still fails, its administrator must update the QS-VC auth service.');
+            if (response.status === 404 || response.status === 503) {
+                setDownloadState({ phase: 'error', message: 'The app download is unavailable. Try again later or contact your administrator.' });
+                return;
             }
-            if (response.status === 503) {
-                const body = await response.json().catch(() => null) as { error?: unknown } | null;
-                throw new Error(typeof body?.error === 'string' ? body.error : 'This app archive is not staged on this server yet. Contact your administrator.');
-            }
-            if (!response.ok) throw new Error(`The installer request failed (HTTP ${response.status}). Try again or contact your administrator.`);
+            if (!response.ok) throw new Error();
             const total = Number(response.headers.get('Content-Length')) || null;
             // Stream the body so the message can show real progress.
             const chunks: Uint8Array[] = [];
@@ -140,7 +138,10 @@ export default function IntranetPage() {
                 const buffer = new Uint8Array(await response.arrayBuffer());
                 chunks.push(buffer); received = buffer.byteLength;
             }
-            if (!received || (total && received !== total)) throw new Error('The download was incomplete. Check your connection and retry.');
+            if (!received || (total && received !== total)) {
+                setDownloadState({ phase: 'error', message: 'The download was incomplete. Check your connection and try again.' });
+                return;
+            }
             const blob = new Blob(chunks as BlobPart[], { type: chosenDownload.mime });
             const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
             if (!isCurrent()) return;
@@ -148,8 +149,8 @@ export default function IntranetPage() {
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a'); link.href = url; link.download = chosenDownload.filename; document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000);
             setDownloadState({ phase: 'done', checksum, size: received, archive: chosenDownload.id.startsWith('macos-') ? 'macos' : chosenDownload.id === 'linux-x64' ? 'linux' : 'windows' });
-        } catch (reason) {
-            if (isCurrent()) setDownloadState({ phase: 'error', message: reason instanceof Error ? reason.message : 'Download failed. Please retry.' });
+        } catch {
+            if (isCurrent()) setDownloadState({ phase: 'error', message: 'We couldn’t download the app. Please try again.' });
         } finally {
             if (downloadRequest.current === controller) downloadRequest.current = null;
         }
@@ -161,7 +162,7 @@ export default function IntranetPage() {
             else { setResult(undefined); setAttempt(value => value + 1); }
         }}><ActionContents>Try again</ActionContents></button></section> : access ? <div className="intranet-layout">
             <section className="service-card"><span className="enterprise-access-badge">{access.onlineDemo ? 'Admin · Online test workspace' : 'Approved QS-Enterprise access'}</span><h2>Open in your browser</h2><p>{access.onlineDemo ? 'This opens the shared QS-VC online app to test the QS-Enterprise experience. It is not an isolated organisation deployment.' : 'Connect to your office network or approved VPN, then sign in to your organisation’s workspace.'}</p><p className="enterprise-address">{access.workspaceUrl}</p><a className="qsvc-action" href={access.workspaceUrl} rel="noreferrer"><ActionContents>Open workspace</ActionContents></a></section>
-            <section className="service-card"><h2>Download QS-VC</h2><p>{access.onlineDemo ? 'Choose your computer and use the same online test workspace.' : 'Choose the app for your computer. The app connects to the organisation workspace above.'}</p><p>On Mac, extract the ZIP and move QS-VC.app to Applications. On Windows, extract the ZIP and run QS-VC.exe from the extracted folder. On Linux x64, extract the ZIP and run qs-vc from the extracted folder; required system libraries depend on your distribution.</p><label className="intranet-platform-label" htmlFor="intranet-download-platform">Your device</label><select id="intranet-download-platform" value={downloadPlatform} disabled={downloading} onChange={event => setDownloadPlatform(event.target.value as DesktopDownload)}>{downloadChoices.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}</select><button className="qsvc-action intranet-download" type="button" aria-busy={downloading} disabled={!chosenDownloadAvailable || downloading || session.status !== 'authenticated'} onClick={download}><ActionContents><span className="mi" aria-hidden="true">download</span>{downloading ? 'Downloading…' : downloadPlatform === 'linux-x64' ? 'Download Linux ZIP' : downloadPlatform.startsWith('macos-') ? 'Download Mac ZIP' : 'Download Windows ZIP'}</ActionContents></button>{!chosenDownloadAvailable && <p role="status">This app archive is not available yet. Choose a device with an available build or contact your administrator.</p>}<p>{access.onlineDemo ? 'For an isolated enterprise workspace, use the address supplied by your organisation.' : 'After installation, use the organisation address above.'} A download does not grant additional meeting permissions.</p><p>Each ZIP includes the getting-started guide, the prerequisites and the intranet setup guide for IT. <a href="/guides/QS-VC-Prerequisites.pdf" target="_blank" rel="noreferrer">Prerequisites (PDF)</a> · <a href="/guides/QS-VC-Getting-Started.pdf" target="_blank" rel="noreferrer">Getting started (PDF)</a> · <a href="/guides/QS-VC-Intranet-Setup.pdf" target="_blank" rel="noreferrer">Intranet setup (PDF)</a></p></section>
-        </div> : <><div className="intranet-layout"><section className="service-card"><span className="enterprise-access-badge">Guided demo · No live connection</span><h2>See what to expect</h2><MeetingScene /><p>This preview uses sample participants. It does not start your camera, microphone or a meeting.</p></section><section className="service-card"><div className="intranet-guide-tabs" aria-label="Guide steps">{steps.map((item, index) => <button type="button" key={item.title} aria-pressed={step === index} onClick={() => setStep(index)}>{index + 1}<span className="sr-only"> {item.title}</span></button>)}</div><div aria-live="polite"><h2>{steps[step].title}</h2><p>{steps[step].text}</p></div><div className="intranet-guide-controls"><button type="button" disabled={step === 0} onClick={() => setStep(value => value - 1)}>Back</button><button type="button" disabled={step === steps.length - 1} onClick={() => setStep(value => value + 1)}>Next</button></div><p>Ask your administrator which features are enabled in your workspace. Offline captions and translated speech require locally available recognition, translation and voices. Poly room-device access requires a configured gateway and compatibility testing for your devices. Remote access requires your organisation’s approved network connection.</p><Link className="qsvc-action" to="/contact?interest=Intranet"><ActionContents>Request access</ActionContents></Link>{session.status === 'anonymous' ? <p><Link to="/login?next=%2Fintranet">Sign in to check access</Link></p> : <p>Your account does not have intranet access. Ask your administrator to approve it.</p>}</section></div></>}
+            <section className="service-card"><h2>Download QS-VC</h2><p>{access.onlineDemo ? 'Choose your computer and use the same online test workspace.' : 'Choose the app for your computer. The app connects to the organisation workspace above.'}</p><p>On Mac, extract the ZIP and move QS-VC.app to Applications. On Windows, extract the ZIP and run QS-VC.exe from the extracted folder. On Linux x64, extract the ZIP and run qs-vc from the extracted folder. Ask your administrator if you need help with your Linux distribution.</p><label className="intranet-platform-label" htmlFor="intranet-download-platform">Your device</label><select id="intranet-download-platform" value={downloadPlatform} disabled={downloading} onChange={event => setDownloadPlatform(event.target.value as DesktopDownload)}>{downloadChoices.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}</select><button className="qsvc-action intranet-download" type="button" aria-busy={downloading} disabled={!chosenDownloadAvailable || downloading || session.status !== 'authenticated'} onClick={download}><ActionContents><span className="mi" aria-hidden="true">download</span>{downloading ? 'Downloading…' : downloadPlatform === 'linux-x64' ? 'Download Linux ZIP' : downloadPlatform.startsWith('macos-') ? 'Download Mac ZIP' : 'Download Windows ZIP'}</ActionContents></button>{!chosenDownloadAvailable && <p role="status">This app archive is not available yet. Choose another device or contact your administrator.</p>}<p>{access.onlineDemo ? 'For an isolated enterprise workspace, use the address supplied by your organisation.' : 'After installation, use the organisation address above.'} A download does not grant additional meeting permissions.</p><p>Each ZIP includes the getting-started guide, the prerequisites and the intranet setup guide for IT. <a href="/guides/QS-VC-Prerequisites.pdf" target="_blank" rel="noreferrer">Prerequisites (PDF)</a> · <a href="/guides/QS-VC-Getting-Started.pdf" target="_blank" rel="noreferrer">Getting started (PDF)</a> · <a href="/guides/QS-VC-Intranet-Setup.pdf" target="_blank" rel="noreferrer">Intranet setup (PDF)</a></p></section>
+        </div> : <><div className="intranet-layout"><section className="service-card"><span className="enterprise-access-badge">Guided demo · No live connection</span><h2>See what to expect</h2><MeetingScene /><p>This preview uses sample participants. It does not start your camera, microphone or a meeting.</p></section><section className="service-card"><div className="intranet-guide-tabs" aria-label="Guide steps">{steps.map((item, index) => <button type="button" key={item.title} aria-pressed={step === index} onClick={() => setStep(index)}>{index + 1}<span className="sr-only"> {item.title}</span></button>)}</div><div aria-live="polite"><h2>{steps[step].title}</h2><p>{steps[step].text}</p></div><div className="intranet-guide-controls"><button type="button" disabled={step === 0} onClick={() => setStep(value => value - 1)}>Back</button><button type="button" disabled={step === steps.length - 1} onClick={() => setStep(value => value + 1)}>Next</button></div><p>Ask your administrator which languages work offline and whether your Poly room devices are supported. To join from outside the office, use your organisation’s approved network connection.</p><Link className="qsvc-action" to="/contact?interest=Intranet"><ActionContents>Request access</ActionContents></Link>{session.status === 'anonymous' ? <p><Link to="/login?next=%2Fintranet">Sign in to check access</Link></p> : <p>Your account does not have intranet access. Ask your administrator to approve it.</p>}</section></div></>}
     </main><SiteFooter /><DownloadFeedback state={token && downloadOwner.current === token ? downloadState : { phase: 'idle' }} onDismiss={() => setDownloadState({ phase: 'idle' })} /></div>;
 }

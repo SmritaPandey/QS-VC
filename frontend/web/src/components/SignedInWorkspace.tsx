@@ -7,6 +7,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import BrandLogo from './BrandLogo';
 import { clearSession, getToken, refreshSession } from '../lib/session';
 import '../styles/workspace.css';
+import '../styles/meeting-home.css';
+import { useEntitlements } from '../lib/entitlements';
+import { CrownBadge, TrialChip } from './PlanAccess';
 import useScrollReveal from '../lib/scroll-reveal';
 import HostedMeetings from './HostedMeetings';
 import MeetingSetupDialog, { type MeetingSetup } from './MeetingSetupDialog';
@@ -26,6 +29,17 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
     const [selected, setSelected] = useState(() => new Date(new Date().setHours(0,0,0,0)));
     const session = useSession();
     const profile = session.profile;
+    const entitlements = useEntitlements();
+    const isAdmin = entitlements.isPlatformAdmin || profile?.role === 'admin';
+    const planKey = entitlements.plan.replace(/_trial$/, '');
+    const planName = planKey === 'guest' ? 'Free' : planKey === 'enterprise' ? 'Quantum-Premise' : planKey.charAt(0).toUpperCase() + planKey.slice(1);
+    const trialActive = !isAdmin && entitlements.verified && entitlements.status === 'trial_active';
+    const planStatus = isAdmin ? 'Administrator' : entitlements.loading ? 'Checking plan…'
+        : !entitlements.verified ? 'Plan unavailable'
+            : entitlements.status === 'trial_expired' ? `${planName} trial ended`
+                : entitlements.status === 'paid_expired' ? `${planName} expired`
+                    : entitlements.status === 'enterprise_pending' ? 'Quantum-Premise pending'
+                        : entitlements.status === 'enterprise_rejected' ? 'Quantum-Premise not approved' : planName;
     const [meetings, setMeetings] = useState<Meeting[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -102,25 +116,35 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
         if (!/^[a-z0-9-]{3,40}$/i.test(code)) { setJoinError('Enter a QS-VC meeting code or a link from this website.'); return; }
         navigate(`/meeting/${encodeURIComponent(code.toUpperCase())}/preview`);
     };
-    return <div className="workspace-shell" ref={root} onKeyDown={event => {
+    return <div className="workspace-shell meeting-home" ref={root} onKeyDown={event => {
         if (event.key === 'Escape') root.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(detail => { detail.open = false; detail.querySelector<HTMLElement>('summary')?.focus(); });
     }}>
         <header className="workspace-header">
             <a className="public-skip" href="#main-content">Skip to content</a>
             <Link className="workspace-brand" to="/app" aria-label="QS-VC meetings"><BrandLogo /></Link>
             <nav className="workspace-navigation" aria-label="Workspace"><Link to="/app" aria-current="page">Meetings</Link><Link to="/schedule">Schedule</Link><Link to="/schedule?type=webinar">Town halls</Link></nav>
+            <div className="meeting-home-membership">
+                <div className="meeting-home-plan" role="status">
+                    {trialActive ? <TrialChip /> : <>
+                        {entitlements.verified && !isAdmin && ['paid_active', 'enterprise_approved'].includes(entitlements.status) && <CrownBadge plan={entitlements.plan} />}
+                        <span>{planStatus}</span>
+                        {!isAdmin && !entitlements.loading && !entitlements.verified && <button className="meeting-home-plan-retry" type="button" onClick={() => window.dispatchEvent(new Event('qsvc:entitlements-refresh'))}>Retry</button>}
+                    </>}
+                </div>
+                <Link className="meeting-home-plan-link" to="/pricing">Manage plan</Link>
+            </div>
             <details className="workspace-account">
                 <summary aria-label="Your account"><span className="workspace-account-initial" aria-hidden="true">{profile?.displayName.trim().charAt(0).toUpperCase() || 'Q'}</span></summary>
                 <div className="workspace-dropdown"><ThemeSelect /><p>{profile?.displayName || (profileError ? 'Account unavailable' : 'Loading account…')}</p>{profile && <span>{profile.email}</span>}{profileError && <button className="qsvc-action qsvc-action--secondary" onClick={() => void refreshSession()}><ActionContents>Retry account</ActionContents></button>}<Link to="/organisation/sso">Sign-in settings</Link><Link to="/">Visit website<span className="mi" aria-hidden="true">north_east</span></Link><button disabled={signingOut} onClick={onSignOut}>{signingOut ? 'Signing out…' : 'Sign out'}<span className="mi" aria-hidden="true">logout</span></button></div>
             </details>
         </header>
-        {joinError && <p role="alert" id="workspace-join-error" className="workspace-alert">{joinError}</p>}
         {sessionError && <p role="alert" className="workspace-alert">{sessionError}</p>}
-        <div className="workspace-body">
-            <aside className="workspace-start" aria-label="Start or join a meeting">
+        <main id="main-content" className="workspace-body">
+            <section className="workspace-start" aria-label="Start or join a meeting">
                 <p className="workspace-welcome">{profile ? `Welcome back, ${profile.displayName}.` : 'Welcome to QS-VC.'}</p>
-                <h1>Your meeting desk.</h1>
-                <p className="workspace-start-copy">Start a room, share a link, or join your team.</p>
+                <h1>Your next meeting starts here.</h1>
+                <p className="workspace-start-copy">Bring everyone together. Start a meeting or join with an invitation.</p>
+                <div className="meeting-home-start-actions">
             <details className="workspace-new">
                 <summary className="qsvc-action" aria-busy={creating}><ActionContents><span className="mi" aria-hidden="true">video_call</span>{creating ? 'Creating…' : 'New meeting'}<span className="mi workspace-new-caret" aria-hidden="true">expand_more</span></ActionContents></summary>
                 <div className="workspace-dropdown"><button disabled={creating} onClick={() => newAction(() => setSetupAction('link'))}><span className="mi" aria-hidden="true">link</span>Create a link</button><button disabled={creating} onClick={() => newAction(() => setSetupAction('start'))}><span className="mi" aria-hidden="true">videocam</span>Start now</button><button onClick={() => newAction(() => navigate('/schedule'))}><span className="mi" aria-hidden="true">calendar_today</span>Schedule a meeting</button></div>
@@ -129,17 +153,30 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
             <form className="workspace-join" onSubmit={joinMeeting}>
                 <span className="mi" aria-hidden="true">keyboard</span>
                 <label className="workspace-sr" htmlFor="workspace-code">Meeting code or link</label>
-                <input id="workspace-code" value={join} onChange={event => setJoin(event.target.value)} placeholder="Enter a code or link" aria-describedby={joinError ? 'workspace-join-error' : undefined} />
+                <input id="workspace-code" value={join} onChange={event => setJoin(event.target.value)} placeholder="Enter a code or link" aria-invalid={Boolean(joinError)} aria-describedby={joinError ? 'workspace-join-error' : undefined} />
                 <button type="submit" disabled={!join.trim()} className="qsvc-action"><ActionContents>Join</ActionContents></button>
             </form>
+                    {joinError && <p role="alert" id="workspace-join-error" className="meeting-home-join-error">{joinError}</p>}
+                </div>
                 </div>
                 <div className="workspace-preflight"><span className="mi" aria-hidden="true">tune</span><p>Check your camera, microphone and language before joining.</p></div>
-            </aside>
-            <main id="main-content" className="workspace-main">
-                <div className="workspace-views" role="tablist" aria-label="Which meetings to show">
-                    <button type="button" role="tab" id="tab-day" aria-selected={view === 'day'} aria-controls="workspace-view-panel" onClick={() => setView('day')}><span className="mi mi-sm" aria-hidden="true">calendar_today</span>By day</button>
-                    <button type="button" role="tab" id="tab-hosted" aria-selected={view === 'hosted'} aria-controls="workspace-view-panel" onClick={() => setView('hosted')}><span className="mi mi-sm" aria-hidden="true">shield_person</span>Meetings I host</button>
-                    <button type="button" role="tab" id="tab-invitations" aria-selected={view === 'invitations'} aria-controls="workspace-view-panel" onClick={() => setView('invitations')}>
+            </section>
+            <section className="workspace-main" aria-label="Your meetings">
+                <div className="workspace-agenda-intro"><span className="meeting-home-section-label">Your meetings</span><p>Make time for what’s next.</p></div>
+                <div className="workspace-views" role="tablist" aria-label="Which meetings to show" onKeyDown={event => {
+                    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+                    const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+                    const index = tabs.indexOf(document.activeElement as HTMLButtonElement);
+                    if (index < 0) return;
+                    event.preventDefault();
+                    const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1
+                        : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length;
+                    tabs[next].focus();
+                    tabs[next].click();
+                }}>
+                    <button type="button" role="tab" id="tab-day" aria-selected={view === 'day'} tabIndex={view === 'day' ? 0 : -1} aria-controls="workspace-view-panel" onClick={() => setView('day')}><span className="mi mi-sm" aria-hidden="true">calendar_today</span>By day</button>
+                    <button type="button" role="tab" id="tab-hosted" aria-selected={view === 'hosted'} tabIndex={view === 'hosted' ? 0 : -1} aria-controls="workspace-view-panel" onClick={() => setView('hosted')}><span className="mi mi-sm" aria-hidden="true">shield_person</span>I host</button>
+                    <button type="button" role="tab" id="tab-invitations" aria-selected={view === 'invitations'} tabIndex={view === 'invitations' ? 0 : -1} aria-controls="workspace-view-panel" onClick={() => setView('invitations')}>
                         <span className="mi mi-sm" aria-hidden="true">mail</span>Invitations
                         {pendingInviteCount > 0 && <span className="workspace-badge">{pendingInviteCount}</span>}
                     </button>
@@ -148,7 +185,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                     <section id="workspace-view-panel" role="tabpanel" aria-labelledby="tab-invitations" className="workspace-schedule">
                         <div className="workspace-day-heading">
                             <div>
-                                <h2>Meeting Invitations & Updates</h2>
+                                <h2>Invitations and updates</h2>
                                 <p>Respond to invitations and view in-app notices.</p>
                             </div>
                         </div>
@@ -164,8 +201,8 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                     {meeting.status !== 'ended' && meeting.status !== 'cancelled' && <Link className="workspace-row-join qsvc-action" to={`/meeting/${encodeURIComponent(meeting.meetingCode)}/preview`}><ActionContents>Join</ActionContents></Link>}</div></article>)}</div>{more && <button className="workspace-load-more qsvc-action qsvc-action--secondary" disabled={loading} onClick={() => setOffset(value => value+50)}><ActionContents>{loading ? 'Loading…' : 'Load more meetings'}</ActionContents></button>}</>}
                 </section>
                 </div>}
-            </main>
-        </div>
+            </section>
+        </main>
         {setupAction && <MeetingSetupDialog action={setupAction} creating={creating} onClose={() => setSetupAction(null)} onCreate={onCreate} />}
     </div>;
 }

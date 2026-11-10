@@ -2,6 +2,8 @@ import type { Request, Response } from 'express';
 import crypto from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { billingRouter, processMandateCancellations } from './billing';
+import { getEntitlements } from '../../../shared/entitlements.cjs';
+import { getPlanPrice } from '../../../shared/payment-pricing.mjs';
 
 const user = {
     sub: '00000000-0000-4000-8000-000000000001',
@@ -13,6 +15,7 @@ const cashfreeSubscriptionId = '00000000-0000-4000-8000-000000000003';
 const cashfreeWebhookSecret = 'cashfree_webhook_test_secret';
 
 afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
 });
@@ -106,42 +109,49 @@ function enablePayPal() {
     vi.stubEnv('PAYPAL_CURRENCY', 'USD');
 }
 
-it('creates a server-priced recurring Razorpay subscription after validating the configured monthly plan', async () => {
+it.each([
+    ['Starter', 'monthly', 30900, 100],
+    ['Business', 'annual', 161500, 12],
+] as const)('creates a server-priced Razorpay subscription for %s %s', async (name, billing, baseMinor, cycles) => {
     enableRazorpay();
+    const plan = name.toLowerCase();
+    const planId = `plan_${plan}_test`;
+    const totalMinor = baseMinor + Math.round(baseMinor * 18 / 100);
+    vi.stubEnv(`RAZORPAY_PLAN_${name.toUpperCase()}${billing === 'annual' ? '_ANNUAL' : ''}`, planId);
     const { pool, queries } = makePool();
     const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
         const url = String(input);
         const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : undefined;
         calls.push({ url, body });
-        if (url.endsWith('/plans/plan_starter_test')) {
-            return new Response(JSON.stringify({ id: 'plan_starter_test', period: 'monthly', interval: 1,
-                item: { currency: 'INR', amount: 58882 } }), { status: 200 });
+        if (url.endsWith(`/plans/${planId}`)) {
+            return new Response(JSON.stringify({ id: planId, period: 'monthly', interval: 1,
+                item: { currency: 'INR', amount: totalMinor } }), { status: 200 });
         }
         if (url.endsWith('/subscriptions')) {
-            return new Response(JSON.stringify({ id: 'sub_test123', plan_id: 'plan_starter_test', status: 'created' }), { status: 200 });
+            return new Response(JSON.stringify({ id: 'sub_test123', plan_id: planId, status: 'created' }), { status: 200 });
         }
         throw new Error(`Unexpected mocked provider request: ${url}`);
     }));
 
     const res = makeResponse();
     await route(makeRouter(pool), '/checkout')(
-        makeRequest({ provider: 'razorpay', plan: 'Starter', trial: false, mandateConsent: true, amount: 1, currency: 'USD' }) as unknown as Request,
+        makeRequest({ provider: 'razorpay', plan: name, billing, trial: false, mandateConsent: true, amount: 1, currency: 'USD' }) as unknown as Request,
         res as unknown as Response,
         vi.fn(),
     );
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({ provider: 'razorpay', subscription_id: 'sub_test123', keyId: 'rzp_test_public',
-        email: user.email, plan: 'Starter', amount: 58882, currency: 'INR', recurring: true });
+        email: user.email, plan: name, amount: totalMinor, currency: 'INR', recurring: true });
     expect(calls).toHaveLength(2);
-    expect(calls[0].url).toContain('/plans/plan_starter_test');
-    expect(calls[1].body).toMatchObject({ plan_id: 'plan_starter_test', total_count: 100, customer_notify: 1,
-        notes: { plan: 'starter', trial_days: '0' } });
+    expect(calls[0].url).toContain(`/plans/${planId}`);
+    expect(calls[1].body).toMatchObject({ plan_id: planId, total_count: cycles, customer_notify: 1,
+        notes: { plan, trial_days: '0' } });
     expect(calls[1].body?.expire_by).toEqual(expect.any(Number));
     expect(calls[1].body).not.toHaveProperty('amount');
     expect(queries.find(query => query.sql.includes('INSERT INTO public.payment_subscriptions'))?.values).toEqual(
-        expect.arrayContaining(['starter', 499, 18, 89.82, 588.82]),
+        expect.arrayContaining([plan, baseMinor / 100, 18, (totalMinor - baseMinor) / 100, totalMinor / 100, 14, billing]),
     );
     expect(JSON.stringify(res.body)).not.toContain('razorpay_test_secret');
 });
@@ -171,6 +181,7 @@ it('preserves and resumes a stale pending PayPal checkout instead of expiring or
         id: cashfreeSubscriptionId, provider: 'paypal', plan: 'starter', status: 'pending', current_period_end: null,
         provider_subscription_id: 'I-EXISTING', provider_order_id: null, provider_session_id: null,
         billing_mode: 'subscription', approval_url: approvalUrl, trial_checkout: false, trial_ends_at: null,
+        billing_period: 'monthly', trial_days: 14, total_amount: '11.80', provider_plan_id: 'paypal_starter_test',
     };
     const { pool, queries } = makePool({ openSubscription: existing });
     const calls: Array<{ url: string; method: string }> = [];
@@ -299,18 +310,18 @@ it('creates a Cashfree trial subscription with GST, account email and normalized
         plan: 'Starter', recurring: true, mode: 'sandbox' });
     expect(sentBody).toMatchObject({
         customer_details: { customer_email: user.email, customer_phone: '9876543210' },
-        plan_details: { plan_type: 'PERIODIC', plan_amount: 588.82, plan_max_amount: 588.82,
+        plan_details: { plan_type: 'PERIODIC', plan_amount: 364.62, plan_max_amount: 364.62,
             plan_max_cycles: 100, plan_intervals: 1, plan_currency: 'INR', plan_interval_type: 'MONTH' },
         authorization_details: { payment_methods: ['upi', 'card'] },
-        subscription_tags: { qsvc_checkout_id: sentBody?.subscription_id, plan: 'starter', trial_days: '7' },
+        subscription_tags: { qsvc_checkout_id: sentBody?.subscription_id, plan: 'starter', trial_days: '14' },
     });
     expect(sentBody?.subscription_first_charge_time).toBe(res.body && typeof res.body === 'object'
         ? (res.body as Record<string, unknown>).trialEndsAt : undefined);
     const scheduledAt = Date.parse(String(sentBody?.subscription_first_charge_time));
-    expect(scheduledAt).toBeGreaterThanOrEqual(before + 7 * 24 * 60 * 60 * 1000);
-    expect(scheduledAt).toBeLessThanOrEqual(Date.now() + 7 * 24 * 60 * 60 * 1000 + 31 * 60 * 1000);
+    expect(scheduledAt).toBeGreaterThanOrEqual(before + 14 * 24 * 60 * 60 * 1000);
+    expect(scheduledAt).toBeLessThanOrEqual(Date.now() + 14 * 24 * 60 * 60 * 1000 + 31 * 60 * 1000);
     const insert = queries.find(query => query.sql.includes('INSERT INTO public.payment_subscriptions'));
-    expect(insert?.values).toEqual(expect.arrayContaining(['starter', 'INR', '499.00', 18, '89.82', '588.82']));
+    expect(insert?.values).toEqual(expect.arrayContaining(['starter', 'INR', '309.00', 18, '55.62', '364.62']));
 });
 
 it('rejects a Cashfree webhook with an invalid signature before provider or database access', async () => {
@@ -383,15 +394,20 @@ it('ignores a valid Cashfree authorization event for a failed checkout without a
     expect(queries.some(query => query.sql.includes('INSERT INTO public.payment_mandate_cancellations'))).toBe(true);
 });
 
-it.each([true, false])('handles signed Cashfree trial authorization and retries (eligible: %s)', async eligible => {
+it.each([
+    { eligible: true, plan: 'starter', trialDays: 7, billing: 'monthly', amount: 588.82, base: '499.00', tax: '89.82', cycles: 100 },
+    { eligible: false, plan: 'starter', trialDays: 7, billing: 'monthly', amount: 588.82, base: '499.00', tax: '89.82', cycles: 100 },
+    { eligible: true, plan: 'business', trialDays: 14, billing: 'annual', amount: 1905.70, base: '1615.00', tax: '290.70', cycles: 12 },
+])('handles $plan $billing Cashfree trial authorization and retries (eligible: $eligible)', async ({ eligible, plan, trialDays, billing, amount, base, tax, cycles }) => {
     enableCashfree();
     const queries: Array<{ sql: string; values: unknown[] }> = [];
     let webhookInsertCount = 0;
     const context = {
-        id: cashfreeSubscriptionId, tenant_id: user.tenantId, user_id: user.sub, plan: 'starter',
+        id: cashfreeSubscriptionId, tenant_id: user.tenantId, user_id: user.sub, plan,
         provider_plan_id: 'cashfree_plan_test', status: 'pending', current_period_end: null,
-        currency: 'INR', base_amount: '499.00', tax_percent: '18', tax_amount: '89.82', total_amount: '588.82',
-        trial_checkout: true, trial_ends_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000 + 30 * 60 * 1000),
+        currency: 'INR', base_amount: base, tax_percent: '18', tax_amount: tax, total_amount: amount.toFixed(2),
+        trial_days: trialDays, billing_period: billing,
+        trial_checkout: true, trial_ends_at: new Date(Math.floor(Date.now() / 1000) * 1000 + trialDays * 24 * 60 * 60 * 1000 + 30 * 60 * 1000),
     };
     const client = {
         query: vi.fn(async (sql: string, values: unknown[] = []) => {
@@ -416,7 +432,7 @@ it.each([true, false])('handles signed Cashfree trial authorization and retries 
         subscription_first_charge_time: providerFirstChargeTime,
         authorization_details: { authorization_status: 'ACTIVE' },
         plan_details: { plan_id: 'cashfree_plan_test', plan_currency: 'INR', plan_interval_type: 'MONTH',
-            plan_intervals: 1, plan_max_cycles: 100, plan_amount: 588.82 },
+            plan_intervals: 1, plan_max_cycles: cycles, plan_amount: amount },
         subscription_tags: { qsvc_checkout_id: cashfreeSubscriptionId },
     }), { status: 200 })));
 
@@ -440,6 +456,8 @@ it.each([true, false])('handles signed Cashfree trial authorization and retries 
     }
 
     expect(webhookInsertCount).toBe(2);
+    expect(queries.find(query => query.sql.includes('UPDATE public.users SET subscription_plan = $1, trial_started_at = NOW()'))?.values)
+        .toEqual(expect.arrayContaining([`${plan}_trial`, context.trial_ends_at]));
     expect(queries.filter(query => query.sql.includes('UPDATE public.users SET subscription_plan = $1, trial_started_at = NOW()'))).toHaveLength(1);
     expect(queries.some(query => query.sql.includes("UPDATE public.payment_subscriptions SET status = 'active'"))).toBe(eligible);
     expect(queries.some(query => query.sql.includes('INSERT INTO public.payment_mandate_cancellations'))).toBe(!eligible);
@@ -505,7 +523,7 @@ it.each(['cancelled', 'failed', 'expired', 'overlap', 'missing-period'])('record
     expect(captures[0].values).toEqual([context.id, 'cashfree', 'same_charge', 58882, 'INR']);
     expect(captured.size).toBe(1);
     expect(queries.filter(query => query.sql.includes('UPDATE public.users SET subscription_plan'))).toHaveLength(needsReview ? 0 : 1);
-    expect(queries.filter(query => query.sql.includes("CASE WHEN status = 'cancelled' THEN status ELSE 'active' END"))).toHaveLength(needsReview ? 0 : 1);
+    expect(queries.filter(query => query.sql.includes("CASE WHEN status IN ('cancelled', 'expired') THEN status ELSE 'active' END"))).toHaveLength(needsReview ? 0 : 1);
     expect(queries.some(query => query.sql.includes('SET needs_review = true'))).toBe(needsReview);
 });
 
@@ -555,4 +573,199 @@ it.each(['success', 'failure', 'pending'])('confirms provider cancellation befor
     expect(JSON.parse(String(fetch.mock.calls[1][1].body)).action).toBe('CANCEL');
     expect(queries.some(query => query.sql.includes('SET completed_at = NOW()'))).toBe(scenario === 'success');
     expect(logger.error).toHaveBeenCalledTimes(scenario === 'success' ? 0 : 1);
+});
+
+it.each([
+    ['Basic', 'monthly', '114.00', '134.52'],
+    ['Basic', 'annual', '95.00', '112.10'],
+    ['Starter', 'monthly', '309.00', '364.62'],
+    ['Starter', 'annual', '257.00', '303.26'],
+    ['Pro', 'monthly', '1199.00', '1414.82'],
+    ['Pro', 'annual', '999.00', '1178.82'],
+    ['Business', 'monthly', '1938.00', '2286.84'],
+    ['Business', 'annual', '1615.00', '1905.70'],
+])('publishes the server quote and trial eligibility for %s %s', (plan, billing, baseAmount, totalAmount) => {
+    enableCashfree();
+    const { pool } = makePool();
+    const res = makeResponse();
+    route(makeRouter(pool), '/options')(makeRequest(null, {}, { plan, billing }) as unknown as Request, res as unknown as Response, vi.fn());
+    expect(res.body).toMatchObject({ billing, trialDays: 14, providers: {
+        cashfree: { enabled: true, trialEnabled: true, baseAmount, totalAmount, maxBillingCycles: billing === 'annual' ? 12 : 100 },
+    } });
+});
+
+it('rejects a stale quote and prevents Enterprise from opening online checkout', async () => {
+    enableCashfree();
+    const { pool } = makePool();
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const checkout = route(makeRouter(pool), '/checkout');
+    for (const [plan, expected] of [['Basic', 409], ['Enterprise', 400]] as const) {
+        const res = makeResponse();
+        await checkout(makeRequest({ provider: 'cashfree', plan, billing: 'annual', trial: true, mandateConsent: true,
+            quote: { currency: 'INR', totalAmount: '134.52' } }) as unknown as Request, res as unknown as Response, vi.fn());
+        expect(res.statusCode).toBe(expected);
+    }
+    expect(pool.connect).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+});
+
+it.each([14, 7])('validates the annual PayPal plan and its trial length (%s days)', async days => {
+    enablePayPal();
+    vi.stubEnv('PAYPAL_PLAN_BASIC_ANNUAL_TRIAL_14', 'P-ANNUAL-TRIAL');
+    vi.stubEnv('PAYPAL_BASIC_ANNUAL_BASE_AMOUNT', '5.00');
+    const { pool, queries } = makePool();
+    let created = false;
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, options?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/v1/oauth2/token')) return Response.json({ access_token: 'test', expires_in: 3600 });
+        if (url.endsWith('/v1/billing/plans/P-ANNUAL-TRIAL')) return Response.json({
+            id: 'P-ANNUAL-TRIAL', status: 'ACTIVE', taxes: { percentage: '18', inclusive: false },
+            billing_cycles: [
+                { tenure_type: 'TRIAL', frequency: { interval_unit: 'DAY', interval_count: days }, total_cycles: 1 },
+                { tenure_type: 'REGULAR', frequency: { interval_unit: 'MONTH', interval_count: 1 }, total_cycles: 12,
+                    pricing_scheme: { fixed_price: { value: '5.00', currency_code: 'USD' } } },
+            ],
+        });
+        if (url.endsWith('/v1/billing/subscriptions')) {
+            created = true;
+            const body = JSON.parse(String(options?.body));
+            expect(body.plan_id).toBe('P-ANNUAL-TRIAL');
+            expect(new URL(body.application_context.return_url).searchParams.get('billing')).toBe('annual');
+            return Response.json({ id: 'I-ANNUAL-TRIAL', links: [{ rel: 'approve', href: 'https://www.sandbox.paypal.com/checkoutnow?token=I-ANNUAL-TRIAL' }] });
+        }
+        throw new Error('Unexpected provider request');
+    }));
+    const res = makeResponse();
+    await route(makeRouter(pool), '/checkout')(makeRequest({ provider: 'paypal', plan: 'Basic', billing: 'annual', trial: true, mandateConsent: true }) as unknown as Request,
+        res as unknown as Response, vi.fn());
+    expect(res.statusCode).toBe(days === 14 ? 200 : 503);
+    expect(created).toBe(days === 14);
+    if (days === 14) {
+        expect(queries.find(query => query.sql.includes('INSERT INTO public.payment_subscriptions'))?.values).toEqual(
+            expect.arrayContaining(['basic', 'USD', '5.90', 14, 'annual']),
+        );
+    }
+});
+
+
+it.each((['basic', 'starter', 'pro', 'business'] as const).flatMap(plan =>
+    (['monthly', 'annual'] as const).map(billing => ({ plan, billing })),
+))('applies verified $plan $billing payment access and preserves the final paid month', async ({ plan, billing }) => {
+    enableCashfree();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2027-01-31T10:00:00.000Z'));
+    const price = getPlanPrice(plan, billing)!;
+    const expectedEnd = new Date('2027-02-28T10:00:00.000Z');
+    const account = {
+        tenant_plan: 'free', subscription_plan: `${plan}_trial`,
+        subscription_expires_at: null as Date | null, trial_started_at: '2027-01-01T10:00:00Z',
+        trial_ends_at: '2027-01-15T10:00:00Z',
+    };
+    const context = {
+        id: cashfreeSubscriptionId, tenant_id: user.tenantId, user_id: user.sub, plan,
+        provider_plan_id: 'cashfree_plan_test', status: billing === 'annual' ? 'expired' : 'active',
+        current_period_end: null, currency: 'INR', base_amount: String(price.baseAmountMinor / 100),
+        tax_percent: '18', tax_amount: String(price.taxAmountMinor / 100), total_amount: String(price.totalAmountMinor / 100),
+        trial_checkout: true, trial_ends_at: new Date(account.trial_ends_at), trial_days: 14, billing_period: billing,
+    };
+    const queries: Array<{ sql: string; values: unknown[] }> = [];
+    const eventIds = new Set();
+    const client = {
+        query: vi.fn(async (sql: string, values: unknown[] = []) => {
+            queries.push({ sql, values });
+            if (sql.includes('qsvc_payment_subscription_context')) return { rows: [context], rowCount: 1 };
+            if (sql.includes('INSERT INTO public.payment_webhook_events')) {
+                if (eventIds.has(values[1])) return { rows: [], rowCount: 0 };
+                eventIds.add(values[1]);
+            }
+            if (sql.includes('UPDATE public.users SET subscription_plan')) {
+                account.subscription_plan = String(values[0]);
+                account.subscription_expires_at = values[2] as Date;
+            }
+            return { rows: [], rowCount: 1 };
+        }),
+        release: vi.fn(),
+    };
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+        subscription_id: 'cashfree_sub_provider', subscription_status: billing === 'annual' ? 'COMPLETED' : 'ACTIVE',
+        next_schedule_date: billing === 'monthly' ? expectedEnd.toISOString() : undefined,
+        plan_details: { plan_id: 'cashfree_plan_test', plan_currency: 'INR', plan_interval_type: 'MONTH',
+            plan_intervals: 1, plan_max_cycles: billing === 'annual' ? 12 : 100, plan_amount: price.totalAmountMinor / 100 },
+        subscription_tags: { qsvc_checkout_id: context.id },
+    })));
+    const pool = { connect: vi.fn(async () => client) };
+    const webhook = route(makeRouter(pool), '/webhooks/cashfree');
+    const rawBody = Buffer.from(JSON.stringify({
+        type: 'SUBSCRIPTION_PAYMENT_SUCCESS', event_time: new Date().toISOString(),
+        data: { subscription_id: 'cashfree_sub_provider', payment_id: `paid_${plan}_${billing}`, payment_type: 'CHARGE',
+            payment_status: 'SUCCESS', payment_currency: 'INR', payment_amount: price.totalAmountMinor / 100 },
+    }));
+    const timestamp = String(Date.now());
+    const signature = crypto.createHmac('sha256', cashfreeWebhookSecret).update(timestamp).update(rawBody).digest('base64');
+    for (let attempt = 0; attempt < 2; attempt++) {
+        const res = makeResponse();
+        await webhook(makeRequest({}, { 'x-webhook-signature': signature, 'x-webhook-timestamp': timestamp }, {}, rawBody) as unknown as Request,
+            res as unknown as Response, vi.fn());
+        expect(res.statusCode).toBe(200);
+    }
+    expect(queries.filter(query => query.sql.includes('UPDATE public.users SET subscription_plan'))).toHaveLength(1);
+    expect(account).toMatchObject({ subscription_plan: plan, subscription_expires_at: expectedEnd });
+    const expectedFeatures = plan === 'basic' ? ['background_effects', 'ai_noise_suppression']
+        : plan === 'starter' ? ['meeting_scheduling', 'ai_captions', 'background_effects', 'ai_noise_suppression']
+            : ['meeting_scheduling', 'ai_captions', 'background_effects', 'ai_noise_suppression', 'cloud_recording'];
+    expect(getEntitlements(account)).toMatchObject({ plan, status: 'paid_active', trialUsed: true, features: expectedFeatures });
+    expect(getEntitlements(account, expectedEnd)).toMatchObject({ plan, status: 'paid_expired', features: [] });
+    expect(queries.find(query => query.sql.includes('UPDATE public.users SET subscription_plan'))?.values)
+        .toEqual([plan, user.sub, expectedEnd, user.tenantId]);
+});
+
+it('keeps a signed Razorpay browser confirmation pending until the provider webhook activates access', async () => {
+    enableRazorpay();
+    const { pool, client, queries } = makePool();
+    client.query.mockImplementation(async (sql: string, values: unknown[] = []) => {
+        queries.push({ sql, values });
+        return { rows: sql.includes('SELECT provider_subscription_id') ? [{ provider_subscription_id: 'sub_selected123' }] : [], rowCount: 1 };
+    });
+    vi.stubGlobal('fetch', vi.fn());
+    const paymentId = 'pay_selected123';
+    const subscriptionId = 'sub_selected123';
+    const signature = crypto.createHmac('sha256', 'razorpay_test_secret').update(`${paymentId}|${subscriptionId}`).digest('hex');
+    const res = makeResponse();
+    await route(makeRouter(pool), '/razorpay/verify')(
+        makeRequest({ paymentId, subscriptionId, signature }) as unknown as Request, res as unknown as Response, vi.fn(),
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ verified: true, activation: 'pending_webhook' });
+    expect(queries.some(query => query.sql.includes('UPDATE public.users'))).toBe(false);
+    expect(queries.some(query => query.sql.includes('INSERT INTO public.payment_captures'))).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+});
+
+it('cancels a paid renewal without reducing the purchased plan or remaining access period', async () => {
+    enableCashfree();
+    const periodEnd = new Date(Date.now() + 15 * 86_400_000);
+    const { pool, client, queries } = makePool();
+    client.query.mockImplementation(async (sql: string, values: unknown[] = []) => {
+        queries.push({ sql, values });
+        if (sql.includes('AS uncharged_trial')) return { rows: [{
+            id: cashfreeSubscriptionId, provider: 'cashfree', provider_subscription_id: 'selected-subscription',
+            billing_mode: 'subscription', status: 'active', current_period_end: periodEnd, uncharged_trial: false,
+        }], rowCount: 1 };
+        if (sql.includes('RETURNING current_period_end')) return { rows: [{ currentPeriodEnd: periodEnd }], rowCount: 1 };
+        return { rows: [], rowCount: 1 };
+    });
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ subscription_status: 'CANCELLED' })));
+    const res = makeResponse();
+    await route(makeRouter(pool), '/cancel')(
+        makeRequest({ subscriptionId: cashfreeSubscriptionId }) as unknown as Request, res as unknown as Response, vi.fn(),
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toEqual({ cancelled: true, currentPeriodEnd: periodEnd });
+    expect(queries.some(query => query.sql.includes('UPDATE public.users'))).toBe(false);
+    const cancellation = queries.find(query => query.sql.includes("SET status = 'cancelled'"));
+    expect(cancellation?.sql).not.toMatch(/current_period_end\s*=/);
+    expect(cancellation?.values).toEqual([cashfreeSubscriptionId, user.tenantId, user.sub]);
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/subscriptions/selected-subscription/manage'),
+        expect.objectContaining({ method: 'POST', body: expect.stringContaining('"action":"CANCEL"') }));
 });

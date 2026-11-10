@@ -41,8 +41,8 @@ export default function MeetingSetupDialog({ action, creating, onClose, onCreate
         try {
             await onCreate({ title: cleanTitle, meetingKind: meetingKind === 'instant' ? 'conference' : meetingKind, startNow });
             onClose();
-        } catch (reason) {
-            setError(reason instanceof Error ? reason.message : 'Could not create the meeting. Please try again.');
+        } catch {
+            setError('Could not create the meeting. Please try again.');
         }
     };
 

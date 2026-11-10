@@ -55,8 +55,8 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
                 }))];
             }
             if (current.current && version === refreshVersion.current) { setWaiting(result.waitingPeers || []); setLoading(false); }
-        } catch (reason) {
-            if (current.current && version === refreshVersion.current) { setError(reason instanceof Error ? reason.message : 'Could not refresh the waiting room.'); setLoading(false); }
+        } catch {
+            if (current.current && version === refreshVersion.current) { setError('Could not refresh the waiting room. Try again.'); setLoading(false); }
         }
     };
     useEffect(() => {
@@ -77,13 +77,12 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
             if (current.current) {
                 setConfirmation(null);
                 if (method === 'admitAll' && Array.isArray(result.failed) && result.failed.length) {
-                    const reasons = [...new Set(result.failed.map((failure: { reason: string }) => failure.reason))].join(' ');
-                    setError(`${result.failed.length} could not be admitted and remain in the waiting room. ${reasons}`);
+                    setError(`${result.failed.length} could not be admitted. Try admitting them from the waiting room.`);
                 }
                 await refresh();
             }
-        } catch (reason) {
-            if (current.current) setError(reason instanceof Error ? reason.message : 'That change could not be made. Please try again.');
+        } catch {
+            if (current.current) setError('That change could not be made. Please try again.');
         } finally { if (current.current) setBusy(false); }
     };
     const setSetting = (key: keyof RoomHostSettings, value: boolean) => run(key === 'locked' ? 'lockMeeting' : 'updateSettings', key === 'locked' ? { locked: value } : { settings: { [key]: value } });
@@ -103,17 +102,17 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
 
             {roomDevicesEnabled && role === 'host' && <section className="host-tools-settings" aria-labelledby="host-room-devices">
                 <h3 id="host-room-devices">Room devices</h3>
-                {roomAlias ? <p role="status">Bridge started. Use room alias <code>{roomAlias}</code> with your organisation’s gateway. Admit callers from the waiting list.</p>
+                {roomAlias ? <p role="status">Room devices can join using <code>{roomAlias}</code>. Admit callers from the waiting room.</p>
                     : <button type="button" disabled={bridgeBusy || settings.locked} onClick={async () => {
                         setBridgeBusy(true);
                         setBridgeError('');
                         try {
                             const result = await signaling.request('startPolyRoom', {});
                             if (current.current) setRoomAlias(result.roomAlias);
-                        } catch (error) {
-                            if (current.current) setBridgeError(error instanceof Error ? error.message : 'Could not start the MCU bridge.');
+                        } catch {
+                            if (current.current) setBridgeError('Room devices could not be enabled. Try again.');
                         } finally { if (current.current) setBridgeBusy(false); }
-                    }}>{bridgeBusy ? 'Starting bridge…' : 'Enable room devices'}</button>}
+                    }}>{bridgeBusy ? 'Enabling room devices…' : 'Enable room devices'}</button>}
                 {bridgeError && <p role="alert">{bridgeError}</p>}
             </section>}
             <section className="host-tools-settings" aria-labelledby="host-access-title">

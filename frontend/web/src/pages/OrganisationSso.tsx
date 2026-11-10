@@ -3,7 +3,7 @@ import { Link, Navigate } from 'react-router-dom';
 import PersonalSignInButtons from '../components/PersonalSignInButtons';
 import SiteNav from '../components/SiteNav';
 import { useSession } from '../lib/use-session';
-import { browserProof, ssoRequest } from '../lib/sso';
+import { browserProof, SignInRequestError, ssoRequest } from '../lib/sso';
 import '../styles/organisation-sso.css';
 
 type Connection = {
@@ -44,7 +44,7 @@ export default function OrganisationSso() {
     async function run(action: () => Promise<void>) {
         if (busy) return;
         setBusy(true); setError(''); setNotice('');
-        try { await action(); } catch (reason) { setError(reason instanceof Error ? reason.message : 'Try again.'); }
+        try { await action(); } catch (reason) { setError(reason instanceof SignInRequestError ? reason.message : 'The change could not be completed. Try again.'); }
         finally { setBusy(false); }
     }
     const save = (path: string, method: string, body?: object) => run(async () => {
@@ -62,7 +62,8 @@ export default function OrganisationSso() {
         void run(async () => {
             const file = fields.get('metadata');
             if (fields.get('provider') === 'saml' && (!(file instanceof File) || !file.size || file.size > 80000)) {
-                throw new Error('Choose a SAML XML file up to 80 KB.');
+                setError('Choose a SAML XML file up to 80 KB.');
+                return;
             }
             const body = fields.get('provider') === 'saml' && file instanceof File
                 ? { provider: 'saml', metadata: await file.text() }

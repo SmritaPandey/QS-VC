@@ -52,15 +52,15 @@ function render() {
         : screen);
 }
 
-function planName(plan) { return plan === 'starter_trial' ? 'Starter trial' : plan === 'pro_trial' ? 'Pro trial' : String(plan || 'guest').replace(/^./, letter => letter.toUpperCase()); }
+function planName(plan) { return String(plan || 'guest').replace(/_trial$/, ' trial').replace(/^./, letter => letter.toUpperCase()); }
 function planBadge() {
     const plan = state.entitlements.plan;
     if (!plan || plan === 'guest') return null;
     const silver = plan === 'starter' || plan === 'starter_trial';
-    const tone = silver ? 'silver' : plan === 'pro' || plan === 'pro_trial' ? 'gold' : 'violet';
-    const crown = h('span', { class: `plan-crown ${tone}`, 'aria-label': `${planName(plan)} plan`, title: `${planName(plan)} plan` }, icon('workspace_premium'));
+    const tone = silver ? 'silver' : plan === 'enterprise' ? 'violet' : 'gold';
+    const crown = plan === 'basic' || plan === 'basic_trial' ? null : h('span', { class: `plan-crown ${tone}`, 'aria-label': `${planName(plan)} plan`, title: `${planName(plan)} plan` }, icon('workspace_premium'));
     let trial = null;
-    if ((plan === 'starter_trial' || plan === 'pro_trial') && state.entitlements.trialEndsAt) {
+    if (plan.endsWith('_trial') && state.entitlements.trialEndsAt) {
         const days = Math.max(0, Math.ceil((new Date(state.entitlements.trialEndsAt).getTime() - Date.now()) / 86400000));
         trial = h('small', { text: `${days} ${days === 1 ? 'day' : 'days'} left in trial` });
     }

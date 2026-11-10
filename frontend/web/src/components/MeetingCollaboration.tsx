@@ -42,7 +42,7 @@ export default function MeetingCollaboration({ open, connected, role, myPeerId, 
     const receive = useCallback((next: CollaborationState) => { if (active.current) setSnapshot(current => newerCollaboration(current, next)); }, []);
     const refresh = useCallback(async () => {
         try { receive(await signaling.request('getCollaborationState')); }
-        catch (reason) { if (active.current) setError(reason instanceof Error ? reason.message : 'Could not load activities.'); }
+        catch { if (active.current) setError('Could not load activities. Try again.'); }
         finally { if (active.current) setLoading(false); }
     }, [receive]);
     useEffect(() => {
@@ -64,8 +64,8 @@ export default function MeetingCollaboration({ open, connected, role, myPeerId, 
             const next: CollaborationState = await signaling.request('collaborationAction', action);
             receive(next);
             return next;
-        } catch (reason) {
-            if (active.current) { setError(reason instanceof Error ? reason.message : 'That change could not be saved.'); void refresh(); }
+        } catch {
+            if (active.current) { setError('That change could not be saved. Try again.'); void refresh(); }
             return null;
         } finally { pending.current = false; if (active.current) setBusy(false); }
     };
@@ -117,7 +117,7 @@ export default function MeetingCollaboration({ open, connected, role, myPeerId, 
             const url = URL.createObjectURL(new Blob([bytes], { type: file.mime }));
             const link = document.createElement('a'); link.href = url; link.download = file.name; document.body.append(link); link.click(); link.remove();
             window.setTimeout(() => URL.revokeObjectURL(url), 1000);
-        } catch (reason) { if (active.current) setError(reason instanceof Error ? reason.message : 'Could not download this file.'); }
+        } catch { if (active.current) setError('Could not download this file. Try again.'); }
         finally { pending.current = false; if (active.current) setBusy(false); }
     };
     const changeTab = (next: Tab) => { cancelStroke(); setTab(next); setError(''); };

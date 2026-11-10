@@ -29,27 +29,31 @@ export default function Signup() {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ displayName: fields.get('displayName'), email: fields.get('email'), phoneNumber: fields.get('phoneNumber'), password: fields.get('password') }),
             });
-            const data = await response.json();
-            if (!response.ok || typeof data.token !== 'string' || !data.token) throw new Error(data.error || 'Could not create your account. Please try again.');
+            if (response.status === 400) { setError('Check your name, email, mobile number and password, then try again.'); return; }
+            if (response.status === 403) { setError('Use your organisation sign-in for this email address.'); return; }
+            if (response.status === 409) { setError('This email already has an account. Sign in to continue.'); return; }
+            if (response.status === 429) { setError('Too many attempts. Wait a few minutes and try again.'); return; }
+            const data = response.ok ? await response.json().catch(() => null) : null;
+            if (typeof data?.token !== 'string' || !data.token) { setError('Could not create your account. Please try again.'); return; }
             if (!completeSignIn(data.token)) return;
             navigate(nextPath(location.search), { replace: true });
-        } catch (reason) {
-            setError(reason instanceof Error ? reason.message : 'Cannot reach sign up. Please try again.');
+        } catch {
+            setError('Could not create your account. Please try again.');
         } finally { setBusy(false); }
     }
     return <div className="public-site public-signup"><SiteNav />
         <main id="main-content" className="public-container public-auth-layout">
             <div className="public-auth-copy"><h1>Your next conversation starts here.</h1>
-                <p>Create a free account. Choose Starter or Pro when you’re ready for more.</p>
-                <p>Already on Starter or Pro? <Link to="/login">Sign in</Link> to use your existing plan.</p>
-                <p>Joining an enterprise? Use your organisation’s SSO / SAML on the <Link to="/login">sign-in page</Link>.</p>
+                <p>Create a free account. Choose a paid plan when you’re ready for more.</p>
+                <p>Already have an account? <Link to="/login">Sign in</Link> to use your existing plan.</p>
+                <p>Joining an enterprise? Use your organisation sign-in on the <Link to="/login">sign-in page</Link>.</p>
             </div>
             <form className="public-auth-form" onSubmit={submit} aria-label="Create an account" aria-busy={busy}>
                 <label htmlFor="signup-name">Your name</label>
                 <input id="signup-name" name="displayName" autoComplete="name" required maxLength={100} />
                 <label htmlFor="signup-phone">Mobile number</label>
                 <input id="signup-phone" name="phoneNumber" type="tel" autoComplete="tel" inputMode="tel" placeholder="+91 98765 43210" required maxLength={24} aria-describedby="signup-phone-help" />
-                <p id="signup-phone-help">Include your country code. We store it on your account; it is not verified by SMS yet.</p>
+                <p id="signup-phone-help">Include your country code. This number is saved to your account.</p>
                 <label htmlFor="signup-email">Email</label>
                 <input id="signup-email" name="email" type="email" autoComplete="email" required maxLength={255} />
                 <label htmlFor="signup-password">Password</label>

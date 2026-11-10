@@ -9,6 +9,8 @@ type Customer = {
     expires_at: string | null;
 };
 
+class AccessRequestError extends Error {}
+
 const endpoint = `${AUTH_API}/api/auth/enterprise/terms`;
 
 export default function EnterpriseAccessTerms() {
@@ -24,7 +26,7 @@ export default function EnterpriseAccessTerms() {
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
             signal: AbortSignal.timeout(8000),
         });
-        if (getToken() !== token) throw new Error('The signed-in account changed.');
+        if (getToken() !== token) throw new AccessRequestError('The signed-in account changed.');
         if (response.status === 401) clearSession(token);
         if (!response.ok) {
             const errors: Record<number, string> = {
@@ -34,7 +36,7 @@ export default function EnterpriseAccessTerms() {
                 404: 'No active customer account was found.',
                 409: 'Multiple accounts match this email. Resolve the duplicate before approving access.',
             };
-            throw new Error(errors[response.status] || 'The access service is unavailable. Try again.');
+            throw new AccessRequestError(errors[response.status] || 'Access settings are unavailable. Try again.');
         }
         return response.json();
     }
@@ -50,7 +52,7 @@ export default function EnterpriseAccessTerms() {
         try {
             setCustomer(await request(`${endpoint}?${new URLSearchParams({ email })}`));
         } catch (reason) {
-            setError(reason instanceof Error ? reason.message : 'Customer lookup failed.');
+            setError(reason instanceof AccessRequestError ? reason.message : 'Customer lookup failed.');
         } finally {
             setBusy(false);
         }
@@ -76,7 +78,7 @@ export default function EnterpriseAccessTerms() {
             setCustomer({ ...customer, workspace_url: term.workspace_url, expires_at: term.expires_at });
             setMessage(`Access saved through ${new Date(term.expires_at).toLocaleString()}.`);
         } catch (reason) {
-            setError(reason instanceof Error ? reason.message : 'Access could not be saved.');
+            setError(reason instanceof AccessRequestError ? reason.message : 'Access could not be saved.');
         } finally {
             setBusy(false);
         }

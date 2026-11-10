@@ -16,7 +16,7 @@ import { createSsoLoopback } from './sso-loopback';
 import * as path from 'path';
 // Copied into the app package at build time (scripts/vendor-shared.cjs): the packaged app must never
 // load files from outside its own folder, or it fails to start.
-import { FEATURE_MIN_PLAN } from './vendor/entitlements.cjs';
+import { FEATURE_MIN_PLAN, PLAN_LEVEL } from './vendor/entitlements.cjs';
 
 const PROTOCOL = 'qsvc';
 const MEETING_CODE = /^[A-Z0-9]{2,8}(-[A-Z0-9]{2,8}){1,4}$/;
@@ -268,7 +268,7 @@ function setupIPC() {
         let entitlements: EntitlementSnapshot = { plan: 'guest', status: 'paid_active', trialEndsAt: null, features: [] };
         if (workspace && user && token) {
             const result = await api('api/auth/me/entitlements');
-            if (result.ok && ['guest', 'starter_trial', 'starter', 'pro_trial', 'pro', 'enterprise'].includes(result.data?.plan)
+            if (result.ok && typeof result.data?.plan === 'string' && Object.prototype.hasOwnProperty.call(PLAN_LEVEL, result.data.plan)
                 && Array.isArray(result.data?.features)) {
                 entitlements = {
                     plan: result.data.plan,

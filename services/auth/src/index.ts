@@ -223,7 +223,7 @@ app.get('/health', (_req, res) => {
 app.get('/ready', async (_req, res) => {
     try {
         await pool.query('SELECT 1 FROM enterprise_access_terms LIMIT 0');
-        await pool.query('SELECT 1 FROM payment_subscriptions LIMIT 0');
+        await pool.query('SELECT trial_days, billing_period FROM payment_subscriptions LIMIT 0');
         await pool.query('SELECT 1 FROM payment_mandate_cancellations LIMIT 0');
         await pool.query('SELECT needs_review, review_reason FROM payment_captures LIMIT 0');
         await pool.query('SELECT phone_number FROM users LIMIT 0');

@@ -1,0 +1,12 @@
+{
+    "guest": 0,
+    "basic_trial": 1,
+    "basic": 1,
+    "starter_trial": 2,
+    "starter": 2,
+    "pro_trial": 3,
+    "pro": 3,
+    "business_trial": 4,
+    "business": 4,
+    "enterprise": 5
+}

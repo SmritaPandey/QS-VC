@@ -8,9 +8,9 @@ export default function CurrencyRateSelector({ id, value }: Props) {
     const statusMessage = value.status === 'loading' || value.status === 'refreshing'
         ? 'Updating exchange rates.'
         : value.status === 'stale'
-            ? 'Exchange rate update failed. Saved rates are being used.'
+            ? 'Prices use the last available exchange rates.'
             : value.status === 'error'
-                ? 'Exchange rates are unavailable. Prices remain in INR.'
+                ? 'Prices are shown in INR.'
                 : 'Exchange rates are up to date.';
 
     return <div className="currency-rate-selector" aria-busy={value.status === 'loading' || value.status === 'refreshing'}>
@@ -21,6 +21,5 @@ export default function CurrencyRateSelector({ id, value }: Props) {
             </select>
         </label>
         <span className="sr-only" role="status" aria-live="polite">{statusMessage}</span>
-        <button type="button" onClick={value.refresh} disabled={value.status === 'loading' || value.status === 'refreshing'}>Refresh rates</button>
     </div>;
 }

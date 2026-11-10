@@ -8,6 +8,7 @@ const desktop = path.resolve(__dirname, '..');
 const shared = path.resolve(desktop, '..', '..', 'shared');
 const copies = [
     ['entitlements.cjs', path.join(desktop, 'dist', 'vendor', 'entitlements.cjs')],
+    ['plan-levels.json', path.join(desktop, 'dist', 'vendor', 'plan-levels.json')],
     ['entitlements.d.cts', path.join(desktop, 'src', 'vendor', 'entitlements.d.cts')],
 ];
 for (const [name, target] of copies) {

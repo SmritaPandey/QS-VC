@@ -4,14 +4,9 @@ interface Props {
     active: boolean;
     securityCode: string | null;
     participants: number;
-    mode: 'streams' | 'script' | 'none' | null;
 }
 
-/**
- * Top-bar status for end-to-end encryption. Opens a small panel with the algorithms in use and the
- * meeting security code participants can compare to rule out key substitution by the server.
- */
-export default function EncryptionBadge({ active, securityCode, participants, mode }: Props) {
+export default function EncryptionBadge({ active, securityCode, participants }: Props) {
     const [open, setOpen] = useState(false);
     const panelId = useId();
     const ref = useRef<HTMLDivElement>(null);
@@ -32,19 +27,15 @@ export default function EncryptionBadge({ active, securityCode, participants, mo
         </button>
         {open && <div className="qs-e2ee-panel" id={panelId} role="dialog" aria-label="Encryption details">
             <h2><span className="mi" aria-hidden="true">verified_user</span> Quantum-safe end-to-end encryption</h2>
-            <p>Audio, video and screen sharing are encrypted on your device and can only be decrypted by people in this meeting. The QS-VC servers forward media they cannot read.</p>
-            <dl>
-                <div><dt>Key exchange</dt><dd>ML-KEM-1024 (NIST FIPS 203)</dd></div>
-                <div><dt>Signatures</dt><dd>ML-DSA-87 (NIST FIPS 204)</dd></div>
-                <div><dt>Media</dt><dd>AES-256-GCM per frame, new key whenever someone leaves</dd></div>
-                <div><dt>Participants</dt><dd>{participants}</dd></div>
-                {mode && mode !== 'none' && <div><dt>Browser engine</dt><dd>{mode === 'streams' ? 'Encoded streams' : 'Script transform (worker)'}</dd></div>}
-            </dl>
+            <p>{active
+                ? 'End-to-end encryption protects this meeting’s audio, video and screen sharing. It uses post-quantum algorithms standardised in NIST FIPS 203 and 204.'
+                : 'End-to-end encryption is being prepared. Wait for the security code before checking the meeting.'}</p>
+            <dl><div><dt>Participants</dt><dd>{participants}</dd></div></dl>
             <div className="qs-e2ee-code">
                 <span>Security code</span>
                 <strong aria-live="polite">{securityCode || '…'}</strong>
             </div>
-            <p className="qs-e2ee-hint">Compare this code with the others (for example, read it out). If everyone sees the same code, nobody — not even the server — has intercepted the meeting keys. It changes when people join or leave.</p>
+            <p className="qs-e2ee-hint">Compare this code with the other participants. It can change when someone joins or leaves. If the codes differ, pause before sharing anything sensitive.</p>
         </div>}
     </div>;
 }

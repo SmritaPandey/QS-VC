@@ -119,6 +119,17 @@ async function openLocalMedia(micId: string | undefined, cameraId: string | unde
 const POLICY_ERRORS = /password|locked|full|cancelled|declined|denied|removed|ended|organiser|organizer|webinar|encryption|sign in/i;
 type JoinFailure = { title: string; detail: string };
 
+function joinPolicyGuidance(message: string) {
+    if (/password/i.test(message)) return 'Check the meeting password and try again.';
+    if (/locked/i.test(message)) return 'The meeting is locked. Ask the host if you can join.';
+    if (/full/i.test(message)) return 'The meeting is full. Try again later or contact the host.';
+    if (/cancelled|ended/i.test(message)) return 'This meeting has ended or been cancelled. Ask the host for a new link.';
+    if (/sign in/i.test(message)) return 'Sign in to join this meeting.';
+    if (/encryption/i.test(message)) return 'This meeting requires end-to-end encryption. Update your browser and try again.';
+    if (/declined|denied|removed/i.test(message)) return 'Contact the host if you still need to join.';
+    return 'Check your invitation or contact the host.';
+}
+
 /**
  * Keeps people in the meeting through brief network drops (Wi-Fi switch, laptop sleep, server restart):
  * the meeting session is re-created up to three times before "Connection lost" is shown.
@@ -426,7 +437,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 media.setPaused(kind, true, kind === 'audio' ? 'mic' : 'camera');
                 if (kind === 'audio') { audioMutedRef.current = true; setAudioMuted(true); }
                 else { videoOffRef.current = true; setVideoOff(true); cameraCapture.current.stop(); }
-                setNotice(error.message);
+                setNotice(`The host has turned off ${kind === 'audio' ? 'microphones' : 'cameras'} for participants.`);
             }
         });
     }, []);
@@ -450,12 +461,12 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 if (!filteredTrack) throw new Error('The AI noise filter did not produce an audio track.');
                 nextProcessedTrack = filteredTrack;
                 outgoingTrack = filteredTrack;
-            } catch (error) {
+            } catch {
                 nextSuppressor?.stop();
                 nextSuppressor = null;
                 await rawTrack.applyConstraints({ noiseSuppression: true }).catch(() => {});
                 effectiveMode = 'standard';
-                showNotice(error instanceof Error ? `${error.message} Using standard noise suppression.` : 'AI noise suppression could not start. Using standard noise suppression.');
+                showNotice('AI noise suppression could not start. Using standard noise suppression.');
             }
         } else {
             await rawTrack.applyConstraints({ noiseSuppression: mode === 'standard' }).catch(() => {});
@@ -593,8 +604,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             const appliedMode = await publishAudioTrack(track, mode);
             noiseModeRef.current = appliedMode;
             setNoiseMode(appliedMode);
-        } catch (error) {
-            showNotice(error instanceof Error ? error.message : 'Microphone noise settings could not be changed.');
+        } catch {
+            showNotice('Microphone noise settings could not be changed.');
             return;
         }
     }, [entitlements.features, entitlements.loading, isPlatformAdmin, publishAudioTrack, requestPlanFeature, showNotice, signedIn]);
@@ -790,7 +801,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         await Promise.all(targets.map(peerId => sendGroupKey(peerId).catch(error => console.warn('[E2EE] Could not send key to', peerId, error))));
                         await signaling.request('e2eeRekey', {}).catch(() => undefined);
                         console.info(`[E2EE] Group key rotated (${reason})`);
-                    }).catch(error => { console.error('[E2EE] Rekey failed:', error); showNotice('Encryption could not rotate. Please rejoin the meeting.'); });
+                    }).catch(error => { console.error('[E2EE] Rekey failed:', error); showNotice('Your secure connection was interrupted. Please rejoin the meeting.'); });
                     return rotation;
                 };
                 // Listeners first, so nothing sent while we set up media is missed.
@@ -868,8 +879,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         playSound('notice');
                         showNotice(`${by || 'The host'} turned off your ${k === 'audio' ? 'microphone' : 'camera'}.`);
                     }),
-                    signaling.on('kicked', async ({ reason }: any) => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/meeting-end', { replace: true, state: { meetingCode, reason: reason || 'You were removed from the meeting.', left: true, canRejoin: false } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
-                    signaling.on('meetingEnded', async ({ reason }: any) => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/meeting-end', { replace: true, state: { meetingCode, reason: reason || 'The meeting has ended.', left: false } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
+                    signaling.on('kicked', async () => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/meeting-end', { replace: true, state: { meetingCode, reason: 'You were removed from the meeting.', left: true, canRejoin: false } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
+                    signaling.on('meetingEnded', async () => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/meeting-end', { replace: true, state: { meetingCode, reason: 'The meeting has ended.', left: false } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
                     signaling.on('chatMessage', (msg: ChatMessage) => {
                         setChatMessages((prev) => [...prev, msg]);
                         if (msg.peerId !== myPeerIdRef.current && !chatOpenRef.current) setIncomingChatMessage(msg);
@@ -884,7 +895,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                             const manager = e2eeRef.current;
                             if (!manager || typeof payload?.peerId !== 'string') return;
                             const bundle: E2EEKeyBundle = { peerId: payload.peerId, kemPublicKey: payload.kemPublicKey, signingPublicKey: payload.signingPublicKey, signature: payload.signature };
-                            if (!await manager.verifyKeyBundle(bundle, payload.peerId)) { showNotice('A participant sent an invalid encryption key. Their media will stay blocked.'); return; }
+                            if (!await manager.verifyKeyBundle(bundle, payload.peerId)) { showNotice('A participant’s audio and video are unavailable because their secure connection could not be verified.'); return; }
                             e2eeBundlesRef.current.set(payload.peerId, bundle);
                             bumpE2EEIdentities();
                             if (typeof payload.keyHolderPeerId === 'string') e2eeKeyHolderRef.current = payload.keyHolderPeerId;
@@ -903,7 +914,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                             await manager.acceptMeetingKey(payload.envelope as E2EEKeyEnvelope, holderPeerId, holderBundle.signingPublicKey, myPeerIdRef.current);
                             setE2EEActive(true);
                             await signaling.request('e2eeKeyReceived', {}).catch(() => undefined);
-                        })().catch(error => { console.error('[E2EE] Group key rejected:', error); showNotice('An encryption key could not be verified, so it was rejected. Media stays protected.'); });
+                        })().catch(error => { console.error('[E2EE] Group key rejected:', error); showNotice('The secure connection could not be verified. Please rejoin the meeting.'); });
                     }),
                     signaling.on('e2eeKeyHolderChanged', (payload: any) => {
                         void (async () => {
@@ -917,7 +928,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                             // We now hold the meeting key: rotate (or create) it, then send it to everyone.
                             await rotateAndDistribute(payload.generate ? 'first key' : 'key holder left');
                             setE2EEActive(true);
-                        })().catch(error => { console.error('[E2EE] Key holder handover failed:', error); showNotice('Encryption could not be handed over. Please rejoin the meeting.'); });
+                        })().catch(error => { console.error('[E2EE] Key holder handover failed:', error); showNotice('Your secure connection was interrupted. Please rejoin the meeting.'); });
                     }),
                 );
 
@@ -937,7 +948,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     for (const peer of joinResult.existingPeers || []) {
                         if (!peer.e2eeKeyBundle) continue;
                         const bundle = peer.e2eeKeyBundle as E2EEKeyBundle;
-                        if (!await e2eeManager.verifyKeyBundle(bundle, peer.peerId)) { showNotice(`${peer.displayName || 'A participant'} has an invalid encryption identity. Their media stays blocked.`); continue; }
+                        if (!await e2eeManager.verifyKeyBundle(bundle, peer.peerId)) { showNotice(`${peer.displayName || 'A participant'} could not be verified. Their audio and video are unavailable.`); continue; }
                         e2eeBundlesRef.current.set(peer.peerId, bundle);
                     }
                     setE2EEEnabled(true);
@@ -953,7 +964,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     }
                 } else {
                     setE2EEEnabled(false);
-                    showNotice('The organiser turned off end-to-end encryption for this meeting. Media is still protected in transit with DTLS-SRTP.');
+                    showNotice('The organiser turned off end-to-end encryption for this meeting. Audio and video are still encrypted in transit.');
                 }
 
                 // People already in the room, with their mic / camera / hand state.
@@ -1033,7 +1044,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                             const watchdog = setTimeout(() => {
                                 if (!alive() || e2eeRef.current !== encryptor || encryptor.getSenderFramesSeen() > 0) return;
                                 void media.closeProducerBySource('mic'); void media.closeProducerBySource('camera');
-                                showNotice('Your browser did not route media through end-to-end encryption, so your microphone and camera were stopped. Update your browser or try Chrome, Edge, Safari or Firefox.');
+                                showNotice('Your microphone and camera were turned off because end-to-end encryption was unavailable. Update your browser and try again.');
                             }, 8000);
                             unsubscribe.push(() => clearTimeout(watchdog));
                         }
@@ -1127,7 +1138,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     if (POLICY_ERRORS.test(message)) {
                         stopLocalMedia(); media.close(); signaling.disconnect();
                         setLocalStream(null); setVideoOff(true); setAudioMuted(true); setRestoring(false);
-                        setJoinFailure({ title: /declined|denied/i.test(message) ? 'You were not let in' : 'You can’t join this meeting right now', detail: message });
+                        setJoinFailure({ title: /declined|denied/i.test(message) ? 'You were not let in' : 'You can’t join this meeting right now', detail: joinPolicyGuidance(message) });
                     } else {
                         // Network or server hiccup: try again automatically before giving up.
                         dropped();
@@ -1192,14 +1203,14 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             media.setPaused('audio', true, 'private-audio');
             try {
                 await signaling.request('setPrivateConversationMuted', { conversationId, muted: true });
-            } catch (error) {
+            } catch {
                 if (isSameConversation()) {
                     privateMicMutedRef.current = false;
                     setPrivateMicMuted(false);
                     if (privateMicTrackRef.current) privateMicTrackRef.current.enabled = true;
                     media.setPaused('audio', false, 'private-audio');
                 }
-                showNotice(error instanceof Error ? error.message : 'Your private microphone could not be muted.');
+                showNotice('Your private microphone could not be muted. Try again.');
             }
             return;
         }
@@ -1237,7 +1248,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 const started = await publishPrivateAudio();
                 if (!isSameConversation()) return;
                 if (!started) throw new Error('Your private microphone could not start. Check browser microphone access and try again.');
-            } catch (error) {
+            } catch {
                 if (isSameConversation()) {
                     privateMicMutedRef.current = true;
                     setPrivateMicMuted(true);
@@ -1245,7 +1256,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     media.setPaused('audio', true, 'private-audio');
                     signaling.request('setPrivateConversationMuted', { conversationId, muted: true }).catch(() => {});
                 }
-                showNotice(error instanceof Error ? error.message : 'Your private microphone could not be unmuted.');
+                showNotice('Your private microphone could not be unmuted. Check microphone access and try again.');
             }
             return;
         }
@@ -1257,8 +1268,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             setPrivateMicMuted(false);
             if (privateMicTrackRef.current) privateMicTrackRef.current.enabled = true;
             media.setPaused('audio', false, 'private-audio');
-        } catch (error) {
-            showNotice(error instanceof Error ? error.message : 'Your private microphone could not be unmuted.');
+        } catch {
+            showNotice('Your private microphone could not be unmuted.');
         }
     }, [publishPrivateAudio, showNotice, state.micId, watchMicrophone]);
 
@@ -1426,7 +1437,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const startScreenShare = useCallback(async (surface?: ScreenShareSurface) => {
         if (!roomSettingsRef.current.allowScreenShare) { showNotice('Screen sharing is disabled by the host.'); return; }
         if (!sessionActive.current || sharingRef.current || busyRef.current.screen) return;
-        if (initializingRef.current || !joinedRef.current || !media.canSend) { showNotice('Screen sharing needs an active media connection. Rejoin and try again.'); return; }
+        if (initializingRef.current || !joinedRef.current || !media.canSend) { showNotice('Screen sharing is unavailable. Rejoin the meeting and try again.'); return; }
         busyRef.current.screen = true;
         const revision = sessionRevision.current;
         try {
@@ -1488,8 +1499,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             pendingRecording.current = null; recordingManager.pending = null;
             setRecordingStatus('Recording saved.');
             return true;
-        } catch (reason) {
-            setRecordingStatus(reason instanceof Error ? reason.message : 'Upload failed. Retry before leaving.');
+        } catch {
+            setRecordingStatus('Upload failed. Retry before leaving.');
             return false;
         } finally { busyRef.current.record = false; }
     }, [meetingCode]);
@@ -1507,8 +1518,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 const result = await recordingManager.stopRecording();
                 pendingRecording.current = { blob: result.blob, format: result.format, meetingCode: meetingCode || '', id: crypto.randomUUID() };
                 recordingManager.pending = pendingRecording.current;
-            } catch (reason) {
-                setRecordingStatus(reason instanceof Error ? reason.message : 'Recording could not be saved.');
+            } catch {
+                setRecordingStatus('Recording could not be saved.');
                 return false;
             } finally {
                 compositeRef.current?.stop(); compositeRef.current = null;
@@ -1553,10 +1564,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             recordingRef.current = true;
             setIsRecording(true);
             setRecordingStatus('');
-        } catch (reason) {
+        } catch {
             compositeRef.current?.stop(); compositeRef.current = null;
             void signaling.request('setRecordingState', { recording: false }).catch(() => {});
-            showNotice(reason instanceof Error ? reason.message : 'Recording could not start.');
+            showNotice('Recording could not start. Try again.');
         } finally { busyRef.current.record = false; }
     }, [finishRecording, meetingCode, myRole, connected, showNotice, entitlements.loading, entitlements.features, entitlements.featureMinimumPlans, isPlatformAdmin, location.hash, location.pathname, location.search]);
 
@@ -1638,11 +1649,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         setKnocks(current => current.filter(k => k.peerId !== peerId));
         signaling.request(admit ? 'admitPeer' : 'rejectPeer', { targetPeerId: peerId }).then(() => {
             if (!admit) notifiedKnocks.current.delete(peerId);
-        }).catch((error: Error) => showNotice(error?.message || 'That request could not be answered.'));
+        }).catch(() => showNotice('That request could not be answered. Try again.'));
     }, [showNotice]);
     const endForEveryone = useCallback(async () => {
         setLeaveOpen(false);
-        try { await signaling.request('endMeeting', {}); } catch (error) { showNotice(error instanceof Error ? error.message : 'The meeting could not be ended.'); return; }
+        try { await signaling.request('endMeeting', {}); } catch { showNotice('The meeting could not be ended.'); return; }
         void handleLeave();
     }, [handleLeave, showNotice]);
     const requestLeave = useCallback(() => {
@@ -1665,21 +1676,21 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             const targetName = peersRef.current.get(targetPeerId)?.displayName || 'participant';
             const result = await signaling.request('startPrivateConversation', { targetPeerId });
             setPrivateInvite({ conversationId: result.conversationId, otherPeerId: targetPeerId, otherDisplayName: targetName, direction: 'outgoing', durationMs: result.durationMs ?? privateConversationLimitMs });
-        } catch (error) { showNotice(error instanceof Error ? error.message : 'The invitation could not be sent.'); }
+        } catch { showNotice('The invitation could not be sent.'); }
     }, [privateConversationLimitMs, showNotice, signedIn]);
 
     const acceptPrivateConversation = useCallback(async () => {
         const invite = privateInviteRef.current;
         if (!invite || invite.direction !== 'incoming') return;
         try { await signaling.request('acceptPrivateConversation', { conversationId: invite.conversationId }); }
-        catch (error) { showNotice(error instanceof Error ? error.message : 'The private invitation is no longer available.'); finishPrivateConversationLocally(invite.conversationId); }
+        catch { showNotice('The private invitation is no longer available.'); finishPrivateConversationLocally(invite.conversationId); }
     }, [finishPrivateConversationLocally, showNotice]);
 
     const declinePrivateConversation = useCallback(async () => {
         const invite = privateInviteRef.current;
         if (!invite || invite.direction !== 'incoming') return;
         try { await signaling.request('declinePrivateConversation', { conversationId: invite.conversationId }); }
-        catch (error) { showNotice(error instanceof Error ? error.message : 'The invitation could not be declined.'); }
+        catch { showNotice('The invitation could not be declined.'); }
         finishPrivateConversationLocally(invite.conversationId);
     }, [finishPrivateConversationLocally, showNotice]);
 
@@ -1687,7 +1698,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         const invite = privateInviteRef.current;
         if (!invite || invite.direction !== 'outgoing') return;
         try { await signaling.request('cancelPrivateConversation', { conversationId: invite.conversationId }); }
-        catch (error) { showNotice(error instanceof Error ? error.message : 'The invitation could not be cancelled.'); }
+        catch { showNotice('The invitation could not be cancelled.'); }
         finishPrivateConversationLocally(invite.conversationId);
     }, [finishPrivateConversationLocally, showNotice]);
 
@@ -1695,7 +1706,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         const active = privateConversationRef.current;
         if (!active) return;
         try { await signaling.request('endPrivateConversation', { conversationId: active.conversationId }); }
-        catch (error) { showNotice(error instanceof Error ? error.message : 'The private conversation could not be ended.'); }
+        catch { showNotice('The private conversation could not be ended.'); }
         finishPrivateConversationLocally(active.conversationId);
     }, [finishPrivateConversationLocally, showNotice]);
 
@@ -1722,10 +1733,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             if (cancelled || raw.readyState !== 'live') { return; }
             processedTrackRef.current = track; setProcessedTrack(track); setEffectStatus('ready');
             sendTrack(track);
-        }).catch((reason: Error) => {
+        }).catch(() => {
             if (cancelled) return;
             processorSourceRef.current = ''; processedTrackRef.current = null; setProcessedTrack(null);
-            setEffectStatus('error'); setEffectError(`${reason?.message || 'Background effects failed to start.'} Your normal camera is being shown.`);
+            setEffectStatus('error'); setEffectError('Background effects could not start. Your camera is still on.');
             sendTrack(raw);
         });
         return () => { cancelled = true; };
@@ -1799,10 +1810,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     // ── Spotlight & stage (host/co-host) ──
     const setSpotlightFor = useCallback((peerId: string | null) => {
-        signaling.request('setSpotlight', { targetPeerId: peerId }).catch((error: Error) => showNotice(error?.message || 'Spotlight could not be changed.'));
+        signaling.request('setSpotlight', { targetPeerId: peerId }).catch(() => showNotice('Spotlight could not be changed. Try again.'));
     }, [showNotice]);
     const setStageFor = useCallback((peerId: string, onStage: boolean) => {
-        signaling.request('setStage', { targetPeerId: peerId, onStage }).catch((error: Error) => showNotice(error?.message || 'The stage could not be changed.'));
+        signaling.request('setStage', { targetPeerId: peerId, onStage }).catch(() => showNotice('The stage could not be changed. Try again.'));
     }, [showNotice]);
 
     // ── Who is speaking (grid highlight, People panel, active speaker on page 1) ──
@@ -1871,7 +1882,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     })()}
                 </div>
                 <div className="top-bar-right">
-                    {e2eeEnabled && <EncryptionBadge active={e2eeActive} securityCode={securityCode} participants={peers.size + 1} mode={e2eeRef.current?.getMode() ?? null} />}
+                    {e2eeEnabled && <EncryptionBadge active={e2eeActive} securityCode={securityCode} participants={peers.size + 1} />}
                     <span className="participant-count"><span className="mi mi-sm">group</span> {peers.size + 1}</span>
                 </div>
             </div>

@@ -34,11 +34,11 @@ export default function ReportProblem({ meetingCode, displayName, diagnostics, o
         lastReport.current = report;
         try {
             const response = await fetch(`${API}/api/meetings/problem-reports`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(report), signal: AbortSignal.timeout(10000) });
-            if (!response.ok) throw new Error((await response.json().catch(() => ({}))).error || 'Your report could not be sent.');
+            if (!response.ok) throw new Error('Report request failed');
             setState('sent');
-        } catch (reason) {
+        } catch {
             setState('failed');
-            setError(reason instanceof Error && reason.name !== 'TimeoutError' ? reason.message : 'Your report could not be sent.');
+            setError('Your report could not be sent. Try again or download a copy.');
         }
     };
     const download = () => {
