@@ -65,7 +65,8 @@ export default function PricingPage() {
     const entitlements = useEntitlements();
     const isAdmin = entitlements.isPlatformAdmin || session.profile?.role === 'admin';
     const eligibleForTrial = !isAdmin && entitlements.plan === 'guest' && !entitlements.trialUsed
-        && entitlements.status === 'paid_active' && !entitlements.loading && session.status !== 'checking';
+        && entitlements.status === 'paid_active' && !entitlements.loading
+        && (session.status === 'anonymous' || entitlements.verified);
 
     return <div className="public-site public-plans pricing-page">
         <SiteNav />
@@ -73,7 +74,7 @@ export default function PricingPage() {
             <section className="pricing-comparison" aria-labelledby="pricing-title">
                 <header className="public-page-intro pricing-comparison-intro">
                     <h1 id="pricing-title">Find your QS-VC plan</h1>
-                    <p>Start with 14 days free. Choose the plan and billing option that suit your team.</p>
+                    <p>{eligibleForTrial ? 'Choose a plan to start your 14-day trial.' : 'Compare plans and choose what works for your team.'}</p>
                 </header>
                 <div className="pricing-comparison-controls">
                     <div className="pricing-billing-switch" role="group" aria-label="Billing period">
@@ -90,7 +91,10 @@ export default function PricingPage() {
                 {isAdmin && <p className="pricing-admin-note">Your admin access includes all plans. <Link to="/app">Go to meetings</Link></p>}
                 <p className="pricing-promotion-notice"><span className="mi" aria-hidden="true">sell</span><span>Introductory offers apply with Cashfree. Regular prices follow the offer period.</span></p>
                 <div className="pricing-offer-grid">
-                    {plans.map(plan => {
+                    {plans.map(item => {
+                        const upgrade = ['paid_active', 'trial_active'].includes(entitlements.status)
+                            && entitlements.plan !== 'guest' && PLAN_LEVEL[entitlements.plan] < PLAN_LEVEL[item.key];
+                        const plan = { ...item, offer: upgrade ? null : item.offer };
                         const price = getPlanPrice(plan.key, billing)!;
                         const savings = annual ? 12 * (getPlanPrice(plan.key)!.baseAmountMinor - price.baseAmountMinor) / 100 : 0;
                         const checkout = `/payment?plan=${plan.name}&billing=${billing}`;
@@ -126,7 +130,7 @@ export default function PricingPage() {
                                     {isAdmin ? 'Included with admin access' : entitlements.plan === plan.key ? 'Current plan' : 'Included in your plan'}
                                 </span> : <>
                                     <Link className="pricing-offer-action" to={eligibleForTrial ? `${checkout}&trial=1` : checkout}>
-                                        {eligibleForTrial ? `Try free for ${TRIAL_DAYS} days` : 'Continue to checkout'}<span className="sr-only"> ({plan.name})</span>
+                                        {eligibleForTrial ? `Try free for ${TRIAL_DAYS} days` : upgrade ? `Upgrade to ${plan.name}` : 'Continue to checkout'}<span className="sr-only"> ({plan.name})</span>
                                     </Link>
                                     {eligibleForTrial && <span className="pricing-trial-note">No plan fee for 14 days</span>}
                                 </>}

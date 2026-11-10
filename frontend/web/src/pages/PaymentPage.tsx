@@ -25,6 +25,7 @@ type PaymentStatus = {
     provider?: Gateway;
     currency?: string;
     totalAmount?: string;
+    replacesSubscriptionId?: string | null;
 } | null;
 type CheckoutResult = {
     provider: Gateway;
@@ -228,6 +229,7 @@ export default function PaymentPage() {
     const [optionsError, setOptionsError] = useState(false);
     const [optionsAttempt, setOptionsAttempt] = useState(0);
     const [paymentStatus, setPaymentStatus] = useState<PaymentStatus>(null);
+    const [paymentStatusReady, setPaymentStatusReady] = useState(false);
     const [message, setMessage] = useState('');
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
@@ -244,7 +246,7 @@ export default function PaymentPage() {
         || entitlements.status === 'trial_expired'
         || entitlements.status === 'paid_expired'
         || (entitlements.status === 'paid_active' && entitlements.plan !== 'guest');
-    const trialEligible = !isAdmin && entitlements.plan === 'guest' && !trialConsumed;
+    const trialEligible = !isAdmin && entitlements.verified && entitlements.plan === 'guest' && !trialConsumed;
     const showTrialFlow = isTrialIntent && !trialRedirectNotice;
     const isTrialCheckout = showTrialFlow && trialEligible && session.status === 'authenticated' && !entitlements.loading;
     const isAuthReady = Boolean(token) && session.status === 'authenticated';
@@ -269,12 +271,17 @@ export default function PaymentPage() {
     const planEntitled = planKey && entitlements.status === 'paid_active' && PLAN_LEVEL[entitlements.plan] >= PLAN_LEVEL[planKey];
     const statusCoversPlan = planKey && paymentStatus?.status === 'active' && PLAN_LEVEL[paymentStatus.plan] >= PLAN_LEVEL[planKey];
     const isCurrentPlan = planEntitled || statusCoversPlan;
-    const subscriptionOpen = paymentStatus?.billingMode === 'subscription'
-        && (['active', 'pending', 'past_due'].includes(paymentStatus.status)
+    const subscriptionOpen = paymentStatus
+        && (['creating', 'active', 'pending', 'past_due'].includes(paymentStatus.status)
             || (paymentStatus.status === 'cancelled' && Boolean(paymentStatus.currentPeriodEnd)
                 && new Date(paymentStatus.currentPeriodEnd!).getTime() > Date.now()));
-    const blockPlanChange = Boolean(pendingPriceChanged || planKey && (subscriptionOpen && (paymentStatus?.plan !== planKey || paymentStatus?.status === 'active' || paymentStatus?.status === 'past_due' || paymentStatus?.status === 'cancelled')
-        || (entitlements.status === 'paid_active' && entitlements.plan !== 'guest' && !planEntitled)));
+    const upgradesCurrentPlan = Boolean(planKey && subscriptionOpen && PLAN_LEVEL[paymentStatus.plan] < PLAN_LEVEL[planKey]
+        && ['active', 'past_due', 'cancelled'].includes(paymentStatus.status));
+    const upgradeFrom = upgradesCurrentPlan ? paymentStatus?.id
+        : paymentStatus?.plan === planKey ? paymentStatus?.replacesSubscriptionId : undefined;
+    const isUpgrade = Boolean(upgradeFrom);
+    const blockPlanChange = Boolean(pendingPriceChanged || planKey && subscriptionOpen && !isUpgrade && !isCurrentPlan
+        && (paymentStatus.plan !== planKey || paymentStatus.status !== 'pending'));
     const renewalTermCopy = billing === 'annual' && providerPrice?.maxBillingCycles === 12
         ? 'Up to 12 monthly payments. You can cancel future renewals anytime.'
         : billing === 'monthly' ? renewalTerms(providerPrice?.maxBillingCycles) : '';
@@ -290,6 +297,7 @@ export default function PaymentPage() {
             throw new CheckoutError('Payment status is temporarily unavailable.');
         }) as PaymentStatus;
         setPaymentStatus(result);
+        setPaymentStatusReady(true);
         return result;
     }, [token]);
 
@@ -300,7 +308,7 @@ export default function PaymentPage() {
         setOptionsLoaded(false);
         setConsent(false);
         setOptionsError(false);
-        fetch(`${AUTH_API}/api/auth/billing/options?plan=${encodeURIComponent(plan.name)}${billingQuery}`, {
+        fetch(`${AUTH_API}/api/auth/billing/options?plan=${encodeURIComponent(plan.name)}${billingQuery}${isUpgrade ? '&upgrade=1' : ''}`, {
             headers, signal: controller.signal, cache: 'no-store',
         }).then(async response => {
             if (!response.ok) throw new Error(OPTIONS_UNAVAILABLE);
@@ -331,15 +339,17 @@ export default function PaymentPage() {
             setOptionsError(true);
         });
         return () => controller.abort();
-    }, [plan?.name, token, showTrialFlow, billingQuery, optionsAttempt]);
+    }, [plan?.name, token, showTrialFlow, billingQuery, optionsAttempt, isUpgrade]);
 
     useEffect(() => {
+        setPaymentStatus(null);
+        setPaymentStatusReady(false);
         if (!token || session.status !== 'authenticated') return;
-        void refreshPaymentStatus().catch(() => undefined);
+        void refreshPaymentStatus().catch(() => setError('We couldn’t check your current plan. Refresh this page to try again.'));
     }, [token, session.status, refreshPaymentStatus]);
 
     useEffect(() => {
-        if (!isTrialIntent || !plan || isProviderReturn || session.status !== 'authenticated' || entitlements.loading) return;
+        if (!isTrialIntent || !plan || isProviderReturn || session.status !== 'authenticated' || entitlements.loading || !entitlements.verified) return;
         if (isAdmin) return;
         if (trialEligible) return;
         const reason = entitlements.status === 'trial_active'
@@ -350,7 +360,7 @@ export default function PaymentPage() {
         setTrialRedirectNotice(reason);
         setConsent(false);
         navigate(`/payment?plan=${encodeURIComponent(plan.name)}${billingQuery}`, { replace: true });
-    }, [isTrialIntent, plan?.name, isProviderReturn, session.status, entitlements.loading, entitlements.status, entitlements.plan, trialEligible, trialConsumed, isAdmin, formattedEntitlementEnd, navigate, billingQuery]);
+    }, [isTrialIntent, plan?.name, isProviderReturn, session.status, entitlements.loading, entitlements.status, entitlements.plan, entitlements.verified, trialEligible, trialConsumed, isAdmin, formattedEntitlementEnd, navigate, billingQuery]);
 
     useEffect(() => {
         if (!isProviderReturn || !token || !plan) return;
@@ -371,12 +381,13 @@ export default function PaymentPage() {
                     window.dispatchEvent(new Event('qsvc:entitlements-refresh'));
                     const trialActive = isTrialIntent && current.status === 'trial_active';
                     const paidActive = !isTrialIntent && current.status === 'paid_active';
+                    const upgrading = billing?.plan === planKey && Boolean(billing?.replacesSubscriptionId);
                     if (isTrialIntent && current.status === 'paid_active') {
                         setMessage('');
                         setError(`This return was for a ${plan.name} trial, but your account has ${planLabel(current.plan)} paid access. Trial activation was not confirmed.`);
                         return;
                     }
-                    if (!isTrialIntent && current.status === 'trial_active') {
+                    if (!isTrialIntent && current.status === 'trial_active' && !upgrading) {
                         setMessage('');
                         setError(`This return was for the paid ${plan.name} plan, but your account has an active ${planLabel(current.plan)} trial. Paid access was not confirmed.`);
                         return;
@@ -392,7 +403,7 @@ export default function PaymentPage() {
                         setMessage(`Your ${plan.name} trial is active${end ? ` through ${end}` : ''}. The provider confirms the first-charge date.`);
                         return;
                     }
-                    if (paidActive) {
+                    if (paidActive && (!upgrading || current.plan === planKey)) {
                         if (current.plan !== planKey) {
                             setMessage('');
                             setError(`Your account shows ${planLabel(current.plan)} access, but this checkout requested ${plan.name}. The requested plan was not confirmed.`);
@@ -440,7 +451,7 @@ export default function PaymentPage() {
                     setError(`This checkout requested a ${plan?.name} trial, but your account has ${planLabel(current.plan)} paid access. Trial activation was not confirmed.`);
                     return;
                 }
-                if (!trial && current?.status === 'trial_active') {
+                if (!trial && current?.status === 'trial_active' && !isUpgrade) {
                     setMessage('');
                     setError(`This checkout requested the paid ${plan?.name} plan, but your account has an active ${planLabel(current.plan)} trial. Paid access was not confirmed.`);
                     return;
@@ -456,7 +467,7 @@ export default function PaymentPage() {
                     setMessage(`Your ${plan?.name} trial is active${end ? ` through ${end}` : ''}. The provider confirms the first-charge date.`);
                     return;
                 }
-                if (!trial && current?.status === 'paid_active') {
+                if (!trial && current?.status === 'paid_active' && (!isUpgrade || current.plan === planKey)) {
                     if (current.plan !== planKey) {
                         setMessage('');
                         setError(`Your account shows ${planLabel(current.plan)} access, but this checkout requested ${plan?.name}. The requested plan was not confirmed.`);
@@ -474,7 +485,7 @@ export default function PaymentPage() {
     }
 
     async function beginCheckout() {
-        if (!plan || !planKey || !isAuthReady || !priceReady || !checkoutGateways.includes(gateway) || !consent || busy || isCurrentPlan || blockPlanChange || isProviderReturn || !renewalTermsReady) return;
+        if (!plan || !planKey || !isAuthReady || !paymentStatusReady || !priceReady || !checkoutGateways.includes(gateway) || !consent || busy || isCurrentPlan || blockPlanChange || isProviderReturn || !renewalTermsReady) return;
         setBusy(true);
         setError('');
         setMessage('');
@@ -498,7 +509,8 @@ export default function PaymentPage() {
             const response = await fetch(`${AUTH_API}/api/auth/billing/checkout`, {
                 method: 'POST',
                 headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider: gateway, plan: plan.name, billing, trial: isTrialCheckout, mandateConsent: true, quote: {
+                body: JSON.stringify({ provider: gateway, plan: plan.name, billing, trial: isTrialCheckout, mandateConsent: true,
+                    ...(upgradeFrom ? { upgradeFrom } : {}), quote: {
                     currency: providerPrice.currency, totalAmount: providerPrice.totalAmount,
                     ...(providerPrice.promotion ? { promotion: { cycles: providerPrice.promotion.cycles, regularTotalAmount: providerPrice.promotion.regularTotalAmount } } : {}),
                 } }),
@@ -582,7 +594,7 @@ export default function PaymentPage() {
             if (!response.ok) throw new Error();
             await refreshPaymentStatus().catch(() => undefined);
             const currentPeriodEnd = typeof result?.currentPeriodEnd === 'string' ? result.currentPeriodEnd : '';
-            setMessage(currentPeriodEnd
+            setMessage(paymentStatus.status === 'pending' ? 'Pending checkout cancelled.' : currentPeriodEnd
                 ? `Renewal is cancelled. Your paid access remains until ${new Date(currentPeriodEnd).toLocaleDateString()}.`
                 : 'Renewal is cancelled.');
         } catch {
@@ -675,8 +687,9 @@ export default function PaymentPage() {
                     {pendingPriceChanged && <p className="payment-note" role="status">Your pending checkout has an earlier price. Cancel it below, then start again to use this offer. We won’t change an existing payment agreement without your approval.</p>}
                     {blockPlanChange && <div className="payment-status" role="status">
                         <span className="mi" aria-hidden="true">info</span>
-                        <p>Your current plan or pending subscription must end before you can switch plans. Use the cancellation control below if it is available.</p>
+                        <p>Finish or cancel your pending checkout before choosing another plan.</p>
                     </div>}
+                    {isUpgrade && <p className="payment-note" role="status">Your upgrade starts a new billing period at the displayed price after payment is confirmed. Your current plan stays available until then. We’ll cancel its future renewals after the upgrade succeeds. Unused time is not credited, and a second free trial is not included.</p>}
                     {message && <div className="payment-status payment-status--success" role="status"><span className="mi" aria-hidden="true">info</span><p>{message}</p></div>}
                     {error && <div className="payment-status payment-status--error" role="alert"><span className="mi" aria-hidden="true">error</span><p>{error}</p></div>}
                     {isAuthReady && checkoutGateways.length > 0 && !isCurrentPlan && !blockPlanChange && !isProviderReturn && (!showTrialFlow || isTrialCheckout) && <>
@@ -689,11 +702,11 @@ export default function PaymentPage() {
                                 : `I authorize ${gatewayName(gateway)} to charge the recurring monthly total shown above, including ${options.taxPercent}% GST. ${renewalTermCopy}`}</span>
                         </label>
                         {isTrialCheckout && <p className="payment-trial-first-charge">{trialFirstChargeCopy}</p>}
-                        <button className="btn-primary payment-checkout-button" type="button" onClick={() => void beginCheckout()} disabled={!consent || busy || !options.paymentsEnabled || !gatewayReady || !priceReady || !renewalTermsReady} aria-busy={busy}>
+                        <button className="btn-primary payment-checkout-button" type="button" onClick={() => void beginCheckout()} disabled={!consent || busy || !paymentStatusReady || !options.paymentsEnabled || !gatewayReady || !priceReady || !renewalTermsReady} aria-busy={busy}>
                             {busy ? 'Opening secure checkout…' : isTrialCheckout ? 'Approve recurring payments' : 'Continue to monthly checkout'}
                         </button>
                     </>}
-                    {isAuthReady && paymentStatus?.id && paymentStatus.billingMode === 'subscription' && ['active', 'pending', 'past_due'].includes(paymentStatus.status) && <button className="payment-cancel" type="button" onClick={() => void cancelSubscription()} disabled={busy}>{busy ? 'Cancelling…' : 'Cancel renewal'}</button>}
+                    {isAuthReady && paymentStatus?.id && paymentStatus.billingMode === 'subscription' && ['active', 'pending', 'past_due'].includes(paymentStatus.status) && <button className="payment-cancel" type="button" onClick={() => void cancelSubscription()} disabled={busy}>{busy ? 'Cancelling…' : paymentStatus.status === 'pending' ? 'Cancel checkout' : 'Cancel renewal'}</button>}
                     {(!providerPrice?.enabled || !renewalTermsReady) && optionsLoaded && options.paymentsEnabled && providerPrice?.enabled && <p className="payment-note" role="status">Renewal terms are unavailable right now. Please try again later.</p>}
                     <p className="payment-cancel-note">Return here to cancel future renewals.</p>
                     <Link className="payment-contact" to={`/contact?interest=${plan.name}`}>Contact us about this plan</Link>

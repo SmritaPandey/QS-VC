@@ -33,7 +33,8 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
     const entitlements = useEntitlements();
     const isAdmin = entitlements.isPlatformAdmin || profile?.role === 'admin';
     const planKey = entitlements.plan.replace(/_trial$/, '');
-    const planName = planKey === 'guest' ? 'Free' : planKey === 'enterprise' ? 'Quantum-Premise' : planKey.charAt(0).toUpperCase() + planKey.slice(1);
+    const freeMember = entitlements.verified && entitlements.plan === 'guest' && !isAdmin;
+    const planName = planKey === 'guest' ? 'Free member' : planKey === 'enterprise' ? 'Quantum-Premise' : planKey.charAt(0).toUpperCase() + planKey.slice(1);
     const trialActive = !isAdmin && entitlements.verified && entitlements.status === 'trial_active';
     const planStatus = isAdmin ? 'Administrator' : entitlements.loading ? 'Checking plan…'
         : !entitlements.verified ? 'Plan unavailable'
@@ -132,7 +133,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                         {!isAdmin && !entitlements.loading && !entitlements.verified && <button className="meeting-home-plan-retry" type="button" onClick={() => window.dispatchEvent(new Event('qsvc:entitlements-refresh'))}>Retry</button>}
                     </>}
                 </div>
-                <Link className="meeting-home-plan-link" to="/pricing">Manage plan</Link>
+                <Link className="meeting-home-plan-link" to="/pricing">{freeMember && !entitlements.trialUsed ? 'Choose a trial plan' : 'Manage plan'}</Link>
             </div>
             <details className="workspace-account">
                 <summary aria-label="Your account"><span className="workspace-account-initial" aria-hidden="true">{profile?.displayName.trim().charAt(0).toUpperCase() || 'Q'}</span></summary>

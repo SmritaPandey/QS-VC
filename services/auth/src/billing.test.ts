@@ -322,7 +322,7 @@ it('preserves and resumes a stale pending PayPal checkout instead of expiring or
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({ provider: 'paypal', approvalUrl, subscriptionId: 'I-EXISTING', recurring: true });
     const staleUpdate = queries.find(query => query.sql.includes("SET status = 'failed'") && query.sql.includes('checkout_expires_at <= NOW()'));
-    expect(staleUpdate?.sql).toContain("AND (provider <> 'paypal' OR status = 'creating')");
+    expect(staleUpdate?.sql).toContain("AND (status = 'creating' OR (provider <> 'paypal' AND replaces_subscription_id IS NULL))");
     expect(queries.some(query => query.sql.includes('INSERT INTO public.payment_subscriptions'))).toBe(false);
     expect(calls.some(call => call.url.includes('/v1/billing/subscriptions') && call.method === 'POST')).toBe(false);
 });
@@ -828,7 +828,7 @@ it.each((['basic', 'starter', 'pro', 'business'] as const).flatMap(plan =>
     expect(getEntitlements(account)).toMatchObject({ plan, status: 'paid_active', trialUsed: true, features: expectedFeatures });
     expect(getEntitlements(account, expectedEnd)).toMatchObject({ plan, status: 'paid_expired', features: [] });
     expect(queries.find(query => query.sql.includes('UPDATE public.users SET subscription_plan'))?.values)
-        .toEqual([plan, user.sub, expectedEnd, user.tenantId]);
+        .toEqual([plan, user.sub, expectedEnd, user.tenantId, false]);
 });
 
 it('keeps a signed Razorpay browser confirmation pending until the provider webhook activates access', async () => {
@@ -957,4 +957,127 @@ it.each([undefined, { cycles: 1, regularTotalAmount: '134.52' }, { cycles: 3, re
     expect(res.statusCode).toBe(409);
     expect(fetch).not.toHaveBeenCalled();
     expect(pool.connect).not.toHaveBeenCalled();
+});
+
+it('creates a full-price upgrade while the current Basic subscription remains active', async () => {
+    enableCashfree();
+    const { pool, queries } = makePool({
+        account: { subscription_plan: 'basic' },
+        openSubscription: { id: cashfreeSubscriptionId, plan: 'basic', status: 'active', provider: 'cashfree' },
+    });
+    const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+        const payload = JSON.parse(String(init?.body));
+        expect(payload.plan_details.plan_amount).toBe(1414.82);
+        expect(payload.subscription_first_charge_time).toBeUndefined();
+        return Response.json({ subscription_id: payload.subscription_id, subscription_session_id: 'new_session',
+            plan_details: { plan_id: 'new_plan' } });
+    });
+    vi.stubGlobal('fetch', fetch);
+    const checkout = route(makeRouter(pool), '/checkout');
+    const input = { provider: 'cashfree', plan: 'Pro', trial: false, mandateConsent: true,
+        upgradeFrom: cashfreeSubscriptionId, quote: { currency: 'INR', totalAmount: '1414.82' } };
+    const res = makeResponse();
+    await checkout(makeRequest(input) as unknown as Request, res as unknown as Response, vi.fn());
+    expect(res.statusCode).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(queries.find(q => q.sql.includes('INSERT INTO public.payment_subscriptions'))?.values.at(-1)).toBe(cashfreeSubscriptionId);
+    expect(queries.some(q => q.sql.includes('superseded_by_subscription_id =') || q.sql.includes('UPDATE public.users'))).toBe(false);
+
+    const wrong = makeResponse();
+    await checkout(makeRequest({ ...input, upgradeFrom: user.sub }) as unknown as Request, wrong as unknown as Response, vi.fn());
+    expect(wrong.statusCode).toBe(409);
+    expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it('blocks test-mode checkout from replacing an existing subscription in production', async () => {
+    enableRazorpay();
+    vi.stubEnv('NODE_ENV', 'production');
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const res = makeResponse();
+    await route(makeRouter(makePool().pool), '/checkout')(makeRequest({
+        provider: 'razorpay', plan: 'Starter', trial: false, mandateConsent: true,
+        upgradeFrom: cashfreeSubscriptionId, quote: { currency: 'INR', totalAmount: '364.62' },
+    }) as unknown as Request, res as unknown as Response, vi.fn());
+    expect(res.statusCode).toBe(503);
+    expect(fetch).not.toHaveBeenCalled();
+});
+
+it('switches plans only on a verified capture and keeps late old-plan payments from downgrading access', async () => {
+    enableCashfree();
+    const previousId = '00000000-0000-4000-8000-000000000004';
+    const nextId = cashfreeSubscriptionId;
+    const periodEnd = new Date(Date.now() + 30 * 86400000);
+    let previousSuperseded = false;
+    let currentPlan = 'basic';
+    const captures = new Set<unknown>();
+    const queued = new Set<unknown>();
+    const client = {
+        query: vi.fn(async (sql: string, values: unknown[] = []) => {
+            if (sql.includes('qsvc_payment_subscription_context')) {
+                const plan = values[1] === 'old' ? 'basic' : 'pro';
+                const price = getPlanPrice(plan)!;
+                return { rows: [{ id: plan === 'basic' ? previousId : nextId, tenant_id: user.tenantId, user_id: user.sub,
+                    plan, provider_plan_id: plan, status: plan === 'basic' ? 'active' : 'pending', current_period_end: null,
+                    currency: 'INR', base_amount: String(price.baseAmountMinor / 100), tax_amount: String(price.taxAmountMinor / 100),
+                    total_amount: String(price.totalAmountMinor / 100), tax_percent: '18', trial_checkout: false,
+                    trial_days: 14, billing_period: 'monthly' }], rowCount: 1 };
+            }
+            if (sql.includes('SELECT replaces_subscription_id')) return { rows: [values[0] === nextId
+                ? { replaces_subscription_id: previousId }
+                : { superseded_by_subscription_id: previousSuperseded ? nextId : null }], rowCount: 1 };
+            if (sql.includes('SELECT id, plan, status, superseded_by_subscription_id')) {
+                return { rows: [{ id: previousId, plan: 'basic', status: 'active', billing_mode: 'subscription' }], rowCount: 1 };
+            }
+            if (sql.includes('INSERT INTO public.payment_captures')) {
+                if (captures.has(values[2])) return { rows: [], rowCount: 0 };
+                captures.add(values[2]);
+            }
+            if (sql.includes('SET status = \'cancelled\', superseded_by_subscription_id')) previousSuperseded = true;
+            if (sql.includes('INSERT INTO public.payment_mandate_cancellations')) queued.add(values[0]);
+            if (sql.includes('UPDATE public.users SET subscription_plan')) {
+                expect(previousSuperseded).toBe(true);
+                expect(queued.has(previousId)).toBe(true);
+                expect(values).toEqual(['pro', user.sub, periodEnd, user.tenantId, true]);
+                currentPlan = String(values[0]);
+            }
+            return { rows: [], rowCount: 1 };
+        }),
+        release: vi.fn(),
+    };
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        const old = url.endsWith('/old');
+        const plan = old ? 'basic' : 'pro';
+        return Response.json({
+            subscription_id: old ? 'old' : 'new', subscription_status: 'ACTIVE', next_schedule_date: periodEnd.toISOString(),
+            plan_details: { plan_id: plan, plan_currency: 'INR', plan_interval_type: 'MONTH', plan_intervals: 1,
+                plan_max_cycles: 100, plan_amount: getPlanPrice(plan)!.totalAmountMinor / 100 },
+            subscription_tags: { qsvc_checkout_id: old ? previousId : nextId },
+        });
+    }));
+    const webhook = route(makeRouter({ connect: vi.fn(async () => client) }), '/webhooks/cashfree');
+    async function capture(subscription: string, amount: number, payment: string) {
+        const rawBody = Buffer.from(JSON.stringify({ type: 'SUBSCRIPTION_PAYMENT_SUCCESS', data: {
+            subscription_id: subscription, payment_id: payment, payment_type: 'CHARGE',
+            payment_status: 'SUCCESS', payment_currency: 'INR', payment_amount: amount,
+        } }));
+        const timestamp = String(Date.now());
+        const signature = crypto.createHmac('sha256', cashfreeWebhookSecret).update(timestamp).update(rawBody).digest('base64');
+        const res = makeResponse();
+        await webhook(makeRequest({}, { 'x-webhook-signature': signature, 'x-webhook-timestamp': timestamp }, {}, rawBody) as unknown as Request,
+            res as unknown as Response, vi.fn());
+        expect(res.statusCode).toBe(200);
+    }
+
+    await capture('new', 1, 'wrong_amount');
+    expect(currentPlan).toBe('basic');
+    expect(queued.size).toBe(0);
+    await capture('new', 1414.82, 'upgrade_capture');
+    await capture('new', 1414.82, 'upgrade_capture');
+    await capture('old', 134.52, 'old_renewal');
+    expect(currentPlan).toBe('pro');
+    expect([...captures]).toEqual(['upgrade_capture', 'old_renewal']);
+    expect([...queued]).toEqual([previousId]);
+    expect(client.query.mock.calls.filter(([sql]) => sql.includes('UPDATE public.users SET subscription_plan'))).toHaveLength(1);
+    expect(client.query.mock.calls.some(([sql]) => sql.includes("review_reason = 'superseded_subscription'"))).toBe(true);
 });

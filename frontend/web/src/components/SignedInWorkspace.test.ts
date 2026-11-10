@@ -23,6 +23,14 @@ describe('meeting home account status', () => {
         expect(html).toContain('Your next meeting starts here.');
     });
 
+    it('gives a new free member a choice of trial plans without showing an active trial', () => {
+        vi.mocked(useEntitlements).mockReturnValue({ ...plan, plan: 'guest', trialUsed: false, features: [] });
+        const html = render();
+        expect(html).toContain('Free member');
+        expect(html).toContain('Choose a trial plan');
+        expect(html).not.toContain('class="trial-chip"');
+    });
+
     it('offers retry instead of calling an unavailable plan Free', () => {
         vi.mocked(useEntitlements).mockReturnValue({ ...plan, plan: 'guest', features: [], verified: false });
         const html = render();

@@ -223,7 +223,7 @@ app.get('/health', (_req, res) => {
 app.get('/ready', async (_req, res) => {
     try {
         await pool.query('SELECT 1 FROM enterprise_access_terms LIMIT 0');
-        await pool.query('SELECT trial_days, billing_period FROM payment_subscriptions LIMIT 0');
+        await pool.query('SELECT trial_days, billing_period, replaces_subscription_id FROM payment_subscriptions LIMIT 0');
         await pool.query('SELECT 1 FROM payment_mandate_cancellations LIMIT 0');
         await pool.query('SELECT needs_review, review_reason FROM payment_captures LIMIT 0');
         await pool.query('SELECT phone_number FROM users LIMIT 0');
@@ -277,8 +277,9 @@ app.post('/api/auth/register', validateBody(registerBody), async (req, res) => {
         const userId = uuidv4();
 
         await pool.query(
-            `INSERT INTO users (id, tenant_id, email, display_name, phone_number, password_hash, role)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            `INSERT INTO users (id, tenant_id, email, display_name, phone_number, password_hash, role,
+                subscription_plan, trial_started_at, trial_ends_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NULL, NULL, NULL)`,
             [userId, tenantId, email, displayName, phoneNumber, passwordHash, role]
         );
 

@@ -32,6 +32,7 @@ const checkoutSchema = z.object({
     billing: z.enum(['monthly', 'annual']).default('monthly'),
     trial: z.boolean(),
     mandateConsent: z.literal(true),
+    upgradeFrom: z.string().uuid().optional(),
     quote: z.object({ currency: z.string().regex(/^[A-Z]{3}$/), totalAmount: z.string().regex(/^\d+(?:\.\d{1,6})?$/),
         promotion: z.object({ cycles: z.number().int().min(1).max(12), regularTotalAmount: z.string().regex(/^\d+(?:\.\d{1,6})?$/) }).optional(),
     }).optional(),
@@ -242,12 +243,13 @@ function paypalConfiguredAmount(plan: PlanKey, billing: BillingPeriod): string {
     return process.env[`PAYPAL_${plan.toUpperCase()}${term}_BASE_AMOUNT`] || '';
 }
 
-function publicOptions(plan: PlanKey, billing: BillingPeriod) {
+function publicOptions(plan: PlanKey, billing: BillingPeriod, upgrade = false) {
+    const upgradeProviderAllowed = (provider: Provider) => !upgrade || process.env.NODE_ENV !== 'production' || providerMode(provider) === 'live';
     const price = getPlanPrice(plan, billing);
     if (!price) return null;
     const razorpay = {
         mode: providerMode('razorpay'),
-        enabled: razorpaySubscriptionsConfigured(plan, billing),
+        enabled: upgradeProviderAllowed('razorpay') && razorpaySubscriptionsConfigured(plan, billing),
         trialEnabled: razorpaySubscriptionsConfigured(plan, billing),
         maxBillingCycles: billingCycles('razorpay', billing),
         currency: price.currency,
@@ -256,7 +258,7 @@ function publicOptions(plan: PlanKey, billing: BillingPeriod) {
         totalAmount: minorToDecimal(price.totalAmountMinor, price.currency),
         taxPercent: GST_PERCENT,
     };
-    let paypal = { mode: providerMode('paypal'), enabled: paypalConfigured(plan, billing), trialEnabled: paypalConfigured(plan, billing, true), maxBillingCycles: billingCycles('paypal', billing) || null, currency: (process.env.PAYPAL_CURRENCY || '').toUpperCase(), baseAmount: '', taxAmount: '', totalAmount: '', taxPercent: GST_PERCENT };
+    let paypal = { mode: providerMode('paypal'), enabled: upgradeProviderAllowed('paypal') && paypalConfigured(plan, billing), trialEnabled: paypalConfigured(plan, billing, true), maxBillingCycles: billingCycles('paypal', billing) || null, currency: (process.env.PAYPAL_CURRENCY || '').toUpperCase(), baseAmount: '', taxAmount: '', totalAmount: '', taxPercent: GST_PERCENT };
     if (paypal.enabled || paypal.trialEnabled) {
         try {
             const baseMinor = decimalToMinor(paypalConfiguredAmount(plan, billing), paypal.currency);
@@ -272,11 +274,11 @@ function publicOptions(plan: PlanKey, billing: BillingPeriod) {
             paypal = { ...paypal, enabled: false, trialEnabled: false };
         }
     }
-    const intro = getIntroPrice(plan, billing);
+    const intro = upgrade ? null : getIntroPrice(plan, billing);
     const cashfreePrice = intro || price;
     const cashfree = {
         mode: providerMode('cashfree'),
-        enabled: cashfreeConfigured() && price.currency === 'INR',
+        enabled: upgradeProviderAllowed('cashfree') && cashfreeConfigured() && price.currency === 'INR',
         trialEnabled: cashfreeConfigured() && price.currency === 'INR',
         maxBillingCycles: billingCycles('cashfree', billing),
         currency: price.currency,
@@ -553,6 +555,13 @@ async function applyWebhook(
         const trialDays = context.trial_days ?? 7;
         const expectedCycles = billingCycles(provider, context.billing_period ?? 'monthly');
         await client.query("SELECT set_config('app.current_tenant', $1, true)", [context.tenant_id]);
+        // Serialize renewals and upgrades for this account, including late old-plan webhooks.
+        await client.query('SELECT id FROM public.users WHERE id = $1 AND tenant_id = $2 FOR UPDATE', [context.user_id, context.tenant_id]);
+        const links = (await client.query(
+            `SELECT replaces_subscription_id, superseded_by_subscription_id, billing_mode
+             FROM public.payment_subscriptions WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
+            [context.id, context.tenant_id],
+        )).rows[0];
         if (!paid && (context.status === 'failed' || (context.status === 'expired' && !context.current_period_end))) {
             if (trialAuthorized) await enqueueMandateCancellation(client, context);
             await client.query("UPDATE public.payment_webhook_events SET result = 'ignored', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2", [provider, eventId, context.tenant_id]);
@@ -600,6 +609,17 @@ async function applyWebhook(
             await client.query("UPDATE public.payment_webhook_events SET result = 'ignored', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2", [provider, eventId, context.tenant_id]);
             await client.query('COMMIT');
             return 'ignored' as const;
+        }
+
+        if (links?.superseded_by_subscription_id) {
+            if (paid && await recordCapture(client, context.id, provider, paymentId!, verifiedPaidAmountMinor!, storedCurrency)) {
+                await client.query(`UPDATE public.payment_captures SET needs_review = true, review_reason = 'superseded_subscription'
+                    WHERE provider = $1 AND provider_payment_id = $2`, [provider, paymentId]);
+            }
+            if (links.billing_mode !== 'one_time') await enqueueMandateCancellation(client, context);
+            await client.query("UPDATE public.payment_webhook_events SET result = 'processed', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2", [provider, eventId, context.tenant_id]);
+            await client.query('COMMIT');
+            return 'processed' as const;
         }
 
         const trialEndsAt = verifiedTrialEndsAt || context.trial_ends_at;
@@ -665,18 +685,38 @@ async function applyWebhook(
                 await client.query('COMMIT');
                 return 'duplicate' as const;
             }
-            await client.query('SELECT id FROM public.users WHERE id = $1 AND tenant_id = $2 FOR UPDATE', [context.user_id, context.tenant_id]);
+            const replacesId = links?.replaces_subscription_id || null;
+            const predecessor = replacesId ? (await client.query(
+                `SELECT id, plan, status, superseded_by_subscription_id, billing_mode
+                 FROM public.payment_subscriptions WHERE id = $1 AND tenant_id = $2 AND user_id = $3 FOR UPDATE`,
+                [replacesId, context.tenant_id, context.user_id],
+            )).rows[0] : null;
+            const upgradeValid = !replacesId || Boolean(predecessor
+                && PLAN_LEVEL[predecessor.plan as PlanKey] < PLAN_LEVEL[context.plan]
+                && ['active', 'past_due', 'cancelled', 'expired'].includes(predecessor.status)
+                && (!predecessor.superseded_by_subscription_id || predecessor.superseded_by_subscription_id === context.id));
             const otherSubscription = await client.query(
                 `SELECT id FROM public.payment_subscriptions WHERE user_id = $1 AND tenant_id = $2 AND id <> $3
-                 AND status IN ('creating', 'pending', 'active', 'past_due') LIMIT 1`, [context.user_id, context.tenant_id, context.id],
+                 AND ($4::uuid IS NULL OR id <> $4)
+                 AND (status IN ('active', 'past_due') OR (status IN ('creating', 'pending')
+                    AND replaces_subscription_id IS DISTINCT FROM $3::uuid)) LIMIT 1`, [context.user_id, context.tenant_id, context.id, replacesId],
             );
-            if (!periodEnd || periodEnd.getTime() <= Date.now() || otherSubscription.rows.length) {
+            if (!periodEnd || periodEnd.getTime() <= Date.now() || otherSubscription.rows.length || !upgradeValid) {
                 await client.query(`UPDATE public.payment_captures SET needs_review = true, review_reason = $3
                     WHERE provider = $1 AND provider_payment_id = $2`,
-                    [provider, paymentId, otherSubscription.rows.length ? 'overlapping_subscription' : 'missing_current_period']);
+                    [provider, paymentId, !upgradeValid ? 'invalid_upgrade' : otherSubscription.rows.length ? 'overlapping_subscription' : 'missing_current_period']);
                 await client.query("UPDATE public.payment_webhook_events SET result = 'processed', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2", [provider, eventId, context.tenant_id]);
                 await client.query('COMMIT');
                 return 'processed' as const;
+            }
+            const activatesUpgrade = Boolean(predecessor && !predecessor.superseded_by_subscription_id);
+            if (activatesUpgrade && predecessor) {
+                await client.query(
+                    `UPDATE public.payment_subscriptions SET status = 'cancelled', superseded_by_subscription_id = $1, updated_at = NOW()
+                     WHERE id = $2 AND tenant_id = $3 AND user_id = $4`,
+                    [context.id, predecessor.id, context.tenant_id, context.user_id],
+                );
+                if (predecessor.billing_mode !== 'one_time') await enqueueMandateCancellation(client, { ...context, id: predecessor.id });
             }
             await client.query(
                 `UPDATE public.payment_subscriptions SET status = CASE WHEN status IN ('cancelled', 'expired') THEN status ELSE 'active' END,
@@ -687,9 +727,9 @@ async function applyWebhook(
             );
             await client.query(
                 `UPDATE public.users SET subscription_plan = $1, subscription_expires_at =
-                    GREATEST(COALESCE(subscription_expires_at, $3), $3), updated_at = NOW()
+                    CASE WHEN $5 THEN $3 ELSE GREATEST(COALESCE(subscription_expires_at, $3), $3) END, updated_at = NOW()
                  WHERE id = $2 AND tenant_id = $4 AND is_active`,
-                [context.plan, context.user_id, periodEnd, context.tenant_id],
+                [context.plan, context.user_id, periodEnd, context.tenant_id, activatesUpgrade],
             );
             await client.query(
                 "UPDATE public.payment_webhook_events SET result = 'processed', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2",
@@ -703,7 +743,7 @@ async function applyWebhook(
                     : eventType.endsWith('.halted') || eventType.endsWith('.SUSPENDED') || eventType.endsWith('.PAYMENT.FAILED')
                         || eventType.endsWith('_PAYMENT_FAILED') || eventType.endsWith('.ON_HOLD') || eventType.endsWith('.CARD_EXPIRED') ? 'past_due'
                         : eventType.endsWith('_AUTH_FAILED') ? 'failed' : null;
-            if (nextStatus) {
+            if (nextStatus && !(nextStatus === 'past_due' && links?.replaces_subscription_id && !context.current_period_end)) {
                 await client.query(
                     `UPDATE public.payment_subscriptions SET status = $1, updated_at = NOW()
                      WHERE id = $2 AND tenant_id = $3 AND status <> 'expired'`,
@@ -756,7 +796,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
         const key = typeof req.query.plan === 'string' ? planKey(req.query.plan) : null;
         const billing = z.enum(['monthly', 'annual']).default('monthly').safeParse(req.query.billing);
         if (!key || !billing.success) return res.status(400).json({ error: 'Choose a paid plan and billing period.' });
-        const options = publicOptions(key, billing.data);
+        const options = publicOptions(key, billing.data, req.query.upgrade === '1');
         res.json(options);
     });
 
@@ -772,9 +812,12 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
             ));
             const latest = await inTenant(pool, user.tenantId, client => client.query(
                 `SELECT id, provider, plan, status, billing_mode AS "billingMode", current_period_end AS "currentPeriodEnd", currency,
-                        base_amount AS "baseAmount", tax_amount AS "taxAmount", total_amount AS "totalAmount"
-                 FROM public.payment_subscriptions WHERE tenant_id = $1 AND user_id = $2
-                 ORDER BY created_at DESC LIMIT 1`, [user.tenantId, user.sub],
+                        base_amount AS "baseAmount", tax_amount AS "taxAmount", total_amount AS "totalAmount",
+                        CASE WHEN status IN ('creating', 'pending') THEN replaces_subscription_id END AS "replacesSubscriptionId"
+                 FROM public.payment_subscriptions WHERE tenant_id = $1 AND user_id = $2 AND superseded_by_subscription_id IS NULL
+                 ORDER BY CASE WHEN status IN ('creating', 'pending') THEN 0
+                    WHEN status IN ('active', 'past_due') THEN 1
+                    WHEN status = 'cancelled' AND current_period_end > NOW() THEN 2 ELSE 3 END, created_at DESC LIMIT 1`, [user.tenantId, user.sub],
             ));
             res.set('Cache-Control', 'no-store').json(latest.rows[0] || null);
         } catch {
@@ -789,20 +832,22 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
         if (!parsed.success) return res.status(400).json({ error: 'Choose a plan and payment channel, then accept the recurring payment terms.' });
         const plan = planKey(parsed.data.plan)!;
         const provider = parsed.data.provider;
-        const { trial, billing } = parsed.data;
+        const { trial, billing, upgradeFrom } = parsed.data;
+        if (trial && upgradeFrom) return res.status(400).json({ error: 'An upgrade starts a paid billing period, without a second trial.' });
         const cycles = billingCycles(provider, billing);
-        const option = publicOptions(plan, billing)?.providers[provider];
+        const option = publicOptions(plan, billing, Boolean(upgradeFrom))?.providers[provider];
         const providerReady = option && (trial ? option.trialEnabled : option.enabled);
         if (!option || !providerReady) {
             const label = provider === 'cashfree' ? 'Cashfree UPI AutoPay' : provider === 'razorpay' ? 'Razorpay Subscriptions' : 'PayPal Subscriptions';
             return res.status(503).json({ error: `${label} is not configured for this billing option yet.` });
         }
         const quote = parsed.data.quote;
-        const introductoryPrice = provider === 'cashfree' ? getIntroPrice(plan, billing) : null;
+        const introductoryPrice = provider === 'cashfree' && !upgradeFrom ? getIntroPrice(plan, billing) : null;
         if (introductoryPrice && (!quote?.promotion || quote.promotion.cycles !== introductoryPrice.cycles
             || Number(quote.promotion.regularTotalAmount) !== getPlanPrice(plan, billing)!.totalAmountMinor / 100)) {
             return res.status(409).json({ error: 'The offer or renewal terms changed. Refresh checkout and confirm the new terms.' });
         }
+        if (upgradeFrom && !quote) return res.status(400).json({ error: 'Confirm the displayed upgrade price before continuing.' });
         if (quote && (quote.currency !== option.currency || Number(quote.totalAmount) !== Number(option.totalAmount))) {
             return res.status(409).json({ error: 'The payment price changed. Refresh checkout and confirm the new total.' });
         }
@@ -813,7 +858,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
             } else if (provider === 'paypal') {
                 providerPlan = await validatePayPalPlan(plan, billing, trial);
             } else {
-                const price = getIntroPrice(plan, billing) || getPlanPrice(plan, billing)!;
+                const price = introductoryPrice || getPlanPrice(plan, billing)!;
                 providerPlan = { id: 'cashfree_periodic_monthly', currency: price.currency,
                     baseAmount: minorToDecimal(price.baseAmountMinor, price.currency),
                     taxAmount: minorToDecimal(price.taxAmountMinor, price.currency),
@@ -852,21 +897,23 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                        AND (status = 'cancelled' OR (billing_mode = 'one_time' AND status = 'active'))
                        AND current_period_end IS NOT NULL AND current_period_end <= NOW()`, [user.tenantId, user.sub],
                 );
-                // PayPal approval links have no matching local expiry; reserve their slot until cancelled.
+                // An approved upgrade can await its first charge after the checkout link expires.
+                // Keep that slot reserved until the provider reports a terminal state or the user cancels.
                 await client.query(
                     `UPDATE public.payment_subscriptions SET status = 'failed', updated_at = NOW()
                      WHERE tenant_id = $1 AND user_id = $2 AND status IN ('creating', 'pending') AND checkout_expires_at <= NOW()
-                       AND (provider <> 'paypal' OR status = 'creating')`,
+                       AND (status = 'creating' OR (provider <> 'paypal' AND replaces_subscription_id IS NULL))`,
                     [user.tenantId, user.sub],
                 );
                 const existingSubscription = await client.query(
                     `SELECT id, provider, plan, status, current_period_end, provider_subscription_id, provider_order_id,
                             provider_session_id, billing_mode, approval_url, trial_checkout, trial_ends_at, trial_days, billing_period, provider_plan_id, total_amount,
-                            intro_cycles, regular_total_amount
+                            intro_cycles, regular_total_amount, replaces_subscription_id
                      FROM public.payment_subscriptions
                      WHERE tenant_id = $1 AND user_id = $2
+                       AND superseded_by_subscription_id IS NULL
                        AND (status IN ('creating', 'pending', 'active', 'past_due') OR (status = 'cancelled' AND current_period_end > NOW()))
-                     ORDER BY created_at DESC LIMIT 1`, [user.tenantId, user.sub],
+                     ORDER BY CASE WHEN status IN ('creating', 'pending') THEN 0 ELSE 1 END, created_at DESC`, [user.tenantId, user.sub],
                 );
                 if (existingSubscription.rows.length) {
                     const existingRow = existingSubscription.rows[0];
@@ -877,6 +924,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                         && Number(existingRow.intro_cycles || 0) === (introductoryPrice?.cycles || 0)
                         && (!introductoryPrice || Number(existingRow.regular_total_amount) === getPlanPrice(plan, billing)!.totalAmountMinor / 100)
                         && (provider === 'cashfree' || existingRow.provider_plan_id === providerPlan.id)
+                        && (existingRow.replaces_subscription_id || null) === (upgradeFrom || null)
                         && Boolean(existingRow.trial_checkout) === trial && existingProviderReference) {
                         trialEndsAt = existingRow.trial_ends_at;
                         return {
@@ -886,20 +934,24 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                             approvalUrl: existingRow.approval_url,
                         };
                     }
-                    throw new Error('EXISTING_SUBSCRIPTION');
+                    if (!upgradeFrom || existingRow.id !== upgradeFrom
+                        || !['active', 'past_due', 'cancelled'].includes(existingRow.status)
+                        || PLAN_LEVEL[existingRow.plan as PlanKey] >= PLAN_LEVEL[plan]) throw new Error('EXISTING_SUBSCRIPTION');
+                } else if (upgradeFrom) {
+                    throw new Error('UPGRADE_CHANGED');
                 }
                 await client.query(
                     `INSERT INTO public.payment_subscriptions
                         (id, tenant_id, user_id, provider, plan, provider_plan_id, billing_mode, currency,
                          base_amount, tax_percent, tax_amount, total_amount, status, checkout_expires_at,
-                         trial_checkout, trial_ends_at, provider_subscription_id, trial_days, billing_period)
-                     VALUES ($1, $2, $3, $4, $5, $6, 'subscription', $7, $8, $9, $10, $11, 'creating', $12, $13, $14, $15, $16, $17)`,
+                         trial_checkout, trial_ends_at, provider_subscription_id, trial_days, billing_period, replaces_subscription_id)
+                     VALUES ($1, $2, $3, $4, $5, $6, 'subscription', $7, $8, $9, $10, $11, 'creating', $12, $13, $14, $15, $16, $17, $18)`,
                     [subscriptionId, user.tenantId, user.sub, provider, plan, providerPlan.id,
                         providerPlan.currency, providerPlan.baseAmount, GST_PERCENT, providerPlan.taxAmount, providerPlan.totalAmount,
                         checkoutExpiresAt, trial, trialEndsAt,
-                        provider === 'cashfree' ? subscriptionId : null, TRIAL_DAYS, billing],
+                        provider === 'cashfree' ? subscriptionId : null, TRIAL_DAYS, billing, upgradeFrom || null],
                 );
-                const intro = provider === 'cashfree' ? getIntroPrice(plan, billing) : null;
+                const intro = introductoryPrice;
                 if (intro) {
                     const regular = getPlanPrice(plan, billing)!;
                     await client.query(
@@ -1011,11 +1063,12 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                 mode: process.env.CASHFREE_ENVIRONMENT === 'production' ? 'production' : 'sandbox', email: attempt.email,
                 plan: parsed.data.plan, recurring: true, trialEndsAt: trialEndsAt?.toISOString() || null });
         } catch (error) {
-            if (error instanceof Error && ['ADMIN_ACCESS', 'ALREADY_ENTITLED', 'EXISTING_SUBSCRIPTION', 'ACCOUNT_UNAVAILABLE', 'TRIAL_ALREADY_USED', 'PHONE_REQUIRED'].includes(error.message)) {
+            if (error instanceof Error && ['ADMIN_ACCESS', 'ALREADY_ENTITLED', 'EXISTING_SUBSCRIPTION', 'ACCOUNT_UNAVAILABLE', 'TRIAL_ALREADY_USED', 'PHONE_REQUIRED', 'UPGRADE_CHANGED'].includes(error.message)) {
                 const messages: Record<string, string> = {
                     ADMIN_ACCESS: 'Administrators already have full access.',
                     ALREADY_ENTITLED: 'Your account already has this plan or a higher plan.',
-                    EXISTING_SUBSCRIPTION: 'A subscription is already pending or active for this account.',
+                    EXISTING_SUBSCRIPTION: 'Finish or cancel the pending checkout, or choose a higher plan to upgrade.',
+                    UPGRADE_CHANGED: 'Your current plan changed. Refresh checkout and confirm the upgrade again.',
                     ACCOUNT_UNAVAILABLE: 'This account is unavailable for checkout.',
                     TRIAL_ALREADY_USED: 'Your one free trial is not available for this account. You can continue with a paid plan.',
                     PHONE_REQUIRED: 'Add an Indian mobile number to your profile before authorizing UPI AutoPay or card billing.',

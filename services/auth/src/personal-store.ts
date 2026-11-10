@@ -53,8 +53,9 @@ export async function attachIdentity(pool: Pool, tenant: string, identity: Ident
             "SELECT id, tenant_id, email, display_name, role FROM users WHERE id = $1 AND tenant_id = $2 AND is_active AND role = 'member' FOR UPDATE",
             [link.user, tenant],
         ) : await db.query<Account>(
-            `INSERT INTO users (tenant_id, email, display_name, phone_number, role, auth_provider)
-             SELECT $1, $2, $3, $4, 'member', $5 WHERE NOT EXISTS (SELECT 1 FROM users WHERE lower(email) = $2)
+            `INSERT INTO users (tenant_id, email, display_name, phone_number, role, auth_provider,
+                subscription_plan, trial_started_at, trial_ends_at)
+             SELECT $1, $2, $3, $4, 'member', $5, NULL, NULL, NULL WHERE NOT EXISTS (SELECT 1 FROM users WHERE lower(email) = $2)
              ON CONFLICT (tenant_id, email) DO NOTHING RETURNING id, tenant_id, email, display_name, role`,
             [tenant, profile?.email, profile?.displayName, profile?.phoneNumber, identity.provider],
         );

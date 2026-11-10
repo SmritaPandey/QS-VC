@@ -4,6 +4,12 @@ import { FEATURE_MIN_PLAN, getEntitlements, getPrivateConversationLimitMs, start
 const started = new Date('2026-11-01T12:00:00.000Z');
 
 describe('plan entitlements and trial eligibility', () => {
+    it('keeps a signed-in personal account free until a plan is chosen', () => {
+        const member = { tenant_plan: 'free', subscription_plan: null, trial_started_at: null, trial_ends_at: null };
+        expect(getEntitlements(member, started)).toMatchObject({
+            plan: 'guest', trialUsed: false, trialEndsAt: null, features: [],
+        });
+    });
     it('starts a new free account on a fourteen-day Starter trial when Starter is selected', () => {
         const user = startTrial({ tenant_plan: 'free' }, 'starter', started)!;
         expect(user).toMatchObject({ subscription_plan: 'starter_trial', trial_started_at: started.toISOString() });
@@ -27,11 +33,11 @@ describe('plan entitlements and trial eligibility', () => {
     });
 
     it('keeps one explicitly chosen trial unchanged on later sign-ins', () => {
-        const firstSignIn = startTrial({ tenant_plan: 'free' }, 'starter', started)!;
-        const secondSignIn = startTrial(firstSignIn, 'starter', new Date('2026-11-05T12:00:00.000Z'));
-        expect(secondSignIn).toBe(firstSignIn);
-        expect(secondSignIn.trial_started_at).toBe(started.toISOString());
-        expect(secondSignIn.trial_ends_at).toBe('2026-11-15T12:00:00.000Z');
+        const firstSelection = startTrial({ tenant_plan: 'free' }, 'starter', started)!;
+        const secondSelection = startTrial(firstSelection, 'starter', new Date('2026-11-05T12:00:00.000Z'));
+        expect(secondSelection).toBe(firstSelection);
+        expect(secondSelection.trial_started_at).toBe(started.toISOString());
+        expect(secondSelection.trial_ends_at).toBe('2026-11-15T12:00:00.000Z');
     });
 
     it('does not start trials for paid or previously trialed accounts', () => {
