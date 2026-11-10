@@ -1,7 +1,7 @@
 import type { Request, Response } from 'express';
 import type { JwtPayload } from 'jsonwebtoken';
 import { sessionErrorStatus } from './sessions.js';
-import { effectiveRole } from './platform-admins.js';
+import { effectiveRole, isPlatformAdmin } from './platform-admins.js';
 
 export function profileHandler(verifyToken: (token: string) => Promise<JwtPayload>, pool: { query: (sql: string, values: unknown[]) => Promise<{ rows: any[] }> }) {
     return async (req: Request, res: Response) => {
@@ -29,6 +29,7 @@ export function profileHandler(verifyToken: (token: string) => Promise<JwtPayloa
                 displayName: user.display_name,
                 phoneNumber: user.phone_number,
                 role: typeof user.email === 'string' ? effectiveRole(user.email, user.role) : user.role,
+                isPlatformAdmin: typeof user.email === 'string' && isPlatformAdmin(user.email),
                 avatarUrl: user.avatar_url,
                 preferences: Object.fromEntries(Object.entries(user.preferences || {}).filter(([key]) => key !== '_authSessionId')),
                 tenantId: user.tenant_id,

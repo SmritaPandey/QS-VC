@@ -11,6 +11,7 @@ import CookieBanner from './CookieBanner';
 import useScrollReveal from '../lib/scroll-reveal';
 import { CrownBadge, TrialChip } from './PlanAccess';
 import { useEntitlements } from '../lib/entitlements';
+import AdminDashboardLink from './AdminDashboardLink';
 
 const quickLinks = [
     { to: '/#features', label: 'Meetings', icon: 'videocam' },
@@ -77,7 +78,7 @@ export default function SiteNav({ accountAction, brandName = 'QS-VC' }: { accoun
                     <Link to="/intranet" aria-current={pathname === '/intranet' ? 'page' : undefined} onClick={() => setOpen(false)}>Intranet</Link>
                     <Link to="/contact" aria-current={pathname === '/contact' ? 'page' : undefined} onClick={() => setOpen(false)}>Contact us</Link>
                     <Link className="public-mobile-app" to="/app" onClick={() => setOpen(false)}>Open meeting app <span className="mi" aria-hidden="true">arrow_forward</span></Link>
-                    {session.status === 'checking' ? <span role="status">Checking account…</span> : session.status === 'unavailable' ? <button type="button" onClick={() => void refreshSession()}>Retry account</button> : session.status === 'authenticated' ? <><TrialChip /><CrownBadge plan={entitlements.plan} /><Link to="/app" onClick={() => setOpen(false)}>Your meetings</Link></> : accountAction || <Link to="/login" aria-current={pathname === '/login' ? 'page' : undefined} onClick={() => setOpen(false)}>Sign in</Link>}
+                    {session.status === 'checking' ? <span role="status">Checking account…</span> : session.status === 'unavailable' ? <button type="button" onClick={() => void refreshSession()}>Retry account</button> : session.status === 'authenticated' ? <><TrialChip /><CrownBadge plan={entitlements.plan} />{session.profile?.isPlatformAdmin === true ? <AdminDashboardLink onClick={() => setOpen(false)} /> : <Link to="/app" onClick={() => setOpen(false)}>Your meetings</Link>}</> : accountAction || <Link to="/login" aria-current={pathname === '/login' ? 'page' : undefined} onClick={() => setOpen(false)}>Sign in</Link>}
                 </div>
                 <ThemeSelect />
                 <Link className="public-primary public-nav-cta qsvc-action" to="/app"><ActionContents>Open meeting app</ActionContents></Link>

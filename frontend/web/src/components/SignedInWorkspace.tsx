@@ -1,4 +1,5 @@
 import CancelScheduledMeeting from './CancelScheduledMeeting';
+import AdminDashboardLink from './AdminDashboardLink';
 import { useSession } from '../lib/use-session';
 import ThemeSelect from './ThemeSelect';
 import ActionContents from './ActionContents';
@@ -122,7 +123,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
         <header className="workspace-header">
             <a className="public-skip" href="#main-content">Skip to content</a>
             <Link className="workspace-brand" to="/app" aria-label="QS-VC meetings"><BrandLogo /></Link>
-            <nav className="workspace-navigation" aria-label="Workspace"><Link to="/app" aria-current="page">Meetings</Link><Link to="/schedule">Schedule</Link><Link to="/schedule?type=webinar">Town halls</Link></nav>
+            <nav className="workspace-navigation" aria-label="Workspace"><Link to="/app" aria-current="page">Meetings</Link><Link to="/schedule">Schedule</Link><Link to="/schedule?type=webinar">Town halls</Link><AdminDashboardLink /></nav>
             <div className="meeting-home-membership">
                 <div className="meeting-home-plan" role="status">
                     {trialActive ? <TrialChip /> : <>
@@ -135,7 +136,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
             </div>
             <details className="workspace-account">
                 <summary aria-label="Your account"><span className="workspace-account-initial" aria-hidden="true">{profile?.displayName.trim().charAt(0).toUpperCase() || 'Q'}</span></summary>
-                <div className="workspace-dropdown"><ThemeSelect /><p>{profile?.displayName || (profileError ? 'Account unavailable' : 'Loading account…')}</p>{profile && <span>{profile.email}</span>}{profileError && <button className="qsvc-action qsvc-action--secondary" onClick={() => void refreshSession()}><ActionContents>Retry account</ActionContents></button>}<Link to="/organisation/sso">Sign-in settings</Link><Link to="/">Visit website<span className="mi" aria-hidden="true">north_east</span></Link><button disabled={signingOut} onClick={onSignOut}>{signingOut ? 'Signing out…' : 'Sign out'}<span className="mi" aria-hidden="true">logout</span></button></div>
+                <div className="workspace-dropdown"><ThemeSelect /><p>{profile?.displayName || (profileError ? 'Account unavailable' : 'Loading account…')}</p>{profile && <span>{profile.email}</span>}{profileError && <button className="qsvc-action qsvc-action--secondary" onClick={() => void refreshSession()}><ActionContents>Retry account</ActionContents></button>}<AdminDashboardLink /><Link to="/organisation/sso">Sign-in settings</Link><Link to="/">Visit website<span className="mi" aria-hidden="true">north_east</span></Link><button disabled={signingOut} onClick={onSignOut}>{signingOut ? 'Signing out…' : 'Sign out'}<span className="mi" aria-hidden="true">logout</span></button></div>
             </details>
         </header>
         {sessionError && <p role="alert" className="workspace-alert">{sessionError}</p>}

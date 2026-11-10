@@ -2,14 +2,15 @@
  * QS-VC Desktop — preload (secure bridge). No Node.js access reaches page code.
  * - The app's own page (static/app.html) gets `window.qsvcDesktop` to call the main process;
  *   the main process refuses these calls from any other page.
- * - The server's meeting room page receives a non-secret session marker, before its scripts run,
- *   so the meeting joins as the signed-in user instead of a guest.
+ * - Approved server pages receive a non-secret session marker before their scripts run;
+ *   the main process verifies the frame and route before supplying it.
  */
 import { contextBridge, ipcRenderer } from 'electron';
 
-if (location.protocol !== 'file:' && /^\/meeting\/[^/]+(\/preview)?\/?$/.test(location.pathname)) {
+if (location.protocol !== 'file:' && (/^\/meeting\/[^/]+(\/preview)?\/?$/.test(location.pathname) || /^\/admin\/?$/.test(location.pathname))) {
     try {
         const marker = ipcRenderer.sendSync('meeting:session-marker');
+        localStorage.removeItem('token');
         if (typeof marker === 'string' && marker) sessionStorage.setItem('token', marker);
         else sessionStorage.removeItem('token');
     } catch { /* join as guest if the session is unavailable */ }
@@ -40,6 +41,7 @@ contextBridge.exposeInMainWorld('qsvcDesktop', {
     setTheme: (theme: string) => call('settings:theme', theme),
     setKeepSignedIn: (keep: boolean) => call('settings:keep', keep),
     openPlans: (plan?: string) => call('plans:open', plan),
+    openAdmin: () => call('admin:open'),
     notify: (title: string, body: string) => call('app:notify', title, body),
     onEvent: (callback: (event: string, payload?: unknown) => void) => {
         ipcRenderer.on('app:event', (_event, name: string, payload: unknown) => callback(name, payload));

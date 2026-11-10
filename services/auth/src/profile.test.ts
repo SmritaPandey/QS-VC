@@ -1,7 +1,8 @@
-import { expect, it, vi } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import type { Request, Response } from 'express';
 import { profileHandler } from './profile.js';
 import { InvalidSessionError } from './sessions.js';
+afterEach(() => vi.unstubAllEnvs());
 
 function response() {
     const res = { status: vi.fn(), json: vi.fn() };
@@ -31,5 +32,20 @@ it('applies the platform admin allow-list to an already-signed-in profile', asyn
     await profileHandler(async () => ({ sub: 'user' }), { query: vi.fn().mockResolvedValue({ rows: [{
         id: 'user', email: 'contact@neurqai.com', role: 'member', preferences: {},
     }] }) })({ headers: { authorization: 'Bearer valid' } } as Request, res as unknown as Response);
-    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ role: 'admin' }));
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ role: 'admin', isPlatformAdmin: true }));
+});
+
+it.each([
+    ['cloud', 'services@madylabs.xyz', 'member', true],
+    ['cloud', 'customer@example.test', 'admin', false],
+    ['onprem', 'services@madylabs.xyz', 'admin', false],
+    ['onprem', 'approved@internal.test', 'member', true],
+    ['onprem', 'other@internal.test', 'member', false],
+])('reports approved admin access for %s / %s from server configuration', async (deployment, email, role, allowed) => {
+    vi.stubEnv('QSVC_DEPLOYMENT', deployment);
+    vi.stubEnv('QSVC_ADMIN_EMAILS', 'approved@internal.test');
+    const res = response();
+    await profileHandler(async () => ({ sub: 'user' }), { query: vi.fn().mockResolvedValue({ rows: [{ id: 'user', email, role }] }) })(
+        { headers: { authorization: 'Bearer valid' } } as Request, res as unknown as Response);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ isPlatformAdmin: allowed }));
 });

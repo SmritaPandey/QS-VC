@@ -26,8 +26,8 @@ function toast(message, kind = 'info') {
     setTimeout(() => box.remove(), 4200);
 }
 async function busy(button, label, work) {
-    const text = button.textContent; button.disabled = true; button.textContent = label;
-    try { return await work(); } finally { button.disabled = false; button.textContent = text; }
+    const children = [...button.childNodes]; button.disabled = true; button.textContent = label;
+    try { return await work(); } finally { button.disabled = false; button.replaceChildren(...children); }
 }
 
 // ── time helpers ──
@@ -275,6 +275,10 @@ function shell() {
             h('div', { class: 'brand' }, logo(), 'QS-VC'),
             planBadge(),
             nav('home', 'Home', 'home'), nav('meetings', 'Meetings', 'calendar_month'), nav('schedule', 'Schedule', 'event'), nav('settings', 'Settings', 'settings'),
+            state.user.isPlatformAdmin === true ? h('button', { type: 'button', class: 'nav', onclick: async event => {
+                const result = await busy(event.currentTarget, 'Opening…', () => api.openAdmin());
+                if (!result.ok) toast(result.error, 'error');
+            } }, icon('admin_panel_settings'), 'Admin dashboard') : null,
             h('div', { class: 'sidebar-foot' },
                 h('div', { class: 'org', title: state.workspace }, h('span', { class: 'dot' }), h('span', { text: state.host })),
                 h('div', { class: 'me' },

@@ -14,6 +14,7 @@ import * as fs from 'fs';
 import { randomBytes } from 'node:crypto';
 import { createSsoLoopback } from './sso-loopback';
 import { changeHostedMeeting } from './meeting-actions';
+import { isDesktopSessionPage } from './desktop-navigation';
 import * as path from 'path';
 // Copied into the app package at build time (scripts/vendor-shared.cjs): the packaged app must never
 // load files from outside its own folder, or it fails to start.
@@ -26,7 +27,7 @@ const APP_PAGE = path.join(__dirname, '..', 'static', 'app.html');
 type Theme = 'system' | 'light' | 'dark';
 interface EntitlementSnapshot { plan: string; status: string; trialEndsAt: string | null; features: string[] }
 interface Config { workspaceUrl?: string; theme?: Theme; keepSignedIn?: boolean; activationReportedWorkspaces?: string[]; entitlementsCache?: { workspaceOrigin: string; accountId: string; fetchedAt: string; value: EntitlementSnapshot } }
-interface User { id: string; email: string; displayName: string; role: string; tenantId?: string }
+interface User { id: string; email: string; displayName: string; role: string; tenantId?: string; isPlatformAdmin?: boolean }
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -142,7 +143,7 @@ async function reachable(url: URL): Promise<boolean> {
 }
 
 const cleanUser = (value: any): User | null => value && typeof value.email === 'string'
-    ? { id: String(value.id), email: value.email, displayName: String(value.displayName || value.email), role: String(value.role || 'member'), tenantId: value.tenantId }
+    ? { id: String(value.id), email: value.email, displayName: String(value.displayName || value.email), role: String(value.role || 'member'), tenantId: value.tenantId, isPlatformAdmin: value.isPlatformAdmin === true }
     : null;
 
 // ━━━ Window and navigation ━━━
@@ -153,8 +154,8 @@ function sameOrigin(value: string): boolean {
 function isAppPage(url: string | undefined): boolean {
     try { return !!url && new URL(url).protocol === 'file:' && decodeURIComponent(new URL(url).pathname).endsWith('/static/app.html'); } catch { return false; }
 }
-function inMeeting(url: string): boolean {
-    try { return sameOrigin(url) && /^\/meeting\/[^/]+(\/preview)?\/?$/.test(new URL(url).pathname); } catch { return false; }
+function inSessionPage(url: string): boolean {
+    return isDesktopSessionPage(url, workspace?.origin, user?.isPlatformAdmin === true);
 }
 
 function showApp(notice = '') {
@@ -189,15 +190,15 @@ function createMainWindow(): BrowserWindow {
     win.webContents.setWindowOpenHandler(({ url }) => { openOutside(url); return { action: 'deny' }; });
     // Only the meeting room is shown from the server; any other server page returns to the app.
     win.webContents.on('will-navigate', (event, url) => {
-        if (isAppPage(url) || inMeeting(url)) return;
+        if (isAppPage(url) || inSessionPage(url)) return;
         event.preventDefault();
-        if (sameOrigin(url)) showApp('You left the meeting.'); else openOutside(url);
+        if (sameOrigin(url)) showApp('Back to your workspace.'); else openOutside(url);
     });
-    const guard = (url: string) => { if (sameOrigin(url) && !inMeeting(url)) showApp('You left the meeting.'); };
+    const guard = (url: string) => { if (sameOrigin(url) && !inSessionPage(url)) showApp('Back to your workspace.'); };
     win.webContents.on('did-navigate', (_event, url) => guard(url));
     win.webContents.on('did-navigate-in-page', (_event, url) => guard(url));
     win.webContents.on('did-fail-load', (_event, code, _description, url, isMainFrame) => {
-        if (isMainFrame && code !== -3 && inMeeting(url)) showApp('Could not open the meeting. Check the office network or VPN.');
+        if (isMainFrame && code !== -3 && inSessionPage(url)) showApp('Could not open this page. Check the office network or VPN.');
     });
 
     void win.loadFile(APP_PAGE);
@@ -210,7 +211,7 @@ function setupPermissions() {
     session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['*://*/api/*'] }, (details, done) => {
         const headers = details.requestHeaders;
         if (token && meetingMarker && details.webContentsId === mainWindow?.webContents.id
-            && details.frame === mainWindow?.webContents.mainFrame && inMeeting(details.frame?.url || '') && sameOrigin(details.url)) {
+            && details.frame === mainWindow?.webContents.mainFrame && inSessionPage(details.frame?.url || '') && sameOrigin(details.url)) {
             const name = Object.keys(headers).find(key => key.toLowerCase() === 'authorization');
             if (name && headers[name] === `Bearer ${meetingMarker}`) headers[name] = `Bearer ${token}`;
         }
@@ -261,9 +262,9 @@ function appHandler<T extends unknown[]>(channel: string, fn: (...args: T) => un
 
 function setupIPC() {
     appHandler('app:state', async () => {
-        if (workspace && token && !user) {
+        if (workspace && token) {
             const me = await api('api/auth/me');
-            user = me.ok ? cleanUser(me.data) : null;
+            if (me.ok) user = cleanUser(me.data);
             if (!me.ok && me.status !== 0) clearSession();
         }
         if (user) void reportDesktopActivation();
@@ -495,12 +496,26 @@ function setupIPC() {
         return { ok: true };
     });
 
+    appHandler('admin:open', async () => {
+        if (!workspace || !mainWindow || !user || !token) return { ok: false, error: 'Sign in with an approved administrator account.' };
+        const sessionToken = token;
+        const origin = workspace.origin;
+        const result = await api('api/auth/admin/access');
+        if (!result.ok || result.data?.access !== 'granted' || token !== sessionToken || workspace?.origin !== origin || !user) {
+            return { ok: false, error: 'Could not verify administrator access. Refresh your account and try again.' };
+        }
+        user.isPlatformAdmin = true;
+        meetingMarker = `qsvc-desktop-${randomBytes(16).toString('hex')}`;
+        void mainWindow.loadURL(new URL('/admin', origin).href);
+        return { ok: true };
+    });
+
     appHandler('app:notify', (title: unknown, body: unknown) => { new Notification({ title: String(title).slice(0, 80), body: String(body).slice(0, 200) }).show(); });
 
     // The renderer sees only a placeholder. The actual credential stays in this process.
     ipcMain.on('meeting:session-marker', event => {
         const url = event.senderFrame?.url || '';
-        event.returnValue = event.sender === mainWindow?.webContents && event.senderFrame === mainWindow?.webContents.mainFrame && inMeeting(url) ? meetingMarker : '';
+        event.returnValue = event.sender === mainWindow?.webContents && event.senderFrame === mainWindow?.webContents.mainFrame && inSessionPage(url) ? meetingMarker : '';
     });
 }
 
