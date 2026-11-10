@@ -21,7 +21,7 @@ import { createSession, validateSession, requireEnterpriseTerm, endSession, sess
 import { contactRouter, contactRequestError } from './contact.js';
 import { effectiveRole, isPlatformAdmin, assertPlatformAdminConfig } from './platform-admins.js';
 import { FEATURE_MIN_PLAN, getEntitlements, getPrivateConversationLimitMs } from '../../../shared/entitlements.cjs';
-import { billingRouter, processMandateCancellations } from './billing.js';
+import { billingRouter, processMandateCancellations, processIntroTransitions } from './billing.js';
 import { ssoRouter } from './sso.js';
 import { passwordBlocked, type Account } from './sso-store.js';
 import { personalSignInRouter } from './personal-sign-in.js';
@@ -573,8 +573,8 @@ void prepareSessionSigning().then(() => {
     const cancelMandates = async () => {
         if (processingCancellations) return;
         processingCancellations = true;
-        try { await processMandateCancellations(pool, logger); }
-        catch { logger.error('Mandate cancellation queue is unavailable. Check database migrations.'); }
+        try { await processMandateCancellations(pool, logger); await processIntroTransitions(pool, logger); }
+        catch { logger.error('Payment maintenance queues are unavailable. Check database migrations.'); }
         finally { processingCancellations = false; }
     };
     void cancelMandates();

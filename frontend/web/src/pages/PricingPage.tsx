@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
 import CurrencyRateSelector from '../components/CurrencyRateSelector';
-import { PAID_PLAN_NAMES, TRIAL_DAYS, getPlanPrice, type BillingPeriod, type PaidPlanKey } from '../../../../shared/payment-pricing.mjs';
+import { PAID_PLAN_NAMES, PLAN_OFFERS, TRIAL_DAYS, getPlanPrice, type BillingPeriod, type PaidPlanKey } from '../../../../shared/payment-pricing.mjs';
 import { formatConvertedAmount, useCurrencyRates } from '../lib/currency-rates';
 import { useSession } from '../lib/use-session';
 import { useEntitlements } from '../lib/entitlements';
@@ -24,12 +24,7 @@ export const plans = PAID_PLAN_NAMES.map(name => ({
         Pro: 'workspace_premium',
         Business: 'groups',
     }[name],
-    offer: {
-        Basic: { percent: 50, label: '50% off for 3 months' },
-        Starter: null,
-        Pro: { percent: 20, label: '20% off first month' },
-        Business: null,
-    }[name],
+    offer: PLAN_OFFERS[name.toLowerCase() as PaidPlanKey] || null,
     features: {
         Basic: ['Browser meetings', 'HD video, screen sharing and chat', 'Host controls', 'Background effects', 'AI noise suppression'],
         Starter: ['Everything in Basic', 'Meeting scheduling', 'AI captions where available', 'Private conversations up to 30 minutes'],
@@ -93,7 +88,7 @@ export default function PricingPage() {
                         : 'Pay month to month. Cancel anytime.'}</p>
                 </div>
                 {isAdmin && <p className="pricing-admin-note">Your admin access includes all plans. <Link to="/app">Go to meetings</Link></p>}
-                <p className="pricing-promotion-notice"><span className="mi" aria-hidden="true">sell</span><span>Introductory offer preview. Checkout currently uses regular prices.</span></p>
+                <p className="pricing-promotion-notice"><span className="mi" aria-hidden="true">sell</span><span>Introductory offers apply with Cashfree. Regular prices follow the offer period.</span></p>
                 <div className="pricing-offer-grid">
                     {plans.map(plan => {
                         const price = getPlanPrice(plan.key, billing)!;
@@ -123,7 +118,7 @@ export default function PricingPage() {
                                     {plan.offer && <span className="pricing-regular-price"><span className="sr-only">Regular price </span><s>{formatPrice(price.baseAmountMinor / 100)}</s></span>}
                                 </div>
                                 <p>Per user/month{annual ? ', billed monthly' : ''}</p>
-                                {plan.offer && <p className="pricing-offer-renewal">Offer preview. Regular rate {formatPrice(price.baseAmountMinor / 100)}/user/month.</p>}
+                                {plan.offer && <p className="pricing-offer-renewal">Then {formatPrice(price.baseAmountMinor / 100)}/user/month.</p>}
                                 {savings > 0 && <p className="pricing-offer-savings">Annual rate saves {formatPrice(savings)} a year</p>}
                             </div>
                             <div className="pricing-offer-actions">

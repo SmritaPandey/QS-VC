@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
 import { getEntitlements, PLAN_LEVEL } from '../../../shared/entitlements.cjs';
-import { GST_PERCENT, PAID_PLAN_NAMES, TRIAL_DAYS, getPlanPrice, type BillingPeriod, type PaidPlanKey as PlanKey } from '../../../shared/payment-pricing.mjs';
+import { GST_PERCENT, PAID_PLAN_NAMES, TRIAL_DAYS, getPlanPrice, getIntroPrice, type BillingPeriod, type PaidPlanKey as PlanKey } from '../../../shared/payment-pricing.mjs';
 import { effectiveRole } from './platform-admins.js';
 
 type Provider = 'razorpay' | 'paypal' | 'cashfree';
@@ -16,6 +16,8 @@ type BillingContext = {
     status: string; current_period_end: Date | null; currency: string; base_amount: string;
     tax_percent: string; tax_amount: string; total_amount: string; trial_checkout: boolean;
     trial_ends_at: Date | null; trial_days: number; billing_period: BillingPeriod;
+    intro_cycles?: number; intro_total_amount?: string; regular_base_amount?: string; regular_tax_amount?: string;
+    regular_total_amount?: string; regular_provider_plan_id?: string; price_transition_completed_at?: Date | null;
 };
 type ProviderPlanSnapshot = {
     id: string; currency: string; intervalUnit: string; intervalCount: number;
@@ -30,7 +32,9 @@ const checkoutSchema = z.object({
     billing: z.enum(['monthly', 'annual']).default('monthly'),
     trial: z.boolean(),
     mandateConsent: z.literal(true),
-    quote: z.object({ currency: z.string().regex(/^[A-Z]{3}$/), totalAmount: z.string().regex(/^\d+(?:\.\d{1,6})?$/) }).optional(),
+    quote: z.object({ currency: z.string().regex(/^[A-Z]{3}$/), totalAmount: z.string().regex(/^\d+(?:\.\d{1,6})?$/),
+        promotion: z.object({ cycles: z.number().int().min(1).max(12), regularTotalAmount: z.string().regex(/^\d+(?:\.\d{1,6})?$/) }).optional(),
+    }).optional(),
 });
 const razorpayVerifySchema = z.object({
     paymentId: z.string().regex(/^pay_[A-Za-z0-9]+$/),
@@ -129,6 +133,52 @@ function cashfreeConfigured() {
     return paymentsEnabled() && publicAuthUrlConfigured
         && Boolean(process.env.CASHFREE_CLIENT_ID && process.env.CASHFREE_CLIENT_SECRET);
 }
+
+/** A durable retry job changes only the future plan after the promised discounted captures. */
+export async function processIntroTransitions(pool: Pool, logger: Logger) {
+    const jobs = await pool.query('SELECT * FROM public.qsvc_claim_intro_transitions()');
+    for (const job of jobs.rows) {
+        try {
+            const subscriptionPath = `/subscriptions/${encodeURIComponent(job.provider_subscription_id)}`;
+            let current = await cashfreeRequest(subscriptionPath, 'GET');
+            if (current.subscription_status !== 'ACTIVE') continue;
+            const remainingCycles = billingCycles('cashfree', job.billing_period) - job.intro_cycles;
+            const planPath = `/plans/${encodeURIComponent(job.regular_provider_plan_id)}`;
+            let renewal;
+            try { renewal = await cashfreeRequest(planPath, 'GET'); }
+            catch {
+                await cashfreeRequest('/plans', 'POST', {
+                    plan_id: job.regular_provider_plan_id, plan_name: 'QS-VC regular renewal', plan_type: 'PERIODIC',
+                    plan_currency: job.currency, plan_recurring_amount: Number(job.regular_total_amount), plan_max_amount: Number(job.regular_total_amount),
+                    plan_max_cycles: remainingCycles, plan_intervals: 1, plan_interval_type: 'MONTH',
+                });
+                renewal = await cashfreeRequest(planPath, 'GET');
+            }
+            const matches = (plan: any) => plan?.plan_id === job.regular_provider_plan_id
+                && plan.plan_currency === job.currency && Number(plan.plan_recurring_amount ?? plan.plan_amount) === Number(job.regular_total_amount)
+                && plan.plan_interval_type === 'MONTH' && Number(plan.plan_intervals) === 1 && Number(plan.plan_max_cycles) === remainingCycles;
+            if (!matches(renewal)) throw new Error('Renewal plan does not match the approved price');
+            if (!matches(current.plan_details)) {
+                if (current.plan_details?.plan_id !== job.provider_plan_id
+                    || Number(current.plan_details?.plan_recurring_amount ?? current.plan_details?.plan_amount) !== Number(job.total_amount)) {
+                    throw new Error('Current plan does not match the recorded checkout');
+                }
+                await cashfreeRequest(`${subscriptionPath}/manage`, 'POST', {
+                    subscription_id: job.provider_subscription_id, action: 'CHANGE_PLAN', action_details: { plan_id: job.regular_provider_plan_id },
+                });
+                current = await cashfreeRequest(subscriptionPath, 'GET');
+            }
+            if (!matches(current.plan_details)) throw new Error('Renewal plan change not confirmed');
+            await inTenant(pool, job.tenant_id, client => client.query(
+                `UPDATE public.payment_subscriptions SET provider_plan_id = regular_provider_plan_id,
+                    base_amount = regular_base_amount, tax_amount = regular_tax_amount, total_amount = regular_total_amount,
+                    price_transition_completed_at = NOW(), updated_at = NOW()
+                 WHERE id = $1 AND tenant_id = $2 AND status = 'active' AND price_transition_completed_at IS NULL`,
+                [job.id, job.tenant_id],
+            ));
+        } catch { logger.error({ subscriptionId: job.id }, 'Introductory price transition pending; retry scheduled'); }
+    }
+}
 function paypalConfigured(plan: PlanKey, billing: BillingPeriod, trial = false) {
     return paymentsEnabled() && Boolean(process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET
         && process.env.PAYPAL_WEBHOOK_ID && providerPlanId('paypal', plan, billing, trial)
@@ -222,15 +272,20 @@ function publicOptions(plan: PlanKey, billing: BillingPeriod) {
             paypal = { ...paypal, enabled: false, trialEnabled: false };
         }
     }
+    const intro = getIntroPrice(plan, billing);
+    const cashfreePrice = intro || price;
     const cashfree = {
         mode: providerMode('cashfree'),
         enabled: cashfreeConfigured() && price.currency === 'INR',
         trialEnabled: cashfreeConfigured() && price.currency === 'INR',
         maxBillingCycles: billingCycles('cashfree', billing),
         currency: price.currency,
-        baseAmount: minorToDecimal(price.baseAmountMinor, price.currency),
-        taxAmount: minorToDecimal(price.taxAmountMinor, price.currency),
-        totalAmount: minorToDecimal(price.totalAmountMinor, price.currency),
+        baseAmount: minorToDecimal(cashfreePrice.baseAmountMinor, price.currency),
+        taxAmount: minorToDecimal(cashfreePrice.taxAmountMinor, price.currency),
+        totalAmount: minorToDecimal(cashfreePrice.totalAmountMinor, price.currency),
+        promotion: intro ? { percent: intro.percent, cycles: intro.cycles,
+            regularBaseAmount: minorToDecimal(price.baseAmountMinor, price.currency),
+            regularTotalAmount: minorToDecimal(price.totalAmountMinor, price.currency) } : null,
         taxPercent: GST_PERCENT,
         paymentMethods: ['UPI AutoPay (BHIM and other UPI apps)', 'Credit/debit card'],
     };
@@ -474,6 +529,7 @@ async function applyWebhook(
     verifiedPaidAmountMinor: number | null = null,
     verifiedPaidCurrency: string | null = null,
     verifiedTrialEndsAt: Date | null = null,
+    verifiedPaidAt: Date | null = null,
 ) {
     const client = await pool.connect();
     try {
@@ -505,11 +561,14 @@ async function applyWebhook(
         }
 
         const storedCurrency = String(context.currency).toUpperCase();
+        const regularPhase = provider === 'cashfree' && Number(context.intro_cycles) > 0
+            && verifiedPlan?.id === context.regular_provider_plan_id;
+        const expectedTotal = regularPhase ? context.regular_total_amount! : context.total_amount;
         const storedAmountsValid = Number(context.tax_percent) === GST_PERCENT
             && decimalToMinor(context.base_amount, storedCurrency) + decimalToMinor(context.tax_amount, storedCurrency)
                 === decimalToMinor(context.total_amount, storedCurrency);
         const providerPlanValid = Boolean(verifiedPlan)
-            && verifiedPlan!.id === context.provider_plan_id
+            && (verifiedPlan!.id === context.provider_plan_id || regularPhase)
             && verifiedCheckoutId === context.id
             && verifiedPlan!.currency.toUpperCase() === storedCurrency
             && verifiedPlan!.intervalCount === 1
@@ -526,12 +585,17 @@ async function applyWebhook(
                     && Number(verifiedPlan!.setupFee || 0) === 0
                     && decimalToMinor(String(verifiedPlan!.amount), storedCurrency) === decimalToMinor(context.base_amount, storedCurrency)
                     : verifiedPlan!.intervalUnit === 'MONTH'
-                        && verifiedPlan!.totalCycles === expectedCycles
-                        && decimalToMinor(String(verifiedPlan!.amount), storedCurrency) === decimalToMinor(context.total_amount, storedCurrency));
+                        && verifiedPlan!.totalCycles === (regularPhase ? expectedCycles - context.intro_cycles! : expectedCycles)
+                        && decimalToMinor(String(verifiedPlan!.amount), storedCurrency) === decimalToMinor(expectedTotal, storedCurrency));
+
+        // A prior-cycle receipt can arrive after the provider has already switched the future plan.
+        const delayedIntroCapture = regularPhase && context.intro_total_amount && verifiedPaidAt
+            && (!context.price_transition_completed_at || verifiedPaidAt <= new Date(context.price_transition_completed_at))
+            && verifiedPaidAmountMinor === decimalToMinor(context.intro_total_amount, storedCurrency);
 
         const paidAmountValid = paid && Boolean(paymentId?.trim()) && paymentId!.length <= 255
             && verifiedPaidAmountMinor !== null && verifiedPaidAmountMinor > 0 && verifiedPaidCurrency?.toUpperCase() === storedCurrency
-            && verifiedPaidAmountMinor === decimalToMinor(context.total_amount, storedCurrency);
+            && (verifiedPaidAmountMinor === decimalToMinor(expectedTotal, storedCurrency) || delayedIntroCapture);
         if ((paid || trialAuthorized) && (!storedAmountsValid || !providerPlanValid || (paid && !paidAmountValid))) {
             await client.query("UPDATE public.payment_webhook_events SET result = 'ignored', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2", [provider, eventId, context.tenant_id]);
             await client.query('COMMIT');
@@ -734,6 +798,11 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
             return res.status(503).json({ error: `${label} is not configured for this billing option yet.` });
         }
         const quote = parsed.data.quote;
+        const introductoryPrice = provider === 'cashfree' ? getIntroPrice(plan, billing) : null;
+        if (introductoryPrice && (!quote?.promotion || quote.promotion.cycles !== introductoryPrice.cycles
+            || Number(quote.promotion.regularTotalAmount) !== getPlanPrice(plan, billing)!.totalAmountMinor / 100)) {
+            return res.status(409).json({ error: 'The offer or renewal terms changed. Refresh checkout and confirm the new terms.' });
+        }
         if (quote && (quote.currency !== option.currency || Number(quote.totalAmount) !== Number(option.totalAmount))) {
             return res.status(409).json({ error: 'The payment price changed. Refresh checkout and confirm the new total.' });
         }
@@ -744,7 +813,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
             } else if (provider === 'paypal') {
                 providerPlan = await validatePayPalPlan(plan, billing, trial);
             } else {
-                const price = getPlanPrice(plan, billing)!;
+                const price = getIntroPrice(plan, billing) || getPlanPrice(plan, billing)!;
                 providerPlan = { id: 'cashfree_periodic_monthly', currency: price.currency,
                     baseAmount: minorToDecimal(price.baseAmountMinor, price.currency),
                     taxAmount: minorToDecimal(price.taxAmountMinor, price.currency),
@@ -792,7 +861,8 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                 );
                 const existingSubscription = await client.query(
                     `SELECT id, provider, plan, status, current_period_end, provider_subscription_id, provider_order_id,
-                            provider_session_id, billing_mode, approval_url, trial_checkout, trial_ends_at, trial_days, billing_period, provider_plan_id, total_amount
+                            provider_session_id, billing_mode, approval_url, trial_checkout, trial_ends_at, trial_days, billing_period, provider_plan_id, total_amount,
+                            intro_cycles, regular_total_amount
                      FROM public.payment_subscriptions
                      WHERE tenant_id = $1 AND user_id = $2
                        AND (status IN ('creating', 'pending', 'active', 'past_due') OR (status = 'cancelled' AND current_period_end > NOW()))
@@ -804,6 +874,8 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     if (existingRow.status === 'pending' && existingRow.provider === provider && existingRow.plan === plan
                         && existingRow.billing_period === billing && existingRow.trial_days === TRIAL_DAYS
                         && Number(existingRow.total_amount) === Number(providerPlan.totalAmount)
+                        && Number(existingRow.intro_cycles || 0) === (introductoryPrice?.cycles || 0)
+                        && (!introductoryPrice || Number(existingRow.regular_total_amount) === getPlanPrice(plan, billing)!.totalAmountMinor / 100)
                         && (provider === 'cashfree' || existingRow.provider_plan_id === providerPlan.id)
                         && Boolean(existingRow.trial_checkout) === trial && existingProviderReference) {
                         trialEndsAt = existingRow.trial_ends_at;
@@ -827,6 +899,17 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                         checkoutExpiresAt, trial, trialEndsAt,
                         provider === 'cashfree' ? subscriptionId : null, TRIAL_DAYS, billing],
                 );
+                const intro = provider === 'cashfree' ? getIntroPrice(plan, billing) : null;
+                if (intro) {
+                    const regular = getPlanPrice(plan, billing)!;
+                    await client.query(
+                        `UPDATE public.payment_subscriptions SET intro_cycles = $1, intro_total_amount = total_amount,
+                            regular_base_amount = $2, regular_tax_amount = $3, regular_total_amount = $4, regular_provider_plan_id = $5
+                         WHERE id = $6 AND tenant_id = $7`,
+                        [intro.cycles, minorToDecimal(regular.baseAmountMinor, regular.currency), minorToDecimal(regular.taxAmountMinor, regular.currency),
+                            minorToDecimal(regular.totalAmountMinor, regular.currency), `qs_${subscriptionId.replace(/-/g, '')}_r`, subscriptionId, user.tenantId],
+                    );
+                }
                 return { id: subscriptionId, email: row.email, phone: row.phone_number, reuse: false, providerSubscriptionId: null, providerSessionId: null, approvalUrl: null };
             });
 
@@ -900,7 +983,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                 customer_details: { customer_email: attempt.email, customer_phone: String(attempt.phone || '').replace(/^\+91/, '') },
                 plan_details: {
                     plan_name: `QS-VC ${parsed.data.plan} ${billing}`, plan_type: 'PERIODIC',
-                    plan_amount: Number(providerPlan.totalAmount), plan_max_amount: Number(providerPlan.totalAmount),
+                    plan_amount: Number(providerPlan.totalAmount), plan_max_amount: Number(minorToDecimal(price.totalAmountMinor, price.currency)),
                     plan_max_cycles: cycles, plan_intervals: 1, plan_currency: price.currency,
                     plan_interval_type: 'MONTH', plan_note: billing === 'annual' ? 'Up to 12 monthly payments; cancel future renewals anytime.' : 'Renews monthly; cancel anytime.',
                 },
@@ -1350,7 +1433,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                 const parsedEnd = cashfreeDate(nextCharge);
                 if (parsedEnd && parsedEnd.getTime() > Date.now()) periodEnd = parsedEnd;
             }
-            if (paid && !periodEnd && subscriptionStatus === 'COMPLETED' && verifiedPlan?.totalCycles === 12) {
+            if (paid && !periodEnd && subscriptionStatus === 'COMPLETED' && verifiedPlan && Number(verifiedPlan.totalCycles) > 0) {
                 const paidAt = cashfreeDate(event.event_time);
                 if (paidAt) periodEnd = nextCalendarMonth(paidAt);
             }
@@ -1362,7 +1445,8 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                 : typeof data.cf_payment_id === 'string' ? data.cf_payment_id : null;
             await applyWebhook(pool, 'cashfree', eventId, `${event.type}${statusSuffix}`, rawBody,
                 subscriptionId, paid, periodEnd, paymentId, verifiedPlan, verifiedCheckoutId,
-                trialAuthorized, verifiedPaidAmountMinor, paymentCurrency, cashfreeDate(verified.subscription_first_charge_time));
+                trialAuthorized, verifiedPaidAmountMinor, paymentCurrency, cashfreeDate(verified.subscription_first_charge_time),
+                paid ? cashfreeDate(data.payment_time || event.event_time) : null);
             res.status(200).json({ received: true });
         } catch (error) {
             logger.error({ error: error instanceof Error ? error.message : 'webhook error' }, 'Cashfree webhook could not be processed');

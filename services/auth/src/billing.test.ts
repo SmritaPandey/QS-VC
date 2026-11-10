@@ -687,12 +687,12 @@ it.each(['success', 'failure', 'pending'])('confirms provider cancellation befor
 });
 
 it.each([
-    ['Basic', 'monthly', '114.00', '134.52'],
-    ['Basic', 'annual', '95.00', '112.10'],
+    ['Basic', 'monthly', '57.00', '67.26'],
+    ['Basic', 'annual', '47.50', '56.05'],
     ['Starter', 'monthly', '309.00', '364.62'],
     ['Starter', 'annual', '257.00', '303.26'],
-    ['Pro', 'monthly', '1199.00', '1414.82'],
-    ['Pro', 'annual', '999.00', '1178.82'],
+    ['Pro', 'monthly', '959.20', '1131.86'],
+    ['Pro', 'annual', '799.20', '943.06'],
     ['Business', 'monthly', '1938.00', '2286.84'],
     ['Business', 'annual', '1615.00', '1905.70'],
 ])('publishes the server quote and trial eligibility for %s %s', (plan, billing, baseAmount, totalAmount) => {
@@ -879,4 +879,82 @@ it('cancels a paid renewal without reducing the purchased plan or remaining acce
     expect(cancellation?.values).toEqual([cashfreeSubscriptionId, user.tenantId, user.sub]);
     expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/subscriptions/selected-subscription/manage'),
         expect.objectContaining({ method: 'POST', body: expect.stringContaining('"action":"CANCEL"') }));
+});
+
+it.each([
+    ['Basic', 'monthly', '67.26', '134.52', 3],
+    ['Basic', 'annual', '56.05', '112.10', 3],
+    ['Pro', 'monthly', '1131.86', '1414.82', 1],
+    ['Pro', 'annual', '943.06', '1178.82', 1],
+] as const)('creates the agreed discounted %s %s mandate and stores the regular renewal snapshot', async (plan, billing, first, regular, cycles) => {
+    enableCashfree();
+    const { pool, queries } = makePool();
+    let sent: any;
+    vi.stubGlobal('fetch', vi.fn(async (_url: string | URL, init?: RequestInit) => {
+        sent = JSON.parse(String(init?.body));
+        return Response.json({ subscription_id: sent.subscription_id, subscription_session_id: 'intro-session', plan_details: { plan_id: 'intro-plan' } });
+    }));
+    const res = makeResponse();
+    await route(makeRouter(pool), '/checkout')(makeRequest({ provider: 'cashfree', plan, billing, trial: true, mandateConsent: true,
+        quote: { currency: 'INR', totalAmount: first, promotion: { cycles, regularTotalAmount: regular } } }) as unknown as Request, res as unknown as Response, vi.fn());
+    expect(res.statusCode).toBe(200);
+    expect(sent.plan_details).toMatchObject({ plan_amount: Number(first), plan_max_amount: Number(regular) });
+    expect(sent.customer_details.customer_email).toBe(user.email);
+    const snapshot = queries.find(query => query.sql.includes('SET intro_cycles = $1'));
+    expect(snapshot?.values[0]).toBe(cycles);
+    expect(snapshot?.values[3]).toBe(regular);
+    expect(snapshot?.values[4]).toMatch(/^qs_[a-f0-9]{32}_r$/);
+    expect(new Date(sent.subscription_first_charge_time).getTime()).toBeGreaterThan(Date.now() + 13 * 86400000);
+});
+
+it.each([
+    ['intro', 67.26, true],
+    ['regular', 134.52, true],
+    ['late-intro', 67.26, true],
+    ['after-transition-underpayment', 67.26, false],
+] as const)('validates Cashfree price-phase receipts and idempotent access: %s', async (phase, amount, accepted) => {
+    enableCashfree();
+    const completed = new Date(Date.now() - 3600000);
+    const context = { id: cashfreeSubscriptionId, tenant_id: user.tenantId, user_id: user.sub, plan: 'basic', provider_plan_id: phase === 'intro' ? 'intro-plan' : 'regular-plan',
+        status: 'active', currency: 'INR', base_amount: phase === 'intro' ? '57' : '114', tax_amount: phase === 'intro' ? '10.26' : '20.52',
+        total_amount: phase === 'intro' ? '67.26' : '134.52', tax_percent: '18', trial_checkout: false, trial_days: 14, billing_period: 'monthly',
+        intro_cycles: 3, intro_total_amount: '67.26', regular_provider_plan_id: 'regular-plan', regular_total_amount: '134.52', price_transition_completed_at: phase === 'intro' ? null : completed };
+    let captured = false;
+    const queries: string[] = [];
+    const client = { query: vi.fn(async (sql: string) => {
+        queries.push(sql);
+        if (sql.includes('qsvc_payment_subscription_context')) return { rows: [context], rowCount: 1 };
+        if (sql.includes('INSERT INTO public.payment_captures')) { if (captured) return { rows: [], rowCount: 0 }; captured = true; }
+        return { rows: [], rowCount: 1 };
+    }), release: vi.fn() };
+    const regularPhase = phase !== 'intro';
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ subscription_id: 'provider-sub', subscription_status: 'ACTIVE',
+        next_schedule_date: new Date(Date.now() + 30 * 86400000).toISOString(),
+        plan_details: { plan_id: regularPhase ? 'regular-plan' : 'intro-plan', plan_currency: 'INR', plan_amount: regularPhase ? 134.52 : 67.26,
+            plan_interval_type: 'MONTH', plan_intervals: 1, plan_max_cycles: regularPhase ? 97 : 100 },
+        subscription_tags: { qsvc_checkout_id: context.id } })));
+    const eventTime = phase === 'late-intro' ? new Date(completed.getTime() - 60000) : new Date();
+    const rawBody = Buffer.from(JSON.stringify({ type: 'SUBSCRIPTION_PAYMENT_SUCCESS', event_time: eventTime.toISOString(),
+        data: { subscription_id: 'provider-sub', payment_id: 'paid-phase', payment_type: 'CHARGE', payment_status: 'SUCCESS', payment_currency: 'INR', payment_amount: amount } }));
+    const timestamp = String(Date.now());
+    const signature = crypto.createHmac('sha256', cashfreeWebhookSecret).update(timestamp).update(rawBody).digest('base64');
+    const webhook = route(makeRouter({ connect: vi.fn(async () => client) } as never), '/webhooks/cashfree');
+    for (let repeat = 0; repeat < 2; repeat++) {
+        const res = makeResponse();
+        await webhook(makeRequest({}, { 'x-webhook-signature': signature, 'x-webhook-timestamp': timestamp }, {}, rawBody) as unknown as Request, res as unknown as Response, vi.fn());
+        expect(res.statusCode).toBe(200);
+    }
+    expect(queries.filter(sql => sql.includes('UPDATE public.users SET subscription_plan'))).toHaveLength(accepted ? 1 : 0);
+});
+
+it.each([undefined, { cycles: 1, regularTotalAmount: '134.52' }, { cycles: 3, regularTotalAmount: '999.00' }])('rejects stale or missing future renewal terms before creating a mandate', async promotion => {
+    enableCashfree();
+    const { pool } = makePool();
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+    const res = makeResponse();
+    await route(makeRouter(pool), '/checkout')(makeRequest({ provider: 'cashfree', plan: 'Basic', billing: 'monthly', trial: true, mandateConsent: true,
+        quote: { currency: 'INR', totalAmount: '67.26', promotion } }) as unknown as Request, res as unknown as Response, vi.fn());
+    expect(res.statusCode).toBe(409);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(pool.connect).not.toHaveBeenCalled();
 });

@@ -19,6 +19,8 @@
 .payment-breakdown .payment-conversion { color: var(--text-secondary); font-size: 13px; }
 .payment-breakdown .payment-conversion strong { font-size: 13px; font-weight: 400; }
 .payment-note { margin: 14px 0 0; color: var(--text-secondary); font-size: 14px; line-height: 1.6; }
+.payment-regular-price { margin-right: 6px; color: var(--text-secondary); font-weight: 400; }
+.payment-breakdown .payment-offer-note { display: block; padding: 10px 12px; border-radius: 8px; background: var(--surface-tint, #e7f6f3); color: var(--text-primary); font-size: 14px; line-height: 1.5; }
 .payment-trial-summary-note { display: grid; gap: 8px; margin-top: 20px; padding: 16px; border-left: 3px solid var(--accent-primary); border-radius: 0 12px 12px 0; background: var(--bg-primary); color: var(--text-secondary); font-size: 14px; line-height: 1.55; }
 .payment-trial-summary-note strong { color: var(--text-primary); font-weight: 500; }
 .payment-change-plan, .payment-summary > a { display: inline-flex; min-height: 44px; align-items: center; margin-top: 14px; text-underline-offset: 4px; }
@@ -33,8 +35,8 @@
 .payment-mode-badge--test { color: var(--text-primary); background: color-mix(in srgb, var(--accent-warning, #d7a83c) 16%, var(--bg-secondary)); }
 .payment-gateway.is-selected { border-color: var(--accent-primary); background: var(--surface-tint, #e7f6f3); }
 .payment-gateway:has(input:focus-visible) { outline: 3px solid color-mix(in srgb, var(--accent-primary) 42%, transparent); outline-offset: 2px; }
-.payment-gateway input[type="radio"] { appearance: none; box-sizing: border-box; width: 20px; height: 20px; min-width: 20px; min-height: 20px; margin: 0; border: 1.5px solid var(--border-tone, #8ba0ab); border-radius: 50%; background: var(--bg-secondary); }
-.payment-gateway input[type="radio"]:checked { border: 6px solid var(--accent-primary); }
+.public-site .payment-page .payment-options .payment-gateway input[type="radio"] { appearance: none; box-sizing: border-box; flex: 0 0 20px; width: 20px; height: 20px; min-width: 20px; min-height: 20px; max-width: 20px; max-height: 20px; padding: 0; margin: 0; box-shadow: none; border: 1.5px solid var(--border-tone, #8ba0ab); border-radius: 50%; background: var(--bg-secondary); }
+.public-site .payment-page .payment-options .payment-gateway input[type="radio"]:checked { border: 6px solid var(--accent-primary); }
 .payment-gateway-copy { min-width: 0; }
 .payment-gateway strong, .payment-gateway small { display: block; }
 .payment-gateway strong { color: var(--text-primary); font-size: 17px; font-weight: 500; line-height: 1.35; }
@@ -45,7 +47,7 @@
 .payment-account-email input:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent-primary) 42%, transparent); outline-offset: 2px; }
 .payment-account-email small { color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
 .payment-consent { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: start; gap: 10px; margin: 18px 0 8px; padding: 12px; border: 1px solid var(--border-tone, #d5e0e5); border-radius: 12px; background: var(--bg-primary); color: var(--text-secondary); font-size: 14px; line-height: 1.55; cursor: pointer; }
-.payment-consent input { box-sizing: border-box; width: 20px; height: 20px; margin: 0; justify-self: center; accent-color: var(--accent-primary); }
+.public-site .payment-page .payment-options .payment-consent input[type="checkbox"] { box-sizing: border-box; width: 20px; height: 20px; min-height: 20px; max-width: 20px; max-height: 20px; padding: 0; margin: 2px 0 0; border-radius: 4px; box-shadow: none; justify-self: center; accent-color: var(--accent-primary); }
 .payment-consent:has(input:focus-visible) { outline: 3px solid color-mix(in srgb, var(--accent-primary) 42%, transparent); outline-offset: 2px; }
 .payment-trial-first-charge { margin: 10px 0 16px; color: var(--text-secondary); font-size: 14px; line-height: 1.55; }
 .payment-checkout-button, .payment-options > .btn-primary { display: inline-flex; width: 100%; min-height: 52px; align-items: center; justify-content: center; margin-top: 14px; padding: 10px 18px; border-radius: 999px; font-size: 16px; }

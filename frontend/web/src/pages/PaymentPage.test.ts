@@ -1,8 +1,37 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
-import PaymentPage, { PaymentProviderChoices } from './PaymentPage';
+import PaymentPage, { PaymentProviderChoices, openCashfreeSubscription } from './PaymentPage';
+
+afterEach(() => vi.unstubAllGlobals());
+
+it.each(['production', 'sandbox'] as const)('opens the documented Cashfree subscription SDK in %s mode', async mode => {
+    const subscriptionsCheckout = vi.fn(async () => ({}));
+    const checkout = vi.fn();
+    const Cashfree = vi.fn(() => ({ subscriptionsCheckout, checkout }));
+    vi.stubGlobal('window', { Cashfree });
+    await openCashfreeSubscription('sub_session_test', mode);
+    expect(Cashfree).toHaveBeenCalledWith({ mode });
+    expect(subscriptionsCheckout).toHaveBeenCalledWith({ subsSessionId: 'sub_session_test', redirectTarget: '_self' });
+    expect(checkout).not.toHaveBeenCalled();
+});
+
+it('handles subscription SDK errors without exposing provider diagnostics', async () => {
+    vi.stubGlobal('window', { Cashfree: () => ({ subscriptionsCheckout: async () => ({ error: { message: 'private provider diagnostic' } }) }) });
+    await expect(openCashfreeSubscription('sub_session_test', 'production')).rejects.toThrow('We couldn’t open Cashfree. Please try again.');
+});
+
+it('rejects an outdated SDK without falling back to the one-time checkout', async () => {
+    const checkout = vi.fn();
+    vi.stubGlobal('window', { Cashfree: () => ({ checkout }) });
+    await expect(openCashfreeSubscription('sub_session_test', 'production')).rejects.toThrow('Refresh this page');
+    expect(checkout).not.toHaveBeenCalled();
+});
+
+it('rejects a missing subscription session before SDK access', async () => {
+    await expect(openCashfreeSubscription('', 'production')).rejects.toThrow('We couldn’t open Cashfree');
+});
 
 const render = (url: string) => renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: [url] }, createElement(PaymentPage)));
 describe('payment selection', () => {

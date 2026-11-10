@@ -2,7 +2,9 @@
 
 Basic, Starter, Pro and Business support recurring online checkout. Free opens the meeting app and Enterprise goes to sales. Each eligible account can start one 14-day trial after provider-confirmed mandate authorization. Existing trials keep their stored duration.
 
-Monthly plans bill each month. Annual rates bill monthly for up to 12 payments, then end. Customers can cancel future renewals from checkout. Razorpay and Cashfree monthly mandates have up to 100 charges and PayPal monthly mandates continue until cancelled. The introductory Basic and Pro discounts in the pricing brief require a separate provider-backed promotion setup.
+Monthly plans bill each month. Annual rates bill monthly for up to 12 payments, then end. Customers can cancel future renewals from checkout. Razorpay and Cashfree monthly mandates have up to 100 charges and PayPal monthly mandates continue until cancelled.
+
+New Cashfree subscriptions apply Basic's 50% discount to the first three paid cycles and Pro's 20% discount to the first paid cycle. Trials do not consume a discounted cycle. GST is calculated on the discounted base. The mandate authorizes the disclosed regular maximum so a durable, retryable job can change the future periodic plan after the discounted captures. Existing subscriptions retain their stored prices. These introductory offers currently apply to Cashfree; Razorpay and PayPal use their configured regular plans.
 
 Provider credentials stay on the auth service. The client receives only the public Razorpay key, Cashfree subscription session ID, or a validated PayPal approval URL. The backend stores the customer email from the signed-in profile and calculates the amount server-side. A changed quote requires the customer to reconfirm.
 
@@ -21,7 +23,9 @@ GST is displayed in checkout. Razorpay and Cashfree recurring amounts are set to
 
 ## Provider setup
 
-Apply pending migrations through `029_public_paid_plans.sql` with the migration role before deploying this auth-service build. It adds the new tiers and stores billing period and trial duration per subscription.
+Apply pending migrations through `030_subscription_intro_prices.sql` with the migration role before deploying this auth-service build. Migration 030 stores immutable regular-price snapshots for new introductory subscriptions and grants the bounded transition worker. Run `db/verify-billing-intro.sql` against a staging database to verify tenant isolation, paid-cycle counting and retry leases; its fixtures are rolled back. Deploy auth and web together after the migration.
+
+Cashfree's subscription SDK entry point is `subscriptionsCheckout({ subsSessionId, redirectTarget: '_self' })`; the one-time `checkout()` API does not accept subscription sessions. SDK loading is checked before creating a subscription. A failed browser handoff can be retried with the existing matching pending session. Cancel an older pending checkout before starting a new offer; a pending mandate must not be silently repriced.
 
 ```sh
 npm run db:migrate

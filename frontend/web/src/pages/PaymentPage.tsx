@@ -13,7 +13,8 @@ import { useCurrencyRates, type DisplayCurrency } from '../lib/currency-rates';
 import '../styles/payment.css';
 
 type Gateway = 'razorpay' | 'paypal' | 'cashfree';
-type GatewayOption = { enabled: boolean; trialEnabled: boolean; mode?: 'live' | 'test' | 'unknown'; maxBillingCycles?: number | null; currency: string; baseAmount: string; taxAmount: string; totalAmount: string };
+type GatewayOption = { enabled: boolean; trialEnabled: boolean; mode?: 'live' | 'test' | 'unknown'; maxBillingCycles?: number | null; currency: string; baseAmount: string; taxAmount: string; totalAmount: string;
+    promotion?: { percent: number; cycles: number; regularBaseAmount: string; regularTotalAmount: string } | null };
 type Options = { billing?: 'monthly' | 'annual'; paymentsEnabled: boolean; taxPercent: number; trialDays: number; providers: Record<Gateway, GatewayOption> };
 type PaymentStatus = {
     id: string;
@@ -21,6 +22,9 @@ type PaymentStatus = {
     status: string;
     billingMode: 'subscription' | 'one_time';
     currentPeriodEnd: string | null;
+    provider?: Gateway;
+    currency?: string;
+    totalAmount?: string;
 } | null;
 type CheckoutResult = {
     provider: Gateway;
@@ -38,7 +42,7 @@ declare global {
     interface Window {
         Razorpay?: new (options: Record<string, unknown>) => { open: () => void; on: (event: string, callback: (value: Record<string, unknown>) => void) => void };
         Cashfree?: (input: { mode: 'sandbox' | 'production' }) => {
-            checkout: (options: { subscriptionSessionId: string; redirectTarget: '_self' }) => Promise<unknown> | unknown;
+            subscriptionsCheckout: (options: { subsSessionId: string; redirectTarget: '_self' }) => Promise<unknown> | unknown;
         };
     }
 }
@@ -119,6 +123,16 @@ function gatewayName(gateway: Gateway) {
     return gateway === 'razorpay' ? 'Razorpay' : gateway === 'cashfree' ? 'Cashfree UPI AutoPay' : 'PayPal';
 }
 
+export async function openCashfreeSubscription(sessionId?: string, mode?: 'sandbox' | 'production') {
+    if (!sessionId?.trim() || (mode !== 'sandbox' && mode !== 'production')) throw new CheckoutError('We couldn’t open Cashfree. Try again or choose another payment option.');
+    const loaded = await loadProviderScript('cashfree');
+    if (!loaded || !window.Cashfree) throw new CheckoutError('We couldn’t open Cashfree. Check your connection and try again.');
+    const cashfree = window.Cashfree({ mode });
+    if (typeof cashfree.subscriptionsCheckout !== 'function') throw new CheckoutError('Cashfree could not load. Refresh this page and try again.');
+    const result = await cashfree.subscriptionsCheckout({ subsSessionId: sessionId, redirectTarget: '_self' });
+    if (result && typeof result === 'object' && 'error' in result && result.error) throw new CheckoutError('We couldn’t open Cashfree. Please try again.');
+}
+
 function gatewayDescription(gateway: Gateway) {
     if (gateway === 'razorpay') return 'Recurring monthly payments using UPI AutoPay, cards or other methods supported for your account.';
     if (gateway === 'cashfree') return 'Cashfree UPI AutoPay, including BHIM where supported, and cards.';
@@ -161,6 +175,10 @@ function normalizeProvider(option?: GatewayOption): GatewayOption {
         || ![option.baseAmount, option.taxAmount, option.totalAmount].every(amount =>
             typeof amount === 'string' && /^\d+(?:\.\d+)?$/.test(amount) && Number.isFinite(Number(amount)))
         || Number(option.totalAmount) <= 0) return DEFAULT_PROVIDER;
+    if (option.promotion && (!Number.isInteger(option.promotion.cycles) || option.promotion.cycles < 1 || option.promotion.cycles > 12
+        || !Number.isInteger(option.promotion.percent) || option.promotion.percent <= 0 || option.promotion.percent >= 100
+        || ![option.promotion.regularBaseAmount, option.promotion.regularTotalAmount].every(value => typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value))
+        || Number(option.promotion.regularTotalAmount) < Number(option.totalAmount))) return DEFAULT_PROVIDER;
     return { ...option, enabled: option.enabled === true, trialEnabled: option.trialEnabled === true,
         mode: option.mode === 'live' || option.mode === 'test' ? option.mode : 'unknown' };
 }
@@ -242,6 +260,9 @@ export default function PaymentPage() {
     const providerPrice = options.providers[gateway];
     const gatewayReady = showTrialFlow ? providerPrice?.trialEnabled : providerPrice?.enabled;
     const priceReady = Boolean(optionsLoaded && providerPrice?.baseAmount && providerPrice?.taxAmount && providerPrice?.totalAmount && providerPrice?.currency);
+    const pendingPriceChanged = Boolean(priceReady && paymentStatus?.status === 'pending' && paymentStatus.plan === planKey
+        && paymentStatus.provider === gateway && paymentStatus.currency === providerPrice.currency && paymentStatus.totalAmount
+        && Number(paymentStatus.totalAmount) !== Number(providerPrice.totalAmount));
     const totalAmountDisplay = priceReady
         ? convertDisplayAmount(providerPrice.totalAmount, providerPrice.currency, currencyRates.displayCurrency, currencyRates.rates)
         : '';
@@ -252,7 +273,7 @@ export default function PaymentPage() {
         && (['active', 'pending', 'past_due'].includes(paymentStatus.status)
             || (paymentStatus.status === 'cancelled' && Boolean(paymentStatus.currentPeriodEnd)
                 && new Date(paymentStatus.currentPeriodEnd!).getTime() > Date.now()));
-    const blockPlanChange = Boolean(planKey && (subscriptionOpen && (paymentStatus?.plan !== planKey || paymentStatus?.status === 'active' || paymentStatus?.status === 'past_due' || paymentStatus?.status === 'cancelled')
+    const blockPlanChange = Boolean(pendingPriceChanged || planKey && (subscriptionOpen && (paymentStatus?.plan !== planKey || paymentStatus?.status === 'active' || paymentStatus?.status === 'past_due' || paymentStatus?.status === 'cancelled')
         || (entitlements.status === 'paid_active' && entitlements.plan !== 'guest' && !planEntitled)));
     const renewalTermCopy = billing === 'annual' && providerPrice?.maxBillingCycles === 12
         ? 'Up to 12 monthly payments. You can cancel future renewals anytime.'
@@ -299,6 +320,7 @@ export default function PaymentPage() {
                 },
             };
             if (controller.signal.aborted) return;
+            setConsent(false);
             setOptions(normalized);
             setOptionsLoaded(true);
             const firstConfigured = GATEWAYS.find(item => normalized.paymentsEnabled
@@ -470,10 +492,16 @@ export default function PaymentPage() {
                 if (!profileUpdate.ok) throw new CheckoutError('Your mobile number could not be saved. Please try again.');
                 await refreshSession();
             }
+            if (gateway !== 'paypal' && !await loadProviderScript(gateway)) {
+                throw new CheckoutError(`We couldn’t load ${gatewayName(gateway)}. Check your connection and try again.`);
+            }
             const response = await fetch(`${AUTH_API}/api/auth/billing/checkout`, {
                 method: 'POST',
                 headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ provider: gateway, plan: plan.name, billing, trial: isTrialCheckout, mandateConsent: true, quote: { currency: providerPrice.currency, totalAmount: providerPrice.totalAmount } }),
+                body: JSON.stringify({ provider: gateway, plan: plan.name, billing, trial: isTrialCheckout, mandateConsent: true, quote: {
+                    currency: providerPrice.currency, totalAmount: providerPrice.totalAmount,
+                    ...(providerPrice.promotion ? { promotion: { cycles: providerPrice.promotion.cycles, regularTotalAmount: providerPrice.promotion.regularTotalAmount } } : {}),
+                } }),
             });
             const body = await responseJson(response);
             if (!response.ok) throw new CheckoutError(checkoutError(response.status, body));
@@ -531,14 +559,7 @@ export default function PaymentPage() {
                 return;
             }
 
-            if (typeof result.sessionId !== 'string' || !result.sessionId || (result.mode !== 'sandbox' && result.mode !== 'production')) throw new CheckoutError('We couldn’t open Cashfree. Try again or choose another payment option.');
-            const loaded = await loadProviderScript('cashfree');
-            if (!loaded || !window.Cashfree) throw new CheckoutError('We couldn’t open Cashfree. Check your connection and try again.');
-            const cashfree = window.Cashfree({ mode: result.mode });
-            const checkoutResult = await cashfree.checkout({ subscriptionSessionId: result.sessionId, redirectTarget: '_self' });
-            if (checkoutResult && typeof checkoutResult === 'object' && 'error' in checkoutResult && checkoutResult.error) {
-                throw new CheckoutError('We couldn’t open Cashfree. Please try again.');
-            }
+            await openCashfreeSubscription(result.sessionId, result.mode);
             setMessage('We’re waiting for Cashfree to confirm your payment setup.');
         } catch (cause) {
             setError(cause instanceof CheckoutError ? cause.message : 'We couldn’t open checkout. Please try again.');
@@ -576,6 +597,9 @@ export default function PaymentPage() {
         ? `One free ${options.trialDays}-day trial per account. Your trial starts when recurring payments are approved and lasts at least ${options.trialDays} days. You’ll see the first charge date before you approve.`
         : 'Review the monthly price, GST and renewal terms before continuing.';
     const displayedMonthlyTotal = priceReady ? formatMoney(providerPrice.totalAmount, providerPrice.currency) : '';
+    const promotion = providerPrice.promotion;
+    const promotionTerms = promotion
+        ? `${promotion.percent}% off for the first ${promotion.cycles} paid month${promotion.cycles === 1 ? '' : 's'}, then ${formatMoney(promotion.regularTotalAmount, providerPrice.currency)}/month including GST.` : '';
     const trialFirstChargeCopy = priceReady
         ? `First monthly charge is ${displayedMonthlyTotal} ${providerPrice.currency}, including GST. You won’t be charged a plan fee until at least ${options.trialDays} days after approval.`
         : `You won’t be charged a plan fee until at least ${options.trialDays} days after approval.`;
@@ -590,7 +614,8 @@ export default function PaymentPage() {
                     <span className="payment-eyebrow">YOUR SELECTED PLAN</span><h2 id="order-title">QS-VC {plan.name}</h2><p>{plan.desc}</p><p>{billing === 'annual' ? 'Annual rate · billed monthly' : 'Monthly billing'}</p>
                     <CurrencyRateSelector id="payment-currency" value={currencyRates} />
                     {priceReady ? <div className="payment-breakdown" aria-label={`${gatewayName(gateway)} monthly price breakdown`}>
-                        <p><span>Plan price</span><strong>{formatMoney(providerPrice.baseAmount, providerPrice.currency)}</strong></p>
+                        <p><span>Plan price</span><strong>{promotion && <s className="payment-regular-price">{formatMoney(promotion.regularBaseAmount, providerPrice.currency)} </s>}{formatMoney(providerPrice.baseAmount, providerPrice.currency)}</strong></p>
+                        {promotion && <p className="payment-offer-note">{promotionTerms}</p>}
                         <p><span>GST ({options.taxPercent}%)</span><strong>{formatMoney(providerPrice.taxAmount, providerPrice.currency)}</strong></p>
                         <p className="payment-total"><span>{options.paymentsEnabled && gatewayReady ? 'Monthly total per user' : 'Proposed monthly total per user'}</span><strong>{displayedMonthlyTotal}<small> / month</small></strong></p>
                         {totalAmountDisplay && currencyRates.displayCurrency !== providerPrice.currency && <p className="payment-conversion"><span>Approx. in {currencyRates.displayCurrency}</span><strong>{totalAmountDisplay}</strong></p>}
@@ -647,6 +672,7 @@ export default function PaymentPage() {
                             ? `Your ${planLabel(paymentStatus.plan)} renewal is cancelled${paymentStatus.currentPeriodEnd ? `; access continues through ${new Date(paymentStatus.currentPeriodEnd).toLocaleDateString()}` : ''}.`
                             : `Your ${planLabel(paymentStatus.plan)} monthly subscription is ${paymentStatus.status.replace('_', ' ')}${paymentStatus.currentPeriodEnd ? ` through ${new Date(paymentStatus.currentPeriodEnd).toLocaleDateString()}` : ''}.`}</p>
                     </div>}
+                    {pendingPriceChanged && <p className="payment-note" role="status">Your pending checkout has an earlier price. Cancel it below, then start again to use this offer. We won’t change an existing payment agreement without your approval.</p>}
                     {blockPlanChange && <div className="payment-status" role="status">
                         <span className="mi" aria-hidden="true">info</span>
                         <p>Your current plan or pending subscription must end before you can switch plans. Use the cancellation control below if it is available.</p>
@@ -656,7 +682,9 @@ export default function PaymentPage() {
                     {isAuthReady && checkoutGateways.length > 0 && !isCurrentPlan && !blockPlanChange && !isProviderReturn && (!showTrialFlow || isTrialCheckout) && <>
                         <label className="payment-consent">
                             <input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} />
-                            <span>{isTrialCheckout
+                            <span>{promotion
+                                ? `I authorize ${gatewayName(gateway)} to charge ${displayedMonthlyTotal} per month for the first ${promotion.cycles} paid month${promotion.cycles === 1 ? '' : 's'}${isTrialCheckout ? ' after my free trial' : ''}, then ${formatMoney(promotion.regularTotalAmount, providerPrice.currency)} per month, including ${options.taxPercent}% GST. ${isTrialCheckout ? 'No plan fee is charged during the trial. ' : ''}${renewalTermCopy}`
+                                : isTrialCheckout
                                 ? `I authorize ${gatewayName(gateway)} to charge ${displayedMonthlyTotal || 'the displayed monthly total'} each month after my trial, including ${options.taxPercent}% GST. No plan fee is charged during the trial. ${renewalTermCopy}`
                                 : `I authorize ${gatewayName(gateway)} to charge the recurring monthly total shown above, including ${options.taxPercent}% GST. ${renewalTermCopy}`}</span>
                         </label>
