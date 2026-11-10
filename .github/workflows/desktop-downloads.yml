@@ -45,10 +45,14 @@ jobs:
           cache-dependency-path: frontend/desktop/package-lock.json
       - name: Install desktop dependencies
         run: npm ci --prefix frontend/desktop
+      - name: Test the smoke-test runner
+        run: node --test frontend/desktop/scripts/smoke-test.test.cjs
       - name: Build ZIP
         run: npm --prefix frontend/desktop run ${{ matrix.script }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Test desktop meeting controls
+        run: node --test frontend/desktop/scripts/meeting-actions.test.cjs
       - name: Install a virtual display
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq xvfb
@@ -63,17 +67,19 @@ jobs:
           set -euo pipefail
           rm -rf smoke && mkdir smoke
           case "${{ runner.os }}" in
-            Linux)   unzip -q "${{ matrix.file }}" -d smoke/app; cmd=(xvfb-run -a smoke/app/qs-vc) ;;
+            Linux)   unzip -q "${{ matrix.file }}" -d smoke/app
+                     # ZIPs cannot preserve root ownership/setuid. Prepare only the extracted
+                     # CI copy, as an administrator would on a restricted enterprise machine.
+                     sudo chown root:root smoke/app/chrome-sandbox
+                     sudo chmod 4755 smoke/app/chrome-sandbox
+                     cmd=(xvfb-run -a smoke/app/qs-vc) ;;
             Windows) unzip -q "${{ matrix.file }}" -d smoke/app; cmd=(smoke/app/QS-VC.exe) ;;
             macOS)   ditto -x -k "${{ matrix.file }}" smoke/app
                      codesign --verify --deep --strict --verbose=2 smoke/app/QS-VC.app
                      cmd=(smoke/app/QS-VC.app/Contents/MacOS/QS-VC) ;;
           esac
           result="$(pwd -W 2>/dev/null || pwd)/smoke/result.txt"
-          QSVC_SMOKE_TEST="$result" timeout 120 "${cmd[@]}" || true
-          if [ ! -f "$result" ]; then echo "::error::${{ matrix.name }} app did not start"; exit 1; fi
-          cat "$result"; echo
-          grep -qx OK "$result" || { echo "::error::${{ matrix.name }} app started but its start page failed"; exit 1; }
+          node ../scripts/smoke-test.cjs "$result" "${cmd[@]}"
           rm -rf smoke
       - name: Verify ZIP and write checksum
         shell: bash

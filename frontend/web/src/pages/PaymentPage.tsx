@@ -13,7 +13,7 @@ import { useCurrencyRates, type DisplayCurrency } from '../lib/currency-rates';
 import '../styles/payment.css';
 
 type Gateway = 'razorpay' | 'paypal' | 'cashfree';
-type GatewayOption = { enabled: boolean; trialEnabled: boolean; maxBillingCycles?: number | null; currency: string; baseAmount: string; taxAmount: string; totalAmount: string };
+type GatewayOption = { enabled: boolean; trialEnabled: boolean; mode?: 'live' | 'test' | 'unknown'; maxBillingCycles?: number | null; currency: string; baseAmount: string; taxAmount: string; totalAmount: string };
 type Options = { billing?: 'monthly' | 'annual'; paymentsEnabled: boolean; taxPercent: number; trialDays: number; providers: Record<Gateway, GatewayOption> };
 type PaymentStatus = {
     id: string;
@@ -43,7 +43,7 @@ declare global {
     }
 }
 
-const GATEWAYS: Gateway[] = ['razorpay', 'cashfree', 'paypal'];
+const GATEWAYS: Gateway[] = ['cashfree', 'razorpay', 'paypal'];
 const DEFAULT_PROVIDER: GatewayOption = { enabled: false, trialEnabled: false, currency: '', baseAmount: '', taxAmount: '', totalAmount: '' };
 const OPTIONS_UNAVAILABLE = 'We couldn’t load payment options. Please try again.';
 
@@ -125,12 +125,44 @@ function gatewayDescription(gateway: Gateway) {
     return 'Review and approve monthly payments on PayPal.';
 }
 
+export function PaymentProviderChoices({ selected, available, providers, loading, disabled, onSelect }: {
+    selected: Gateway;
+    available: Gateway[];
+    providers: Options['providers'];
+    loading: boolean;
+    disabled: boolean;
+    onSelect: (gateway: Gateway) => void;
+}) {
+    return <fieldset className="payment-provider-list" disabled={disabled}>
+        <legend className="sr-only">Recurring payment provider</legend>
+        {GATEWAYS.map(item => {
+            const ready = available.includes(item);
+            const selectedReady = ready && selected === item;
+            const unavailable = !loading && !ready;
+            const mode = providers[item]?.mode;
+            const status = loading ? 'Checking…' : !ready
+                ? item === 'razorpay' && mode === 'test' ? 'Test mode · Unavailable' : 'Unavailable'
+                : mode === 'test' ? 'Test mode' : mode === 'live' ? 'Live' : 'Available';
+            return <label key={item} className={`payment-gateway${selectedReady ? ' is-selected' : ''}${unavailable ? ' is-unavailable' : ''}`}>
+                <input type="radio" name="gateway" value={item} checked={selectedReady} disabled={!ready}
+                    aria-describedby={`payment-provider-status-${item}`} onChange={() => onSelect(item)} />
+                <span className="payment-gateway-copy">
+                    <span className="payment-gateway-heading"><strong>{gatewayName(item)}</strong><span id={`payment-provider-status-${item}`} className={`payment-mode-badge${ready && mode === 'test' ? ' payment-mode-badge--test' : ''}`}>{status}</span></span>
+                    <small>{gatewayDescription(item)}</small>
+                </span>
+                <span className="mi payment-provider-check" aria-hidden="true">{unavailable ? 'lock' : loading ? 'schedule' : selectedReady ? 'check_circle' : 'radio_button_unchecked'}</span>
+            </label>;
+        })}
+    </fieldset>;
+}
+
 function normalizeProvider(option?: GatewayOption): GatewayOption {
     if (!option || typeof option.currency !== 'string' || !/^[A-Z]{3}$/.test(option.currency)
         || ![option.baseAmount, option.taxAmount, option.totalAmount].every(amount =>
             typeof amount === 'string' && /^\d+(?:\.\d+)?$/.test(amount) && Number.isFinite(Number(amount)))
         || Number(option.totalAmount) <= 0) return DEFAULT_PROVIDER;
-    return { ...option, enabled: option.enabled === true, trialEnabled: option.trialEnabled === true };
+    return { ...option, enabled: option.enabled === true, trialEnabled: option.trialEnabled === true,
+        mode: option.mode === 'live' || option.mode === 'test' ? option.mode : 'unknown' };
 }
 
 async function responseJson(response: Response) {
@@ -167,7 +199,7 @@ export default function PaymentPage() {
         ? plans.find(item => item.name === requestedPlan)
         : undefined;
     const planKey = plan?.key;
-    const [gateway, setGateway] = useState<Gateway>('razorpay');
+    const [gateway, setGateway] = useState<Gateway>('cashfree');
     const [options, setOptions] = useState<Options>({
         paymentsEnabled: false,
         taxPercent: 18,
@@ -271,7 +303,7 @@ export default function PaymentPage() {
             setOptionsLoaded(true);
             const firstConfigured = GATEWAYS.find(item => normalized.paymentsEnabled
                 && (showTrialFlow ? normalized.providers[item].trialEnabled : normalized.providers[item].enabled));
-            setGateway(firstConfigured || (normalized.providers.razorpay.totalAmount ? 'razorpay' : 'cashfree'));
+            setGateway(firstConfigured || 'cashfree');
         }).catch(() => {
             if (controller.signal.aborted) return;
             setOptionsError(true);
@@ -597,16 +629,12 @@ export default function PaymentPage() {
                     </label>}
                     {isTrialIntent && isAuthReady && entitlements.loading && <div className="payment-status" role="status"><span className="mi" aria-hidden="true">schedule</span><p>Checking trial eligibility…</p></div>}
                     {optionsError && <div className="payment-status payment-status--error"><span className="mi" aria-hidden="true">error</span><p role="alert">{OPTIONS_UNAVAILABLE}</p><button className="payment-cancel payment-retry" type="button" onClick={() => { setOptionsError(false); setOptionsAttempt(value => value + 1); }}>Try again</button></div>}
-                    {checkoutGateways.length > 0 && <fieldset className="payment-provider-list" disabled={!isAuthReady || busy || isProviderReturn}>
-                        <legend className="sr-only">Recurring payment provider</legend>
-                        {checkoutGateways.map(item => <label key={item} className={`payment-gateway${gateway === item ? ' is-selected' : ''}`}>
-                            <input type="radio" name="gateway" value={item} checked={gateway === item} onChange={() => { setGateway(item); setConsent(false); }} />
-                            <span className="payment-gateway-copy"><strong>{gatewayName(item)}</strong><small>{gatewayDescription(item)}</small></span>
-                            <span className="mi payment-provider-check" aria-hidden="true">{gateway === item ? 'check_circle' : 'radio_button_unchecked'}</span>
-                        </label>)}
-                    </fieldset>}
+                    <PaymentProviderChoices selected={gateway} available={checkoutGateways} providers={options.providers}
+                        loading={!optionsLoaded && !optionsError} disabled={!isAuthReady || busy || isProviderReturn}
+                        onSelect={item => { setGateway(item); setConsent(false); }} />
+                    {gatewayReady && providerPrice.mode === 'test' && <p className="payment-note" role="status">Test mode — payments are simulated.</p>}
                     {!optionsLoaded && !optionsError && <div className="payment-status" role="status"><span className="mi" aria-hidden="true">schedule</span><p>Loading payment providers…</p></div>}
-                    {optionsLoaded && !options.paymentsEnabled && <div className="payment-status" role="status"><span className="mi" aria-hidden="true">info</span><p>Online checkout is currently unavailable.</p></div>}
+                    {optionsLoaded && !options.paymentsEnabled && <div className="payment-status" role="status"><span className="mi" aria-hidden="true">info</span><p>Payment methods are temporarily unavailable. Please try again later.</p></div>}
                     {optionsLoaded && options.paymentsEnabled && enabledGateways.length === 0 && checkoutGateways.length === 0 && <div className="payment-status" role="status"><span className="mi" aria-hidden="true">info</span><p>Recurring payments are currently unavailable for this plan.</p></div>}
                     {optionsLoaded && options.paymentsEnabled && showTrialFlow && enabledGateways.length > 0 && checkoutGateways.length === 0 && <div className="payment-status" role="status"><span className="mi" aria-hidden="true">info</span><p>A free trial is currently unavailable for this plan. You can still choose a paid plan.</p><Link className="payment-trial-paid-link" to={`/payment?plan=${encodeURIComponent(plan.name)}${billingQuery}`}>Continue without a trial</Link></div>}
                     {isCurrentPlan && !paymentStatus && <div className="payment-status" role="status">

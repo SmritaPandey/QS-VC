@@ -327,7 +327,7 @@ async function loadMeetings(container, fromDays, toDays, upcomingOnly) {
     const result = await api.listMeetings(start.toISOString(), addDays(start, Math.min(31, toDays - fromDays)).toISOString());
     if (!result.ok) { container.replaceChildren(h('div', { class: 'empty' }, icon('cloud_off'), h('b', { text: 'Meetings could not load' }), h('span', { text: result.error || '' }))); return; }
     const now = Date.now();
-    let meetings = result.meetings.filter(m => m.status !== 'ended').map(m => ({ ...m, when: new Date(m.scheduledStart || m.createdAt) }));
+    let meetings = result.meetings.filter(m => m.status !== 'ended' && m.status !== 'cancelled').map(m => ({ ...m, when: new Date(m.scheduledStart || m.createdAt) }));
     if (upcomingOnly) meetings = meetings.filter(m => m.when.getTime() > now - 3 * 3600000).slice(0, 8);
     meetings.sort((a, b) => a.when - b.when);
     if (!meetings.length) {
@@ -345,12 +345,33 @@ async function loadMeetings(container, fromDays, toDays, upcomingOnly) {
 
 function meetingRow(meeting, withDay) {
     const join = h('button', { class: 'btn small', onclick: async () => { const r = await busy(join, '…', () => api.joinMeeting(meeting.meetingCode)); if (!r.ok) toast(r.error, 'error'); } }, 'Join');
-    return h('article', { class: 'meeting' },
+    const active = meeting.status === 'active';
+    const canManage = active ? meeting.isHost : meeting.status === 'waiting' && (meeting.scheduledStart ? meeting.canCancel : meeting.isHost);
+    const manage = canManage ? h('button', { type: 'button', class: 'btn danger small',
+        'aria-label': `${active ? 'End meeting for everyone' : 'Cancel meeting'}: ${meeting.title || meeting.meetingCode}`,
+        onclick: async () => {
+            const buttons = row.querySelectorAll('button');
+            buttons.forEach(button => { button.disabled = true; });
+            manage.textContent = active ? 'Ending…' : 'Cancelling…';
+            try {
+                const result = await api.changeMeeting({ id: meeting.id, meetingCode: meeting.meetingCode, title: meeting.title,
+                    action: active ? 'end' : 'cancel', scheduled: !!meeting.scheduledStart });
+                if (!result.ok) { toast(result.error || 'Could not update this meeting. Try again.', 'error'); return; }
+                if (!result.dismissed) { toast(active ? 'Meeting ended for everyone.' : 'Meeting cancelled.'); render(); }
+            } catch { toast('Could not update this meeting. Check its status and try again.', 'error'); }
+            finally {
+                buttons.forEach(button => { button.disabled = false; });
+                manage.textContent = active ? 'End meeting' : 'Cancel meeting';
+            }
+        } }, active ? 'End meeting' : 'Cancel meeting') : null;
+    const row = h('article', { class: 'meeting' },
         h('time', { datetime: meeting.when.toISOString() }, timeText(meeting.when), h('small', { text: withDay ? dayText(meeting.when) : (meeting.type === 'instant' ? 'Instant' : 'Scheduled') })),
         h('div', { class: 'title' }, h('b', {}, meeting.title || 'Meeting', meeting.status === 'active' ? h('span', { class: 'live', text: 'Live' }) : null), h('code', { text: meeting.meetingCode })),
         h('div', { class: 'tools' },
+            manage,
             h('button', { class: 'icon-btn', title: 'Copy invitation', 'aria-label': `Copy invitation for ${meeting.title || 'meeting'}`, onclick: async () => { const r = await api.copyInvite(meeting.meetingCode); toast(r.ok ? 'Invitation copied.' : 'Could not copy.', r.ok ? 'info' : 'error'); } }, icon('content_copy')),
             join));
+    return row;
 }
 
 async function startNow(button) {

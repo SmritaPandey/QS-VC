@@ -105,6 +105,15 @@ function billingCycles(provider: Provider, billing: BillingPeriod) {
 }
 
 function paymentsEnabled() { return process.env.PAYMENTS_ENABLED === 'true' && process.env.PAYMENT_TERMS_CONFIRMED === 'true'; }
+function providerMode(provider: Provider): 'live' | 'test' | 'unknown' {
+    if (provider === 'razorpay') {
+        const keyId = process.env.RAZORPAY_KEY_ID || '';
+        return keyId.startsWith('rzp_live_') ? 'live' : keyId.startsWith('rzp_test_') ? 'test' : 'unknown';
+    }
+    return provider === 'cashfree'
+        ? process.env.CASHFREE_ENVIRONMENT === 'production' ? 'live' : 'test'
+        : process.env.PAYPAL_ENVIRONMENT === 'live' ? 'live' : 'test';
+}
 function paypalBaseUrl() {
     return process.env.PAYPAL_ENVIRONMENT === 'live'
         ? 'https://api-m.paypal.com'
@@ -187,6 +196,7 @@ function publicOptions(plan: PlanKey, billing: BillingPeriod) {
     const price = getPlanPrice(plan, billing);
     if (!price) return null;
     const razorpay = {
+        mode: providerMode('razorpay'),
         enabled: razorpaySubscriptionsConfigured(plan, billing),
         trialEnabled: razorpaySubscriptionsConfigured(plan, billing),
         maxBillingCycles: billingCycles('razorpay', billing),
@@ -196,7 +206,7 @@ function publicOptions(plan: PlanKey, billing: BillingPeriod) {
         totalAmount: minorToDecimal(price.totalAmountMinor, price.currency),
         taxPercent: GST_PERCENT,
     };
-    let paypal = { enabled: paypalConfigured(plan, billing), trialEnabled: paypalConfigured(plan, billing, true), maxBillingCycles: billingCycles('paypal', billing) || null, currency: (process.env.PAYPAL_CURRENCY || '').toUpperCase(), baseAmount: '', taxAmount: '', totalAmount: '', taxPercent: GST_PERCENT };
+    let paypal = { mode: providerMode('paypal'), enabled: paypalConfigured(plan, billing), trialEnabled: paypalConfigured(plan, billing, true), maxBillingCycles: billingCycles('paypal', billing) || null, currency: (process.env.PAYPAL_CURRENCY || '').toUpperCase(), baseAmount: '', taxAmount: '', totalAmount: '', taxPercent: GST_PERCENT };
     if (paypal.enabled || paypal.trialEnabled) {
         try {
             const baseMinor = decimalToMinor(paypalConfiguredAmount(plan, billing), paypal.currency);
@@ -213,6 +223,7 @@ function publicOptions(plan: PlanKey, billing: BillingPeriod) {
         }
     }
     const cashfree = {
+        mode: providerMode('cashfree'),
         enabled: cashfreeConfigured() && price.currency === 'INR',
         trialEnabled: cashfreeConfigured() && price.currency === 'INR',
         maxBillingCycles: billingCycles('cashfree', billing),

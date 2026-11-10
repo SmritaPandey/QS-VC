@@ -29,6 +29,10 @@ npm run db:migrate
 
 Set `PAYMENTS_ENABLED=true` and `PAYMENT_TERMS_CONFIRMED=true` in the auth-service environment after confirming the displayed price, GST, trial, renewal, cancellation and refund terms. Production must use HTTPS callback URLs. Keep all secret keys out of source files and `VITE_` variables.
 
+Providers can use different modes: for example, Cashfree production for live BHIM/UPI AutoPay, Razorpay test credentials, and PayPal unavailable while unconfigured. `/billing/options` reports each provider's `mode` (`live`, `test`, or `unknown`) separately from its checkout readiness, without returning credentials. Razorpay mode comes only from the `rzp_live_` or `rzp_test_` key prefix; other keys are `unknown`. Cashfree reports `live` only for `CASHFREE_ENVIRONMENT=production`, and PayPal only for `PAYPAL_ENVIRONMENT=live`; other values use their sandbox APIs and report `test`. Both global flags and each provider's required configuration must still pass before checkout, including the plan for the selected billing period.
+
+For the Cloudflare-gateway deployment, set `AUTH_PUBLIC_URL=https://qsvcmeet.com` and use that public origin for payment return and webhook URLs. The protected `backend.qsvcmeet.com` origin requires the Worker-only origin header; provider callbacks and customer redirects must pass through the public Worker.
+
 ### Cashfree Subscriptions (UPI AutoPay, BHIM and cards)
 
 Cashfree provides the recurring gateway. BHIM is selected by the customer as a UPI app inside Cashfree's UPI AutoPay authorization flow; BHIM does not provide a separate merchant API key for this integration.

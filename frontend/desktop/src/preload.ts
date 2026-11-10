@@ -35,6 +35,7 @@ contextBridge.exposeInMainWorld('qsvcDesktop', {
     createMeeting: (title: string) => call('meetings:create', title),
     scheduleMeeting: (input: { title: string; start: string; minutes: number }) => call('meetings:schedule', input),
     joinMeeting: (code: string) => call('meetings:join', code),
+    changeMeeting: (input: { id: string; meetingCode: string; title: string; action: 'end' | 'cancel'; scheduled: boolean }) => call('meetings:change', input),
     copyInvite: (code: string) => call('invite:copy', code),
     setTheme: (theme: string) => call('settings:theme', theme),
     setKeepSignedIn: (keep: boolean) => call('settings:keep', keep),

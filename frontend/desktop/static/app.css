@@ -131,13 +131,18 @@ label.field > span { display:block; margin-bottom:6px; font-size:13px; font-weig
 /* ── Meeting list ── */
 .list { display:grid; gap:10px; }
 .day { margin:22px 0 8px; font-size:12px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; color:var(--faint); }
-.meeting { display:grid; grid-template-columns:92px 1fr auto; align-items:center; gap:16px; padding:14px 16px; border-radius:14px; background:var(--card); border:1px solid var(--line); box-shadow:var(--shadow); }
+.meeting { display:grid; grid-template-columns:92px minmax(0, 1fr) auto; align-items:center; gap:16px; padding:14px 16px; border-radius:14px; background:var(--card); border:1px solid var(--line); box-shadow:var(--shadow); }
 .meeting time { display:grid; font-weight:600; font-size:15px; }
 .meeting time small { font-weight:400; color:var(--faint); font-size:12px; }
 .meeting .title { min-width:0; }
 .meeting .title b { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600; }
 .meeting .title code { font:12px/1.4 ui-monospace, Menlo, Consolas, monospace; color:var(--muted); }
-.meeting .tools { display:flex; gap:6px; align-items:center; }
+.meeting .tools { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; align-items:center; }
+.meeting .tools .btn { white-space:nowrap; }
+@media (max-width: 1100px) {
+  .meeting { grid-template-columns:76px minmax(0, 1fr); }
+  .meeting .tools { grid-column:2; justify-content:flex-start; }
+}
 .live { display:inline-flex; align-items:center; gap:6px; margin-left:8px; font-size:12px; color:var(--ok); font-weight:600; }
 .live::before { content:''; width:7px; height:7px; border-radius:50%; background:var(--ok); box-shadow:0 0 8px var(--ok); }
 .empty { display:grid; place-items:center; gap:8px; padding:40px 20px; text-align:center; color:var(--muted); border:1px dashed var(--line-strong); border-radius:var(--radius); }

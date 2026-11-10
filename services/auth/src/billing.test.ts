@@ -109,6 +109,117 @@ function enablePayPal() {
     vi.stubEnv('PAYPAL_CURRENCY', 'USD');
 }
 
+it('publishes independent mixed provider modes without credentials and blocks unconfigured PayPal', async () => {
+    enableRazorpay();
+    enableCashfree();
+    vi.stubEnv('CASHFREE_ENVIRONMENT', 'production');
+    vi.stubEnv('PAYPAL_CLIENT_ID', undefined);
+    vi.stubEnv('PAYPAL_CLIENT_SECRET', undefined);
+    vi.stubEnv('PAYPAL_ENVIRONMENT', undefined);
+    const { pool } = makePool();
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const res = makeResponse();
+
+    route(makeRouter(pool), '/options')(makeRequest(null, {}, { plan: 'Starter' }) as unknown as Request,
+        res as unknown as Response, vi.fn());
+
+    expect(res.body).toMatchObject({ paymentsEnabled: true, providers: {
+        cashfree: { mode: 'live', enabled: true, trialEnabled: true },
+        razorpay: { mode: 'test', enabled: true, trialEnabled: true },
+        paypal: { mode: 'test', enabled: false, trialEnabled: false },
+    } });
+    const publicJson = JSON.stringify(res.body);
+    for (const value of ['rzp_test_public', 'razorpay_test_secret', 'razorpay_test_webhook_secret',
+        'cashfree_test_client', 'cashfree_test_secret', cashfreeWebhookSecret, 'plan_starter_test']) {
+        expect(publicJson).not.toContain(value);
+    }
+    expect(publicJson).not.toMatch(/keyId|clientId|secret|webhook|planId/i);
+    const checkout = makeResponse();
+    await route(makeRouter(pool), '/checkout')(makeRequest({ provider: 'paypal', plan: 'Starter', trial: false, mandateConsent: true }) as unknown as Request,
+        checkout as unknown as Response, vi.fn());
+    expect(checkout.statusCode).toBe(503);
+    expect(pool.connect).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+});
+
+it.each([
+    ['razorpay', 'RAZORPAY_KEY_ID', 'rzp_live_example', 'live'],
+    ['razorpay', 'RAZORPAY_KEY_ID', 'rzp_test_example', 'test'],
+    ['razorpay', 'RAZORPAY_KEY_ID', 'example_key', 'unknown'],
+    ['razorpay', 'RAZORPAY_KEY_ID', undefined, 'unknown'],
+    ['cashfree', 'CASHFREE_ENVIRONMENT', 'production', 'live'],
+    ['cashfree', 'CASHFREE_ENVIRONMENT', 'sandbox', 'test'],
+    ['cashfree', 'CASHFREE_ENVIRONMENT', 'live', 'test'],
+    ['cashfree', 'CASHFREE_ENVIRONMENT', undefined, 'test'],
+    ['paypal', 'PAYPAL_ENVIRONMENT', 'live', 'live'],
+    ['paypal', 'PAYPAL_ENVIRONMENT', 'sandbox', 'test'],
+    ['paypal', 'PAYPAL_ENVIRONMENT', 'production', 'test'],
+    ['paypal', 'PAYPAL_ENVIRONMENT', undefined, 'test'],
+] as const)('labels %s mode from %s=%s as %s', (provider, env, value, mode) => {
+    vi.stubEnv(env, value);
+    const { pool } = makePool();
+    const res = makeResponse();
+    route(makeRouter(pool), '/options')(makeRequest(null, {}, { plan: 'Starter' }) as unknown as Request,
+        res as unknown as Response, vi.fn());
+    expect(res.body).toMatchObject({ providers: { [provider]: { mode } } });
+});
+
+it.each(['PAYMENTS_ENABLED', 'PAYMENT_TERMS_CONFIRMED'])('blocks every provider checkout when %s is false', async flag => {
+    enableRazorpay();
+    enableCashfree();
+    enablePayPal();
+    vi.stubEnv('CASHFREE_ENVIRONMENT', 'production');
+    vi.stubEnv(flag, 'false');
+    const { pool } = makePool();
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const router = makeRouter(pool);
+    const options = makeResponse();
+    route(router, '/options')(makeRequest(null, {}, { plan: 'Starter' }) as unknown as Request,
+        options as unknown as Response, vi.fn());
+    expect(options.body).toMatchObject({ paymentsEnabled: false, providers: {
+        cashfree: { mode: 'live', enabled: false, trialEnabled: false },
+        razorpay: { mode: 'test', enabled: false, trialEnabled: false },
+        paypal: { enabled: false, trialEnabled: false },
+    } });
+    for (const provider of ['cashfree', 'razorpay', 'paypal']) {
+        for (const trial of [false, true]) {
+            const res = makeResponse();
+            await route(router, '/checkout')(makeRequest({ provider, plan: 'Starter', trial, mandateConsent: true }) as unknown as Request,
+                res as unknown as Response, vi.fn());
+            expect(res.statusCode).toBe(503);
+        }
+    }
+    expect(pool.connect).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+});
+
+it('disables only annual Razorpay checkout when its annual plan is missing', async () => {
+    enableRazorpay();
+    enableCashfree();
+    vi.stubEnv('RAZORPAY_PLAN_STARTER_ANNUAL', undefined);
+    const { pool } = makePool();
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const router = makeRouter(pool);
+    for (const billing of ['monthly', 'annual']) {
+        const res = makeResponse();
+        route(router, '/options')(makeRequest(null, {}, { plan: 'Starter', billing }) as unknown as Request,
+            res as unknown as Response, vi.fn());
+        expect(res.body).toMatchObject({ providers: {
+            razorpay: { mode: 'test', enabled: billing === 'monthly', trialEnabled: billing === 'monthly' },
+            cashfree: { enabled: true, trialEnabled: true },
+        } });
+    }
+    const res = makeResponse();
+    await route(router, '/checkout')(makeRequest({ provider: 'razorpay', plan: 'Starter', billing: 'annual', trial: false, mandateConsent: true }) as unknown as Request,
+        res as unknown as Response, vi.fn());
+    expect(res.statusCode).toBe(503);
+    expect(pool.connect).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+});
+
 it.each([
     ['Starter', 'monthly', 30900, 100],
     ['Business', 'annual', 161500, 12],

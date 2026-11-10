@@ -13,6 +13,7 @@ import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, she
 import * as fs from 'fs';
 import { randomBytes } from 'node:crypto';
 import { createSsoLoopback } from './sso-loopback';
+import { changeHostedMeeting } from './meeting-actions';
 import * as path from 'path';
 // Copied into the app package at build time (scripts/vendor-shared.cjs): the packaged app must never
 // load files from outside its own folder, or it fails to start.
@@ -36,6 +37,7 @@ let user: User | null = null;
 let meetingMarker = '';           // non-secret placeholder for meeting web requests
 let cancelSso: (() => void) | undefined;
 let pendingDeepLink = '';
+const pendingMeetingChanges = new Set<string>();
 
 // ━━━ Settings on disk ━━━
 
@@ -429,6 +431,43 @@ function setupIPC() {
         if (found.status === 0) return { ok: false, error: found.error };
         openMeeting(code);
         return { ok: true };
+    });
+
+    appHandler('meetings:change', async (input: { id?: unknown; meetingCode?: unknown; title?: unknown; action?: unknown; scheduled?: unknown }) => {
+        if (!mainWindow || !workspace || !user || !token) return { ok: false, error: 'Sign in to manage your meetings.' };
+        if (!input || !/^[0-9a-f-]{36}$/i.test(String(input.id)) || !MEETING_CODE.test(String(input.meetingCode))
+            || (input.action !== 'end' && input.action !== 'cancel')) return { ok: false, error: 'Refresh your meetings and try again.' };
+        const action = input.action;
+        const code = String(input.meetingCode);
+        if (pendingMeetingChanges.has(code)) return { ok: false, error: 'This meeting is already being updated.' };
+        pendingMeetingChanges.add(code);
+        const sessionToken = token;
+        const origin = workspace.origin;
+        const isCurrent = () => token === sessionToken && workspace?.origin === origin;
+        try {
+            const confirmation = await dialog.showMessageBox(mainWindow, {
+                type: 'warning', buttons: [action === 'end' ? 'End meeting' : 'Cancel meeting', 'Keep meeting'], defaultId: 1, cancelId: 1,
+                message: `${action === 'end' ? 'End' : 'Cancel'} “${String(input.title || 'this meeting').slice(0, 200)}”?`,
+                detail: action === 'end' ? 'Everyone in the meeting and waiting room will be disconnected. You can start it again with the same link.'
+                    : 'Its join link will stop working. Update any external calendar invitations separately.',
+            });
+            if (confirmation.response !== 0) return { ok: true, dismissed: true };
+            if (!isCurrent()) return { ok: false, error: 'Your session changed. Refresh your meetings.' };
+            if (action === 'cancel' && input.scheduled === true) {
+                const result = await api(`api/meetings/${encodeURIComponent(String(input.id))}/schedule`, { method: 'PATCH', body: { action } });
+                if (!result.ok) return { ok: false, error: 'Could not cancel this meeting. Refresh its status and try again.' };
+            } else {
+                const result = await api('api/signaling-ticket', { method: 'POST', body: { meetingCode: input.meetingCode } });
+                if (!result.ok || typeof result.data?.ticket !== 'string') throw new Error('Meeting authentication failed');
+                const url = new URL('/ws', origin);
+                url.protocol = workspace?.protocol === 'https:' ? 'wss:' : 'ws:';
+                await changeHostedMeeting({ url: url.href, ticket: result.data.ticket, meetingCode: String(input.meetingCode), action,
+                    signal: AbortSignal.timeout(20000), isCurrent });
+            }
+            return isCurrent() ? { ok: true } : { ok: false, error: 'Your session changed. Refresh your meetings.' };
+        } catch {
+            return { ok: false, error: 'Could not confirm the meeting change. Refresh its status or try again.' };
+        } finally { pendingMeetingChanges.delete(code); }
     });
 
     appHandler('invite:copy', (code: unknown) => {
