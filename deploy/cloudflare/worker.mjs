@@ -8,7 +8,7 @@ const SECURITY_HEADERS = {
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Permissions-Policy': 'camera=(self), microphone=(self), display-capture=(self), speaker-selection=(self), geolocation=(), payment=(self "https://api.razorpay.com" "https://sdk.cashfree.com"), usb=()',
     'Cross-Origin-Opener-Policy': 'same-origin',
-    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://checkout.razorpay.com https://sdk.cashfree.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' wss: https:; worker-src 'self' blob:; frame-src https://*.razorpay.com https://*.cashfree.com https://www.paypal.com https://www.sandbox.paypal.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval' https://checkout.razorpay.com https://sdk.cashfree.com https://static.cloudflareinsights.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self'; connect-src 'self' wss: https:; worker-src 'self' blob:; frame-src https://*.razorpay.com https://*.cashfree.com https://www.paypal.com https://www.sandbox.paypal.com; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'",
 };
 
 function withSecurityHeaders(response) {

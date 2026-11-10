@@ -53,6 +53,8 @@ test('website responses carry browser security headers', async () => {
     assert.match(response.headers.get('Strict-Transport-Security'), /max-age=31536000/);
     assert.match(response.headers.get('Permissions-Policy'), /camera=\(self\)/);
     assert.match(response.headers.get('Content-Security-Policy'), /frame-ancestors 'none'/);
+    const scripts = response.headers.get('Content-Security-Policy').split(';').find(value => value.trim().startsWith('script-src ')).trim().split(/\s+/).slice(1);
+    assert.deepEqual(scripts, ["'self'", "'wasm-unsafe-eval'", 'https://checkout.razorpay.com', 'https://sdk.cashfree.com', 'https://static.cloudflareinsights.com']);
     assert.equal(response.headers.get('Content-Type'), 'text/html');
 });
 
