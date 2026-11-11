@@ -40,12 +40,16 @@ describe('payment selection', () => {
         expect(html).toContain('QS-VC Pro');
         expect(html).toContain('Review the monthly price, GST and renewal terms before continuing.');
         expect(html).toContain('Loading current price…');
+        expect(html).toContain('Order summary');
+        expect(html).toContain('Contact information');
+        expect(html).not.toContain('payment-due-today');
         expect(html).toContain('Loading payment providers…');
         expect(html).toContain('role="status"');
     });
     it('explains that the fourteen-day trial is one-time and starts after provider confirmation', () => {
         const html = render('/payment?plan=Starter&trial=1');
         expect(html).toContain('Set up your Starter trial.');
+        expect(html).not.toContain('payment-due-today');
         expect(html).toContain('One free 14-day trial per account.');
         expect(html).toContain('Your trial starts when recurring payments are approved and lasts at least 14 days.');
         expect(html).toContain('Choose a payment channel');

@@ -23,7 +23,7 @@ services:
       ASR_ENGINE: whisper
       ASR_DEVICE: cpu
       NODE_ENV: production
-      ASR_MODEL: ${ASR_MODEL:-/models/whisper}  # "base" is faster but less accurate
+      ASR_MODEL: ${ASR_MODEL:-/models/whisper}
       ASR_COMPUTE_TYPE: int8
       ASR_CPU_THREADS: '2'
       ASR_BEAM_SIZE: ${ASR_BEAM_SIZE:-2}

@@ -13,6 +13,10 @@ COPY services/mt/requirements.txt .
 # PyTorch first, from the chosen index (CPU or CUDA build); the pinned requirement then counts as satisfied.
 RUN python -m pip install --index-url "$TORCH_INDEX" torch==2.15.0 \
  && python -m pip install -r requirements.txt
+# IndicTransToolkit 1.1.1 imports the tokenizer base class from its old location.
+RUN toolkit="$(python -c 'import sysconfig; print(sysconfig.get_path("purelib"))')/IndicTransToolkit" \
+ && sed -i 's/from transformers\.tokenization_utils import PreTrainedTokenizerBase/from transformers import PreTrainedTokenizerBase/' "$toolkit/collator.py" \
+ && python -c 'from IndicTransToolkit import IndicProcessor; IndicProcessor(inference=True)'
 COPY services/mt/app.py services/mt/glossary.example.json ./
 RUN useradd --system --uid 10001 qsvc && mkdir -p /models && chown qsvc /models
 USER qsvc

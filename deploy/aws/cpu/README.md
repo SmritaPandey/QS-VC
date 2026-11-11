@@ -34,16 +34,72 @@ bash /path/to/setup-instance.sh          # Docker, Compose plugin, 4 GB swap, lo
 ```
 
 ## 3. Code, secrets, start
-Copy `services/asr`, `services/mt` and `deploy/aws/cpu` into `/opt/qsvc` (same S3 presigned-link method as the
-backend). Then:
+Copy the QS-VC source into `/opt/qsvc`. The Docker builds also need
+`shared/model_security.py`. Keep existing keys in `deploy/aws/cpu/.env` if
+signaling already uses them. For a new installation:
 ```sh
 cd /opt/qsvc
 openssl rand -hex 32                      # → ASR_API_KEY (keep it)
 openssl rand -hex 32                      # → MT_API_KEY  (keep it)
 cp deploy/aws/cpu/.env.example deploy/aws/cpu/.env && chmod 600 deploy/aws/cpu/.env
 nano deploy/aws/cpu/.env                  # paste both keys
-docker compose -f deploy/aws/cpu/compose.yml --env-file deploy/aws/cpu/.env up -d --build
-docker logs -f qsvc-mt                    # first start downloads ~2 GB of translation models (several minutes)
+```
+
+Set `ASR_MODEL=/models/whisper` in the private env file. Prepare the multilingual
+faster-whisper small model and both IndicTrans2 distilled 200M directions
+(`ai4bharat/indictrans2-en-indic-dist-200M` and `ai4bharat/indictrans2-indic-en-dist-200M`).
+Download exact revisions, review the model files and custom Python, and stage real
+files without cache symlinks. Run `python3 scripts/pin-model.py DIRECTORY --revision COMMIT`
+for each reviewed bundle. Use a full 40-character commit hash. The services require
+these manifests and read the model volumes without downloading models at startup.
+
+Place the three prepared folders on the AI host under `/opt/qsvc/model-bundles`
+as `whisper`, `en-indic`, and `indic-en`. With the same Compose project used to
+launch the services, run the following on the AI host. These commands preserve
+any model directories already present in the volumes. If an existing directory
+fails verification, inspect and replace that bundle separately.
+
+```sh
+cd /opt/qsvc
+(
+set -eu
+qsvc_ai() {
+  sudo docker compose -f deploy/aws/cpu/compose.yml --env-file deploy/aws/cpu/.env "$@"
+}
+qsvc_ai config --quiet
+qsvc_ai build asr mt
+qsvc_ai create asr mt
+
+stage_models() {
+  service=$1
+  shift
+  volume=$(sudo docker inspect --format '{{range .Mounts}}{{if eq .Destination "/models"}}{{.Name}}{{end}}{{end}}' "qsvc-$service")
+  test -n "$volume"
+  sudo docker run --rm --network none --user 0 --entrypoint sh \
+    --mount "type=volume,source=$volume,target=/models" \
+    --mount type=bind,source=/opt/qsvc/model-bundles,target=/bundles,readonly \
+    "qsvc-$service:cpu" -ec '
+      for model in "$@"; do
+        if [ ! -e "/models/$model" ]; then
+          test -f "/bundles/$model/qsvc-model-manifest.json"
+          staging=$(mktemp -d /models/.stage.XXXXXX)
+          trap '"'"'rm -rf "$staging"'"'"' EXIT
+          cp -R "/bundles/$model" "$staging/$model"
+          chown -R 10001 "$staging/$model"
+          mv "$staging/$model" "/models/$model"
+          rmdir "$staging"
+          trap - EXIT
+        fi
+      done
+    ' sh "$@"
+}
+stage_models asr whisper
+stage_models mt en-indic indic-en
+
+qsvc_ai run --rm --no-deps --entrypoint python asr -c 'from shared.model_security import model_path; model_path("/models/whisper")'
+qsvc_ai run --rm --no-deps --entrypoint python mt -c 'from shared.model_security import model_path; model_path("/models/en-indic"); model_path("/models/indic-en")'
+qsvc_ai up -d asr mt
+)
 ```
 
 ## 4. Check (on the AI instance)
@@ -77,7 +133,7 @@ A signed-in person speaks Hindi with **Share my speech as captions** on; another
 Expect the Hindi line, then the English line a few seconds after each pause.
 
 ## Tuning
-- Faster but less accurate: `ASR_MODEL=base` in `deploy/aws/cpu/.env`, then `up -d asr`.
+- Faster but less accurate: stage a reviewed multilingual base bundle at a separate path inside the model volume, set `ASR_MODEL` to that path, then recreate `asr`.
 - More spoken languages: `ASR_LANGUAGES=en,hi,bn,ta,te,mr` (Whisper `small` is weak on these; prefer a GPU host).
 - Fewer live updates (more CPU for final lines): raise `ASR_PARTIAL_INTERVAL_MS` (default 2500).
 - `m7i-flex` instances can slow down under long sustained load; captions get slower, not wrong.

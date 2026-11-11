@@ -22,6 +22,32 @@ env:
   NODE_VERSION: 22
 
 jobs:
+  secrets:
+    name: Secret scan (all history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # Historical leaks intentionally fail until rotation and history cleanup.
+      - name: Scan with redacted output
+        run: docker run --rm -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:v8.24.2 git --redact --log-opts="--all" /repo
+
+  python-tests:
+    name: Model integrity tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s shared -p 'test_*.py'
+
   # ── Fast checks: run in parallel, no npm install needed ─────────────────────
   security:
     name: Security evidence and dependency audit

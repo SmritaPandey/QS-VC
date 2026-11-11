@@ -604,7 +604,7 @@ export default function PaymentPage() {
         }
     }
 
-    const pageTitle = showTrialFlow ? `Set up your ${plan?.name || ''} trial.` : 'Your next step with QS-VC.';
+    const pageTitle = showTrialFlow ? `Set up your ${plan?.name || ''} trial.` : 'Review and check out';
     const introCopy = showTrialFlow
         ? `One free ${options.trialDays}-day trial per account. Your trial starts when recurring payments are approved and lasts at least ${options.trialDays} days. You’ll see the first charge date before you approve.`
         : 'Review the monthly price, GST and renewal terms before continuing.';
@@ -620,10 +620,16 @@ export default function PaymentPage() {
         <Link className="payment-back-link" to={pricingHref}>← Back to plans</Link>
         <header className="public-page-intro"><h1>{pageTitle}</h1><p>{introCopy}</p></header>
         {!plan ? <section className="payment-summary"><h2>Choose a plan first.</h2><p>Select Basic, Starter, Pro or Business to review payment options.</p><Link to={pricingHref}>View plans</Link></section>
-            : isAdmin ? <section className="payment-admin-access" role="status"><span className="payment-eyebrow">ADMIN ACCESS</span><h2>You already have every feature.</h2><p>There is no need to start a trial or set up a monthly plan.</p><Link className="btn-primary" to="/app">Go to meetings</Link></section>
+            : isAdmin ? <section className="payment-admin-access" role="status"><h2>You already have every feature.</h2><p>There is no need to start a trial or set up a monthly plan.</p><Link className="btn-primary" to="/app">Go to meetings</Link></section>
             : <div className="payment-layout">
+                <section className="payment-plan-review" aria-labelledby="selected-plan-title">
+                    <div><span className="mi" aria-hidden="true">videocam</span><h2 id="selected-plan-title">QS-VC {plan.name}</h2></div>
+                    <p>{plan.desc}</p>
+                    <p>{billing === 'annual' ? 'Annual rate · billed monthly' : 'Monthly plan'} · Per user</p>
+                    <Link to={pricingHref}>Change plan</Link>
+                </section>
                 <section className="payment-summary" aria-labelledby="order-title">
-                    <span className="payment-eyebrow">YOUR SELECTED PLAN</span><h2 id="order-title">QS-VC {plan.name}</h2><p>{plan.desc}</p><p>{billing === 'annual' ? 'Annual rate · billed monthly' : 'Monthly billing'}</p>
+                    <h2 id="order-title">Order summary</h2><p className="payment-order-plan">QS-VC {plan.name}</p><p>{billing === 'annual' ? 'Annual rate · billed monthly' : 'Monthly billing'}</p>
                     <CurrencyRateSelector id="payment-currency" value={currencyRates} />
                     {priceReady ? <div className="payment-breakdown" aria-label={`${gatewayName(gateway)} monthly price breakdown`}>
                         <p><span>Plan price</span><strong>{promotion && <s className="payment-regular-price">{formatMoney(promotion.regularBaseAmount, providerPrice.currency)} </s>}{formatMoney(providerPrice.baseAmount, providerPrice.currency)}</strong></p>
@@ -632,6 +638,11 @@ export default function PaymentPage() {
                         <p className="payment-total"><span>{options.paymentsEnabled && gatewayReady ? 'Monthly total per user' : 'Proposed monthly total per user'}</span><strong>{displayedMonthlyTotal}<small> / month</small></strong></p>
                         {totalAmountDisplay && currencyRates.displayCurrency !== providerPrice.currency && <p className="payment-conversion"><span>Approx. in {currencyRates.displayCurrency}</span><strong>{totalAmountDisplay}</strong></p>}
                     </div> : <div className="payment-status" role="status"><span className="mi" aria-hidden="true">info</span><p>{optionsLoaded || optionsError ? 'We couldn’t load the price for this plan.' : 'Loading current price…'}</p></div>}
+                    {priceReady && !isCurrentPlan && !blockPlanChange && (!showTrialFlow || isTrialCheckout) && <div className="payment-due-today">
+                        <span>{isTrialCheckout ? 'Plan fee today' : gatewayReady && options.paymentsEnabled ? 'Due at checkout' : 'Proposed first charge'}</span>
+                        <strong>{isTrialCheckout ? formatMoney(0, providerPrice.currency) : displayedMonthlyTotal}</strong>
+                        <small>{isTrialCheckout ? `First plan charge at least ${options.trialDays} days after approval. Any payment-method verification is shown by the provider.` : 'Includes GST. Review and approve the final amount with your payment provider.'}</small>
+                    </div>}
                     <p className="payment-note">{renewalTermCopy && `${renewalTermCopy} `}Currency conversions are estimates. You pay in the currency shown at checkout.</p>
                     {showTrialFlow && <div className="payment-trial-summary-note">
                         <strong>No plan fee during the trial.</strong>
@@ -642,7 +653,8 @@ export default function PaymentPage() {
                     <Link className="payment-change-plan" to={pricingHref}>Choose a different plan</Link>
                 </section>
                 <section className="payment-options" aria-labelledby="gateway-title">
-                    <h2 id="gateway-title">Choose a payment channel</h2>
+                    <h2>Contact information</h2>
+                    <p className="payment-details-intro">Your subscription belongs to your signed-in QS-VC account.</p>
                     {session.status === 'checking' && <div className="payment-status" role="status"><span className="mi" aria-hidden="true">schedule</span><p>Checking your account…</p></div>}
                     {session.status !== 'checking' && !isAuthReady && !(showTrialFlow && optionsLoaded && enabledGateways.length > 0 && checkoutGateways.length === 0) && <div className="payment-status" role="status">
                         <span className="mi" aria-hidden="true">info</span>
@@ -666,6 +678,8 @@ export default function PaymentPage() {
                     </label>}
                     {isTrialIntent && isAuthReady && entitlements.loading && <div className="payment-status" role="status"><span className="mi" aria-hidden="true">schedule</span><p>Checking trial eligibility…</p></div>}
                     {optionsError && <div className="payment-status payment-status--error"><span className="mi" aria-hidden="true">error</span><p role="alert">{OPTIONS_UNAVAILABLE}</p><button className="payment-cancel payment-retry" type="button" onClick={() => { setOptionsError(false); setOptionsAttempt(value => value + 1); }}>Try again</button></div>}
+                    <h2 id="gateway-title" className="payment-method-title">Choose a payment channel</h2>
+                    <p className="payment-details-intro">Choose a provider here. Add or change your card or UPI details in its checkout.</p>
                     <PaymentProviderChoices selected={gateway} available={checkoutGateways} providers={options.providers}
                         loading={!optionsLoaded && !optionsError} disabled={!isAuthReady || busy || isProviderReturn}
                         onSelect={item => { setGateway(item); setConsent(false); }} />

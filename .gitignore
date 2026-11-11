@@ -63,3 +63,6 @@ release/
 
 /installers/*.zip
 /installers/*.sha256
+
+# Distribute release binaries through release storage, not source control.
+/deploy/aws/outgoing/
