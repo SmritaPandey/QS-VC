@@ -149,7 +149,8 @@ class IndicTrans2Backend:
         batch = self.processor.preprocess_batch(texts, src_lang=src_code, tgt_lang=tgt_code)
         inputs = tokenizer(batch, truncation=True, padding="longest", max_length=256, return_tensors="pt").to(self.device)
         with torch.inference_mode():
-            generated = model.generate(**inputs, use_cache=True, min_length=0, max_length=256, num_beams=int(os.environ.get("MT_BEAMS", "4")), num_return_sequences=1)
+            # The pinned IndicTrans2 code uses a legacy cache incompatible with DynamicCache.
+            generated = model.generate(**inputs, use_cache=False, min_length=0, max_length=256, num_beams=int(os.environ.get("MT_BEAMS", "4")), num_return_sequences=1)
         decoded = tokenizer.batch_decode(generated, skip_special_tokens=True, clean_up_tokenization_spaces=True)
         return self.processor.postprocess_batch(decoded, lang=tgt_code)
 

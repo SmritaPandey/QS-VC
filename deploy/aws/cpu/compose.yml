@@ -50,6 +50,7 @@ services:
       NODE_ENV: production
       MT_MODEL_EN_INDIC: ${MT_MODEL_EN_INDIC:-/models/en-indic}
       MT_MODEL_INDIC_EN: ${MT_MODEL_INDIC_EN:-/models/indic-en}
+      HF_MODULES_CACHE: /tmp/hf-modules
       MT_DEVICE: cpu
       MT_LANGUAGES: ${MT_LANGUAGES:-en,hi,bn,ta,te,mr,gu,kn,ml,pa,or,ur}
       MT_API_KEY: ${MT_API_KEY:?Set the same value as LIBRETRANSLATE_API_KEY on the backend}
