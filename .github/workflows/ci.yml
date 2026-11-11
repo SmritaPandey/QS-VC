@@ -175,6 +175,8 @@ jobs:
           output-file: qsvc-${{ matrix.image }}.cdx.json
           artifact-name: qsvc-${{ matrix.image }}.cdx.json
       - name: Scan SBOM
+        id: grype
+        continue-on-error: true
         uses: anchore/scan-action@v7
         with:
           sbom: qsvc-${{ matrix.image }}.cdx.json
@@ -186,6 +188,26 @@ jobs:
           only-fixed: true
           # Reuse the vulnerability database between runs instead of downloading it per image.
           cache-db: true
+      - name: Retry scan when Grype produced no report
+        id: grype-retry
+        if: ${{ steps.grype.outcome == 'failure' && hashFiles(format('qsvc-{0}.sarif', matrix.image)) == '' }}
+        continue-on-error: true
+        uses: anchore/scan-action@v7
+        env:
+          GRYPE_DB_REQUIRE_UPDATE_CHECK: 'true'
+        with:
+          sbom: qsvc-${{ matrix.image }}.cdx.json
+          output-format: sarif
+          output-file: qsvc-${{ matrix.image }}.sarif
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: true
+          cache-db: false
+      - name: Require a successful vulnerability scan
+        if: ${{ !cancelled() && steps.grype.outcome != 'success' && steps.grype-retry.outcome != 'success' }}
+        run: |
+          echo "::error::Grype did not complete a passing scan. Check the scan steps and the vulnerability report when available."
+          exit 1
       - name: Upload vulnerability report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
