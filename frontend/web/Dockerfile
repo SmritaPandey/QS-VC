@@ -13,7 +13,7 @@ COPY frontend/web/public/ ./public/
 COPY shared/ /shared/
 RUN npx vite build
 
-FROM nginx:alpine
+FROM nginx:alpine AS runtime
 # Latest Alpine security fixes for the static web server image.
 RUN apk upgrade --no-cache
 COPY --from=builder /app/dist /usr/share/nginx/html

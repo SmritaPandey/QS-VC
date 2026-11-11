@@ -161,6 +161,9 @@ jobs:
           push: false
           load: true
           tags: qsvc-${{ matrix.image }}:latest
+          # Refresh Alpine packages even when the web runtime's base digest hasn't changed.
+          pull: ${{ matrix.image == 'web' }}
+          no-cache-filters: ${{ matrix.image == 'web' && 'runtime' || '' }}
           # Unchanged layers (npm installs, the mediasoup worker) come from the cache.
           cache-from: type=gha,scope=qsvc-${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=qsvc-${{ matrix.image }}
@@ -175,9 +178,18 @@ jobs:
         uses: anchore/scan-action@v7
         with:
           sbom: qsvc-${{ matrix.image }}.cdx.json
+          output-format: sarif
+          output-file: qsvc-${{ matrix.image }}.sarif
           fail-build: true
           severity-cutoff: high
           # Fail on high/critical findings that have a published fix; unfixed OS CVEs are tracked in the SBOM.
           only-fixed: true
           # Reuse the vulnerability database between runs instead of downloading it per image.
           cache-db: true
+      - name: Upload vulnerability report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: qsvc-${{ matrix.image }}-grype
+          path: qsvc-${{ matrix.image }}.sarif
+          if-no-files-found: ignore
