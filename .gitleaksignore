@@ -1,0 +1,4 @@
+# Internal JDBC host, port and database name. No embedded credentials.
+c0af3804e9d606375f8626c962b64165d3c07802:deploy/keycloak/compose.yml:generic-api-key:26
+# Documentation comment naming a public ML-KEM algorithm.
+261f46b9b6a1d1dc085c2533314b34d9b56af492:shared/crypto/pqc.ts:generic-api-key:6
