@@ -1,0 +1,27 @@
+# ASSUMED – pending client approval. strongSwan 6.1 candidate. Do not deploy unrendered.
+connections {
+    qsvc-site {
+        version = 2
+        local_addrs = LOCAL_GATEWAY_IP
+        remote_addrs = REMOTE_GATEWAY_IP
+        proposals = aes256gcm16-prfsha384-ecp384-ke1_mlkem768
+        fragmentation = yes
+        local {
+            auth = pubkey
+            id = LOCAL_GATEWAY_FQDN
+            certs = LOCAL_GATEWAY_CERT.pem
+        }
+        remote {
+            auth = pubkey
+            id = REMOTE_GATEWAY_FQDN
+        }
+        children {
+            qsvc-subnets {
+                local_ts = LOCAL_VC_CIDR
+                remote_ts = REMOTE_VC_CIDR
+                esp_proposals = aes256gcm16-ecp384-ke1_mlkem768
+                start_action = trap
+            }
+        }
+    }
+}

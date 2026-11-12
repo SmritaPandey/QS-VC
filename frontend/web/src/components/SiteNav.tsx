@@ -16,7 +16,7 @@ import AdminDashboardLink from './AdminDashboardLink';
 const quickLinks = [
     { to: '/#features', label: 'Meetings', icon: 'videocam' },
     { to: '/pricing', label: 'Plans', icon: 'view_agenda' },
-    { to: '/intranet', label: 'Intranet', icon: 'domain' },
+    { to: '/intranet', label: 'On-prem', icon: 'domain' },
     { to: '/contact', label: 'Contact us', icon: 'mail' },
     { to: '/app', label: 'Open meeting app', icon: 'arrow_outward' },
 ];
@@ -75,7 +75,7 @@ export default function SiteNav({ accountAction, brandName = 'QS-VC' }: { accoun
                 <div className="public-nav-links" id="public-nav-links" data-open={open} onKeyDown={event => { if (event.key === 'Escape') { setOpen(false); document.querySelector<HTMLButtonElement>('.public-menu-toggle')?.focus(); } }}>
                     <a href="/#features" onClick={() => setOpen(false)}>Meetings</a>
                     <Link to="/pricing" aria-current={pathname === '/pricing' ? 'page' : undefined} onClick={() => setOpen(false)}>Plans</Link>
-                    <Link to="/intranet" aria-current={pathname === '/intranet' ? 'page' : undefined} onClick={() => setOpen(false)}>Intranet</Link>
+                    <Link to="/intranet" aria-current={pathname === '/intranet' ? 'page' : undefined} onClick={() => setOpen(false)}>On-prem</Link>
                     <Link to="/contact" aria-current={pathname === '/contact' ? 'page' : undefined} onClick={() => setOpen(false)}>Contact us</Link>
                     <Link className="public-mobile-app" to="/app" onClick={() => setOpen(false)}>Open meeting app <span className="mi" aria-hidden="true">arrow_forward</span></Link>
                     {session.status === 'checking' ? <span role="status">Checking account…</span> : session.status === 'unavailable' ? <button type="button" onClick={() => void refreshSession()}>Retry account</button> : session.status === 'authenticated' ? <><TrialChip /><CrownBadge plan={entitlements.plan} />{session.profile?.isPlatformAdmin === true ? <AdminDashboardLink onClick={() => setOpen(false)} /> : <Link to="/app" onClick={() => setOpen(false)}>Your meetings</Link>}</> : accountAction || <Link to="/login" aria-current={pathname === '/login' ? 'page' : undefined} onClick={() => setOpen(false)}>Sign in</Link>}

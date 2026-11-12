@@ -174,6 +174,8 @@ services:
       - LIBRETRANSLATE_URL=${LIBRETRANSLATE_URL:-}
       - LIBRETRANSLATE_API_KEY=${LIBRETRANSLATE_API_KEY:-}
       - CAPTION_TRANSLATION_PROVIDER=${CAPTION_TRANSLATION_PROVIDER:-}
+      - QSVC_DEPLOYMENT=${QSVC_DEPLOYMENT:-}
+      - ENABLE_ONPREM_GOOGLE_TRANSLATION=${ENABLE_ONPREM_GOOGLE_TRANSLATION:-false}
       - GOOGLE_TRANSLATE_API_KEY=${GOOGLE_TRANSLATE_API_KEY:-}
       - ASR_URL=${ASR_URL:-}
       - ASR_API_KEY=${ASR_API_KEY:-}
@@ -231,7 +233,9 @@ services:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${AUTH_DB_USER:-qs_auth_app}
       - POSTGRES_PASSWORD=${AUTH_DB_PASSWORD:?Set AUTH_DB_PASSWORD for the restricted auth database role}
-      - JWT_EXPIRY=24h
+      - JWT_EXPIRY=${JWT_EXPIRY:-24h}
+      - QSVC_DEPLOYMENT=${QSVC_DEPLOYMENT:-}
+      - QSVC_ADMIN_EMAILS=${QSVC_ADMIN_EMAILS:-}
       - PAYMENTS_ENABLED=${PAYMENTS_ENABLED:-false}
       - PAYMENT_TERMS_CONFIRMED=${PAYMENT_TERMS_CONFIRMED:-false}
       - PAYMENT_RETURN_URL=${PAYMENT_RETURN_URL:-}
@@ -359,6 +363,8 @@ services:
     build:
       context: .
       dockerfile: frontend/web/Dockerfile
+      args:
+        VITE_DEPLOYMENT: ${QSVC_DEPLOYMENT:-}
     container_name: qsvc-web
     environment:
       - VITE_SIGNALING_URL=wss://${DOMAIN}/ws

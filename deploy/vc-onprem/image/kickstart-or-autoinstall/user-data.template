@@ -1,0 +1,19 @@
+#cloud-config
+autoinstall:
+  version: 1
+  ssh:
+    install-server: true
+    allow-pw: false
+  user-data:
+    disable_root: true
+    users:
+      - name: qsvc-build
+        lock_passwd: true
+        ssh_authorized_keys:
+          - REPLACE_WITH_EPHEMERAL_BUILD_PUBLIC_KEY
+        sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+  storage:
+    layout:
+      name: direct
+  updates: security
+  shutdown: reboot

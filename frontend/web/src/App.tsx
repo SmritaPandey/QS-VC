@@ -24,6 +24,23 @@ import { Gate, TrialEndedPrompt, UpgradePromptListener } from './components/Plan
 
 export default function App() {
     useEffect(() => {
+        if (import.meta.env.VITE_DEPLOYMENT !== 'onprem') return;
+        const controller = new AbortController();
+        const check = async () => {
+            try {
+                const response = await fetch('/api/onprem/trial', { cache: 'no-store', signal: controller.signal });
+                if (response.status === 403 && (await response.json()).code === 'ONPREM_TRIAL_EXPIRED') {
+                    window.location.reload();
+                }
+            } catch {
+                // The gateway enforces expiry even when a browser cannot poll it.
+            }
+        };
+        void check();
+        const timer = window.setInterval(check, 15_000);
+        return () => { controller.abort(); window.clearInterval(timer); };
+    }, []);
+    useEffect(() => {
         let active = true;
         const faces = [
             document.fonts.load('400 16px "IBM Plex Sans"'),

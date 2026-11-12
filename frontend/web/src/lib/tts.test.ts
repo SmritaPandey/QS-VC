@@ -17,9 +17,17 @@ beforeEach(() => {
     vi.stubGlobal('window', { speechSynthesis: synth });
     vi.stubGlobal('SpeechSynthesisUtterance', Utterance);
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('actual TextToSpeechEngine', () => {
+    it('declines a remote voice in on-prem builds', () => {
+        vi.stubEnv('VITE_DEPLOYMENT', 'onprem');
+        const engine = new TextToSpeechEngine({ language: 'hi-IN' });
+        engine.start();
+        expect(engine.speak('नमस्ते')).toBe(false);
+        expect(synth.speak).not.toHaveBeenCalled();
+        engine.dispose();
+    });
     it('safely declines when browser speech synthesis is unavailable', () => {
         vi.stubGlobal('window', {});
         const engine = new TextToSpeechEngine({ language: 'hi-IN' });

@@ -38,7 +38,7 @@ export class SpeechToTextEngine {
 
     /** Check if Web Speech API is available in this browser. */
     static isSupported(): boolean {
-        return typeof window !== 'undefined' && !!(
+        return import.meta.env.VITE_DEPLOYMENT !== 'onprem' && typeof window !== 'undefined' && !!(
             (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
         );
     }

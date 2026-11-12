@@ -1,0 +1,245 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "name": "QS-VC source inventory"
+    }
+  },
+  "components": [
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "qsvc-crypto-1",
+      "name": "X25519MLKEM768",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "kem"
+        }
+      },
+      "properties": [
+        {
+          "name": "qsvc:provider",
+          "value": "Caddy/Go TLS"
+        },
+        {
+          "name": "qsvc:use",
+          "value": "Edge key establishment"
+        },
+        {
+          "name": "qsvc:key-location",
+          "value": "Ephemeral TLS runtime"
+        },
+        {
+          "name": "qsvc:evidence",
+          "value": "Configured candidate"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "qsvc-crypto-2",
+      "name": "Ed25519",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "signature"
+        }
+      },
+      "properties": [
+        {
+          "name": "qsvc:provider",
+          "value": "Node crypto"
+        },
+        {
+          "name": "qsvc:use",
+          "value": "Auth session signing"
+        },
+        {
+          "name": "qsvc:key-location",
+          "value": "SESSION_SIGNING_KEY_FILE"
+        },
+        {
+          "name": "qsvc:evidence",
+          "value": "Source-observed"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "qsvc-crypto-3",
+      "name": "Ed25519",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "signature"
+        }
+      },
+      "properties": [
+        {
+          "name": "qsvc:provider",
+          "value": "OpenSSL"
+        },
+        {
+          "name": "qsvc:use",
+          "value": "Release verification"
+        },
+        {
+          "name": "qsvc:key-location",
+          "value": "Offline release custodian"
+        },
+        {
+          "name": "qsvc:evidence",
+          "value": "Synthetic test"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "qsvc-crypto-4",
+      "name": "ML-DSA-65",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "signature"
+        }
+      },
+      "properties": [
+        {
+          "name": "qsvc:provider",
+          "value": "OpenSSL"
+        },
+        {
+          "name": "qsvc:use",
+          "value": "Release verification"
+        },
+        {
+          "name": "qsvc:key-location",
+          "value": "Offline release custodian"
+        },
+        {
+          "name": "qsvc:evidence",
+          "value": "Synthetic test"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "qsvc-crypto-5",
+      "name": "AES-256-GCM",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "ae"
+        }
+      },
+      "properties": [
+        {
+          "name": "qsvc:provider",
+          "value": "Node crypto"
+        },
+        {
+          "name": "qsvc:use",
+          "value": "Backup data encryption"
+        },
+        {
+          "name": "qsvc:key-location",
+          "value": "Ephemeral per-backup DEK"
+        },
+        {
+          "name": "qsvc:evidence",
+          "value": "Synthetic test"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "qsvc-crypto-6",
+      "name": "AES-256-KW",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "other"
+        }
+      },
+      "properties": [
+        {
+          "name": "qsvc:provider",
+          "value": "Node crypto"
+        },
+        {
+          "name": "qsvc:use",
+          "value": "Backup data key wrapping"
+        },
+        {
+          "name": "qsvc:key-location",
+          "value": "Private backup KEK file"
+        },
+        {
+          "name": "qsvc:evidence",
+          "value": "Synthetic test"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "qsvc-crypto-7",
+      "name": "SHA-256",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "hash"
+        }
+      },
+      "properties": [
+        {
+          "name": "qsvc:provider",
+          "value": "Python hashlib"
+        },
+        {
+          "name": "qsvc:use",
+          "value": "Release file inventory"
+        },
+        {
+          "name": "qsvc:key-location",
+          "value": "None"
+        },
+        {
+          "name": "qsvc:evidence",
+          "value": "Synthetic test"
+        }
+      ]
+    },
+    {
+      "type": "cryptographic-asset",
+      "bom-ref": "qsvc-crypto-8",
+      "name": "DTLS-SRTP",
+      "cryptoProperties": {
+        "assetType": "algorithm",
+        "algorithmProperties": {
+          "primitive": "other"
+        }
+      },
+      "properties": [
+        {
+          "name": "qsvc:provider",
+          "value": "Browser and mediasoup"
+        },
+        {
+          "name": "qsvc:use",
+          "value": "Media transport"
+        },
+        {
+          "name": "qsvc:key-location",
+          "value": "Ephemeral runtime"
+        },
+        {
+          "name": "qsvc:evidence",
+          "value": "Negotiation UNVERIFIED"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+---
+- name: Stage SSH restrictions
+  hosts: qsvc
+  become: true
+  tasks:
+    - name: Install managed SSH restrictions
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/00-qsvc.conf
+        mode: "0644"
+        content: |
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PermitRootLogin no
+          DisableForwarding yes
+    - name: Check effective SSH syntax before operator reload
+      ansible.builtin.command: /usr/sbin/sshd -t
+      changed_when: false

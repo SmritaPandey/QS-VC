@@ -1,0 +1,17 @@
+#cloud-config
+hostname: REPLACE_WITH_CLIENT_HOSTNAME
+preserve_hostname: false
+disable_root: true
+ssh_pwauth: false
+ssh_deletekeys: true
+users:
+  - name: qsvc-operator
+    lock_passwd: true
+    ssh_authorized_keys:
+      - REPLACE_WITH_CLIENT_OPERATOR_PUBLIC_KEY
+    groups: [sudo]
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+ca_certs:
+  trusted:
+    - |
+      REPLACE_WITH_CLIENT_CA_CERTIFICATE

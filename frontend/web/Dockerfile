@@ -11,7 +11,8 @@ COPY frontend/web/index.html ./
 COPY frontend/web/src/ ./src/
 COPY frontend/web/public/ ./public/
 COPY shared/ /shared/
-RUN npx vite build
+ARG VITE_DEPLOYMENT
+RUN VITE_DEPLOYMENT="$VITE_DEPLOYMENT" npx vite build
 
 FROM nginx:alpine AS runtime
 # Latest Alpine security fixes for the static web server image.

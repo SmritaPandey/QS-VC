@@ -226,6 +226,8 @@ services:
       context: ../..
       dockerfile: deploy/aws/Dockerfile
       target: web
+      args:
+        VITE_ONPREM_TRIAL_DOWNLOAD_URL: ${VITE_ONPREM_TRIAL_DOWNLOAD_URL:-}
     ports:
       - 127.0.0.1:8080:5173
     restart: unless-stopped

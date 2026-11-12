@@ -250,7 +250,8 @@ export class TextToSpeechEngine {
     }
 
     private loadVoices(): void {
-        this.voices = this.synth?.getVoices() || [];
+        this.voices = (this.synth?.getVoices() || []).filter(voice =>
+            import.meta.env.VITE_DEPLOYMENT !== 'onprem' || voice.localService);
     }
 
     /** A matching language is mandatory; never rely on the browser's default voice. */

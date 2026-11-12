@@ -35,7 +35,7 @@ beforeEach(async () => {
 
 afterEach(() => {
     cleanup.forEach(dispose => dispose());
-    vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals();
+    vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.unstubAllEnvs();
 });
 
 function mount() {
@@ -52,6 +52,14 @@ function savedRates(age: number) {
 }
 
 describe('automatic currency updates', () => {
+    it('keeps prices in INR without requesting remote rates in on-prem builds', () => {
+        vi.stubEnv('VITE_DEPLOYMENT', 'onprem');
+        const state = useCurrencyRates();
+        for (const effect of lifecycle.effects) effect();
+        expect(state.displayCurrency).toBe('INR');
+        expect(state.rates).toEqual({ INR: 1 });
+        expect(fetch).not.toHaveBeenCalled();
+    });
     it('shares a request across mounts and refreshes an open page at 24 hours', async () => {
         mount(); mount();
         expect(fetch).toHaveBeenCalledTimes(1);

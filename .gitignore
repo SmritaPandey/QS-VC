@@ -66,3 +66,11 @@ release/
 
 # Distribute release binaries through release storage, not source control.
 /deploy/aws/outgoing/
+
+# Track the on-prem release tooling while keeping generated payloads ignored.
+!/deploy/vc-onprem/release/
+/deploy/vc-onprem/release/*
+!/deploy/vc-onprem/release/*.sh
+!/deploy/vc-onprem/release/manifest.py
+!/deploy/vc-onprem/release/*.md
+!/deploy/vc-onprem/release/VERSION

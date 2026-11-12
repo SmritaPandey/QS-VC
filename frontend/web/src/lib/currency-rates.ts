@@ -112,6 +112,7 @@ export function useCurrencyRates(): CurrencyRatesState {
     const [status, setStatus] = useState<CurrencyRatesState['status']>(() => currentRates() ? 'ready' : 'loading');
 
     useEffect(() => {
+        if (import.meta.env.VITE_DEPLOYMENT === 'onprem') return;
         let active = true;
         let running = false;
         let timer = 0;
@@ -156,6 +157,9 @@ export function useCurrencyRates(): CurrencyRatesState {
         setCurrencyValue(next);
         saveStorage(CURRENCY_KEY, next);
     }, [cached]);
+    if (import.meta.env.VITE_DEPLOYMENT === 'onprem') {
+        return { currency: 'INR', displayCurrency: 'INR', rates: { INR: 1 }, rateDate: null, status: 'ready', setCurrency };
+    }
     const rates = cached?.rates || { INR: 1 as const };
     const displayCurrency = rates[currency] ? currency : 'INR';
 

@@ -18,9 +18,16 @@ beforeEach(() => {
     Recognition.instances = [];
     vi.stubGlobal('window', { SpeechRecognition: Recognition });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
 describe('browser speech recognition lifecycle', () => {
+    it('keeps the browser recognition provider off in on-prem builds', () => {
+        vi.stubEnv('VITE_DEPLOYMENT', 'onprem');
+        const engine = new SpeechToTextEngine('Demo');
+        engine.start();
+        expect(SpeechToTextEngine.isSupported()).toBe(false);
+        expect(Recognition.instances).toHaveLength(0);
+    });
     it('updates one utterance from interim to final and resets identity after normal restart', () => {
         const onCaption = vi.fn();
         const engine = new SpeechToTextEngine('Synthetic Speaker', { onCaption });

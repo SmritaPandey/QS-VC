@@ -488,14 +488,14 @@ function VerifiedAdminDashboard({ token }: { token: string }) {
     const message = access === 'checking'
         ? 'Please wait while we confirm this account.'
         : access === 'denied'
-            ? 'This account does not have platform administrator access. Go to Intranet to check whether workspace access is enabled for your account.'
-            : 'Your sign-in is still active, but the admin access check did not complete. Try again or open the Intranet page for workspace and app downloads.';
+            ? 'This account does not have platform administrator access. Go to On-prem to check whether workspace access is enabled for your account.'
+            : 'Your sign-in is still active, but the admin access check did not complete. Try again or open the On-prem page for workspace and app downloads.';
     return <main className="admin-dashboard admin-access-page">
         <section className="admin-access-panel" aria-labelledby="admin-access-title">
             <h1 id="admin-access-title">{title}</h1>
             <p role="status" aria-live="polite">{message}</p>
             <div className="admin-access-actions">
-                <Link className="btn-primary" to="/intranet">Open Intranet</Link>
+                <Link className="btn-primary" to="/intranet">Open On-prem</Link>
                 {access === 'unavailable' && <button className="btn-secondary" type="button" onClick={() => { setAccess('checking'); setAttempt(value => value + 1); }}>Try again</button>}
                 <Link className="admin-access-back" to="/app">Back to meetings</Link>
             </div>
@@ -515,7 +515,7 @@ export default function AdminPage() {
             <div className="admin-access-actions">
                 {session.status === 'anonymous'
                     ? <Link className="btn-primary" to="/login?next=%2Fadmin">Sign in</Link>
-                    : <Link className="btn-primary" to="/intranet">Open Intranet</Link>}
+                    : <Link className="btn-primary" to="/intranet">Open On-prem</Link>}
                 <Link className="admin-access-back" to="/app">Back to meetings</Link>
             </div>
         </section>

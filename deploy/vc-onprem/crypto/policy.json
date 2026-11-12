@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "profiles": {
+    "pilot": {
+      "edgeTls": "tls1.3",
+      "edgeGroups": ["x25519mlkem768", "x25519"],
+      "releaseSignatures": ["Ed25519", "ML-DSA-65"],
+      "sshKex": "mlkem768x25519-sha256"
+    },
+    "high-assurance": {
+      "status": "design-only",
+      "edgeGroups": ["SecP384r1MLKEM1024"],
+      "releaseSignatures": ["Ed25519", "ML-DSA-87"],
+      "rootSignatureCandidate": "SLH-DSA"
+    }
+  }
+}

@@ -31,14 +31,15 @@ if [[ "${QSVC_PACKAGE_SSO:-false}" == true ]]; then
 fi
 "${compose[@]}" build sfu signaling auth meeting recording web
 
-mkdir -p "$output_dir/sbom"
+mkdir -p "$output_dir/sbom" "$output_dir/scans"
 for image in "${runtime_images[@]}" "${app_images[@]}"; do
   name="${image//[:\/]/-}"
   sbom="$output_dir/sbom/$name.cdx.json"
   echo "Generating CycloneDX SBOM for $image"
   syft "$image" -o cyclonedx-json > "$sbom"
+  syft "$image" -o spdx-json > "$output_dir/sbom/$name.spdx.json"
   echo "Scanning $image SBOM"
-  grype "sbom:$sbom" --fail-on high
+  grype "sbom:$sbom" --fail-on high -o json > "$output_dir/scans/$name.grype.json"
 done
 
 docker save --output "$output_dir/qsvc-intranet-images.tar" "${runtime_images[@]}" "${app_images[@]}"

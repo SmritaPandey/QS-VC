@@ -1,0 +1,46 @@
+services:
+  trial-gateway:
+    image: qsvc-auth:intranet
+    entrypoint: ["node", "/opt/qsvc-trial/gateway.cjs"]
+    user: "65534:65534"
+    read_only: true
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./trial:/opt/qsvc-trial:ro
+      - /var/lib/qsvc/onprem-trial:/trial:ro
+  sfu:
+    environment:
+      NODE_OPTIONS: --require=/opt/qsvc-trial/stop-at-expiry.cjs
+    volumes:
+      - ./trial:/opt/qsvc-trial:ro
+      - /var/lib/qsvc/onprem-trial:/trial:ro
+  auth:
+    environment:
+      QSVC_DEPLOYMENT: onprem
+      QSVC_SSO_ENABLED: "false"
+      QSVC_DIGILOCKER_ENABLED: "false"
+      QSVC_GOOGLE_CLIENT_ID: ""
+      QSVC_GOOGLE_CLIENT_SECRET: ""
+      QSVC_MICROSOFT_CLIENT_ID: ""
+      QSVC_MICROSOFT_CLIENT_SECRET: ""
+      QSVC_EMAIL_API_KEY: ""
+      PAYMENTS_ENABLED: "false"
+      PAYMENT_TERMS_CONFIRMED: "false"
+      JWT_EXPIRY: 1h
+  signaling:
+    volumes:
+      - ./trial:/opt/qsvc-trial:ro
+      - /var/lib/qsvc/onprem-trial:/trial:ro
+    environment:
+      NODE_OPTIONS: --require=/opt/qsvc-trial/stop-at-expiry.cjs
+      QSVC_DEPLOYMENT: onprem
+      ENABLE_ONPREM_GOOGLE_TRANSLATION: "false"
+      GOOGLE_TRANSLATE_API_KEY: ""
+      LIBRETRANSLATE_URL: ""
+      ASR_URL: ""
+      MINUTES_LLM_URL: ""
+  recording:
+    environment:
+      RECORDING_BUCKET: ""
