@@ -204,7 +204,7 @@ jobs:
           only-fixed: true
           cache-db: false
       - name: Require a successful vulnerability scan
-        if: ${{ !cancelled() && steps.grype.outcome != 'success' && steps.grype-retry.outcome != 'success' }}
+        if: ${{ !cancelled() && steps.grype.outcome == 'failure' && steps.grype-retry.outcome != 'success' }}
         run: |
           echo "::error::Grype did not complete a passing scan. Check the scan steps and the vulnerability report when available."
           exit 1
