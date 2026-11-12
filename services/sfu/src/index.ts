@@ -100,7 +100,7 @@ function mountPolyBridge() {
     if (!controlToken || process.env.BRIDGE_API_TOKEN !== controlToken) {
         throw new Error('Poly bridge requires matching SFU_CONTROL_TOKEN and BRIDGE_API_TOKEN');
     }
-    const adapter = createPolyAdapter(id => rooms.get(id));
+    const adapter = createPolyAdapter(id => rooms.get(id), getOrCreateRoom);
     const { createPolyBridge } = require(resolve(modulePath));
     const bridge = createPolyBridge(adapter);
     app.get('/api/poly/rooms/:room/snapshot', (req, res) => {

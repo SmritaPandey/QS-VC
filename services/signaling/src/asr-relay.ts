@@ -14,7 +14,7 @@ import { logger } from './logger.js';
  *       JSON {type:'partial'|'final', segment, text, language} out.
  *   GET {ASR_URL}/v1/languages → {languages:[{code,name}], autoDetect, engine, model}
  */
-const startSchema = z.object({ language: z.union([z.literal('auto'), z.string().regex(/^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/)]) }).strict();
+const startSchema = z.object({ processorConsent: z.literal(true), language: z.union([z.literal('auto'), z.string().regex(/^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/)]) }).strict();
 const audioSchema = z.object({ seq: z.number().int().min(0), pcm: z.string().min(4).max(48_000) }).strict();
 const resultSchema = z.object({ type: z.enum(['partial', 'final', 'error', 'ready']), segment: z.number().int().min(0).optional(), text: z.string().max(4000).optional(), language: z.string().max(20).optional(), message: z.string().max(300).optional() });
 const capabilitySchema = z.object({ languages: z.array(z.object({ code: z.string().regex(/^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/), name: z.string().max(100) })).max(300), autoDetect: z.boolean().optional(), engine: z.string().max(60).optional(), model: z.string().max(120).optional() });
@@ -64,7 +64,7 @@ function member(ws: object, roomId: string, peerId: string) {
 export async function startAsr(ws: object, roomId: string, peerId: string, params: unknown) {
     const peer = member(ws, roomId, peerId);
     const parsed = startSchema.safeParse(params);
-    if (!parsed.success) throw new Error('Invalid speech settings');
+    if (!parsed.success) throw new Error('Explicit transcription processor consent is required');
     if (peer.audioMuted) throw new Error('Unmute your microphone before sharing captions');
     const base = baseUrl();
     if (!base) throw new Error('Server speech recognition is not configured');
@@ -95,9 +95,15 @@ export async function startAsr(ws: object, roomId: string, peerId: string, param
         if (sessions.get(key(roomId, peerId)) === session) sessions.delete(key(roomId, peerId));
         if (!session.stopping) roomManager.sendToPeer(roomId, peerId, 'asrStopped', { reason: 'service-closed' });
         session.closed = true;
+        announceProcessorState(roomId);
     });
     upstream.on('error', () => { /* reported via ready/close */ });
-    try { await session.ready; } catch (error) { stopAsr(ws, roomId, peerId); throw error; }
+    try { await session.ready; } catch (error) {
+        if (sessions.get(key(roomId, peerId)) === session) stopAsr(ws, roomId, peerId, true);
+        throw error;
+    }
+    if (session.closed || session.stopping) throw new Error('Transcription was stopped');
+    announceProcessorState(roomId);
     return { started: true, language: parsed.data.language };
 }
 
@@ -117,19 +123,31 @@ export function pushAsrAudio(ws: object, roomId: string, peerId: string, params:
     return { accepted: true };
 }
 
-export function stopAsr(ws: object | null, roomId: string, peerId: string) {
+export function stopAsr(ws: object | null, roomId: string, peerId: string, discard = false) {
     const session = sessions.get(key(roomId, peerId));
     if (!session) return { stopped: false };
     if (ws) member(ws, roomId, peerId);
     session.stopping = true;
     sessions.delete(key(roomId, peerId));
+    if (discard) session.closed = true;
+    announceProcessorState(roomId);
     try {
-        if (session.upstream.readyState === WebSocket.OPEN) { session.upstream.send(JSON.stringify({ type: 'stop' })); setTimeout(() => session.upstream.close(), 1500).unref?.(); }
+        if (discard) session.upstream.terminate();
+        else if (session.upstream.readyState === WebSocket.OPEN) { session.upstream.send(JSON.stringify({ type: 'stop' })); setTimeout(() => session.upstream.close(), 1500).unref?.(); }
         else session.upstream.terminate();
     } catch { /* already closed */ }
     return { stopped: true };
 }
 
 /** Called on disconnect and when the server mutes a peer. */
-export function stopAsrForPeer(roomId: string, peerId: string) { stopAsr(null, roomId, peerId); }
+export function stopAsrForPeer(roomId: string, peerId: string) { stopAsr(null, roomId, peerId, true); }
 export function activeAsrSessions() { return sessions.size; }
+
+/** Processor access is visible to all participants, including late joiners. */
+export function asrParticipants(roomId: string) {
+    return [...sessions.values()].filter(session => session.roomId === roomId && !session.closed && !session.stopping)
+        .map(session => ({ peerId: session.peerId, displayName: roomManager.getRoom(roomId)?.peers.get(session.peerId)?.displayName || 'Participant' }));
+}
+function announceProcessorState(roomId: string) {
+    roomManager.broadcast(roomId, 'captionProcessorState', { participants: asrParticipants(roomId) });
+}

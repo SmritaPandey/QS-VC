@@ -1,3 +1,4 @@
+import { roomDialHandler } from './room-dial.js';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
@@ -42,6 +43,8 @@ app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, standardHeaders: true, l
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // REST API
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+app.post('/api/internal/room-numbers/:number/resolve', roomDialHandler);
 
 app.get('/health', (_req, res) => {
     res.json({

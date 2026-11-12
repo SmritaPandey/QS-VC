@@ -17,6 +17,7 @@ export function createPolyBridge(sfu: SfuAdapter) {
   const fs = new FreeSwitch();
   const waitingCalls = new Map<string, string>();
   const rooms = new Map<string, RoomBridge>();
+  const starting = new Map<string, Promise<void>>();
 
   fs.on("member-add", (e) => rooms.get(e.room)?.onMemberAdd(e).catch(console.error));
   fs.on("member-del", (e) => rooms.get(e.room)?.onMemberDel(e).catch(console.error));
@@ -35,9 +36,10 @@ export function createPolyBridge(sfu: SfuAdapter) {
     sfu.notifyLobby(e.room, { callId: e.uuid, displayName: e.displayName, protocol: e.protocol, remoteAddress: e.remoteAddress, encrypted: e.encrypted }).catch(console.error);
   });
   fs.on("lobby-left", (e) => {
-    if (waitingCalls.get(e.uuid) !== e.room) return;
+    const roomId = waitingCalls.get(e.uuid);
+    if (!roomId) return;
     waitingCalls.delete(e.uuid);
-    sfu.notifyLobbyLeft(e.room, e.uuid).catch(console.error);
+    sfu.notifyLobbyLeft(roomId, e.uuid).catch(console.error);
   });
 
   const http = Router();
@@ -66,21 +68,37 @@ export function createPolyBridge(sfu: SfuAdapter) {
 
   /** Ensure the bridge is running for a room, starting it if necessary. */
   async function ensureRoom(roomId: string): Promise<void> {
+    const pending = starting.get(roomId);
+    if (pending) return pending;
     if (rooms.has(roomId)) return;
-    await sfu.ensureBridge(roomId);
-    const rb = new RoomBridge(roomId, sfu, fs);
-    rooms.set(roomId, rb);
-    try { await rb.start(); } catch (e) { rooms.delete(roomId); await rb.stop(); throw e; }
+    const task = (async () => {
+      await sfu.ensureBridge(roomId);
+      const rb = new RoomBridge(roomId, sfu, fs);
+      rooms.set(roomId, rb);
+      try { await rb.start(); } catch (e) { rooms.delete(roomId); await rb.stop(); throw e; }
+    })();
+    starting.set(roomId, task);
+    try { await task; } finally { starting.delete(roomId); }
   }
 
   /** Handle a dial-in call that arrived via a numeric room number. */
   async function handleDialIn(uuid: string, dialedNumber: string, ev: any): Promise<void> {
-    const resolved = await sfu.resolveDialedNumber(dialedNumber);
+    let resolved;
+    try { resolved = await sfu.resolveDialedNumber(dialedNumber, ev.pin); }
+    catch (error) {
+      await fs.deny(uuid);
+      throw error;
+    }
     if (!resolved) {
       // Number not in service: play error tone and hang up
       await fs.api(`uuid_broadcast ${uuid} ivr/ivr-invalid_number.wav both`);
       // Give it a moment to play, then kill
       setTimeout(() => fs.api(`uuid_kill ${uuid} UNALLOCATED_NUMBER`).catch(() => undefined), 3000);
+      return;
+    }
+    // Only the tenant-scoped lookup service can attest PIN verification.
+    if ((resolved.pinRequired && !resolved.pinVerified) || (resolved.encryption === "required" && !ev.encrypted)) {
+      await fs.deny(uuid);
       return;
     }
     const { roomId, autoAdmit } = resolved;
@@ -111,14 +129,11 @@ export function createPolyBridge(sfu: SfuAdapter) {
   }
 
   http.post("/rooms/:room/start", wrap(async (req, res) => {
-    if (!rooms.has(req.params.room)) {
-      const rb = new RoomBridge(req.params.room, sfu, fs);
-      rooms.set(req.params.room, rb);
-      try { await rb.start(); } catch (e) { rooms.delete(req.params.room); await rb.stop(); throw e; }
-    }
+    await ensureRoom(req.params.room);
     res.json({ started: true, room: req.params.room });
   }));
   async function stopRoom(roomId: string) {
+    await starting.get(roomId)?.catch(() => undefined);
     const bridge = rooms.get(roomId);
     rooms.delete(roomId);
     for (const [callId, waitingRoomId] of waitingCalls) {
@@ -145,9 +160,9 @@ export function createPolyBridge(sfu: SfuAdapter) {
     http.post(`/rooms/:room/lobby/:callId/${action}`, wrap(async (req, res) => {
       const { room: roomId, callId } = req.params;
       if (!rooms.has(roomId) || waitingCalls.get(callId) !== roomId) return res.status(404).end();
-      waitingCalls.delete(callId);
       const result = action === "admit" ? await fs.admit(callId, roomId) : await fs.deny(callId);
       if (result.startsWith("-ERR")) return res.status(502).json({ error: "MCU rejected the lobby action" });
+      waitingCalls.delete(callId);
       await sfu.notifyLobbyLeft(roomId, callId);
       res.json({ result });
     }));

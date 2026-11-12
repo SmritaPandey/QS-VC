@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocketServer } from 'ws';
 import http from 'http';
 import { roomManager, type PeerState } from './room-manager';
-import { asrCapabilities, pushAsrAudio, resetAsrCapabilities, startAsr, stopAsr } from './asr-relay';
+import { asrParticipants, asrCapabilities, pushAsrAudio, resetAsrCapabilities, startAsr, stopAsr } from './asr-relay';
 import { clearEmptyRoomCaptions } from './captions';
 import { generateMinutes, transcriptText } from './minutes';
 
@@ -47,11 +47,35 @@ afterEach(() => {
 });
 
 describe('server speech relay', () => {
+    it('requires explicit processor consent and preserves encrypted room settings', async () => {
+        const asr = await fakeAsr();
+        try {
+            vi.stubEnv('ASR_URL', asr.url);
+            const speaker = participant();
+            const room = roomManager.getRoom(speaker.roomId)!;
+            room.settings.e2eeRequired = true;
+            await expect(startAsr(speaker.ws, speaker.roomId, speaker.id, { language: 'en' }))
+                .rejects.toThrow('consent');
+            expect(asrParticipants(room.id)).toEqual([]);
+            expect(asr.received.url).toBe('');
+            await startAsr(speaker.ws, room.id, speaker.id, { processorConsent: true, language: 'en' });
+            expect(room.settings.e2eeRequired).toBe(true);
+            expect(asrParticipants(room.id)).toEqual([{ peerId: speaker.id, displayName: 'Asha' }]);
+            stopAsr(speaker.ws, room.id, speaker.id, true);
+            expect(pushAsrAudio(speaker.ws, room.id, speaker.id, { seq: 1, pcm: Buffer.alloc(8000).toString('base64') }))
+                .toMatchObject({ accepted: false });
+            expect(asrParticipants(room.id)).toEqual([]);
+            await new Promise(resolve => setTimeout(resolve, 30));
+            expect(sent(speaker.ws, 'captionReceived')).toEqual([]);
+            expect(room.settings.e2eeRequired).toBe(true);
+        } finally { await asr.close(); }
+    });
+
     it('reports not configured so clients fall back to browser recognition', async () => {
         vi.stubEnv('ASR_URL', '');
         expect(await asrCapabilities()).toEqual({ configured: false });
         const peer = participant();
-        await expect(startAsr(peer.ws, peer.roomId, peer.id, { language: 'hi' })).rejects.toThrow('not configured');
+        await expect(startAsr(peer.ws, peer.roomId, peer.id, { processorConsent: true, language: 'hi' })).rejects.toThrow('not configured');
     });
     it('streams PCM to the speech service and turns results into attributed room captions', async () => {
         const asr = await fakeAsr();
@@ -59,7 +83,7 @@ describe('server speech relay', () => {
             vi.stubEnv('ASR_URL', asr.url); vi.stubEnv('ASR_API_KEY', 'secret');
             expect(await asrCapabilities()).toMatchObject({ configured: true, available: true, autoDetect: true, languages: [{ code: 'hi', name: 'Hindi' }, { code: 'en', name: 'English' }] });
             const speaker = participant(); const listener = participant(speaker.roomId, 'Listener');
-            await startAsr(speaker.ws, speaker.roomId, speaker.id, { language: 'auto' });
+            await startAsr(speaker.ws, speaker.roomId, speaker.id, { processorConsent: true, language: 'auto' });
             expect(asr.received.url).toBe('/v1/stream?language=auto&sample_rate=16000');
             expect(asr.received.auth).toBe('Bearer secret');
             const pcm = Buffer.alloc(8000).toString('base64');
@@ -78,7 +102,7 @@ describe('server speech relay', () => {
         try {
             vi.stubEnv('ASR_URL', asr.url);
             const speaker = participant();
-            await startAsr(speaker.ws, speaker.roomId, speaker.id, { language: 'hi' });
+            await startAsr(speaker.ws, speaker.roomId, speaker.id, { processorConsent: true, language: 'hi' });
             roomManager.getRoom(speaker.roomId)!.peers.get(speaker.id)!.audioMuted = true;
             expect(pushAsrAudio(speaker.ws, speaker.roomId, speaker.id, { seq: 1, pcm: Buffer.alloc(100).toString('base64') })).toEqual({ accepted: false });
             roomManager.getRoom(speaker.roomId)!.peers.get(speaker.id)!.audioMuted = false;

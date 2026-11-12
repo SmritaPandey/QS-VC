@@ -45,12 +45,13 @@
     <!-- Dial-in: sip:<room>@mcu  or  H.323 <mcu-ip>##<room>. Goes to the LOBBY. -->
     <!-- Direct dial-in via numeric room number (3-10 digits). -->
     <extension name="qsvc_number">
-      <condition field="destination_number" expression="^(\d{3,10})$">
+      <condition field="destination_number" expression="^(\d{3,10})(?:\*(\d{4,12}))?$">
         <action application="set" data="qsvc_number=$1"/>
+        <action application="set" data="qsvc_pin=$2"/>
         <action application="set" data="qsvc_room=$1"/>
         <action application="set" data="qsvc_lobby=true"/>
-        <!-- If a PIN is required, the bridge will check it after parking.
-             Optionally collect a PIN up-front (play_and_get_digits). -->
+        <!-- Dial NUMBER*PIN for a protected room. The meeting service verifies
+             the PIN before admission; it never returns the stored hash. -->
         <action application="set" data="rtp_secure_media=optional"/>
         <action application="answer"/>
         <action application="playback" data="silence_stream://500"/>

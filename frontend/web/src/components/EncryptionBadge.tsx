@@ -30,6 +30,7 @@ export default function EncryptionBadge({ active, securityCode, participants }: 
             <p>{active
                 ? 'End-to-end encryption protects this meeting’s audio, video and screen sharing. It uses post-quantum algorithms standardised in NIST FIPS 203 and 204.'
                 : 'End-to-end encryption is being prepared. Wait for the security code before checking the meeting.'}</p>
+            <p>Captions, translations and transcripts can be read by the meeting service. If you allow server transcription, its processor also receives a copy of your microphone audio.</p>
             <dl><div><dt>Participants</dt><dd>{participants}</dd></div></dl>
             <div className="qs-e2ee-code">
                 <span>Security code</span>

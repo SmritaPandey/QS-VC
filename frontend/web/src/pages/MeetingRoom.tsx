@@ -1776,9 +1776,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             return;
         }
         // Server recognition (any modern browser) or the browser's own recognizer.
-        const supported = SpeechToTextEngine.isSupported() || (!e2eeActive && ServerSpeechEngine.isSupported());
+        const supported = SpeechToTextEngine.isSupported() || ServerSpeechEngine.isSupported();
         if (!canPublishRef.current) { showNotice('Captions are on. You’ll see what the speakers say.'); return; }
-        if (supported && hasCaptionConsent()) { setShareSpeech(true); showNotice('Captions are on, including your own speech.'); }
+        if (supported && hasCaptionConsent() && !ServerSpeechEngine.isSupported()) { setShareSpeech(true); showNotice('Captions are on, including your own speech.'); }
         else if (supported) { setLanguageOpen(true); setReactionsOpen(false); showNotice('Captions are on. To let others read what you say, turn on “Share my speech as captions”.'); }
         else showNotice('Captions are on. This browser can’t caption your own speech, but you’ll see what others say.');
     }, [captionsOn, showNotice, signedIn, guestCaptionLanguage, e2eeActive]);

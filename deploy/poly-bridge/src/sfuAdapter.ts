@@ -41,7 +41,7 @@ export interface SfuAdapter {
    * Resolve a dialed room number to meeting details via the signaling service.
    * Returns null when the number is not assigned to any room.
    */
-  resolveDialedNumber(number: string): Promise<DialedNumberResult | null>;
+  resolveDialedNumber(number: string, pin?: string): Promise<DialedNumberResult | null>;
 
   /**
    * Ensure a bridge is running for the given room (idempotent).
@@ -77,5 +77,6 @@ export interface DialedNumberResult {
   meetingCode: string;
   autoAdmit: boolean;
   pinRequired: boolean;
+  pinVerified: boolean;
   encryption: string;
 }

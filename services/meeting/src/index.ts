@@ -1,3 +1,4 @@
+import { roomDialHandler } from './room-dial.js';
 import { serviceSecret } from '../../../shared/service-secrets.cjs';
 import { insertSchedule, scheduleOccurrences } from './schedule-occurrences.js';
 import { meetingAuth, requireFeature, type AuthPayload } from './auth.js';
@@ -166,6 +167,8 @@ const scheduleFeature = requireFeature(AUTH_URL, 'meeting_scheduling');
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // ROUTES
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+app.post('/api/internal/room-numbers/:number/resolve', roomDialHandler(pool));
 
 app.get('/health', (_req, res) => {
     res.json({ status: 'ok', service: 'qsvc-meeting' });

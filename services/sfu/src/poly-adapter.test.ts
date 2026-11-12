@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { types as ms } from 'mediasoup';
 import { createPolyAdapter } from './poly-adapter.js';
 import type { Room } from './mediasoup/room.js';
@@ -14,7 +14,19 @@ function fixture() {
     return { adapter, room, producer };
 }
 
+afterEach(() => vi.unstubAllGlobals());
+
 describe('Poly SFU adapter', () => {
+    it('creates SFU resources for a host-started bridge and rejects unconfigured number lookup', async () => {
+        const { room } = fixture();
+        const ensureRoom = vi.fn().mockResolvedValue(room);
+        const adapter = createPolyAdapter(() => undefined, ensureRoom);
+        await adapter.ensureBridge('new-room');
+        expect(ensureRoom).toHaveBeenCalledExactlyOnceWith('new-room');
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ status: 503, ok: false }));
+        await expect(adapter.resolveDialedNumber('1001')).rejects.toThrow('Numeric room lookup unavailable');
+    });
+
     it('uses the existing router and detaches browser media listeners on teardown', async () => {
         const { adapter, room, producer } = fixture();
         expect(await adapter.getRouter('room')).toBe(room.router);

@@ -2,7 +2,7 @@
  * Server speech recognition: streams the meeting's OWN microphone track (the device picked in
  * the meeting, after noise suppression) as 16 kHz mono PCM to QS-VC signaling, which relays it
  * to the organisation's speech service. Works in every browser with AudioWorklet (Chrome, Edge,
- * Firefox, Safari, Electron) and keeps audio on the organisation's servers.
+ * Firefox, Safari, Electron). A separate consented audio copy is readable by signaling and ASR.
  */
 import { signaling } from './signaling';
 
@@ -16,6 +16,7 @@ const WORKLET = `class QsvcCapture extends AudioWorkletProcessor {
 registerProcessor('qsvc-capture', QsvcCapture);`;
 
 export interface ServerSpeechOptions {
+    processorConsent: boolean;
     language: string; // BCP-47 or 'auto'
     getTrack: () => MediaStreamTrack | null;
     onError?: (message: string) => void;
@@ -40,11 +41,15 @@ export class ServerSpeechEngine {
 
     async start(): Promise<void> {
         if (this.active) return;
+        if (!this.options.processorConsent) {
+            this.options.onError?.('Allow transcription processor access before sharing microphone audio.');
+            return;
+        }
         const live = this.options.getTrack();
         if (!live || live.readyState !== 'live') { this.options.onError?.('No microphone is available for captions.'); return; }
         this.active = true;
         try {
-            await signaling.request('asrStart', { language: this.options.language });
+            await signaling.request('asrStart', { language: this.options.language, processorConsent: true });
             if (!this.active) { signaling.notify('asrStop'); return; }
             // Clone so captions never change the track the meeting sends.
             this.track = live.clone();

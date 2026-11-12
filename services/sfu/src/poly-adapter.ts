@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { types as ms } from 'mediasoup';
 import type { Room } from './mediasoup/room.js';
 
@@ -15,7 +16,7 @@ type Snapshot = {
     roster: Map<string, Participant & { muted: boolean }>;
 };
 
-export function createPolyAdapter(findRoom: (id: string) => Room | undefined) {
+export function createPolyAdapter(findRoom: (id: string) => Room | undefined, ensureRoom?: (id: string) => Promise<Room>) {
     const states = new WeakMap<Room, Snapshot>();
     const requireRoom = (id: string) => {
         const room = findRoom(id);
@@ -40,6 +41,26 @@ export function createPolyAdapter(findRoom: (id: string) => Room | undefined) {
     const participant = ({ callId, displayName, protocol, encrypted }: Participant): Participant =>
         ({ callId, displayName, protocol, encrypted });
     return {
+        async ensureBridge(roomId: string) {
+            if (ensureRoom) await ensureRoom(roomId);
+            else requireRoom(roomId);
+        },
+        async resolveDialedNumber(number: string, pin?: string) {
+            if (!/^[0-9]{3,10}$/.test(number)) return null;
+            const base = process.env.SIGNALING_URL || 'http://127.0.0.1:4001';
+            const response = await fetch(base + '/api/internal/room-numbers/' + number + '/resolve', {
+                method: 'POST', redirect: 'error', signal: AbortSignal.timeout(6000),
+                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + process.env.BRIDGE_API_TOKEN },
+                body: JSON.stringify({ ...(pin ? { pin } : {}) }),
+            });
+            if (response.status === 404) return null;
+            if (!response.ok) throw new Error('Numeric room lookup unavailable');
+            return z.object({
+                roomId: z.string().regex(/^[a-zA-Z0-9-]{1,80}$/),
+                meetingCode: z.string(), autoAdmit: z.boolean(), pinRequired: z.boolean(),
+                pinVerified: z.boolean(), encryption: z.enum(['required', 'optional']),
+            }).parse(await response.json());
+        },
         async getRouter(roomId: string) { return requireRoom(roomId).router; },
         async listBrowserProducers(roomId: string) {
             const room = requireRoom(roomId);

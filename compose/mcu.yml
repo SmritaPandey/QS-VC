@@ -1,45 +1,44 @@
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-# QS-VC MCU (FreeSWITCH + Poly Bridge) — Docker Compose
-# Connects legacy SIP/H.323 room systems (e.g. Polycom, Cisco) to QS-VC
-# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-version: '3.8'
-
+# Standalone Linux SFU+MCU bridge, alongside existing signaling/meeting services.
+# FreeSWITCH runs on this host or at FS_SIP_HOST/FS_ESL_HOST.
 services:
-  freeswitch:
-    image: qsvc-mcu:${QSVC_VERSION:-latest}
-    container_name: qsvc-freeswitch
+  sfu:
+    image: qsvc-sfu-poly:${QSVC_VERSION:-local}
+    build:
+      context: ..
+      dockerfile: deploy/poly-bridge/Dockerfile
     restart: unless-stopped
     network_mode: host
-    environment:
-      FS_ESL_PASSWORD: ${FS_ESL_PASSWORD:-ClueCon}
-      FS_ESL_PORT: ${FS_ESL_PORT:-8021}
-    volumes:
-      - ../config/freeswitch/dialplan:/etc/freeswitch/dialplan:ro
-      - ../config/freeswitch/directory:/etc/freeswitch/directory:ro
-      - ../config/freeswitch/sip_profiles:/etc/freeswitch/sip_profiles:ro
-      - freeswitch-recordings:/var/lib/freeswitch/recordings
-
-  poly-bridge:
-    image: qsvc-core:${QSVC_VERSION:-latest}
-    container_name: qsvc-poly-bridge
-    restart: unless-stopped
-    command: ["node", "deploy/poly-bridge/server.js"]
     env_file:
       - ${QSVC_CONFIG_FILE:-../config/.env}
     environment:
       NODE_ENV: production
-      QSVC_DEPLOYMENT: onprem
+      SFU_PORT: ${SFU_PORT:-4000}
+      SFU_ANNOUNCED_IP: ${SFU_ANNOUNCED_IP:?Set the reachable SFU address}
+      SFU_CONTROL_TOKEN: ${BRIDGE_API_TOKEN:?Set a private shared bridge/control token}
+      BRIDGE_API_TOKEN: ${BRIDGE_API_TOKEN:?Set a private shared bridge/control token}
+      POLY_BRIDGE_MODULE: /poly/dist/index.js
       FS_ESL_HOST: ${FS_ESL_HOST:-127.0.0.1}
       FS_ESL_PORT: ${FS_ESL_PORT:-8021}
-      FS_ESL_PASSWORD: ${FS_ESL_PASSWORD:-ClueCon}
-      BRIDGE_API_TOKEN: ${BRIDGE_API_TOKEN:-dev-bridge-secret-2026}
-      BRIDGE_RTP_ANNOUNCED_IP: ${SFU_ANNOUNCED_IP:-127.0.0.1}
-      SFU_URL: http://127.0.0.1:4000
-      SIGNALING_URL: http://127.0.0.1:4001
-    network_mode: host
+      FS_ESL_PASSWORD: ${FS_ESL_PASSWORD:?Set a private ESL password}
+      FS_SIP_HOST: ${FS_SIP_HOST:-127.0.0.1:5090}
+      DRACHTIO_HOST: 127.0.0.1
+      DRACHTIO_SECRET: ${DRACHTIO_SECRET:?Set a private drachtio secret}
+      BRIDGE_RTP_ANNOUNCED_IP: ${SFU_ANNOUNCED_IP}
+      BRIDGE_SRTP: mandatory
+      SIGNALING_URL: ${SIGNALING_URL:-http://127.0.0.1:4001}
     depends_on:
-      - freeswitch
-
-volumes:
-  freeswitch-recordings:
-
+      - drachtio
+  drachtio:
+    image: drachtio/drachtio-server:0.8.26
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - drachtio
+      - --contact
+      - "sip:*:5070;transport=udp,tcp"
+      - --secret
+      - ${DRACHTIO_SECRET:?Set a private drachtio secret}
+      - --admin-port
+      - "9022"
+      - --loglevel
+      - info

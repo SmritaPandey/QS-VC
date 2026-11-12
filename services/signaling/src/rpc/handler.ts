@@ -15,7 +15,7 @@ import { z } from 'zod';
 import { can, getPrivateConversationLimitMs } from '../../../../shared/entitlements.cjs';
 import meetingInvitation from '../../../../shared/meeting-invitation.cjs';
 import { publishCaption, publishInterim, subscribeCaptions, translationCapabilities, translateCaption, clearEmptyRoomCaptions, forgetPeerCaptions, setTranscriptSaving, transcriptEntries } from '../captions.js';
-import { asrCapabilities, pushAsrAudio, startAsr, stopAsr, stopAsrForPeer } from '../asr-relay.js';
+import { asrParticipants, asrCapabilities, pushAsrAudio, startAsr, stopAsr, stopAsrForPeer } from '../asr-relay.js';
 import { generateMinutes, minutesConfigured } from '../minutes.js';
 import { saveTranscript } from '../transcript-store.js';
 
@@ -324,7 +324,7 @@ export async function handleRpcMessage(
                 return { jsonrpc: '2.0', id: id!, result };
             }
             case 'asrStop':
-                return { jsonrpc: '2.0', id: id!, result: stopAsr(ws, connectionState.roomId!, connectionState.peerId!) };
+                return { jsonrpc: '2.0', id: id!, result: stopAsr(ws, connectionState.roomId!, connectionState.peerId!, true) };
             case 'captionSubscribe': {
                 // Guests (and accounts without captions) read captions in ONE language and get no translated voice.
                 const targets = (params as { targets?: unknown })?.targets;
@@ -335,7 +335,7 @@ export async function handleRpcMessage(
             }
             case 'translationCapabilities': {
                 const [captions, asr] = await Promise.all([translationCapabilities(ws, connectionState.roomId!, connectionState.peerId!), asrCapabilities()]);
-                return { jsonrpc: '2.0', id: id!, result: { ...captions, asr, minutes: { configured: minutesConfigured() } } };
+                return { jsonrpc: '2.0', id: id!, result: { ...captions, asr: { ...asr, participants: asrParticipants(connectionState.roomId!) }, minutes: { configured: minutesConfigured() } } };
             }
             case 'setTranscriptSaving': {
                 const parsed = z.object({ enabled: z.boolean() }).strict().safeParse(params);
