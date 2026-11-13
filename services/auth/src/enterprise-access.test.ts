@@ -182,3 +182,25 @@ it('rejects non-admins from the Enterprise approval queue without reading it', a
     expect(res.sendStatus).toHaveBeenCalledWith(403);
     expect(query).not.toHaveBeenCalled();
 });
+
+it('serves only the staged server installer without sign-in', async () => {
+    const folder = mkdtempSync(path.join(tmpdir(), 'qsvc-onprem-installer-'));
+    try {
+        const archive = path.join(folder, 'installer.tar.gz');
+        writeFileSync(archive, 'test archive');
+        vi.stubEnv('ENTERPRISE_ONPREM_TRIAL_INSTALLER', archive);
+        const verify = vi.fn();
+        const router = enterpriseRouter(verify);
+        const routeIndex = router.stack.findIndex(layer => layer.route?.path === '/trial-package');
+        const guardIndex = router.stack.findIndex(layer => !layer.route);
+        expect(routeIndex).toBeGreaterThanOrEqual(0);
+        expect(routeIndex).toBeLessThan(guardIndex);
+        const res = { set: vi.fn(), download: vi.fn() };
+        await router.stack[routeIndex].route!.stack[0].handle({} as Request, res as unknown as Response, vi.fn());
+        expect(res.download).toHaveBeenCalledWith(archive, 'QS-VC-On-prem-Installer.tar.gz', expect.any(Function));
+        expect(verify).not.toHaveBeenCalled();
+        expect(router.stack.findIndex(layer => layer.route?.path === '/windows')).toBeGreaterThan(guardIndex);
+    } finally {
+        rmSync(folder, { recursive: true, force: true });
+    }
+});

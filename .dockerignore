@@ -19,3 +19,5 @@ deploy/aws/installers
 deploy/aws/outgoing
 frontend/desktop
 tmp
+
+deploy/aws/license-private

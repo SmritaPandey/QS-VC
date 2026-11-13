@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express';
-import { stat } from 'node:fs/promises';
+import { createPrivateKey, sign } from 'node:crypto';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import type { Pool } from 'pg';
@@ -78,6 +79,27 @@ export function enterpriseRouter(
         if (rows.length !== 1) return res.sendStatus(409);
         return res.json(rows[0]);
     }));
+    if (db) router.post('/terms/:userId/onprem-license', withAdmin(async (req, res) => {
+        const id = z.string().uuid().safeParse(req.params.userId);
+        const installation = z.string().uuid().safeParse(req.body?.installationId);
+        if (!id.success || !installation.success) return res.sendStatus(400);
+        const keyFile = process.env.QSVC_ONPREM_LICENSE_KEY_FILE;
+        if (!keyFile) return res.status(503).json({ error: 'On-prem license signing is not configured.' });
+        const { rows } = await db.query(
+            `SELECT t.expires_at FROM enterprise_access_terms t
+             JOIN users u ON u.id = t.user_id JOIN tenants o ON o.id = u.tenant_id
+             WHERE t.user_id = $1 AND t.expires_at > now() AND u.is_active AND o.is_active`,
+            [id.data],
+        );
+        if (!rows.length) return res.sendStatus(404);
+        const key = createPrivateKey(await readFile(keyFile));
+        if (key.asymmetricKeyType !== 'ed25519') return res.sendStatus(503);
+        const payload = JSON.stringify({ purpose: 'qsvc-onprem-extension-v1', installationId: installation.data,
+            expiresAt: new Date(rows[0].expires_at).getTime() });
+        return res.attachment('qsvc-onprem-license.json').json({
+            payload, signature: sign(null, Buffer.from(payload), key).toString('base64url'),
+        });
+    }));
     if (db) router.put('/terms/:userId', withAdmin(async (req, res, adminId) => {
         const term = termBody.safeParse(req.body);
         const id = z.string().uuid().safeParse(req.params.userId);
@@ -154,6 +176,19 @@ export function enterpriseRouter(
             return res.json({ status: rows[0].status, notificationSent });
         }));
     }
+    const trialArchive = async () => {
+        const file = process.env.ENTERPRISE_ONPREM_TRIAL_INSTALLER;
+        if (!file || !path.isAbsolute(file) || !file.endsWith('.tar.gz')) return undefined;
+        try { return (await stat(file)).isFile() ? file : undefined; } catch { return undefined; }
+    };
+    router.get('/trial-package', async (_req, res) => {
+        res.set('Cache-Control', 'no-store');
+        const file = await trialArchive();
+        if (!file) return res.status(503).type('text/plain').send('The On-prem installer is not available yet. Please check back later.');
+        return res.download(file, 'QS-VC-On-prem-Installer.tar.gz', error => {
+            if (error && !res.headersSent) res.sendStatus(503);
+        });
+    });
     router.use(async (req, res, next) => {
         res.setHeader('Cache-Control', 'no-store');
         try {

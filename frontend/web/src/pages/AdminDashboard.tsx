@@ -454,6 +454,7 @@ const AdminDashboard: React.FC = () => {
                                     <HealthDot status={stats.recordingHealth} label="Recordings" />
                                 </div>
                             </section>
+                            {import.meta.env.VITE_DEPLOYMENT === 'onprem' && <AiUsage />}
 
                         </div>
                     </div>
@@ -462,6 +463,40 @@ const AdminDashboard: React.FC = () => {
         </div>
     );
 };
+
+function AiUsage() {
+    const [usage, setUsage] = useState<Record<string, { used: number; limit: number; provider: string | null }>>();
+    const [unavailable, setUnavailable] = useState(false);
+    useEffect(() => {
+        const controller = new AbortController();
+        const refresh = async () => {
+            try {
+                const response = await fetch(`${AUTH_API}/api/auth/admin/ai-usage`, {
+                    headers: { Authorization: `Bearer ${getToken()}` },
+                    signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]),
+                });
+                if (response.status === 404) return;
+                if (!response.ok) throw new Error();
+                setUsage(await response.json());
+                setUnavailable(false);
+            } catch {
+                if (!controller.signal.aborted) setUnavailable(true);
+            }
+        };
+        void refresh();
+        const timer = window.setInterval(refresh, 30_000);
+        return () => { controller.abort(); window.clearInterval(timer); };
+    }, []);
+    if (!usage && !unavailable) return null;
+    return <section className="system-section">
+        <h3>AI usage this hour</h3>
+        {unavailable ? <p role="status">AI temporarily unavailable.</p> : <ul>
+            {Object.entries(usage || {}).map(([feature, counter]) => <li key={feature}>
+                {feature}: {counter.limit ? `${counter.used} / ${counter.limit} requests · ${counter.provider}` : 'Disabled'}
+            </li>)}
+        </ul>}
+    </section>;
+}
 
 function VerifiedAdminDashboard({ token }: { token: string }) {
     const [access, setAccess] = useState<'checking' | 'allowed' | 'denied' | 'unavailable'>('checking');

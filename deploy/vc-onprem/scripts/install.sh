@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import tempfile
 import time
+import uuid
 
 directory = Path('/var/lib/qsvc/onprem-trial')
 directory.mkdir(parents=True, exist_ok=True, mode=0o755)
@@ -34,5 +35,14 @@ with tempfile.NamedTemporaryFile(dir=directory) as temporary:
     except FileExistsError:
         if not state.is_file() or state.is_symlink():
             raise SystemExit("Invalid existing On-prem trial state")
+if not (directory / 'installation-id').exists():
+    with tempfile.NamedTemporaryFile(dir=directory) as temporary:
+        temporary.write((str(uuid.uuid4()) + '\n').encode())
+        temporary.flush()
+        os.fchmod(temporary.fileno(), 0o644)
+        try:
+            os.link(temporary.name, directory / 'installation-id')
+        except FileExistsError:
+            pass
 TRIAL
 echo 'Database staged. Create restricted DB accounts and complete network preflight before starting the remaining services.'

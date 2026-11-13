@@ -1,6 +1,6 @@
 import Signup from './pages/Signup';
-import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { useEffect, type ReactNode } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import Contact from './pages/Contact';
 import Login from './pages/Login';
 import HomePage from './pages/HomePage';
@@ -21,6 +21,21 @@ import AdminDashboard from './pages/AdminDashboard';
 import ScheduleMeeting from './pages/ScheduleMeeting';
 import { EntitlementsProvider } from './lib/entitlements';
 import { Gate, TrialEndedPrompt, UpgradePromptListener } from './components/PlanAccess';
+
+import { useSession } from './lib/use-session';
+
+function OnPremAccess({ children }: { children: ReactNode }) {
+    const session = useSession();
+    const location = useLocation();
+    if (import.meta.env.VITE_DEPLOYMENT !== 'onprem' || session.status === 'authenticated') return <>{children}</>;
+    if (session.status === 'anonymous') {
+        return <Navigate replace to={`/login?next=${encodeURIComponent(location.pathname + location.search)}`} />;
+    }
+    return <main className="public-container service-page">
+        <p role="status">{session.status === 'checking' ? 'Checking your sign-in…' : 'We couldn’t verify your sign-in.'}</p>
+        {session.status === 'unavailable' && <button type="button" onClick={() => window.location.reload()}>Try again</button>}
+    </main>;
+}
 
 export default function App() {
     useEffect(() => {
@@ -74,10 +89,10 @@ export default function App() {
                 <Route path="/sso/personal/complete" element={<PersonalSignInComplete />} />
                 <Route path="/sso/complete" element={<SsoComplete />} />
                 <Route path="/organisation/sso" element={<OrganisationSso />} />
-                <Route path="/app" element={<Landing />} />
+                <Route path="/app" element={<OnPremAccess><Landing /></OnPremAccess>} />
                 <Route path="/schedule" element={<Gate feature="meeting_scheduling"><ScheduleMeeting /></Gate>} />
-                <Route path="/meeting/:meetingCode/preview" element={<PreMeeting />} />
-                <Route path="/meeting/:meetingCode" element={<MeetingRoom />} />
+                <Route path="/meeting/:meetingCode/preview" element={<OnPremAccess><PreMeeting /></OnPremAccess>} />
+                <Route path="/meeting/:meetingCode" element={<OnPremAccess><MeetingRoom /></OnPremAccess>} />
                 <Route path="/meeting-end" element={<MeetingEnd />} />
                 <Route path="/recordings/:meetingId" element={<RecordingPlayback />} />
                 <Route path="/recordings/shared/:shareToken" element={<RecordingPlayback />} />

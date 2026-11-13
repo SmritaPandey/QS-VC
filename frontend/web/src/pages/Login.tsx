@@ -66,13 +66,13 @@ export default function Login() {
         }
     }
     return <div className="public-site public-login">
-        <SiteNav accountAction={<Link className="btn-secondary qsvc-action qsvc-action--secondary" to="/app"><ActionContents>Continue as guest</ActionContents></Link>} />
+        <SiteNav accountAction={import.meta.env.VITE_DEPLOYMENT !== 'onprem' ? <Link className="btn-secondary qsvc-action qsvc-action--secondary" to="/app"><ActionContents>Continue as guest</ActionContents></Link> : undefined} />
         <main id="main-content" className="public-container public-auth-layout">
             <div className="public-auth-copy">
                 <h1>Sign in to QS-VC</h1>
                 <p>Sign in to your account, or join a meeting as a guest.</p>
                 <p>Check your camera and microphone before entering the meeting.</p>
-                <Link className="public-text-link qsvc-action qsvc-action--secondary" to="/app"><ActionContents>Continue as guest</ActionContents></Link>
+                {import.meta.env.VITE_DEPLOYMENT !== 'onprem' && <Link className="public-text-link qsvc-action qsvc-action--secondary" to="/app"><ActionContents>Continue as guest</ActionContents></Link>}
             </div>
             <form className="public-auth-form" onSubmit={submit} aria-busy={!!busy} aria-label="Sign in">
                 <label className="field-label" htmlFor="login-email">Email</label>

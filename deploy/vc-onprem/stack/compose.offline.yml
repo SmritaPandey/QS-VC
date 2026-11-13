@@ -1,4 +1,16 @@
 services:
+  ai-gateway:
+    profiles: [ai-gateway]
+    image: qsvc-auth:intranet
+    entrypoint: ["node", "/opt/qsvc-ai/gateway.cjs"]
+    user: "65534:65534"
+    read_only: true
+    restart: unless-stopped
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    volumes:
+      - ./ai:/opt/qsvc-ai:ro
+      - /var/lib/qsvc/ai:/ai-config:ro
   trial-gateway:
     image: qsvc-auth:intranet
     entrypoint: ["node", "/opt/qsvc-trial/gateway.cjs"]
@@ -18,6 +30,8 @@ services:
       - /var/lib/qsvc/onprem-trial:/trial:ro
   auth:
     environment:
+      QSVC_AI_GATEWAY_ENABLED: ${QSVC_AI_GATEWAY_ENABLED:-false}
+      QSVC_AI_GATEWAY_TOKEN: ${QSVC_AI_GATEWAY_TOKEN:-}
       QSVC_DEPLOYMENT: onprem
       QSVC_SSO_ENABLED: "false"
       QSVC_DIGILOCKER_ENABLED: "false"
@@ -41,6 +55,10 @@ services:
       LIBRETRANSLATE_URL: ""
       ASR_URL: ""
       MINUTES_LLM_URL: ""
+      QSVC_AI_GATEWAY_ENABLED: ${QSVC_AI_GATEWAY_ENABLED:-false}
+      MINUTES_LLM_MODEL: ${QSVC_AI_MINUTES_MODEL:-}
+      MINUTES_LLM_API_KEY: ${QSVC_AI_GATEWAY_TOKEN:-}
+      MINUTES_TIMEOUT_MS: "11000"
   recording:
     environment:
       RECORDING_BUCKET: ""

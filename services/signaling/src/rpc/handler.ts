@@ -352,8 +352,11 @@ export async function handleRpcMessage(
                 if (!roomManager.isHostOrCoHost(roomId, connectionState.peerId!)) throw createError(-32005, 'Only hosts can create meeting minutes');
                 const transcript = transcriptEntries(roomId);
                 if (!transcript.saving) throw createError(-32005, 'Turn on “Save transcript” first');
-                const minutes = await generateMinutes(transcript.entries, parsed.data.language);
                 const room = roomManager.getRoom(roomId);
+                if (process.env.QSVC_DEPLOYMENT === 'onprem' && (!room || room.settings.e2eeRequired)) {
+                    throw createError(-32005, 'AI minutes are unavailable for this protected meeting');
+                }
+                const minutes = await generateMinutes(transcript.entries, parsed.data.language);
                 if (room) void saveTranscript(room.meetingCode, [], transcript.since || Date.now(), minutes);
                 return { jsonrpc: '2.0', id: id!, result: { minutes } };
             }
@@ -364,6 +367,9 @@ export async function handleRpcMessage(
             // JOIN ROOM (with waiting room + password support)
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             case 'joinRoom': {
+                if (process.env.QSVC_DEPLOYMENT === 'onprem' && !connectionState.authUser?.sub) {
+                    throw createError(-32005, 'Sign in to join this On-prem meeting');
+                }
                 if (connectionState.peerId || connectionState.roomId) {
                     throw createError(-32000, 'Already joined or waiting for a room');
                 }

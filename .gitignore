@@ -74,3 +74,5 @@ release/
 !/deploy/vc-onprem/release/manifest.py
 !/deploy/vc-onprem/release/*.md
 !/deploy/vc-onprem/release/VERSION
+
+/deploy/aws/license-private/

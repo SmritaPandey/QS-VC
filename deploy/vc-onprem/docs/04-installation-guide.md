@@ -21,6 +21,44 @@ expiration page links to https://qsvcmeet.com/contact?interest=Enterprise.
 Use a synchronized host clock. This local control cannot resist a client with
 root access or restore of an earlier VM snapshot.
 
-For a public download, publish the signed package and pass its HTTPS URL as
-VITE_ONPREM_TRIAL_DOWNLOAD_URL when building the public web app. If the URL is
-unset, visitors can request the package without signing in.
+
+## Download the installer
+
+1. Open On-prem on the QS-VC website and choose Download installer. When the installer is staged, the website streams the signed Linux server archive to your browser.
+2. Run the installer on the Linux server. Installation works offline and requires local administrator access and release signature verification. There is no QS-VC sign-in during installation.
+
+   Obtain the trusted installer tool and both release signing public keys
+   independently. Prepare the private environment file. Run:
+
+       sudo bash scripts/install-archive.sh QS-VC-On-prem-Installer.tar.gz /opt/qsvc/release PRIVATE_ENV ED25519_PUB ML_DSA_65_PUB
+
+3. Follow the database role and service startup steps above. Preserve the
+   extracted release directory. Container bind mounts use files in it.
+
+Stage the signed archive on the portal in the existing private installer mount
+under the configured ENTERPRISE_ONPREM_TRIAL_INSTALLER path. Never host it in
+the web root. Continue with the existing MCU and workspace sign-in steps where applicable. The On-prem workspace requires a verified sign-in to join meetings
+during the trial. At expiry, the workspace directs users to Contact us for an extension.
+
+## Resume after approval
+
+The expired workspace displays its installation ID. The customer sends that ID
+and their portal account email through Contact us. In the hosted Admin Console,
+find the account, save the agreed access term, then enter the installation ID
+and download the signed license. Give that JSON file to the customer.
+
+On the installed Linux server, apply the file with:
+
+    sudo install -m 0644 qsvc-onprem-license.json /var/lib/qsvc/onprem-trial/license.json.new
+    sudo mv /var/lib/qsvc/onprem-trial/license.json.new /var/lib/qsvc/onprem-trial/license.json
+
+The gateway checks the signature and installation ID on each request. Signaling
+and media restart under Compose's restart policy. If those services were stopped
+manually, start them again with the signed Compose files and private environment.
+
+Configure a dedicated Ed25519 signing key on the hosted auth service using
+QSVC_ONPREM_LICENSE_KEY_FILE. The AWS Compose mounts deploy/aws/license-private read-only at /run/qsvc-license. Store signing.pem there with read access only for the auth service identity and the host administrator. The builder requires
+the matching public key path in QSVC_ONPREM_LICENSE_PUBLIC_KEY. The signed package
+contains only the public key. This offline approval takes effect after the
+customer applies the file. It expires on the approved date and cannot be revoked
+remotely while the server remains offline.

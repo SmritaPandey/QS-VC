@@ -84,6 +84,28 @@ export default function EnterpriseAccessTerms() {
         }
     }
 
+    async function issueLicense(event: FormEvent<HTMLFormElement>) {
+        event.preventDefault();
+        if (!customer || busy) return;
+        const installationId = String(new FormData(event.currentTarget).get('installationId')).trim();
+        setBusy(true);
+        setError('');
+        try {
+            const license = await request(endpoint + '/' + encodeURIComponent(customer.id) + '/onprem-license', {
+                method: 'POST', body: JSON.stringify({ installationId }),
+            });
+            const url = URL.createObjectURL(new Blob([JSON.stringify(license)], { type: 'application/json' }));
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'qsvc-onprem-license.json';
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 30000);
+            setMessage('License downloaded. Send it to the customer’s server administrator.');
+        } catch (reason) {
+            setError(reason instanceof AccessRequestError ? reason.message : 'Could not issue the On-prem license.');
+        } finally { setBusy(false); }
+    }
+
     return <section className="admin-section" aria-labelledby="enterprise-terms-title">
         <h2 id="enterprise-terms-title">Quantum-Premise access terms</h2>
         <form onSubmit={findCustomer}>
@@ -100,6 +122,11 @@ export default function EnterpriseAccessTerms() {
             <div><label htmlFor="enterprise-expires-at">Access ends in your local time</label>{' '}
                 <input id="enterprise-expires-at" name="expiresAt" type="datetime-local" required /></div>
             <button type="submit" disabled={busy}>Save access term</button>
+        </form>}
+        {customer?.expires_at && Date.parse(customer.expires_at) > Date.now() && <form onSubmit={issueLicense}>
+            <label htmlFor="onprem-installation-id">On-prem installation ID</label>{' '}
+            <input id="onprem-installation-id" name="installationId" required maxLength={36} />{' '}
+            <button type="submit" disabled={busy}>Download signed license</button>
         </form>}
         {busy && <p role="status">Working…</p>}
         {message && <p role="status">{message}</p>}

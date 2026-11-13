@@ -5,8 +5,15 @@ import type { TranscriptEntry } from './captions.js';
  * (vLLM, Ollama, llama.cpp server, Azure OpenAI, or a hosted provider).
  * Configure: MINUTES_LLM_URL (base, e.g. http://llm:8000/v1), MINUTES_LLM_MODEL, MINUTES_LLM_API_KEY (optional).
  */
+function minutesBase() {
+    if (process.env.QSVC_DEPLOYMENT === 'onprem') {
+        return process.env.QSVC_AI_GATEWAY_ENABLED === 'true' ? 'http://ai-gateway:4011/v1' : '';
+    }
+    return process.env.MINUTES_LLM_URL?.trim() || '';
+}
+
 export function minutesConfigured() {
-    return Boolean(process.env.MINUTES_LLM_URL?.trim() && process.env.MINUTES_LLM_MODEL?.trim());
+    return Boolean(minutesBase() && process.env.MINUTES_LLM_MODEL?.trim());
 }
 
 const SYSTEM = `You write meeting minutes from a live-caption transcript. The transcript may contain recognition errors and several languages.
@@ -28,7 +35,7 @@ export function transcriptText(entries: TranscriptEntry[], maxChars = 60_000): s
 export async function generateMinutes(entries: TranscriptEntry[], language = 'English'): Promise<string> {
     if (!minutesConfigured()) throw new Error('Meeting minutes are not configured on this server');
     if (!entries.length) throw new Error('There is no transcript yet. Turn on captions and speak first.');
-    const base = process.env.MINUTES_LLM_URL!.trim().replace(/\/$/, '');
+    const base = minutesBase().replace(/\/$/, '');
     const key = process.env.MINUTES_LLM_API_KEY?.trim();
     let response: Response;
     try {

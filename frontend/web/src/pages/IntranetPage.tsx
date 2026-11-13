@@ -1,32 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
 import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
 import ActionContents from '../components/ActionContents';
-import MeetingScene from '../components/MeetingScene';
 import DownloadFeedback, { type DownloadState } from '../components/DownloadFeedback';
 import { AUTH_API, clearSession, getToken, refreshSession } from '../lib/session';
 import { useSession } from '../lib/use-session';
 import { intranetUrl, isOnlineTestWorkspace } from '../lib/intranet-url';
 import '../styles/service-pages.css';
 
-const trialDownload = (() => {
-    const value = import.meta.env.VITE_ONPREM_TRIAL_DOWNLOAD_URL;
-    if (!value) return null;
-    try {
-        const url = new URL(value);
-        return url.protocol === 'https:' && !url.username && !url.password ? url.href : null;
-    } catch {
-        return null;
-    }
-})();
+const setupGuide = '/guides/QS-VC-Intranet-Setup.pdf';
 
-const steps = [
-    { title: 'Connect to your organisation', text: 'At the office, connect to your organisation’s network. When travelling, connect to the VPN supplied by your IT team first.' },
-    { title: 'Choose browser or desktop app', text: 'Approved accounts can open the workspace in a browser or download the app for Windows, Linux x64, Mac with Apple silicon, or Mac with Intel. Each connects to the same organisation-hosted service.' },
-    { title: 'Check your devices and join', text: 'Sign in to your organisation’s workspace, check your camera and microphone, then join an authorised meeting. Your administrator manages access.' },
-    { title: 'Work together', text: 'Meet with video, chat and screen sharing. Use available whiteboard, polls, Q&A and notes. Check which languages your workspace offers.' },
-];
 type DesktopDownload = 'windows' | 'macos-arm64' | 'macos-x64' | 'linux-x64';
 type DownloadAvailability = { windows: boolean; macAppleSilicon: boolean; macIntel: boolean; linuxX64: boolean };
 const downloadChoices: Array<{ id: DesktopDownload; label: string; availableKey: keyof DownloadAvailability; endpoint: string; filename: string; mime: string }> = [
@@ -46,7 +29,6 @@ export default function IntranetPage() {
     const error = session.status === 'unavailable' ? 'We couldn’t check your account. Try again.' : current?.error;
     const downloadRequest = useRef<AbortController | null>(null);
     const downloadOwner = useRef('');
-    const [step, setStep] = useState(0);
     const [downloadState, setDownloadState] = useState<DownloadState>({ phase: 'idle' });
     const [downloadPlatform, setDownloadPlatform] = useState<DesktopDownload>('windows');
     const chosenDownload = downloadChoices.find(choice => choice.id === downloadPlatform)!;
@@ -167,14 +149,16 @@ export default function IntranetPage() {
         }
     }
     return <div className="public-site"><SiteNav brandName="QS-Enterprise" /><main className="public-container service-page intranet-page" id="main-content">
-        <header className="public-page-intro"><h1>{access?.onlineDemo ? 'Your online test workspace.' : access ? 'Your QS-Enterprise workspace.' : 'Meet inside your organisation.'}</h1><p>{access?.onlineDemo ? 'Open the shared QS-VC app to try your admin experience online.' : access ? 'Choose how you connect to your approved workspace.' : 'Explore QS-VC On-prem without signing in.'}</p></header>
-        <section className="service-card" aria-labelledby="onprem-trial-title">
-            <h2 id="onprem-trial-title">Try QS-VC On-prem free for 14 days</h2>
-            <p>The trial starts when your IT team installs QS-VC on your server. When it ends, contact us to continue using the workspace.</p>
-            {trialDownload
-                ? <a className="qsvc-action" href={trialDownload}><ActionContents>Download trial package</ActionContents></a>
-                : <Link className="qsvc-action" to="/contact?interest=Enterprise"><ActionContents>Request the trial package</ActionContents></Link>}
-            <p><a href="/guides/QS-VC-Intranet-Setup.pdf" target="_blank" rel="noreferrer">Read the On-prem setup guide (PDF)</a></p>
+        <header className="public-page-intro"><h1>{access?.onlineDemo ? 'Your online test workspace.' : access ? 'Your QS-Enterprise workspace.' : 'Meet inside your organisation.'}</h1><p>{access?.onlineDemo ? 'Open the shared QS-VC app to try your admin experience online.' : access ? 'Choose how you connect to your approved workspace.' : 'Set up QS-VC on your organisation’s Linux server.'}</p></header>
+        <section className="service-card" aria-labelledby="onprem-installer-title">
+            <h2 id="onprem-installer-title">QS-VC On-prem installer</h2>
+            <p>Your 14 days of free use start at installation. When they end, the workspace shows how to contact us for an extension.</p>
+            <a className="qsvc-action" href={AUTH_API + '/api/auth/enterprise/trial-package'}><ActionContents>Download installer</ActionContents></a>
+            <a className="onprem-guide-preview" href={setupGuide} target="_blank" rel="noreferrer"
+                aria-label="Open the On-prem setup guide PDF in a new tab">
+                <img src="/guides/on-prem-setup-preview.png" alt="" width="453" height="640" loading="lazy" />
+                <span className="qsvc-action qsvc-action--secondary"><ActionContents>Open setup PDF</ActionContents></span>
+            </a>
         </section>
         {loading ? <p role="status">Checking QS-Enterprise access…</p> : error ? <section className="service-card"><p role="alert">{error}</p><button className="qsvc-action" type="button" onClick={() => {
             if (session.status === 'unavailable') void refreshSession();
@@ -182,6 +166,6 @@ export default function IntranetPage() {
         }}><ActionContents>Try again</ActionContents></button></section> : access ? <div className="intranet-layout">
             <section className="service-card"><span className="enterprise-access-badge">{access.onlineDemo ? 'Admin · Online test workspace' : 'Approved QS-Enterprise access'}</span><h2>Open in your browser</h2><p>{access.onlineDemo ? 'This opens the shared QS-VC online app to test the QS-Enterprise experience. It is not an isolated organisation deployment.' : 'Connect to your office network or approved VPN, then sign in to your organisation’s workspace.'}</p><p className="enterprise-address">{access.workspaceUrl}</p><a className="qsvc-action" href={access.workspaceUrl} rel="noreferrer"><ActionContents>Open workspace</ActionContents></a></section>
             <section className="service-card"><h2>Download QS-VC</h2><p>{access.onlineDemo ? 'Choose your computer and use the same online test workspace.' : 'Choose the app for your computer. The app connects to the organisation workspace above.'}</p><p>On Mac, extract the ZIP and move QS-VC.app to Applications. On Windows, extract the ZIP and run QS-VC.exe from the extracted folder. On Linux x64, extract the ZIP and run qs-vc from the extracted folder. Ask your administrator if you need help with your Linux distribution.</p><label className="intranet-platform-label" htmlFor="intranet-download-platform">Your device</label><select id="intranet-download-platform" value={downloadPlatform} disabled={downloading} onChange={event => setDownloadPlatform(event.target.value as DesktopDownload)}>{downloadChoices.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}</select><button className="qsvc-action intranet-download" type="button" aria-busy={downloading} disabled={!chosenDownloadAvailable || downloading || session.status !== 'authenticated'} onClick={download}><ActionContents><span className="mi" aria-hidden="true">download</span>{downloading ? 'Downloading…' : downloadPlatform === 'linux-x64' ? 'Download Linux ZIP' : downloadPlatform.startsWith('macos-') ? 'Download Mac ZIP' : 'Download Windows ZIP'}</ActionContents></button>{!chosenDownloadAvailable && <p role="status">This app archive is not available yet. Choose another device or contact your administrator.</p>}<p>{access.onlineDemo ? 'For an isolated enterprise workspace, use the address supplied by your organisation.' : 'After installation, use the organisation address above.'} A download does not grant additional meeting permissions.</p><p>Each ZIP includes the getting-started guide, the prerequisites and the on-prem setup guide for IT. <a href="/guides/QS-VC-Prerequisites.pdf" target="_blank" rel="noreferrer">Prerequisites (PDF)</a> · <a href="/guides/QS-VC-Getting-Started.pdf" target="_blank" rel="noreferrer">Getting started (PDF)</a> · <a href="/guides/QS-VC-Intranet-Setup.pdf" target="_blank" rel="noreferrer">On-prem setup (PDF)</a></p></section>
-        </div> : <><div className="intranet-layout"><section className="service-card"><span className="enterprise-access-badge">Guided demo · No live connection</span><h2>See what to expect</h2><MeetingScene /><p>This preview uses sample participants. It does not start your camera, microphone or a meeting.</p></section><section className="service-card"><div className="intranet-guide-tabs" aria-label="Guide steps">{steps.map((item, index) => <button type="button" key={item.title} aria-pressed={step === index} onClick={() => setStep(index)}>{index + 1}<span className="sr-only"> {item.title}</span></button>)}</div><div aria-live="polite"><h2>{steps[step].title}</h2><p>{steps[step].text}</p></div><div className="intranet-guide-controls"><button type="button" disabled={step === 0} onClick={() => setStep(value => value - 1)}>Back</button><button type="button" disabled={step === steps.length - 1} onClick={() => setStep(value => value + 1)}>Next</button></div><p>Ask your administrator which languages work offline and whether your Poly room devices are supported. To join from outside the office, use your organisation’s approved network connection.</p></section></div></>}
+        </div> : null}
     </main><SiteFooter /><DownloadFeedback state={token && downloadOwner.current === token ? downloadState : { phase: 'idle' }} onDismiss={() => setDownloadState({ phase: 'idle' })} /></div>;
 }

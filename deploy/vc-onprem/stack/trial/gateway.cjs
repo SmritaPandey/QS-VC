@@ -1,7 +1,8 @@
 const { createServer } = require('node:http');
 const { trialState } = require('./state.cjs');
 
-const contact = 'https://qsvcmeet.com/contact?interest=Enterprise';
+const contact = 'https://qsvcmeet.com/contact?interest=Enterprise&topic=deployment';
+const { readFileSync } = require('node:fs');
 createServer((req, res) => {
     const state = trialState();
     res.setHeader('Cache-Control', 'no-store');
@@ -10,12 +11,17 @@ createServer((req, res) => {
         return;
     }
     const expired = state === 'expired';
+    let installationId = '';
+    try {
+        const value = readFileSync('/trial/installation-id', 'utf8').trim();
+        if (/^[0-9a-f-]{36}$/.test(value)) installationId = value;
+    } catch { /* Older installs can be assigned an ID by rerunning setup. */ }
     const title = expired ? 'Your 14-day trial has ended' : 'This workspace is unavailable';
     const message = expired ? 'Contact QS-VC to continue using this On-prem workspace.' : 'Ask your administrator to check the On-prem installation.';
     res.statusCode = expired ? 403 : 503;
     if (!(req.headers.accept || '').includes('text/html')) {
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.end(JSON.stringify({ code: expired ? 'ONPREM_TRIAL_EXPIRED' : 'ONPREM_TRIAL_UNAVAILABLE', contact }));
+        res.end(JSON.stringify({ code: expired ? 'ONPREM_TRIAL_EXPIRED' : 'ONPREM_TRIAL_UNAVAILABLE', contact, ...(expired && { installationId }) }));
         return;
     }
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
@@ -25,5 +31,7 @@ createServer((req, res) => {
         + 'main{max-width:35rem;margin:12vh auto;padding:2rem;background:white;border-radius:1rem}h1{line-height:1.2}'
         + 'a{display:inline-block;background:#07585c;color:white;padding:.7rem 1.2rem;border-radius:.5rem}</style>'
         + '<main><p>QS-VC On-prem</p><h1>' + title + '</h1><p>' + message + '</p>'
-        + '<a href="' + contact + '">Contact us</a></main></html>');
+        + '<a href="' + contact.replace('&', '&amp;') + '">Contact us</a>'
+        + (expired && installationId ? '<p>Include this installation ID in your request: <code>' + installationId + '</code></p>' : '')
+        + '</main></html>');
 }).listen(4010, '0.0.0.0');

@@ -1,0 +1,13 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "component": { "name": "QS-VC On-prem AI gateway", "type": "application" }
+  },
+  "services": [
+    { "name": "Local Ollama or vLLM", "description": "Optional client-managed local inference", "authenticated": true },
+    { "name": "OpenRouter", "description": "Optional external free-model routing", "endpoints": ["https://openrouter.ai/api/v1/"], "authenticated": true, "x-trust-boundary": true },
+    { "name": "Custom HTTPS endpoint", "description": "Optional approved external endpoint configured by the client", "x-trust-boundary": true }
+  ]
+}

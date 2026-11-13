@@ -230,7 +230,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
         try {
             const result = await signaling.request('generateMinutes', {}) as { minutes: string };
             setMinutes(result.minutes); setStatus('Minutes are ready. They are saved with the transcript.');
-        } catch { setStatus('Could not create minutes. Try again.'); }
+        } catch { setStatus('AI temporarily unavailable. Your meeting can continue.'); }
         finally { setMinutesBusy(false); }
     };
 

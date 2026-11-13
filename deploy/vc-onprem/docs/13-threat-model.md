@@ -24,3 +24,14 @@ Nation-state and carrier adversaries can record traffic for harvest-now-decrypt-
 | Backup and SIEM → second site | Disclosure, deletion or repudiation | Storage/security owners validate encryption, immutable copies, retention and restore. Treat active host compromise separately from disk theft |
 
 Critical impact includes control of release or trust roots. High impact includes cross-tenant access to protected recordings or admin takeover. Medium impact includes bounded denial of service. Low impact includes non-sensitive metadata leakage. Classifications depend on demonstrated reach and privilege. No severity here asserts a confirmed exploitable finding.
+
+## AI data flow
+
+The summaries RPC checks host or co-host access, transcript saving and E2EE
+state before forwarding meeting text to the internal AI gateway. The gateway
+applies per-feature policy and chooses local Ollama/vLLM, OpenRouter or a
+custom HTTPS endpoint. Only an explicitly approved standard-profile route
+may transmit meeting data outside the site. The gateway opens the client
+credential in memory and records external call metadata to structured logs.
+Treat provider custody, admin policy changes and quota exhaustion as separate
+trust boundaries. The security owner validates egress and SIEM forwarding.

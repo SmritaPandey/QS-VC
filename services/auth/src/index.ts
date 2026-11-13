@@ -484,6 +484,28 @@ app.get('/api/auth/me/entitlements', async (req, res) => {
     }
 });
 
+app.get('/api/auth/admin/ai-usage', async (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    if (process.env.QSVC_DEPLOYMENT !== 'onprem' || process.env.QSVC_AI_GATEWAY_ENABLED !== 'true') return res.sendStatus(404);
+    const authorization = req.get('authorization');
+    if (!authorization?.startsWith('Bearer ')) return res.sendStatus(401);
+    try {
+        const user = await verifyToken(authorization.slice(7));
+        if (user.role !== 'admin' || !isPlatformAdmin(user.email)) return res.sendStatus(403);
+    } catch (error) {
+        return res.sendStatus(sessionErrorStatus(error));
+    }
+    try {
+        const response = await fetch('http://ai-gateway:4011/usage', {
+            headers: { Authorization: 'Bearer ' + process.env.QSVC_AI_GATEWAY_TOKEN },
+            redirect: 'error',
+            signal: AbortSignal.timeout(2500),
+        });
+        if (response.ok) return res.json(await response.json());
+    } catch { /* AI availability is independent of the admin dashboard. */ }
+    return res.status(503).json({ error: 'AI temporarily unavailable' });
+});
+
 // Administrative plan information is scoped to the verified caller's tenant.
 app.get('/api/auth/admin/plan', async (req, res) => {
     const authorization = req.get('authorization');

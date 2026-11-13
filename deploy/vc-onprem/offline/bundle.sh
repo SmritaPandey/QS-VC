@@ -5,14 +5,23 @@ package=$(cd -- "$(dirname -- "$0")/.." && pwd)
 repo=$(cd -- "$package/../.." && pwd)
 output=$(realpath -m -- "$2")
 umask 077
+[[ ! -e "$output.tar.gz" && ! -L "$output.tar.gz" ]] || { echo "Archive already exists" >&2; exit 1; }
 mkdir -- "$output"
+node --test "$package/stack/ai/gateway.test.cjs"
 QSVC_DEPLOYMENT=onprem QSVC_PACKAGE_SSO=false bash "$repo/scripts/package-intranet-images.sh" "$1" "$output"
 cp "$package/stack/compose.offline.yml" "$output/"
 cp -R "$package/stack/trial" "$output/trial"
 chmod 755 "$output/trial"
 chmod 644 "$output/trial/"*.cjs
+: "${QSVC_ONPREM_LICENSE_PUBLIC_KEY:?Set the production license verification public key path}"
+openssl asn1parse -in "$QSVC_ONPREM_LICENSE_PUBLIC_KEY" | grep -E 'OBJECT *:ED25519$' >/dev/null
+openssl pkey -pubin -in "$QSVC_ONPREM_LICENSE_PUBLIC_KEY" -pubout -out "$output/trial/license-public.pem"
+chmod 644 "$output/trial/license-public.pem"
+mkdir -m 755 "$output/ai"
+install -m 644 "$package/stack/ai/gateway.cjs" "$package/stack/ai/policy.example.json" "$output/ai/"
 cp "$package/release/VERSION" "$package/release/CHANGELOG.md" "$output/"
 cp "$package/crypto/policy.json" "$package/crypto/source-cbom.json" "$output/"
+install -m 644 "$package/stack/ai/services.cdx.json" "$output/sbom/ai-services.cdx.json"
 cp -R "$package/docs" "$output/onprem-docs"
 cp "$repo/config/.env.onprem.template" "$output/config/onprem.env.template"
 python3 - "$output/config/Caddyfile.template" "$package/crypto/policy.json" <<'CADDY'
@@ -45,3 +54,8 @@ path.write_text(text.replace(anchor, gate + anchor))
 CADDY
 (cd "$output" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 bash "$package/release/sign.sh" "$output" "$3" "$4"
+archive=$(mktemp "${output}.tar.gz.XXXXXX")
+trap 'rm -f -- "$archive"' EXIT
+COPYFILE_DISABLE=1 tar -C "$output" -czf "$archive" .
+ln -- "$archive" "$output.tar.gz"
+printf 'Signed installer archive: %s\n' "$output.tar.gz"

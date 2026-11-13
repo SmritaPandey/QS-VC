@@ -1,0 +1,13 @@
+{
+  "profile": "air-gapped",
+  "providers": {
+    "local": { "baseUrl": "http://ollama:11434/v1/" },
+    "openrouter": {
+      "discovery": true,
+      "encryptedKey": "/ai-config/openrouter.sealed",
+      "kekFile": "/ai-config/openrouter.kek"
+    },
+    "custom-endpoint": {}
+  },
+  "features": {}
+}

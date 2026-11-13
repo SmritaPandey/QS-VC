@@ -20,7 +20,6 @@ COPY db ./db
 COPY deploy/aws/prepare-demo-db.cjs ./deploy/aws/prepare-demo-db.cjs
 # Same-origin routes are compiled into the AWS website, never the old Render URLs.
 RUN printf 'VITE_API_URL=\nVITE_AUTH_URL=\nVITE_MEETING_URL=\nVITE_RECORDING_URL=\nVITE_SIGNALING_URL=\n' > frontend/web/.env.production
-ARG VITE_ONPREM_TRIAL_DOWNLOAD_URL
 RUN npm run build
 RUN mkdir -p /opt/qsvc/certs && node -e "fetch('https://truststore.pki.rds.amazonaws.com/ap-south-1/ap-south-1-bundle.pem').then(r=>{if(!r.ok)throw Error('RDS CA download failed');return r.text()}).then(p=>require('fs').writeFileSync('/opt/qsvc/certs/rds-ca.pem',p))"
 ENV NODE_ENV=production

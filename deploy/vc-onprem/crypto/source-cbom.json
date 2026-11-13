@@ -240,6 +240,48 @@
           "value": "Negotiation UNVERIFIED"
         }
       ]
+    },
+    {
+      "type": "application",
+      "name": "Optional AI adapter: local Ollama/vLLM",
+      "properties": [
+        {
+          "name": "qsvc:credential-storage",
+          "value": "Client-managed encrypted envelope where configured"
+        },
+        {
+          "name": "qsvc:transport",
+          "value": "HTTPS required for external adapters. Provider negotiation unverified."
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "Optional AI adapter: OpenRouter",
+      "properties": [
+        {
+          "name": "qsvc:credential-storage",
+          "value": "Client-managed encrypted envelope where configured"
+        },
+        {
+          "name": "qsvc:transport",
+          "value": "HTTPS required for external adapters. Provider negotiation unverified."
+        }
+      ]
+    },
+    {
+      "type": "application",
+      "name": "Optional AI adapter: custom HTTPS endpoint",
+      "properties": [
+        {
+          "name": "qsvc:credential-storage",
+          "value": "Client-managed encrypted envelope where configured"
+        },
+        {
+          "name": "qsvc:transport",
+          "value": "HTTPS required for external adapters. Provider negotiation unverified."
+        }
+      ]
     }
   ]
 }

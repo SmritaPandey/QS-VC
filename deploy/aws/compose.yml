@@ -129,8 +129,11 @@ services:
       ENTERPRISE_MACOS_ARM64_INSTALLER: /opt/qsvc/installers/QS-VC-macOS-arm64.zip
       ENTERPRISE_MACOS_X64_INSTALLER: /opt/qsvc/installers/QS-VC-macOS-x64.zip
       ENTERPRISE_LINUX_X64_INSTALLER: /opt/qsvc/installers/QS-VC-Linux-x64.zip
+      QSVC_ONPREM_LICENSE_KEY_FILE: ${QSVC_ONPREM_LICENSE_KEY_FILE:-/run/qsvc-license/signing.pem}
+      ENTERPRISE_ONPREM_TRIAL_INSTALLER: /opt/qsvc/installers/QS-VC-On-prem-Installer.tar.gz
     volumes:
       - ./installers:/opt/qsvc/installers:ro
+      - ./license-private:/run/qsvc-license:ro
     command: [node, services/auth/dist/index.js]
     healthcheck:
       test: [CMD, node, -e, "fetch('http://127.0.0.1:4002/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -226,8 +229,6 @@ services:
       context: ../..
       dockerfile: deploy/aws/Dockerfile
       target: web
-      args:
-        VITE_ONPREM_TRIAL_DOWNLOAD_URL: ${VITE_ONPREM_TRIAL_DOWNLOAD_URL:-}
     ports:
       - 127.0.0.1:8080:5173
     restart: unless-stopped

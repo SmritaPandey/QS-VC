@@ -37,14 +37,15 @@ Complete the DB, network and certificate setup before starting application servi
 - See the [security acceptance checklist](docs/09-uat-checklist.md) and
   [cryptographic posture](docs/14-crypto-architecture.md) for outstanding evidence.
 
-## Public On-prem trial
 
-The website exposes the setup guide and trial request without sign-in. Set
-VITE_ONPREM_TRIAL_DOWNLOAD_URL in the public AWS web build to offer the
-published signed package directly. The installed trial uses the host
-installation timestamp. At expiry, the gateway blocks the workspace and links
-to the public Contact us page. See the installation guide for scope and limits.
+## On-prem trial and installer
 
-Local Docker verification covered active requests, expired HTML and API
-responses, missing state and the media service startup guard. This does not
-replace full stack or client acceptance tests.
+The setup guide and server installer are public. The workspace requires sign-in to join
+meetings during the 14-day host trial. At expiry, the gateway blocks use and
+links to Contact us. An admin can issue a signed extension for the customer to apply locally.
+
+The archive installer extracts into a fresh directory, verifies both
+signatures, then stages PostgreSQL. See the [installation guide](docs/04-installation-guide.md)
+for download, database roles and application startup.
+
+The optional [AI gateway](docs/17-ai-gateway.md) is disabled by default.
