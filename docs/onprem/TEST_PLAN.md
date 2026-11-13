@@ -15,7 +15,8 @@
 | coturn 4.19.0 built from source without SQLite or any database backend | PASS on an Ubuntu 24.04 build host (not yet as the Alpine image). Binary links only OpenSSL and libevent. Through `deploy/turn/start.sh`: shared-secret allocation and relay to the allowed SFU address worked with 0% loss; a private peer without `TURN_ALLOWED_SFU_IP` was refused (403); a wrong secret was refused. |
 | coturn start-up flag | FIXED. coturn 4.17+ rejects `--no-dtls` and would not start with the old `start.sh` (this also affected the 4.18 candidate). `start.sh` now adds it only when the installed coturn supports it. |
 | Rebuilt coturn image (Alpine) Grype scan | NOT RUN. Build with a digest-pinned `QSVC_ALPINE_IMAGE`, then scan. Expect no SQLite packages in the image. |
-| SFU on distroless runtime (`gcr.io/distroless/cc-debian12:nonroot`) | NOT RUN. Image registries were not reachable from the environment that made the change. Verified separately: the mediasoup 3.32.2 prebuilt worker needs only glibc 2.34+, libstdc++ and libgcc, which this runtime provides. Next: build, start the worker, health check, a two-person call, Grype scan. |
+| SFU on distroless runtime (`gcr.io/distroless/cc-debian12:nonroot`) | FAILED gate on 13 Nov: built, 2 Critical + 16 High (13 Debian 12 glibc/GCC-runtime won't-fix, 5 libssl3 with fixes not yet in the base). Replaced by the Wolfi Node runtime below. |
+| SFU on Wolfi runtime (`cgr.dev/chainguard/node`) | NOT RUN. Build, start the worker, health check, two-person call, Grype scan. |
 | Signed release and target downloads | NOT RUN. Requires passing scans and production release keys. |
 | Clean Rocky 9 installation and activation | NOT RUN. Requires guided installer and VM. |
 | Appliance import and desktop packages | NOT RUN. Requires build and target platforms. |

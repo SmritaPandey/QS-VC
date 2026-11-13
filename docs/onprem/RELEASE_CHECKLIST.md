@@ -19,8 +19,8 @@
 
 - Before building, set digest-pinned bases (the package script refuses anything else):
   `QSVC_ALPINE_IMAGE` (coturn build and runtime), `QSVC_SFU_BUILD_BASE` (node:22-bookworm-slim) and
-  `QSVC_SFU_RUNTIME_BASE` (gcr.io/distroless/cc-debian12:nonroot). Keep both SFU bases on the same
-  Debian release. Resolve a digest with `docker buildx imagetools inspect <image>`.
+  `QSVC_SFU_RUNTIME_BASE` (cgr.dev/chainguard/node:latest). The builder's glibc must not be newer
+  than the runtime's. Resolve a digest with `docker buildx imagetools inspect <image>`.
 - Every `FROM` in `deploy/vc-onprem/stack/*/Dockerfile` must be digest-pinned or come from one of these variables.
 - The gate stays `--fail-on high` for all findings, including wont-fix. A finding that cannot be remediated
   needs a person-reviewed OpenVEX file for that exact image in `deploy/vc-onprem/release/vex/`

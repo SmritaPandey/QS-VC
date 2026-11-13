@@ -60,6 +60,11 @@ if [[ "${QSVC_PACKAGE_SSO:-false}" == true ]]; then
   runtime_images+=("${keycloak_image%@*}")
 fi
 "${compose[@]}" build sfu signaling auth meeting recording web
+# The SFU runtime image must provide Node (the Dockerfile no longer copies it in).
+if ! docker run --rm --platform linux/amd64 --entrypoint node qsvc-sfu:intranet -e 'process.exit(0)' >/dev/null 2>&1; then
+  echo "qsvc-sfu:intranet cannot run node. Check QSVC_SFU_RUNTIME_BASE (expected cgr.dev/chainguard/node@sha256:...)." >&2
+  exit 2
+fi
 
 mkdir -p "$output_dir/sbom" "$output_dir/scans"
 scan_work=$(mktemp -d)

@@ -37,7 +37,7 @@ services:
         # images (same Debian release); package-intranet-images.sh refuses unpinned bases.
         # Resolve with: docker buildx imagetools inspect <image> --format '{{json .Manifest.Digest}}'
         SFU_BUILD_BASE: ${QSVC_SFU_BUILD_BASE:-node:22-bookworm-slim}
-        SFU_RUNTIME_BASE: ${QSVC_SFU_RUNTIME_BASE:-gcr.io/distroless/cc-debian12:nonroot}
+        SFU_RUNTIME_BASE: ${QSVC_SFU_RUNTIME_BASE:-cgr.dev/chainguard/node:latest}
     environment:
       NODE_OPTIONS: --require=/opt/qsvc-trial/stop-at-expiry.cjs
     volumes:
