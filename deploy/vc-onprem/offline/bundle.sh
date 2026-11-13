@@ -63,6 +63,7 @@ CADDY
 bash "$package/release/sign.sh" "$output" "$3" "$4"
 archive=$(mktemp "${output}.tar.gz.XXXXXX")
 trap 'rm -f -- "$archive"' EXIT
-COPYFILE_DISABLE=1 tar -C "$output" -czf "$archive" .
+# No macOS extended attributes or ACLs in the archive (GNU tar on the server warns about them).
+COPYFILE_DISABLE=1 tar --no-xattrs --no-acls -C "$output" -czf "$archive" .
 ln -- "$archive" "$output.tar.gz"
 printf 'Signed installer archive: %s\n' "$output.tar.gz"

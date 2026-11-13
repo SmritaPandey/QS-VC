@@ -29,3 +29,10 @@ a meeting. In the Poly lab, dial 1001 before a browser joins, verify both media
 directions, then test unknown numbers, PIN, disabled endpoints and activation.
 
 13 Nov full image gate (scan-run-1): auth, caddy, coturn, meeting, postgres, recording, redis, sfu, signaling and web all 0 Critical / 0 High. Bases: alpine:3.24@sha256:f59abe65…, node:22-bookworm-slim@sha256:e9f565d3…, cgr.dev/chainguard/node (digest in IMAGE-MANIFEST.txt). Not yet signed or staged.
+
+13 Nov signed package: QS-VC-On-prem-Installer-1.0.0.tar.gz, 375,190,495 bytes, SHA-256 ea85e33c4b65dab4a2e212fa90518c8c07c36d8cf9b1338ba50d63f847350e50.
+- Gate in the signed build: all 10 images 0 Critical / 0 High.
+- Ed25519 manifest signature verified with the release public key (fingerprint 9fb65ad8…); file inventory matches manifest.json (123 files); bundled licence public key SHA-256 c69c7699…; no private keys or build secrets in the package.
+- ML-DSA-65 signature: verify on the Mac (OpenSSL 4.1) with stage-server-package.sh before upload.
+- Fixed after this build: manifest.py needed Python 3.11 (fails on Rocky 9 / Amazon Linux 2023 Python 3.9); bundle.sh now strips macOS xattrs from the archive.
+- Not run: SFU worker health check, TURN two-person call, clean Rocky 9 install, activation.

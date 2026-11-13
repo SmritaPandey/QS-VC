@@ -20,8 +20,13 @@ def inventory(root):
             continue
         if not path.is_file():
             raise ValueError("Release contains a non-regular file")
+        digest = hashlib.sha256()
         with path.open("rb") as content:
-            entries[name] = hashlib.file_digest(content, "sha256").hexdigest()
+            # Chunked read: hashlib.file_digest needs Python 3.11, but Rocky/RHEL 9 and
+            # Amazon Linux 2023 ship Python 3.9.
+            for block in iter(lambda: content.read(1 << 20), b""):
+                digest.update(block)
+        entries[name] = digest.hexdigest()
     if not entries:
         raise ValueError("Release payload is empty")
     return entries
