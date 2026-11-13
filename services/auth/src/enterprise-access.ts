@@ -181,10 +181,14 @@ export function enterpriseRouter(
         if (!file || !path.isAbsolute(file) || !file.endsWith('.tar.gz')) return undefined;
         try { return (await stat(file)).isFile() ? file : undefined; } catch { return undefined; }
     };
+    router.get('/server-package/status', async (_req, res) => {
+        res.set('Cache-Control', 'no-store');
+        return res.json({ available: Boolean(await trialArchive()) });
+    });
     router.get('/trial-package', async (_req, res) => {
         res.set('Cache-Control', 'no-store');
         const file = await trialArchive();
-        if (!file) return res.status(503).type('text/plain').send('The On-prem installer is not available yet. Please check back later.');
+        if (!file) return res.status(503).type('text/plain').send('The Linux server package is not available. Please check back later.');
         return res.download(file, 'QS-VC-On-prem-Installer.tar.gz', error => {
             if (error && !res.headersSent) res.sendStatus(503);
         });

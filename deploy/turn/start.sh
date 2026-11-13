@@ -18,6 +18,9 @@ if [ "${QSVC_TURN_TLS:-false}" = true ]; then
   test -r /etc/coturn/tls/fullchain.pem && test -r /etc/coturn/tls/privkey.pem
   set -- "$@" --tls-listening-port=5349 --cert=/etc/coturn/tls/fullchain.pem --pkey=/etc/coturn/tls/privkey.pem
 else
-  set -- "$@" --no-tls --no-dtls
+  set -- "$@" --no-tls
+  # coturn 4.17+ keeps DTLS off unless --dtls is given and rejects --no-dtls;
+  # older images (e.g. the hosted 4.6.x) still need the flag.
+  if turnserver -h 2>&1 | grep -q -- '--no-dtls'; then set -- "$@" --no-dtls; fi
 fi
 exec "$@"

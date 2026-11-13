@@ -45,7 +45,7 @@ Defaults, validation rules and enabled-profile requirements remain to be reconci
 | `AUTH_PORT` | `deploy/aws/.env.example:40`; `services/auth/src/index.ts:124` |
 | `AUTH_PUBLIC_URL` | `config/.env.onprem.template:13`; `config/.env.onprem.template:40`; `deploy/aws/.env.example:18`; +4 locations |
 | `AWS_REGION` | `services/recording/src/storage.ts:20` |
-| `BRIDGE_API_TOKEN` | `compose/mcu.yml:17`; `compose/mcu.yml:18`; `compose/single-box.yml:288`; +5 locations |
+| `BRIDGE_API_TOKEN` | `legacy/compose/mcu.yml:17`; `legacy/compose/mcu.yml:18`; `legacy/compose/single-box.yml:288`; +5 locations |
 | `BRIDGE_LEG_VIDEO_CODEC` | `deploy/poly-bridge/.env.example:13` |
 | `BRIDGE_RTP_ANNOUNCED_IP` | `deploy/poly-bridge/.env.example:3` |
 | `BRIDGE_RTP_LISTEN_IP` | `deploy/poly-bridge/.env.example:2` |
@@ -67,7 +67,7 @@ Defaults, validation rules and enabled-profile requirements remain to be reconci
 | `DOMAIN` | `config/.env.onprem.template:10`; `deploy/aws/.env.example:1`; `deploy/aws/compose.yml:217`; +18 locations |
 | `DRACHTIO_HOST` | `deploy/poly-bridge/.env.example:9` |
 | `DRACHTIO_PORT` | `deploy/poly-bridge/.env.example:10` |
-| `DRACHTIO_SECRET` | `compose/mcu.yml:25`; `compose/mcu.yml:40`; `deploy/poly-bridge/.env.example:11`; +1 locations |
+| `DRACHTIO_SECRET` | `legacy/compose/mcu.yml:25`; `legacy/compose/mcu.yml:40`; `deploy/poly-bridge/.env.example:11`; +1 locations |
 | `ENABLE_ONPREM_GOOGLE_TRANSLATION` | `config/.env.onprem.template:93`; `services/signaling/src/captions.ts:50`; `services/signaling/src/translation.ts:24` |
 | `ENTERPRISE_ACCESS_JSON` | `deploy/aws/.env.example:58`; `deploy/aws/compose.yml:78`; `services/auth/src/enterprise-access.ts:171` |
 | `ENTERPRISE_LINUX_X64_INSTALLER` | `services/auth/src/enterprise-access.ts:206`; `services/auth/src/enterprise-access.ts:248` |
@@ -75,16 +75,16 @@ Defaults, validation rules and enabled-profile requirements remain to be reconci
 | `ENTERPRISE_MACOS_X64_INSTALLER` | `services/auth/src/enterprise-access.ts:205`; `services/auth/src/enterprise-access.ts:247` |
 | `ENTERPRISE_WINDOWS_INSTALLER` | `services/auth/src/enterprise-access.ts:203`; `services/auth/src/enterprise-access.ts:245` |
 | `FS_CONF_PROFILE` | `deploy/poly-bridge/.env.example:8` |
-| `FS_ESL_HOST` | `compose/mcu.yml:20`; `config/.env.onprem.template:85`; `deploy/poly-bridge/.env.example:5` |
-| `FS_ESL_PASSWORD` | `compose/mcu.yml:22`; `compose/single-box.yml:267`; `compose/single-box.yml:287`; +2 locations |
-| `FS_ESL_PORT` | `compose/mcu.yml:21`; `compose/single-box.yml:268`; `config/.env.onprem.template:86`; +1 locations |
-| `FS_SIP_HOST` | `compose/mcu.yml:23`; `deploy/poly-bridge/.env.example:4` |
+| `FS_ESL_HOST` | `legacy/compose/mcu.yml:20`; `config/.env.onprem.template:85`; `deploy/poly-bridge/.env.example:5` |
+| `FS_ESL_PASSWORD` | `legacy/compose/mcu.yml:22`; `legacy/compose/single-box.yml:267`; `legacy/compose/single-box.yml:287`; +2 locations |
+| `FS_ESL_PORT` | `legacy/compose/mcu.yml:21`; `legacy/compose/single-box.yml:268`; `config/.env.onprem.template:86`; +1 locations |
+| `FS_SIP_HOST` | `legacy/compose/mcu.yml:23`; `deploy/poly-bridge/.env.example:4` |
 | `GOOGLE_TRANSLATE_API_KEY` | `deploy/aws/compose.yml:169`; `docker-compose.prod.yml:177`; `services/signaling/src/captions.ts:272`; +1 locations |
 | `HF_TOKEN` | `deploy/aws/gpu/.env.example:7`; `deploy/aws/gpu/compose.yml:36`; `deploy/e2e/.env.example:9`; +3 locations |
 | `HOST` | `services/meeting/src/index.ts:1210`; `services/signaling/src/index.ts:158` |
 | `HYBRID_MODE` | `services/signaling/src/config.ts:18` |
-| `INTERNAL_AUTH_SECRET` | `compose/core.yml:102`; `compose/core.yml:148`; `compose/core.yml:172`; +10 locations |
-| `INVITATION_SECRET` | `compose/core.yml:150`; `compose/core.yml:174`; `compose/single-box.yml:147`; +6 locations |
+| `INTERNAL_AUTH_SECRET` | `legacy/compose/core.yml:102`; `legacy/compose/core.yml:148`; `legacy/compose/core.yml:172`; +10 locations |
+| `INVITATION_SECRET` | `legacy/compose/core.yml:150`; `legacy/compose/core.yml:174`; `legacy/compose/single-box.yml:147`; +6 locations |
 | `JWT_EXPIRY` | `config/.env.onprem.template:33`; `services/auth/src/index.ts:138` |
 | `JWT_SECRET` | `config/.env.onprem.template:32`; `deploy/aws/.env.example:14`; `services/auth/src/turn.ts:28` |
 | `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` | `deploy/keycloak/compose.yml:38` |
@@ -103,14 +103,14 @@ Defaults, validation rules and enabled-profile requirements remain to be reconci
 | `MEETING_DB_PASSWORD` | `config/.env.onprem.template:112`; `docker-compose.prod.yml:319` |
 | `MEETING_DB_USER` | `config/.env.onprem.template:111`; `docker-compose.prod.yml:318` |
 | `MEETING_INTERNAL_URL` | `docker-compose.prod.yml:183`; `services/meeting/src/signaling-bridge.ts:14`; `services/meeting/src/signaling-bridge.ts:15`; +8 locations |
-| `MEETING_POLICY_SECRET` | `compose/core.yml:149`; `compose/core.yml:173`; `compose/single-box.yml:146`; +6 locations |
+| `MEETING_POLICY_SECRET` | `legacy/compose/core.yml:149`; `legacy/compose/core.yml:173`; `legacy/compose/single-box.yml:146`; +6 locations |
 | `MEETING_PORT` | `deploy/aws/.env.example:41`; `services/meeting/src/index.ts:148`; `services/meeting/src/signaling-bridge.ts:15` |
 | `MIGRATION_DATABASE_URL` | `deploy/aws/.env.example:11`; `deploy/aws/compose.yml:206` |
-| `MINIO_ACCESS_KEY` | `compose/core.yml:63`; `compose/single-box.yml:64`; `config/.env.onprem.template:77`; +2 locations |
+| `MINIO_ACCESS_KEY` | `legacy/compose/core.yml:63`; `legacy/compose/single-box.yml:64`; `config/.env.onprem.template:77`; +2 locations |
 | `MINIO_BUCKET` | `config/.env.onprem.template:79` |
 | `MINIO_ENDPOINT` | `config/.env.onprem.template:75` |
-| `MINIO_PORT` | `compose/core.yml:68`; `compose/single-box.yml:69`; `config/.env.onprem.template:76` |
-| `MINIO_SECRET_KEY` | `compose/core.yml:64`; `compose/single-box.yml:65`; `config/.env.onprem.template:78`; +2 locations |
+| `MINIO_PORT` | `legacy/compose/core.yml:68`; `legacy/compose/single-box.yml:69`; `config/.env.onprem.template:76` |
+| `MINIO_SECRET_KEY` | `legacy/compose/core.yml:64`; `legacy/compose/single-box.yml:65`; `config/.env.onprem.template:78`; +2 locations |
 | `MINUTES_LLM_API_KEY` | `config/.env.onprem.template:98`; `deploy/aws/.env.example:73`; `deploy/aws/compose.yml:178`; +2 locations |
 | `MINUTES_LLM_MODEL` | `config/.env.onprem.template:97`; `deploy/aws/.env.example:72`; `deploy/aws/compose.yml:177`; +3 locations |
 | `MINUTES_LLM_URL` | `config/.env.onprem.template:96`; `deploy/aws/.env.example:71`; `deploy/aws/compose.yml:176`; +3 locations |
@@ -170,48 +170,48 @@ Defaults, validation rules and enabled-profile requirements remain to be reconci
 | `POLY_BRIDGE_MODULE` | `services/sfu/src/index.ts:98` |
 | `POLY_TENANT_ID` | `services/signaling/src/room-dial.ts:18` |
 | `PORT` | `services/auth/src/index.ts:124`; `services/meeting/src/index.ts:148`; `services/meeting/src/signaling-bridge.ts:15`; +1 locations |
-| `POSTGRES_DB` | `compose/core.yml:25`; `compose/core.yml:33`; `compose/single-box.yml:26`; +5 locations |
+| `POSTGRES_DB` | `legacy/compose/core.yml:25`; `legacy/compose/core.yml:33`; `legacy/compose/single-box.yml:26`; +5 locations |
 | `POSTGRES_HOST` | `config/.env.onprem.template:20` |
-| `POSTGRES_PASSWORD` | `compose/core.yml:27`; `compose/single-box.yml:28`; `config/.env.onprem.template:24`; +1 locations |
-| `POSTGRES_PORT` | `compose/core.yml:31`; `compose/single-box.yml:32`; `config/.env.onprem.template:21` |
-| `POSTGRES_USER` | `compose/core.yml:26`; `compose/core.yml:33`; `compose/single-box.yml:27`; +4 locations |
+| `POSTGRES_PASSWORD` | `legacy/compose/core.yml:27`; `legacy/compose/single-box.yml:28`; `config/.env.onprem.template:24`; +1 locations |
+| `POSTGRES_PORT` | `legacy/compose/core.yml:31`; `legacy/compose/single-box.yml:32`; `config/.env.onprem.template:21` |
+| `POSTGRES_USER` | `legacy/compose/core.yml:26`; `legacy/compose/core.yml:33`; `legacy/compose/single-box.yml:27`; +4 locations |
 | `QSVC_ADMIN_EMAILS` | `config/.env.onprem.template:17`; `services/auth/scripts/create-platform-admins.cjs:15` |
 | `QSVC_ADMIN_PASSWORD` | `services/auth/scripts/create-platform-admins.cjs:12` |
 | `QSVC_ADMIN_SIGNUP_OPEN` | `services/auth/src/index.ts:259` |
 | `QSVC_ADMIN_WORKSPACE_URL` | `services/auth/src/enterprise-access.ts:181` |
 | `QSVC_ALLOW_UNVERIFIED_MODELS` | `docker-compose.prod.yml:383`; `docker-compose.prod.yml:408`; `shared/model_security.py:12`; +1 locations |
-| `QSVC_CONFIG_FILE` | `compose/ai.yml:16`; `compose/ai.yml:43`; `compose/ai.yml:69`; +15 locations |
+| `QSVC_CONFIG_FILE` | `legacy/compose/ai.yml:16`; `legacy/compose/ai.yml:43`; `legacy/compose/ai.yml:69`; +15 locations |
 | `QSVC_DEMO_DATABASE` | `deploy/aws/prepare-demo-db.cjs:5`; `services/auth/scripts/create-demo-accounts.cjs:10` |
 | `QSVC_DEPLOYMENT` | `config/.env.onprem.template:8`; `services/auth/src/enterprise-access.ts:180`; `services/signaling/src/captions.ts:49`; +2 locations |
-| `QSVC_DIGILOCKER_AUTHORIZE_URL` | `compose/core.yml:115`; `compose/single-box.yml:112`; `deploy/aws/compose.yml:63`; +1 locations |
-| `QSVC_DIGILOCKER_CLIENT_ID` | `compose/core.yml:118`; `compose/single-box.yml:115`; `deploy/aws/compose.yml:66`; +1 locations |
-| `QSVC_DIGILOCKER_CLIENT_SECRET` | `compose/core.yml:119`; `compose/single-box.yml:116`; `deploy/aws/compose.yml:67`; +1 locations |
-| `QSVC_DIGILOCKER_ENABLED` | `compose/core.yml:114`; `compose/single-box.yml:111`; `deploy/aws/compose.yml:62`; +2 locations |
-| `QSVC_DIGILOCKER_SCOPE` | `compose/core.yml:120`; `compose/single-box.yml:117`; `deploy/aws/compose.yml:68`; +2 locations |
-| `QSVC_DIGILOCKER_TOKEN_URL` | `compose/core.yml:116`; `compose/single-box.yml:113`; `deploy/aws/compose.yml:64`; +1 locations |
-| `QSVC_DIGILOCKER_USER_URL` | `compose/core.yml:117`; `compose/single-box.yml:114`; `deploy/aws/compose.yml:65`; +1 locations |
+| `QSVC_DIGILOCKER_AUTHORIZE_URL` | `legacy/compose/core.yml:115`; `legacy/compose/single-box.yml:112`; `deploy/aws/compose.yml:63`; +1 locations |
+| `QSVC_DIGILOCKER_CLIENT_ID` | `legacy/compose/core.yml:118`; `legacy/compose/single-box.yml:115`; `deploy/aws/compose.yml:66`; +1 locations |
+| `QSVC_DIGILOCKER_CLIENT_SECRET` | `legacy/compose/core.yml:119`; `legacy/compose/single-box.yml:116`; `deploy/aws/compose.yml:67`; +1 locations |
+| `QSVC_DIGILOCKER_ENABLED` | `legacy/compose/core.yml:114`; `legacy/compose/single-box.yml:111`; `deploy/aws/compose.yml:62`; +2 locations |
+| `QSVC_DIGILOCKER_SCOPE` | `legacy/compose/core.yml:120`; `legacy/compose/single-box.yml:117`; `deploy/aws/compose.yml:68`; +2 locations |
+| `QSVC_DIGILOCKER_TOKEN_URL` | `legacy/compose/core.yml:116`; `legacy/compose/single-box.yml:113`; `deploy/aws/compose.yml:64`; +1 locations |
+| `QSVC_DIGILOCKER_USER_URL` | `legacy/compose/core.yml:117`; `legacy/compose/single-box.yml:114`; `deploy/aws/compose.yml:65`; +1 locations |
 | `QSVC_E2EE_DEFAULT` | `services/signaling/src/rpc/handler.ts:1686` |
-| `QSVC_EMAIL_API_KEY` | `compose/core.yml:125`; `compose/single-box.yml:122`; `deploy/aws/compose.yml:73`; +3 locations |
-| `QSVC_EMAIL_FROM` | `compose/core.yml:126`; `compose/single-box.yml:123`; `deploy/aws/compose.yml:74`; +3 locations |
+| `QSVC_EMAIL_API_KEY` | `legacy/compose/core.yml:125`; `legacy/compose/single-box.yml:122`; `deploy/aws/compose.yml:73`; +3 locations |
+| `QSVC_EMAIL_FROM` | `legacy/compose/core.yml:126`; `legacy/compose/single-box.yml:123`; `deploy/aws/compose.yml:74`; +3 locations |
 | `QSVC_ENTERPRISE_TERMS_REQUIRED` | `deploy/aws/compose.yml:161`; `deploy/aws/compose.yml:75`; `docker-compose.prod.yml:163`; +5 locations |
-| `QSVC_GOOGLE_CLIENT_ID` | `compose/core.yml:121`; `compose/single-box.yml:118`; `deploy/aws/compose.yml:69`; +1 locations |
-| `QSVC_GOOGLE_CLIENT_SECRET` | `compose/core.yml:122`; `compose/single-box.yml:119`; `deploy/aws/compose.yml:70`; +1 locations |
-| `QSVC_KEYCLOAK_ADMIN_CLIENT_ID` | `compose/core.yml:111`; `compose/single-box.yml:108`; `deploy/aws/compose.yml:59`; +2 locations |
-| `QSVC_KEYCLOAK_ADMIN_CLIENT_SECRET` | `compose/core.yml:112`; `compose/single-box.yml:109`; `deploy/aws/compose.yml:60`; +3 locations |
+| `QSVC_GOOGLE_CLIENT_ID` | `legacy/compose/core.yml:121`; `legacy/compose/single-box.yml:118`; `deploy/aws/compose.yml:69`; +1 locations |
+| `QSVC_GOOGLE_CLIENT_SECRET` | `legacy/compose/core.yml:122`; `legacy/compose/single-box.yml:119`; `deploy/aws/compose.yml:70`; +1 locations |
+| `QSVC_KEYCLOAK_ADMIN_CLIENT_ID` | `legacy/compose/core.yml:111`; `legacy/compose/single-box.yml:108`; `deploy/aws/compose.yml:59`; +2 locations |
+| `QSVC_KEYCLOAK_ADMIN_CLIENT_SECRET` | `legacy/compose/core.yml:112`; `legacy/compose/single-box.yml:109`; `deploy/aws/compose.yml:60`; +3 locations |
 | `QSVC_KEYCLOAK_CLIENT_ID` | `services/auth/src/sso-keycloak.ts:28` |
-| `QSVC_KEYCLOAK_CLIENT_SECRET` | `compose/core.yml:110`; `compose/single-box.yml:107`; `deploy/aws/compose.yml:58`; +3 locations |
-| `QSVC_KEYCLOAK_INTERNAL_URL` | `compose/core.yml:109`; `compose/single-box.yml:106`; `deploy/aws/compose.yml:57`; +2 locations |
-| `QSVC_KEYCLOAK_ISSUER` | `compose/core.yml:108`; `compose/single-box.yml:105`; `deploy/aws/compose.yml:56`; +2 locations |
-| `QSVC_MICROSOFT_CLIENT_ID` | `compose/core.yml:123`; `compose/single-box.yml:120`; `deploy/aws/compose.yml:71`; +1 locations |
-| `QSVC_MICROSOFT_CLIENT_SECRET` | `compose/core.yml:124`; `compose/single-box.yml:121`; `deploy/aws/compose.yml:72`; +1 locations |
+| `QSVC_KEYCLOAK_CLIENT_SECRET` | `legacy/compose/core.yml:110`; `legacy/compose/single-box.yml:107`; `deploy/aws/compose.yml:58`; +3 locations |
+| `QSVC_KEYCLOAK_INTERNAL_URL` | `legacy/compose/core.yml:109`; `legacy/compose/single-box.yml:106`; `deploy/aws/compose.yml:57`; +2 locations |
+| `QSVC_KEYCLOAK_ISSUER` | `legacy/compose/core.yml:108`; `legacy/compose/single-box.yml:105`; `deploy/aws/compose.yml:56`; +2 locations |
+| `QSVC_MICROSOFT_CLIENT_ID` | `legacy/compose/core.yml:123`; `legacy/compose/single-box.yml:120`; `deploy/aws/compose.yml:71`; +1 locations |
+| `QSVC_MICROSOFT_CLIENT_SECRET` | `legacy/compose/core.yml:124`; `legacy/compose/single-box.yml:121`; `deploy/aws/compose.yml:72`; +1 locations |
 | `QSVC_PUBLIC_URL` | `config/.env.onprem.template:11`; `services/auth/src/enterprise-access.ts:179` |
 | `QSVC_SMOKE_TEST` | `frontend/desktop/src/main.ts:576` |
-| `QSVC_SSO_AUTH_URL` | `compose/core.yml:106`; `compose/core.yml:16`; `compose/single-box.yml:103`; +6 locations |
-| `QSVC_SSO_ENABLED` | `compose/core.yml:105`; `compose/single-box.yml:102`; `deploy/aws/compose.yml:53`; +2 locations |
-| `QSVC_SSO_IDP_HOSTS` | `compose/core.yml:113`; `compose/single-box.yml:110`; `deploy/aws/compose.yml:61`; +2 locations |
-| `QSVC_SSO_WEB_URL` | `compose/core.yml:107`; `compose/single-box.yml:104`; `deploy/aws/compose.yml:55`; +2 locations |
+| `QSVC_SSO_AUTH_URL` | `legacy/compose/core.yml:106`; `legacy/compose/core.yml:16`; `legacy/compose/single-box.yml:103`; +6 locations |
+| `QSVC_SSO_ENABLED` | `legacy/compose/core.yml:105`; `legacy/compose/single-box.yml:102`; `deploy/aws/compose.yml:53`; +2 locations |
+| `QSVC_SSO_IDP_HOSTS` | `legacy/compose/core.yml:113`; `legacy/compose/single-box.yml:110`; `deploy/aws/compose.yml:61`; +2 locations |
+| `QSVC_SSO_WEB_URL` | `legacy/compose/core.yml:107`; `legacy/compose/single-box.yml:104`; `deploy/aws/compose.yml:55`; +2 locations |
 | `QSVC_TRIAL_NOW` | `services/auth/src/index.ts:390`; `services/auth/src/index.ts:391`; `services/auth/src/index.ts:470`; +1 locations |
-| `QSVC_VERSION` | `compose/ai.yml:10`; `compose/ai.yml:37`; `compose/ai.yml:63`; +16 locations |
+| `QSVC_VERSION` | `legacy/compose/ai.yml:10`; `legacy/compose/ai.yml:37`; `legacy/compose/ai.yml:63`; +16 locations |
 | `QSVC_WEB_URL` | `frontend/desktop/src/main.ts:64` |
 | `RAZORPAY_KEY_ID` | `config/.env.onprem.template:41`; `deploy/aws/.env.example:19`; `deploy/aws/compose.yml:83`; +6 locations |
 | `RAZORPAY_KEY_SECRET` | `config/.env.onprem.template:42`; `deploy/aws/.env.example:20`; `deploy/aws/compose.yml:84`; +5 locations |
@@ -227,11 +227,11 @@ Defaults, validation rules and enabled-profile requirements remain to be reconci
 | `RECORDING_BUCKET` | `deploy/aws/.env.example:61`; `deploy/aws/compose.yml:195`; `services/recording/src/app.ts:58`; +1 locations |
 | `RECORDING_PORT` | `services/recording/src/index.ts:17` |
 | `REDIS_HOST` | `config/.env.onprem.template:27`; `services/sfu/src/config.ts:91`; `services/signaling/src/config.ts:23` |
-| `REDIS_PASSWORD` | `compose/core.yml:44`; `compose/core.yml:50`; `compose/single-box.yml:45`; +7 locations |
-| `REDIS_PORT` | `compose/core.yml:48`; `compose/single-box.yml:49`; `config/.env.onprem.template:28`; +2 locations |
+| `REDIS_PASSWORD` | `legacy/compose/core.yml:44`; `legacy/compose/core.yml:50`; `legacy/compose/single-box.yml:45`; +7 locations |
+| `REDIS_PORT` | `legacy/compose/core.yml:48`; `legacy/compose/single-box.yml:49`; `config/.env.onprem.template:28`; +2 locations |
 | `REDIS_URL` | `services/signaling/src/config.ts:21` |
-| `SESSION_SIGNING_KEY_FILE` | `compose/core.yml:273`; `compose/single-box.yml:329`; `config/.env.onprem.template:100`; +3 locations |
-| `SFU_ANNOUNCED_IP` | `compose/core.yml:202`; `compose/core.yml:86`; `compose/mcu.yml:16`; +12 locations |
+| `SESSION_SIGNING_KEY_FILE` | `legacy/compose/core.yml:273`; `legacy/compose/single-box.yml:329`; `config/.env.onprem.template:100`; +3 locations |
+| `SFU_ANNOUNCED_IP` | `legacy/compose/core.yml:202`; `legacy/compose/core.yml:86`; `legacy/compose/mcu.yml:16`; +12 locations |
 | `SFU_CONTROL_HOST` | `services/sfu/src/index.ts:347` |
 | `SFU_CONTROL_TOKEN` | `config/.env.onprem.template:68`; `deploy/aws/.env.example:12`; `deploy/aws/.env.example:52`; +6 locations |
 | `SFU_INTERNAL_URL` | `deploy/aws/.env.example:45`; `services/signaling/src/config.ts:8` |
@@ -239,21 +239,21 @@ Defaults, validation rules and enabled-profile requirements remain to be reconci
 | `SFU_MAX_PORT` | `config/.env.onprem.template:67`; `deploy/aws/.env.example:49`; `services/sfu/src/config.ts:29` |
 | `SFU_MIN_PORT` | `config/.env.onprem.template:66`; `deploy/aws/.env.example:48`; `services/sfu/src/config.ts:28` |
 | `SFU_NUM_WORKERS` | `deploy/aws/.env.example:47`; `services/sfu/src/config.ts:9` |
-| `SFU_PORT` | `compose/mcu.yml:15`; `config/.env.onprem.template:64`; `deploy/aws/.env.example:43`; +1 locations |
+| `SFU_PORT` | `legacy/compose/mcu.yml:15`; `config/.env.onprem.template:64`; `deploy/aws/.env.example:43`; +1 locations |
 | `SIGNALING_DIST` | `services/meeting/src/signaling-bridge.ts:10`; `services/meeting/src/signaling-bridge.ts:14`; `services/meeting/src/signaling-bridge.ts:25` |
 | `SIGNALING_MAX_ROOMS` | `services/signaling/src/room-manager.ts:153` |
 | `SIGNALING_PORT` | `deploy/aws/.env.example:42`; `services/signaling/src/config.ts:7` |
-| `SIGNALING_URL` | `compose/mcu.yml:28`; `services/sfu/src/poly-adapter.ts:50` |
+| `SIGNALING_URL` | `legacy/compose/mcu.yml:28`; `services/sfu/src/poly-adapter.ts:50` |
 | `STUN_SERVERS` | `services/auth/src/turn.ts:32`; `services/signaling/src/config.ts:11` |
 | `TRANSLATION_TIMEOUT_MS` | `services/signaling/src/captions.ts:99` |
-| `TURN_ACCESS_SECRET` | `compose/core.yml:103`; `compose/core.yml:175`; `compose/single-box.yml:100`; +6 locations |
-| `TURN_ALLOWED_SFU_IP` | `compose/core.yml:87`; `compose/single-box.yml:83`; `deploy/aws/compose.yml:219`; +1 locations |
+| `TURN_ACCESS_SECRET` | `legacy/compose/core.yml:103`; `legacy/compose/core.yml:175`; `legacy/compose/single-box.yml:100`; +6 locations |
+| `TURN_ALLOWED_SFU_IP` | `legacy/compose/core.yml:87`; `legacy/compose/single-box.yml:83`; `deploy/aws/compose.yml:219`; +1 locations |
 | `TURN_CERT_FILE` | `deploy/turn/compose.aws-tls.yml:10`; `deploy/turn/compose.tls.yml:9` |
 | `TURN_HOST` | `deploy/turn/compose.aws-tls.yml:4`; `deploy/turn/compose.aws-tls.yml:5`; `deploy/turn/compose.tls.yml:5`; +1 locations |
 | `TURN_KEY_FILE` | `deploy/turn/compose.aws-tls.yml:11`; `deploy/turn/compose.tls.yml:10` |
 | `TURN_PASSWORD` | `services/signaling/src/config.ts:12`; `services/signaling/src/config.ts:13` |
-| `TURN_REALM` | `compose/core.yml:85`; `compose/single-box.yml:81`; `docker-compose.prod.yml:107` |
-| `TURN_SECRET` | `compose/core.yml:84`; `compose/single-box.yml:80`; `config/.env.onprem.template:106`; +8 locations |
+| `TURN_REALM` | `legacy/compose/core.yml:85`; `legacy/compose/single-box.yml:81`; `docker-compose.prod.yml:107` |
+| `TURN_SECRET` | `legacy/compose/core.yml:84`; `legacy/compose/single-box.yml:80`; `config/.env.onprem.template:106`; +8 locations |
 | `TURN_SERVERS` | `config/.env.onprem.template:72`; `deploy/aws/.env.example:55`; `deploy/aws/compose.yml:25`; +3 locations |
 | `TURN_USERNAME` | `services/signaling/src/config.ts:12`; `services/signaling/src/config.ts:13` |
 | `VITE_API_URL` | `frontend/web/src/components/CancelScheduledMeeting.tsx:5`; `frontend/web/src/components/HostedMeetings.tsx:7`; `frontend/web/src/components/InviteModal.tsx:6`; +7 locations |

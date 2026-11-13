@@ -1,4 +1,12 @@
 services:
+  caddy:
+    image: qsvc-caddy:intranet
+  postgres:
+    image: qsvc-postgres:intranet
+  redis:
+    image: qsvc-redis:intranet
+  coturn:
+    image: qsvc-coturn:intranet
   ai-gateway:
     profiles: [ai-gateway]
     image: qsvc-auth:intranet
@@ -23,6 +31,13 @@ services:
       - ./trial:/opt/qsvc-trial:ro
       - /var/lib/qsvc/onprem-trial:/trial:ro
   sfu:
+    build:
+      args:
+        # Release builds set QSVC_SFU_BUILD_BASE / QSVC_SFU_RUNTIME_BASE to digest-pinned
+        # images (same Debian release); package-intranet-images.sh refuses unpinned bases.
+        # Resolve with: docker buildx imagetools inspect <image> --format '{{json .Manifest.Digest}}'
+        SFU_BUILD_BASE: ${QSVC_SFU_BUILD_BASE:-node:22-bookworm-slim}
+        SFU_RUNTIME_BASE: ${QSVC_SFU_RUNTIME_BASE:-gcr.io/distroless/cc-debian12:nonroot}
     environment:
       NODE_OPTIONS: --require=/opt/qsvc-trial/stop-at-expiry.cjs
     volumes:
@@ -59,6 +74,9 @@ services:
       MINUTES_LLM_MODEL: ${QSVC_AI_MINUTES_MODEL:-}
       MINUTES_LLM_API_KEY: ${QSVC_AI_GATEWAY_TOKEN:-}
       MINUTES_TIMEOUT_MS: "11000"
+  minio:
+    profiles: [object-storage]
   recording:
+    depends_on: !reset {}
     environment:
       RECORDING_BUCKET: ""

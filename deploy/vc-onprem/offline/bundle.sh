@@ -3,18 +3,24 @@ set -euo pipefail
 [[ $# == 4 ]] || { echo 'Usage: bundle.sh BUILD_ENV NEW_OUTPUT ED25519_KEY ML_DSA_65_KEY' >&2; exit 2; }
 package=$(cd -- "$(dirname -- "$0")/.." && pwd)
 repo=$(cd -- "$package/../.." && pwd)
+for tool in docker node python3 openssl syft grype sha256sum; do
+    command -v "$tool" >/dev/null || { echo "Missing release build tool: $tool" >&2; exit 2; }
+done
+for input in "$1" "$3" "$4"; do
+    [[ -f "$input" && -r "$input" ]] || { echo 'Build environment and both signing key files must be readable' >&2; exit 2; }
+done
+: "${QSVC_ONPREM_LICENSE_PUBLIC_KEY:?Set the production license verification public key path}"
+openssl asn1parse -in "$QSVC_ONPREM_LICENSE_PUBLIC_KEY" | grep -E 'OBJECT *:ED25519$' >/dev/null
 output=$(realpath -m -- "$2")
 umask 077
 [[ ! -e "$output.tar.gz" && ! -L "$output.tar.gz" ]] || { echo "Archive already exists" >&2; exit 1; }
 mkdir -- "$output"
 node --test "$package/stack/ai/gateway.test.cjs"
-QSVC_DEPLOYMENT=onprem QSVC_PACKAGE_SSO=false bash "$repo/scripts/package-intranet-images.sh" "$1" "$output"
+QSVC_DEPLOYMENT=onprem QSVC_PACKAGE_OFFLINE_PILOT=true QSVC_PACKAGE_SSO=false bash "$repo/scripts/package-intranet-images.sh" "$1" "$output"
 cp "$package/stack/compose.offline.yml" "$output/"
 cp -R "$package/stack/trial" "$output/trial"
 chmod 755 "$output/trial"
 chmod 644 "$output/trial/"*.cjs
-: "${QSVC_ONPREM_LICENSE_PUBLIC_KEY:?Set the production license verification public key path}"
-openssl asn1parse -in "$QSVC_ONPREM_LICENSE_PUBLIC_KEY" | grep -E 'OBJECT *:ED25519$' >/dev/null
 openssl pkey -pubin -in "$QSVC_ONPREM_LICENSE_PUBLIC_KEY" -pubout -out "$output/trial/license-public.pem"
 chmod 644 "$output/trial/license-public.pem"
 mkdir -m 755 "$output/ai"

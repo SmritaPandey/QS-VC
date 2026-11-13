@@ -76,3 +76,8 @@ release/
 !/deploy/vc-onprem/release/VERSION
 
 /deploy/aws/license-private/
+
+# Generated On-prem release archives and private key material
+/deploy/aws/installers/*.tar.gz
+*.pem
+*.key

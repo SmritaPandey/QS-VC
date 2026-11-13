@@ -20,6 +20,20 @@ const downloadChoices: Array<{ id: DesktopDownload; label: string; availableKey:
 ];
 export default function IntranetPage() {
     const session = useSession();
+    const [packageStatus, setPackageStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
+    useEffect(() => {
+        const controller = new AbortController();
+        const url = AUTH_API + '/api/auth/enterprise/server-package/status';
+        fetch(url, { cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]) })
+            .then(async response => {
+                if (!response.ok) throw new Error();
+                const status = await response.json();
+                if (!controller.signal.aborted) setPackageStatus(status.available === true ? 'available' : 'unavailable');
+            })
+            .catch(() => { if (!controller.signal.aborted) setPackageStatus('unavailable'); });
+        return () => controller.abort();
+    }, []);
+
     const token = session.profile ? getToken() : '';
     const [result, setResult] = useState<{ token: string; access?: { workspaceUrl: string; downloads: DownloadAvailability; onlineDemo: boolean }; error?: string }>();
     const [attempt, setAttempt] = useState(0);
@@ -150,18 +164,20 @@ export default function IntranetPage() {
     }
     return <div className="public-site"><SiteNav brandName="QS-Enterprise" /><main className="public-container service-page intranet-page" id="main-content">
         <header className="public-page-intro"><h1>{access?.onlineDemo ? 'Your online test workspace.' : access ? 'Your QS-Enterprise workspace.' : 'Meet inside your organisation.'}</h1><p>{access?.onlineDemo ? 'Open the shared QS-VC app to try your admin experience online.' : access ? 'Choose how you connect to your approved workspace.' : 'Set up QS-VC on your organisation’s Linux server.'}</p></header>
-        <section className="service-card" aria-labelledby="onprem-installer-title">
-            <h2 id="onprem-installer-title">QS-VC On-prem installer</h2>
-            <p>Your 14 days of free use start at installation. When they end, the workspace shows how to contact us for an extension.</p>
+        <section className="service-card" aria-labelledby="onprem-package-title">
+            <h2 id="onprem-package-title">Server package for Linux administrators</h2>
+            <p>Download the signed archive from any device, then transfer it to your Linux server for setup. The setup guide explains how to connect your devices to the workspace.</p>
             <div className="onprem-installer-actions">
-                <a className="qsvc-action" href={AUTH_API + '/api/auth/enterprise/trial-package'}>
-                    <ActionContents><span className="mi" aria-hidden="true">download</span>Download installer</ActionContents>
-                </a>
+                {packageStatus === 'available' && <a className="qsvc-action" href={AUTH_API + '/api/auth/enterprise/trial-package'}>
+                    <ActionContents><span className="mi" aria-hidden="true">download</span>Download server package</ActionContents>
+                </a>}
                 <a className="qsvc-action qsvc-action--secondary" href={setupGuide} target="_blank" rel="noreferrer">
                     <ActionContents><span className="mi" aria-hidden="true">picture_as_pdf</span>Read setup guide</ActionContents>
                     <span className="sr-only"> (PDF, opens in a new tab)</span>
                 </a>
             </div>
+            <p role="status">{packageStatus === 'checking' ? 'Checking package availability…'
+                : packageStatus === 'unavailable' ? 'The server package is currently unavailable.' : ''}</p>
         </section>
         <section className="service-card onprem-devices" aria-labelledby="onprem-devices-title">
             <h2 id="onprem-devices-title">Join from your device</h2>
