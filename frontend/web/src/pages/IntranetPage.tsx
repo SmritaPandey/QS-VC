@@ -153,12 +153,20 @@ export default function IntranetPage() {
         <section className="service-card" aria-labelledby="onprem-installer-title">
             <h2 id="onprem-installer-title">QS-VC On-prem installer</h2>
             <p>Your 14 days of free use start at installation. When they end, the workspace shows how to contact us for an extension.</p>
-            <a className="qsvc-action" href={AUTH_API + '/api/auth/enterprise/trial-package'}><ActionContents>Download installer</ActionContents></a>
-            <a className="onprem-guide-preview" href={setupGuide} target="_blank" rel="noreferrer"
-                aria-label="Open the On-prem setup guide PDF in a new tab">
-                <img src="/guides/on-prem-setup-preview.png" alt="" width="453" height="640" loading="lazy" />
-                <span className="qsvc-action qsvc-action--secondary"><ActionContents>Open setup PDF</ActionContents></span>
-            </a>
+            <div className="onprem-installer-actions">
+                <a className="qsvc-action" href={AUTH_API + '/api/auth/enterprise/trial-package'}>
+                    <ActionContents><span className="mi" aria-hidden="true">download</span>Download installer</ActionContents>
+                </a>
+                <a className="qsvc-action qsvc-action--secondary" href={setupGuide} target="_blank" rel="noreferrer">
+                    <ActionContents><span className="mi" aria-hidden="true">picture_as_pdf</span>Read setup guide</ActionContents>
+                    <span className="sr-only"> (PDF, opens in a new tab)</span>
+                </a>
+            </div>
+        </section>
+        <section className="service-card onprem-devices" aria-labelledby="onprem-devices-title">
+            <h2 id="onprem-devices-title">Join from your device</h2>
+            <p>Open the workspace address from your IT team in a browser on Windows, macOS, Linux, iPhone, iPad or Android.</p>
+            <p>Approved workspace accounts can also download the desktop app for Windows x64, macOS (Apple silicon or Intel), or Linux x64.</p>
         </section>
         {loading ? <p role="status">Checking QS-Enterprise access…</p> : error ? <section className="service-card"><p role="alert">{error}</p><button className="qsvc-action" type="button" onClick={() => {
             if (session.status === 'unavailable') void refreshSession();

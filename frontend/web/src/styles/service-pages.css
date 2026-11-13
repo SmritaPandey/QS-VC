@@ -39,26 +39,21 @@
 .intranet-guide-tabs button[aria-pressed=true] { background:#006d77; color:white; }
 .intranet-page .meeting-scene { margin-bottom:20px; }
 
-.onprem-guide-preview {
-    display: grid;
-    justify-items: center;
-    gap: 1rem;
-    width: min(100%, 19rem);
-    margin-block-start: 1.5rem;
-    padding: 1rem;
-    border: 1px solid currentColor;
-    border-radius: 1rem;
-    text-decoration: none;
+.onprem-installer-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .75rem;
+    margin-block-start: 1.25rem;
 }
 
-.onprem-guide-preview img {
-    display: block;
-    width: 100%;
-    height: auto;
-    border-radius: .375rem;
+.onprem-devices {
+    margin-block: 1rem;
 }
 
-.onprem-guide-preview:focus-visible {
-    outline: 2px solid currentColor;
-    outline-offset: 4px;
+@media (max-width: 480px) {
+    .onprem-installer-actions .qsvc-action {
+        width: 100%;
+        justify-content: center;
+    }
 }
