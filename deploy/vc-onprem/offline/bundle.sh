@@ -11,7 +11,8 @@ for input in "$1" "$3" "$4"; do
 done
 : "${QSVC_ONPREM_LICENSE_PUBLIC_KEY:?Set the production license verification public key path}"
 openssl asn1parse -in "$QSVC_ONPREM_LICENSE_PUBLIC_KEY" | grep -E 'OBJECT *:ED25519$' >/dev/null
-output=$(realpath -m -- "$2")
+# Portable (macOS realpath has no -m): absolute path; the directory itself must not exist yet.
+output=$(python3 -c 'import os, sys; print(os.path.abspath(os.path.expanduser(sys.argv[1])))' "$2")
 umask 077
 [[ ! -e "$output.tar.gz" && ! -L "$output.tar.gz" ]] || { echo "Archive already exists" >&2; exit 1; }
 mkdir -- "$output"
