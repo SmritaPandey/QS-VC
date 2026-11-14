@@ -131,6 +131,12 @@ services:
       ENTERPRISE_LINUX_X64_INSTALLER: /opt/qsvc/installers/QS-VC-Linux-x64.zip
       QSVC_ONPREM_LICENSE_KEY_FILE: ${QSVC_ONPREM_LICENSE_KEY_FILE:-/run/qsvc-license/signing.pem}
       ENTERPRISE_ONPREM_TRIAL_INSTALLER: /opt/qsvc/installers/QS-VC-On-prem-Installer.tar.gz
+      # Public On-Prem server downloads (a missing file shows "Coming soon"; put <file>.sha256 beside each).
+      ENTERPRISE_ONPREM_LINUX_INSTALLER: /opt/qsvc/installers/qsvc-server-setup.run
+      ENTERPRISE_ONPREM_OVA: /opt/qsvc/installers/QS-VC-Server-Appliance.ova
+      ENTERPRISE_ONPREM_VHDX: /opt/qsvc/installers/QS-VC-Server-Appliance-HyperV.zip
+      ENTERPRISE_ONPREM_QCOW2: /opt/qsvc/installers/QS-VC-Server-Appliance.qcow2
+      ENTERPRISE_ONPREM_WINDOWS_SERVER: /opt/qsvc/installers/QS-VC-Server-Setup.exe
     volumes:
       - ./installers:/opt/qsvc/installers:ro
       - ./license-private:/run/qsvc-license:ro

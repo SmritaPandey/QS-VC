@@ -36,3 +36,9 @@ directions, then test unknown numbers, PIN, disabled endpoints and activation.
 - ML-DSA-65 signature: verify on the Mac (OpenSSL 4.1) with stage-server-package.sh before upload.
 - Fixed after this build: manifest.py needed Python 3.11 (fails on Rocky 9 / Amazon Linux 2023 Python 3.9); bundle.sh now strips macOS xattrs from the archive.
 - Not run: SFU worker health check, TURN two-person call, clean Rocky 9 install, activation.
+
+13 Nov installer work (qsvc-server-setup.run, built from the signed package ea85e33c…):
+- PASS (Ubuntu 24.04 + Docker 29, silent mode): both signatures verified with the bundled static OpenSSL 3.5.9 (the stock-Rocky-9 fix), secrets generated, images loaded, DB + restricted accounts, all services healthy, administrator sign-in 200 and wrong password 401, HTTPS gateway/web/downloads/auth through Caddy (TLS 1.3), internal root CA exported, re-run (repair) keeps secrets and installation ID.
+- PASS: 14-day block (installed-at moved back 15 days): web, API and /downloads return the activation page with the installation ID; signaling/SFU stop; restoring the date recovers automatically.
+- FIXED during the test: org names with spaces broke the settings file; meeting service crash-looped because the meeting image starts its own copy of signaling (now SIGNALING_DIST= in docker-compose.prod.yml and the installer's site override).
+- NOT RUN: Rocky Linux 9 + Podman + SELinux enforcing (no Rocky image reachable from the test environment), interactive whiptail wizard on a real console, firewalld/systemd steps, appliance and Windows Server builds (need KVM/Windows runners: GitHub workflow added), branch app installers on real Windows/macOS.

@@ -62,3 +62,5 @@ the matching public key path in QSVC_ONPREM_LICENSE_PUBLIC_KEY. The signed packa
 contains only the public key. This offline approval takes effect after the
 customer applies the file. It expires on the approved date and cannot be revoked
 remotely while the server remains offline.
+
+For room endpoints, follow the [Polycom over MPLS guide](19-polycom-mpls-setup.md).

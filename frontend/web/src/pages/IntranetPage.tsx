@@ -18,9 +18,21 @@ const downloadChoices: Array<{ id: DesktopDownload; label: string; availableKey:
     { id: 'macos-x64', label: 'Mac · Intel · ZIP', availableKey: 'macIntel', endpoint: 'macos/x64', filename: 'QS-VC-macOS-x64.zip', mime: 'application/zip' },
     { id: 'linux-x64', label: 'Linux · x64 · ZIP', availableKey: 'linuxX64', endpoint: 'linux/x64', filename: 'QS-VC-Linux-x64.zip', mime: 'application/zip' },
 ];
+type ServerFile = { available: boolean; filename?: string; size?: number; sha256?: string };
+const serverChoices: Array<{ id: string; os: 'linux' | 'windows' | 'any'; title: string; detail: string; recommended?: boolean }> = [
+    { id: 'linux-installer', os: 'linux', title: 'Linux server setup (.run)', detail: 'Guided installer for Rocky Linux 9 / RHEL 9 (Ubuntu 22.04/24.04 also supported). Works offline; installs, configures and starts QS-VC.', recommended: true },
+    { id: 'vmware-ova', os: 'any', title: 'Server appliance for VMware (.ova)', detail: 'Hardened Rocky Linux 9 virtual machine with QS-VC preinstalled. Import, set the IP on the console, finish in the setup wizard.' },
+    { id: 'hyperv-vhdx', os: 'windows', title: 'Server appliance for Hyper-V (.vhdx)', detail: 'The same appliance as a Generation 2 Hyper-V disk.' },
+    { id: 'kvm-qcow2', os: 'any', title: 'Server appliance for KVM / Proxmox / Nutanix (.qcow2)', detail: 'The same appliance as a QCOW2 disk image.' },
+    { id: 'windows-server', os: 'windows', title: 'Windows Server setup (.exe)', detail: 'For Windows Server 2019/2022/2025 with Hyper-V: creates and configures the QS-VC appliance VM for you.' },
+    { id: 'linux-package', os: 'linux', title: 'Offline server package (.tar.gz)', detail: 'Signed package for administrators who install manually or build their own media.' },
+];
+const formatSize = (bytes?: number) => !bytes ? '' : bytes >= 1e9 ? (bytes / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(bytes / 1e6)) + ' MB';
+
 export default function IntranetPage() {
     const session = useSession();
-    const [packageStatus, setPackageStatus] = useState<'checking' | 'available' | 'unavailable'>('checking');
+    const [serverStatus, setServerStatus] = useState<'checking' | 'ready' | 'unavailable'>('checking');
+    const [serverFiles, setServerFiles] = useState<Record<string, ServerFile>>({});
     useEffect(() => {
         const controller = new AbortController();
         const url = AUTH_API + '/api/auth/enterprise/server-package/status';
@@ -28,11 +40,17 @@ export default function IntranetPage() {
             .then(async response => {
                 if (!response.ok) throw new Error();
                 const status = await response.json();
-                if (!controller.signal.aborted) setPackageStatus(status.available === true ? 'available' : 'unavailable');
+                if (controller.signal.aborted) return;
+                const platforms: Record<string, ServerFile> = status.platforms && typeof status.platforms === 'object' ? status.platforms : {};
+                // Older servers report only one Linux package.
+                if (!status.platforms && status.available === true) platforms['linux-package'] = { available: true };
+                setServerFiles(platforms);
+                setServerStatus('ready');
             })
-            .catch(() => { if (!controller.signal.aborted) setPackageStatus('unavailable'); });
+            .catch(() => { if (!controller.signal.aborted) setServerStatus('unavailable'); });
         return () => controller.abort();
     }, []);
+    const visitorOs = typeof navigator === 'undefined' ? '' : /Windows/i.test(navigator.userAgent) ? 'windows' : /Linux|X11/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) ? 'linux' : '';
 
     const token = session.profile ? getToken() : '';
     const [result, setResult] = useState<{ token: string; access?: { workspaceUrl: string; downloads: DownloadAvailability; onlineDemo: boolean }; error?: string }>();
@@ -165,19 +183,32 @@ export default function IntranetPage() {
     return <div className="public-site"><SiteNav brandName="QS-Enterprise" /><main className="public-container service-page intranet-page" id="main-content">
         <header className="public-page-intro"><h1>{access?.onlineDemo ? 'Your online test workspace.' : access ? 'Your QS-Enterprise workspace.' : 'Meet inside your organisation.'}</h1><p>{access?.onlineDemo ? 'Open the shared QS-VC app to try your admin experience online.' : access ? 'Choose how you connect to your approved workspace.' : 'Set up QS-VC on your organisation’s Linux server.'}</p></header>
         <section className="service-card" aria-labelledby="onprem-package-title">
-            <h2 id="onprem-package-title">Server package for Linux administrators</h2>
-            <p>Download the signed archive from any device, then transfer it to your Linux server for setup. The setup guide explains how to connect your devices to the workspace.</p>
+            <h2 id="onprem-package-title">Install the QS-VC server</h2>
+            <p>Install once on a server in your data centre or hub. Every file is signed and works without internet after download. The server then provides the QS-VC app for Windows, Mac and Linux to all your branches on its own <code>/downloads</code> page.</p>
+            {serverStatus === 'checking' && <p role="status">Checking available downloads…</p>}
+            {serverStatus === 'unavailable' && <p role="status">Downloads are temporarily unavailable. Please try again later.</p>}
+            {serverStatus === 'ready' && <ul className="onprem-server-downloads">
+                {[...serverChoices].sort((a, b) => Number(b.os === visitorOs) - Number(a.os === visitorOs)).map(choice => {
+                    const item = serverFiles[choice.id];
+                    return <li key={choice.id} className="onprem-server-download">
+                        <h3>{choice.title}{choice.recommended && <span className="enterprise-access-badge"> Recommended</span>}</h3>
+                        <p>{choice.detail}</p>
+                        {item?.available ? <>
+                            <a className="qsvc-action" href={AUTH_API + '/api/auth/enterprise/server-package/' + choice.id} download>
+                                <ActionContents><span className="mi" aria-hidden="true">download</span>Download{item.size ? ' · ' + formatSize(item.size) : ''}</ActionContents>
+                            </a>
+                            {item.sha256 && <p className="onprem-checksum">SHA-256 <code>{item.sha256}</code></p>}
+                        </> : <p role="status">Coming soon</p>}
+                    </li>;
+                })}
+            </ul>}
             <div className="onprem-installer-actions">
-                {packageStatus === 'available' && <a className="qsvc-action" href={AUTH_API + '/api/auth/enterprise/trial-package'}>
-                    <ActionContents><span className="mi" aria-hidden="true">download</span>Download server package</ActionContents>
-                </a>}
                 <a className="qsvc-action qsvc-action--secondary" href={setupGuide} target="_blank" rel="noreferrer">
                     <ActionContents><span className="mi" aria-hidden="true">picture_as_pdf</span>Read setup guide</ActionContents>
                     <span className="sr-only"> (PDF, opens in a new tab)</span>
                 </a>
             </div>
-            <p role="status">{packageStatus === 'checking' ? 'Checking package availability…'
-                : packageStatus === 'unavailable' ? 'The server package is currently unavailable.' : ''}</p>
+            <p>Before installing, compare the release key fingerprints shown by the installer with the ones QS-VC sends you separately. After installation you have 14 days of full use; contact QS-VC with your installation ID to activate.</p>
         </section>
         <section className="service-card onprem-devices" aria-labelledby="onprem-devices-title">
             <h2 id="onprem-devices-title">Join from your device</h2>

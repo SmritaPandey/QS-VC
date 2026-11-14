@@ -59,6 +59,13 @@ gate = """    forward_auth trial-gateway:4010 {
 """
 path.write_text(text.replace(anchor, gate + anchor))
 CADDY
+# Branch app installers served by the hub at https://<server>/downloads (optional; signed with the package).
+if [[ -n ${QSVC_CLIENTS_DIR:-} ]]; then
+  [[ -d $QSVC_CLIENTS_DIR ]] || { echo "QSVC_CLIENTS_DIR is not a directory" >&2; exit 2; }
+  mkdir -m 755 "$output/clients"
+  find "$QSVC_CLIENTS_DIR" -maxdepth 1 -type f \( -name '*.exe' -o -name '*.msi' -o -name '*.dmg' -o -name '*.pkg' -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \) \
+    -exec install -m 644 {} "$output/clients/" \;
+fi
 (cd "$output" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS)
 bash "$package/release/sign.sh" "$output" "$3" "$4"
 archive=$(mktemp "${output}.tar.gz.XXXXXX")

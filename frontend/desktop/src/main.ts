@@ -6,7 +6,8 @@
  * process (no browser CORS, the session token never touches page storage). Only a meeting
  * itself opens the server's meeting room page; leaving the meeting returns to the app.
  *
- * Organisation address: first-run screen, or IT pre-sets `workspace.json` next to QS-VC.exe
+ * Organisation address: first-run screen, or IT pre-sets `workspace.json` next to QS-VC.exe, in
+ * %ProgramData%\QS-VC (Windows installer /SERVERURL=), /Library/Application Support/QS-VC (macOS) or /etc/qsvc (Linux)
  * ({"workspaceUrl":"https://..."}), or QSVC_WEB_URL.
  */
 import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell, session, desktopCapturer, dialog, net, nativeTheme, safeStorage, clipboard } from 'electron';
@@ -62,7 +63,16 @@ function parseWorkspace(value: unknown): URL | null {
 
 function loadWorkspace(): URL | null {
     const candidates: unknown[] = [process.env.QSVC_WEB_URL, readConfig().workspaceUrl];
-    try { candidates.push(JSON.parse(fs.readFileSync(path.join(path.dirname(process.execPath), 'workspace.json'), 'utf8')).workspaceUrl); } catch { /* not pre-set */ }
+    // IT presets: next to the executable, then the system-wide file written by the installer, MDM or Group Policy.
+    const presets = [
+        path.join(path.dirname(process.execPath), 'workspace.json'),
+        process.platform === 'win32' ? path.join(process.env.ProgramData || 'C:\\ProgramData', 'QS-VC', 'workspace.json')
+            : process.platform === 'darwin' ? '/Library/Application Support/QS-VC/workspace.json'
+            : '/etc/qsvc/workspace.json',
+    ];
+    for (const preset of presets) {
+        try { candidates.push(JSON.parse(fs.readFileSync(preset, 'utf8')).workspaceUrl); } catch { /* not pre-set */ }
+    }
     for (const value of candidates) { const url = value ? parseWorkspace(value) : null; if (url) return url; }
     return null;
 }

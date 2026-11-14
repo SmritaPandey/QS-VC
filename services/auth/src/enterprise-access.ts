@@ -176,23 +176,55 @@ export function enterpriseRouter(
             return res.json({ status: rows[0].status, notificationSent });
         }));
     }
-    const trialArchive = async () => {
-        const file = process.env.ENTERPRISE_ONPREM_TRIAL_INSTALLER;
-        if (!file || !path.isAbsolute(file) || !file.endsWith('.tar.gz')) return undefined;
-        try { return (await stat(file)).isFile() ? file : undefined; } catch { return undefined; }
+    // Public On-Prem server downloads, one per platform. Each file is optional: a missing file shows
+    // "Coming soon" on the On-Prem page. A sidecar "<file>.sha256" (first word = hex digest) is published too.
+    const serverDownloads = {
+        'linux-installer': { env: 'ENTERPRISE_ONPREM_LINUX_INSTALLER', ext: '.run' },
+        'linux-package': { env: 'ENTERPRISE_ONPREM_TRIAL_INSTALLER', ext: '.tar.gz' },
+        'vmware-ova': { env: 'ENTERPRISE_ONPREM_OVA', ext: '.ova' },
+        'hyperv-vhdx': { env: 'ENTERPRISE_ONPREM_VHDX', ext: '.zip' },
+        'kvm-qcow2': { env: 'ENTERPRISE_ONPREM_QCOW2', ext: '.qcow2' },
+        'windows-server': { env: 'ENTERPRISE_ONPREM_WINDOWS_SERVER', ext: '.exe' },
+    } as const;
+    type ServerPlatform = keyof typeof serverDownloads;
+    const serverFile = async (platform: ServerPlatform) => {
+        const { env, ext } = serverDownloads[platform];
+        const file = process.env[env];
+        if (!file || !path.isAbsolute(file) || !file.endsWith(ext)) return undefined;
+        try {
+            const info = await stat(file);
+            if (!info.isFile()) return undefined;
+            let sha256: string | undefined;
+            try { sha256 = (await readFile(file + '.sha256', 'utf8')).trim().split(/\s+/)[0]?.toLowerCase(); } catch { /* optional */ }
+            return { file, size: info.size, sha256: sha256 && /^[0-9a-f]{64}$/.test(sha256) ? sha256 : undefined };
+        } catch { return undefined; }
+    };
+    const sendServerFile = async (platform: ServerPlatform, res: Response) => {
+        res.set('Cache-Control', 'no-store');
+        const found = await serverFile(platform);
+        if (!found) return res.status(503).type('text/plain').send('This QS-VC server download is not available yet. Please check back later.');
+        return res.download(found.file, path.basename(found.file), error => {
+            if (error && !res.headersSent) res.sendStatus(503);
+        });
     };
     router.get('/server-package/status', async (_req, res) => {
         res.set('Cache-Control', 'no-store');
-        return res.json({ available: Boolean(await trialArchive()) });
+        const platforms: Record<string, { available: boolean; filename?: string; size?: number; sha256?: string }> = {};
+        for (const platform of Object.keys(serverDownloads) as ServerPlatform[]) {
+            const found = await serverFile(platform);
+            platforms[platform] = found
+                ? { available: true, filename: path.basename(found.file), size: found.size, sha256: found.sha256 }
+                : { available: false };
+        }
+        return res.json({ available: Object.values(platforms).some(item => item.available), platforms });
     });
-    router.get('/trial-package', async (_req, res) => {
-        res.set('Cache-Control', 'no-store');
-        const file = await trialArchive();
-        if (!file) return res.status(503).type('text/plain').send('The Linux server package is not available. Please check back later.');
-        return res.download(file, 'QS-VC-On-prem-Installer.tar.gz', error => {
-            if (error && !res.headersSent) res.sendStatus(503);
-        });
+    router.get('/server-package/:platform', async (req, res) => {
+        const platform = req.params.platform;
+        if (!Object.prototype.hasOwnProperty.call(serverDownloads, platform)) return res.sendStatus(404);
+        return sendServerFile(platform as ServerPlatform, res);
     });
+    // Older links to the Linux server package keep working.
+    router.get('/trial-package', async (_req, res) => sendServerFile('linux-package', res));
     router.use(async (req, res, next) => {
         res.setHeader('Cache-Control', 'no-store');
         try {

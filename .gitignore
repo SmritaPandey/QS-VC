@@ -5,6 +5,8 @@ node_modules/
 # Build output
 dist/
 build/
+# Electron-builder resources (NSIS include for the Windows installer) are source, not output.
+!/frontend/desktop/build/
 *.tsbuildinfo
 
 # Environment
@@ -74,10 +76,17 @@ release/
 !/deploy/vc-onprem/release/manifest.py
 !/deploy/vc-onprem/release/*.md
 !/deploy/vc-onprem/release/VERSION
+!/deploy/vc-onprem/release/vex/
 
 /deploy/aws/license-private/
 
 # Generated On-prem release archives and private key material
-/deploy/aws/installers/*.tar.gz
+/deploy/aws/installers/*
+!/deploy/aws/installers/README.md
 *.pem
 *.key
+
+# On-prem installer build outputs
+/deploy/vc-onprem/appliance/out-*/
+/deploy/vc-onprem/appliance/packer_cache/
+/deploy/vc-onprem/windows-server/output/

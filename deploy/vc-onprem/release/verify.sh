@@ -7,8 +7,10 @@ for item in manifest.json manifest.ed25519.sig manifest.ml-dsa-65.sig; do
   [[ -f "$release/$item" && ! -L "$release/$item" ]] || exit 2
 done
 # Keys and verifier come from an independent, trusted channel.
-openssl asn1parse -in "$2" | grep -Eq "OBJECT *:ED25519$"
-openssl asn1parse -in "$3" | grep -Eq "OBJECT *:(ML-DSA-65|id-ml-dsa-65)$"
-openssl pkeyutl -verify -pubin -inkey "$2" -rawin -in "$release/manifest.json" -sigfile "$release/manifest.ed25519.sig"
-openssl pkeyutl -verify -pubin -inkey "$3" -rawin -in "$release/manifest.json" -sigfile "$release/manifest.ml-dsa-65.sig"
+# QSVC_OPENSSL lets the installer use its bundled OpenSSL 3.5 (stock Rocky/RHEL 9 and
+# Amazon Linux OpenSSL cannot verify ML-DSA-65).
+"${QSVC_OPENSSL:-openssl}" asn1parse -in "$2" | grep -Eq "OBJECT *:ED25519$"
+"${QSVC_OPENSSL:-openssl}" asn1parse -in "$3" | grep -Eq "OBJECT *:(ML-DSA-65|id-ml-dsa-65)$"
+"${QSVC_OPENSSL:-openssl}" pkeyutl -verify -pubin -inkey "$2" -rawin -in "$release/manifest.json" -sigfile "$release/manifest.ed25519.sig"
+"${QSVC_OPENSSL:-openssl}" pkeyutl -verify -pubin -inkey "$3" -rawin -in "$release/manifest.json" -sigfile "$release/manifest.ml-dsa-65.sig"
 python3 "$script_dir/manifest.py" verify "$release"

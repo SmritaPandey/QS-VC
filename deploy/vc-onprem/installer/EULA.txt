@@ -1,0 +1,8 @@
+QS-VC END USER LICENCE AGREEMENT
+
+DRAFT-EULA-PLACEHOLDER: replace this file with the licence text approved by
+NeurQ AI Labs Private Limited's legal counsel before any customer release.
+Release builds refuse to run while this line is present.
+
+Until then, use of this software is governed only by the written agreement
+between your organisation and the QS-VC publisher.

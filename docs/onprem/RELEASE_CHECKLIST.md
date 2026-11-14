@@ -25,3 +25,22 @@
 - The gate stays `--fail-on high` for all findings, including wont-fix. A finding that cannot be remediated
   needs a person-reviewed OpenVEX file for that exact image in `deploy/vc-onprem/release/vex/`
   (rules in its README, enforced by `check-vex.py`). Never widen the gate itself.
+
+## Installers (after the signed server package)
+
+1. **Branch apps**: GitHub → Actions → *On-prem installers* (repository must be private), `build_desktop`.
+   Download the Windows (EXE + MSI), macOS (DMG + PKG) and Linux (DEB + RPM + AppImage) artifacts into
+   `~/qsvc-build/clients/`. Without code-signing certificates Windows shows "Unknown publisher" and macOS
+   needs right-click → Open; add `CSC_LINK`/`CSC_KEY_PASSWORD` and Apple notarisation secrets when available.
+2. **Server package with branch apps inside**: re-run `bundle.sh` with `QSVC_CLIENTS_DIR=~/qsvc-build/clients`
+   so the hub serves them at `https://<server>/downloads`.
+3. **Verifier**: `bash deploy/vc-onprem/installer/build-verifier.sh ~/qsvc-build/qsvc-openssl` (static OpenSSL 3.5.9).
+4. **Linux server setup (.run)**: replace `deploy/vc-onprem/installer/EULA.txt` with the approved licence text, then
+   `QSVC_VERIFIER_OPENSSL=~/qsvc-build/qsvc-openssl QSVC_RELEASE_KEY_DIR=~/qsvc-release-keys-2026-11 bash deploy/vc-onprem/installer/build-run.sh <signed .tar.gz> ~/qsvc-release-keys-2026-11 ~/qsvc-build/installers`.
+5. **Appliance (OVA/VHDX/QCOW2)**: upload the .run to private storage, create a 1-hour link, run the workflow with
+   `build_appliance`, `run_url`, `run_sha256` and the Rocky 9 minimal ISO SHA-256 (from the Rocky CHECKSUM file).
+6. **Windows Server setup (.exe)**: same workflow, `build_windows_server`; publish next to the `-HyperV.zip`.
+7. **Publish**: copy files to `deploy/aws/installers/` on the web server with these names, each with a `.sha256`:
+   `qsvc-server-setup.run`, `QS-VC-On-prem-Installer.tar.gz`, `QS-VC-Server-Appliance.ova`,
+   `QS-VC-Server-Appliance-HyperV.zip`, `QS-VC-Server-Appliance.qcow2`, `QS-VC-Server-Setup.exe`.
+   The On-Prem page lists each one automatically ("Coming soon" until present).

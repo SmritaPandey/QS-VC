@@ -1,0 +1,35 @@
+# Rocky Linux 9 minimal kickstart for the QS-VC appliance (CIS-oriented defaults).
+text
+lang en_US.UTF-8
+keyboard us
+timezone UTC --utc
+network --bootproto=dhcp --activate --onboot=yes --hostname=qsvc-appliance
+rootpw --lock
+user --name=qsvcbuild --groups=wheel --password=${build_password} --plaintext
+selinux --enforcing
+firewall --enabled --ssh
+services --enabled=chronyd,firewalld --disabled=kdump
+bootloader --timeout=3 --append="audit=1"
+zerombr
+clearpart --all --initlabel
+autopart --type=lvm --nohome
+skipx
+firstboot --disable
+reboot
+%packages --ignoremissing
+@^minimal-environment
+podman
+newt
+python3
+iproute
+chrony
+policycoreutils-python-utils
+container-selinux
+aide
+audit
+-kexec-tools
+%end
+%post
+echo 'qsvcbuild ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/90-qsvcbuild
+chmod 440 /etc/sudoers.d/90-qsvcbuild
+%end

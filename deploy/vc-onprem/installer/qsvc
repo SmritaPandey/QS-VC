@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# qsvc — manage an installed QS-VC server.  Usage: qsvc status|start|stop|restart|logs [service]|ca|support-bundle|version
+set -euo pipefail
+PREFIX=/opt/qsvc; ETC=/etc/qsvc
+[[ $(id -u) == 0 ]] || { echo 'Run as root (sudo qsvc ...)' >&2; exit 1; }
+[[ -f $ETC/qsvc.env && -f $ETC/runtime ]] || { echo 'QS-VC is not installed on this server.' >&2; exit 1; }
+# shellcheck disable=SC1091
+. "$ETC/runtime"
+DOCKER=docker
+if [[ $RUNTIME == podman ]]; then export DOCKER_HOST=unix:///run/podman/podman.sock; DOCKER=podman; fi
+compose() {
+  /usr/local/libexec/qsvc-compose -p qsvc --project-directory "$PREFIX/current" --env-file "$ETC/qsvc.env" \
+    -f "$PREFIX/current/docker-compose.prod.yml" -f "$PREFIX/current/compose.offline.yml" -f "$ETC/compose.site.yml" "$@"
+}
+SERVICES=(postgres redis coturn trial-gateway sfu signaling auth meeting web caddy)
+case "${1:-status}" in
+  start)   compose up -d --no-build --pull never --no-deps "${SERVICES[@]}" ;;
+  stop)    compose stop ;;
+  restart) compose stop; compose up -d --no-build --pull never --no-deps "${SERVICES[@]}" ;;
+  status)  echo "QS-VC $VERSION ($RUNTIME) · installation $(cat /var/lib/qsvc/onprem-trial/installation-id 2>/dev/null)"
+           compose ps --format 'table {{.Service}}\t{{.Status}}' ;;
+  logs)    if [[ -n ${2:-} ]]; then compose logs --tail 200 -f "$2"; else compose logs --tail 100; fi ;;
+  ca)      compose exec -T caddy cat /data/caddy/pki/authorities/local/root.crt >"$PREFIX/downloads/QS-VC-Root-CA.crt"
+           chmod 644 "$PREFIX/downloads/QS-VC-Root-CA.crt"; echo "Saved $PREFIX/downloads/QS-VC-Root-CA.crt" ;;
+  support-bundle)
+           out="/root/qsvc-support-$(date +%Y%m%d-%H%M%S).tar.gz"; tmp=$(mktemp -d)
+           { echo "version $VERSION runtime $RUNTIME"; uname -a; cat /etc/os-release; df -h; free -m; } >"$tmp/system.txt" 2>&1
+           compose ps >"$tmp/services.txt" 2>&1 || true
+           for s in "${SERVICES[@]}"; do compose logs --no-color --tail 500 "$s" >"$tmp/$s.log" 2>&1 || true; done
+           sed -E 's/^([A-Z_]*(SECRET|PASSWORD|TOKEN|KEY)[A-Z_]*)=.*/\1=<removed>/' "$ETC/qsvc.env" >"$tmp/qsvc.env.redacted"
+           cp /var/log/qsvc-setup.log "$tmp/" 2>/dev/null || true
+           tar -C "$tmp" -czf "$out" . && rm -rf "$tmp" && chmod 600 "$out" && echo "Support bundle (secrets removed): $out" ;;
+  version) echo "QS-VC $VERSION" ;;
+  *) echo 'Usage: qsvc status|start|stop|restart|logs [service]|ca|support-bundle|version' >&2; exit 2 ;;
+esac

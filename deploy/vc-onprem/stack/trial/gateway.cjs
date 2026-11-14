@@ -16,8 +16,8 @@ createServer((req, res) => {
         const value = readFileSync('/trial/installation-id', 'utf8').trim();
         if (/^[0-9a-f-]{36}$/.test(value)) installationId = value;
     } catch { /* Older installs can be assigned an ID by rerunning setup. */ }
-    const title = expired ? 'Your 14-day trial has ended' : 'This workspace is unavailable';
-    const message = expired ? 'Contact QS-VC to continue using this On-prem workspace.' : 'Ask your administrator to check the On-prem installation.';
+    const title = expired ? 'This QS-VC installation needs activation' : 'This workspace is unavailable';
+    const message = expired ? 'The 14 days of use included with this installation have ended. Contact QS-VC with the installation ID below; once QS-VC approves it, the workspace continues with all its data.' : 'Ask your administrator to check the On-prem installation.';
     res.statusCode = expired ? 403 : 503;
     if (!(req.headers.accept || '').includes('text/html')) {
         res.setHeader('Content-Type', 'application/json; charset=utf-8');

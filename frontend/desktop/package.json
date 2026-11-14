@@ -14,14 +14,18 @@
         "package:mac:x64": "npm run build && electron-builder --mac zip --x64",
         "package:linux": "npm run package:linux:x64",
         "package:linux:x64": "npm run build && electron-builder --linux zip --x64",
-        "package:win:x64": "npm run build && electron-builder --win zip --x64"
+        "package:win:x64": "npm run build && electron-builder --win zip --x64",
+        "package:win:installers": "npm run build && electron-builder --win nsis msi --x64",
+        "package:mac:installers": "npm run build && electron-builder --mac dmg pkg --arm64 && electron-builder --mac dmg pkg --x64",
+        "package:linux:installers": "npm run build && electron-builder --linux deb rpm AppImage --x64"
     },
     "build": {
         "appId": "com.qsvc.desktop",
         "productName": "QS-VC",
-        "copyright": "QS-VC",
+        "copyright": "Copyright © 2026 QS-VC",
         "directories": {
-            "output": "release"
+            "output": "release",
+            "buildResources": "build"
         },
         "files": [
             "dist/**/*",
@@ -40,6 +44,18 @@
         "win": {
             "target": [
                 {
+                    "target": "nsis",
+                    "arch": [
+                        "x64"
+                    ]
+                },
+                {
+                    "target": "msi",
+                    "arch": [
+                        "x64"
+                    ]
+                },
+                {
                     "target": "zip",
                     "arch": [
                         "x64"
@@ -48,10 +64,28 @@
             ],
             "icon": "assets/icon.ico",
             "signAndEditExecutable": false,
-            "artifactName": "QS-VC-Windows-${arch}.zip"
+            "artifactName": "QS-VC-Windows-${arch}.${ext}"
         },
         "linux": {
             "target": [
+                {
+                    "target": "deb",
+                    "arch": [
+                        "x64"
+                    ]
+                },
+                {
+                    "target": "rpm",
+                    "arch": [
+                        "x64"
+                    ]
+                },
+                {
+                    "target": "AppImage",
+                    "arch": [
+                        "x64"
+                    ]
+                },
                 {
                     "target": "zip",
                     "arch": [
@@ -61,11 +95,27 @@
             ],
             "icon": "assets/icon.png",
             "category": "Network",
-            "artifactName": "QS-VC-Linux-${arch}.zip",
-            "executableName": "qs-vc-bin"
+            "artifactName": "QS-VC-Linux-${arch}.${ext}",
+            "executableName": "qs-vc-bin",
+            "maintainer": "QS-VC <support@qsvcmeet.com>",
+            "synopsis": "QS-VC video meetings for your organisation"
         },
         "mac": {
             "target": [
+                {
+                    "target": "dmg",
+                    "arch": [
+                        "arm64",
+                        "x64"
+                    ]
+                },
+                {
+                    "target": "pkg",
+                    "arch": [
+                        "arm64",
+                        "x64"
+                    ]
+                },
                 {
                     "target": "zip",
                     "arch": [
@@ -76,7 +126,7 @@
             ],
             "icon": "assets/icon.png",
             "category": "public.app-category.video",
-            "artifactName": "QS-VC-macOS-${arch}.zip",
+            "artifactName": "QS-VC-macOS-${arch}.${ext}",
             "identity": null,
             "hardenedRuntime": false,
             "gatekeeperAssess": false,
@@ -85,7 +135,50 @@
                 "NSMicrophoneUsageDescription": "QS-VC uses your microphone for video meetings."
             }
         },
-        "afterPack": "scripts/after-pack.cjs"
+        "afterPack": "scripts/after-pack.cjs",
+        "nsis": {
+            "oneClick": false,
+            "perMachine": true,
+            "allowElevation": true,
+            "allowToChangeInstallationDirectory": true,
+            "createDesktopShortcut": true,
+            "createStartMenuShortcut": true,
+            "shortcutName": "QS-VC",
+            "uninstallDisplayName": "QS-VC",
+            "runAfterFinish": true,
+            "include": "build/installer.nsh",
+            "artifactName": "QS-VC-Setup-${version}-${arch}.${ext}",
+            "deleteAppDataOnUninstall": false,
+            "installerIcon": "assets/icon.ico",
+            "uninstallerIcon": "assets/icon.ico"
+        },
+        "msi": {
+            "perMachine": true,
+            "oneClick": false,
+            "createDesktopShortcut": true,
+            "createStartMenuShortcut": true,
+            "shortcutName": "QS-VC",
+            "artifactName": "QS-VC-${version}-${arch}.${ext}",
+            "upgradeCode": "9c8e5f3a-7b2d-4c41-9a6e-2f1d0b8c4e71"
+        },
+        "dmg": {
+            "artifactName": "QS-VC-${version}-macOS-${arch}.${ext}"
+        },
+        "pkg": {
+            "artifactName": "QS-VC-${version}-macOS-${arch}.${ext}",
+            "installLocation": "/Applications",
+            "allowAnywhere": false,
+            "isRelocatable": false
+        },
+        "deb": {
+            "artifactName": "qs-vc_${version}_amd64.${ext}"
+        },
+        "rpm": {
+            "artifactName": "qs-vc-${version}.x86_64.${ext}"
+        },
+        "appImage": {
+            "artifactName": "QS-VC-${version}-x86_64.${ext}"
+        }
     },
     "devDependencies": {
         "electron": "45.2.3",
@@ -95,5 +188,6 @@
     "author": "QS-VC",
     "allowScripts": {
         "electron@45.2.3": true
-    }
+    },
+    "homepage": "https://qsvcmeet.com"
 }

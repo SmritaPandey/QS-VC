@@ -1,0 +1,16 @@
+[Unit]
+Description=QS-VC appliance first-boot setup (console)
+After=network-online.target systemd-user-sessions.service
+Wants=network-online.target
+ConditionPathExists=!/etc/qsvc/appliance-configured
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/qsvc-firstboot
+StandardInput=tty
+StandardOutput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
