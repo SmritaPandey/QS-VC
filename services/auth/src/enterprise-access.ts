@@ -199,11 +199,11 @@ export function enterpriseRouter(
             return { file, size: info.size, sha256: sha256 && /^[0-9a-f]{64}$/.test(sha256) ? sha256 : undefined };
         } catch { return undefined; }
     };
-    const sendServerFile = async (platform: ServerPlatform, res: Response) => {
+    const sendServerFile = async (platform: ServerPlatform, res: Response, downloadName?: string) => {
         res.set('Cache-Control', 'no-store');
         const found = await serverFile(platform);
         if (!found) return res.status(503).type('text/plain').send('This QS-VC server download is not available yet. Please check back later.');
-        return res.download(found.file, path.basename(found.file), error => {
+        return res.download(found.file, downloadName || path.basename(found.file), error => {
             if (error && !res.headersSent) res.sendStatus(503);
         });
     };
@@ -224,7 +224,7 @@ export function enterpriseRouter(
         return sendServerFile(platform as ServerPlatform, res);
     });
     // Older links to the Linux server package keep working.
-    router.get('/trial-package', async (_req, res) => sendServerFile('linux-package', res));
+    router.get('/trial-package', async (_req, res) => sendServerFile('linux-package', res, 'QS-VC-On-prem-Installer.tar.gz'));
     router.use(async (req, res, next) => {
         res.setHeader('Cache-Control', 'no-store');
         try {

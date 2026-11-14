@@ -204,3 +204,26 @@ it('serves only the staged server installer without sign-in', async () => {
         rmSync(folder, { recursive: true, force: true });
     }
 });
+
+it('preserves the staged versioned name on the platform download route', async () => {
+    const folder = mkdtempSync(path.join(tmpdir(), 'qsvc-platform-installer-'));
+    try {
+        const name = 'QS-VC-On-prem-Installer-1.1.0.tar.gz';
+        const archive = path.join(folder, name);
+        writeFileSync(archive, 'test archive');
+        vi.stubEnv('ENTERPRISE_ONPREM_TRIAL_INSTALLER', archive);
+        const verify = vi.fn();
+        const router = enterpriseRouter(verify);
+        const routeIndex = router.stack.findIndex(layer => layer.route?.path === '/server-package/:platform');
+        expect(routeIndex).toBeLessThan(router.stack.findIndex(layer => !layer.route));
+        const res = { set: vi.fn(), download: vi.fn() };
+        await router.stack[routeIndex].route!.stack[0].handle(
+            { params: { platform: 'linux-package' } } as unknown as Request,
+            res as unknown as Response, vi.fn(),
+        );
+        expect(res.download).toHaveBeenCalledWith(archive, name, expect.any(Function));
+        expect(verify).not.toHaveBeenCalled();
+    } finally {
+        rmSync(folder, { recursive: true, force: true });
+    }
+});
