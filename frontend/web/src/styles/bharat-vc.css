@@ -1,0 +1,6 @@
+.host-tools-settings.bharat-vc-connection label { display: grid; gap: 8px; }
+.host-tools-settings.bharat-vc-connection input:not([type=checkbox]), .host-tools-settings.bharat-vc-connection select { width: 100%; min-height: 44px; height: auto; box-sizing: border-box; padding: 8px 12px; color: inherit; background: #203747; border: 1px solid #7891a3; border-radius: 8px; font: inherit; }
+.bharat-vc-connection input:focus-visible,.bharat-vc-connection select:focus-visible,.bharat-vc-connection button:focus-visible { outline: 2px solid #71e4d3; outline-offset: 3px; }
+.bharat-vc-connection p { overflow-wrap: anywhere; }
+
+.bharat-vc-connection button { min-height: 44px; padding: 8px 12px; }

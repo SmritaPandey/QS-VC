@@ -13,6 +13,7 @@ function chatHarness(open = false) {
     let now = 0;
     const messages: unknown[] = [];
     const context = {
+        alive: () => true, joinResult: { settings: { e2eeRequired: false } }, showNotice: vi.fn(),
         seenChatMessages: { current: new Set<string>() }, myPeerIdRef: { current: 'me' }, chatOpenRef: { current: open },
         setChatMessages: (update: (previous: unknown[]) => unknown[]) => { messages.splice(0, messages.length, ...update(messages)); },
         setIncomingChatMessage: vi.fn(), lastChatSound: { current: -Infinity }, playSound: vi.fn(), performance: { now: () => now },

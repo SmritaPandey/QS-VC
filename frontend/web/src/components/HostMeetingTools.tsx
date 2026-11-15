@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { signaling } from '../lib/signaling';
+import BharatVcConnection from './BharatVcConnection';
 import WaitingRoom, { type WaitingPeer } from './WaitingRoom';
 import '../styles/host-meeting-tools.css';
 
@@ -115,6 +116,7 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
                     }}>{bridgeBusy ? 'Enabling room devices…' : 'Enable room devices'}</button>}
                 {bridgeError && <p role="alert">{bridgeError}</p>}
             </section>}
+            {roomDevicesEnabled && role === 'host' && <BharatVcConnection />}
             <section className="host-tools-settings" aria-labelledby="host-access-title">
                 <h3 id="host-access-title">Meeting access</h3>
                 <p className="host-access-policy"><span className="mi mi-sm" aria-hidden="true">hourglass_top</span> Everyone waits for host or co-host approval before entering.</p>

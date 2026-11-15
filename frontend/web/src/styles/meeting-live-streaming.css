@@ -1,0 +1,11 @@
+.meeting-live-streaming { padding: 16px; color: #edf5fa; background: #162b3b; border: 1px solid #476174; border-radius: 12px; font: 400 14px/1.5 'IBM Plex Sans', sans-serif; }
+.meeting-live-streaming h3 { margin: 0 0 8px; font-size: 18px; font-weight: 500; }
+.meeting-live-streaming p { margin: 8px 0 12px; max-width: 65ch; }
+.meeting-live-streaming label { display: grid; gap: 6px; margin: 12px 0; }
+.meeting-live-streaming select { min-height: 44px; padding: 8px; color: #edf5fa; background: #102333; border: 1px solid #7296ad; border-radius: 8px; font: inherit; font-size: 16px; }
+.meeting-live-streaming .meeting-live-consent { display: flex; gap: 10px; align-items: flex-start; }
+.meeting-live-consent input { flex: 0 0 20px; width: 20px; height: 20px; margin-top: 2px; accent-color: #71e4d3; }
+.meeting-live-streaming button { min-height: 44px; margin: 4px 8px 4px 0; padding: 8px 12px; color: #102a43; background: #71e4d3; border: 0; border-radius: 8px; font: inherit; cursor: pointer; }
+.meeting-live-streaming button:disabled { opacity: .55; cursor: not-allowed; }
+.meeting-live-streaming .meeting-live-stop { color: #fff; background: #7a2d3e; }
+.meeting-live-streaming :is(button,select,input):focus-visible { outline: 2px solid #edf5fa; outline-offset: 3px; }

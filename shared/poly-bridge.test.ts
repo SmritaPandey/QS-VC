@@ -6,11 +6,12 @@ import { createPolyBridge } from '../deploy/poly-bridge/src/index';
 import type { SfuAdapter } from '../deploy/poly-bridge/src/sfuAdapter';
 
 const mocks = vi.hoisted(() => ({
-    start: vi.fn(), stop: vi.fn(), deny: vi.fn(), admit: vi.fn(), api: vi.fn(),
+    dialBharatVc: vi.fn(), start: vi.fn(), stop: vi.fn(), deny: vi.fn(), admit: vi.fn(), api: vi.fn(),
 }));
 vi.mock('../deploy/poly-bridge/src/config', () => ({ config: { apiToken: 'test-token' } }));
 vi.mock('../deploy/poly-bridge/src/esl', () => ({
     FreeSwitch: class extends EventEmitter {
+        dialBharatVc = mocks.dialBharatVc;
         deny = mocks.deny;
         admit = mocks.admit;
         api = mocks.api;
@@ -93,4 +94,31 @@ describe('Poly numeric dial-in lifecycle', () => {
         bridge.freeswitch.emit('lobby-left', { uuid: call.uuid, room: '1001' });
         expect(sfu.notifyLobbyLeft).toHaveBeenCalledWith('room', call.uuid);
     });
+});
+
+
+it('restricts Bharat VC dial requests, authenticates the bridge and never returns the invitation PIN', async () => {
+    const { bridge } = fixture();
+    const app = express(); app.use('/poly', bridge.http);
+    const server = createServer(app);
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    const base = `http://127.0.0.1:${port}/poly/rooms/room`;
+    const headers = { Authorization: 'Bearer test-token', 'Content-Type': 'application/json' };
+    const invitation = { conferenceId: '1234567890', gateway: 'sip.bharatvc.nic.in', pin: '123456', consent: true };
+    try {
+        expect((await fetch(base + '/bharatvc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(invitation) })).status).toBe(401);
+        await fetch(base + '/start', { method: 'POST', headers });
+        for (const input of [{ ...invitation, gateway: 'other.test' }, { ...invitation, pin: '1,execute=bad' }, { ...invitation, consent: false }]) expect((await fetch(base + '/bharatvc', { method: 'POST', headers, body: JSON.stringify(input) })).status).toBe(400);
+        expect(mocks.dialBharatVc).not.toHaveBeenCalled();
+        mocks.dialBharatVc.mockResolvedValueOnce('-ERR rejected').mockResolvedValueOnce('+OK call');
+        expect((await fetch(base + '/bharatvc', { method: 'POST', headers, body: JSON.stringify(invitation) })).status).toBe(502);
+        expect((await fetch(base + '/bharatvc', { method: 'POST', headers, body: JSON.stringify(invitation) })).status).toBe(409);
+        mocks.api.mockResolvedValueOnce('+OK');
+        expect((await fetch(base + '/bharatvc/disconnect', { method: 'POST', headers })).status).toBe(200);
+        const response = await fetch(base + '/bharatvc', { method: 'POST', headers, body: JSON.stringify(invitation) });
+        expect(response.status).toBe(202);
+        expect(await response.text()).not.toContain(invitation.pin);
+        expect(mocks.dialBharatVc).toHaveBeenCalledWith('room', '1234567890@sip.bharatvc.nic.in', invitation.pin, expect.stringMatching(/^[0-9a-f-]{36}$/));
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
 });

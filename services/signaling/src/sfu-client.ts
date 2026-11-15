@@ -40,6 +40,9 @@ async function sfuFetch(path: string, options: RequestInit = {}, timeoutMs = MED
 }
 
 export const sfuClient = {
+    disconnectBharatVc: (roomId: string) => sfuFetch(`/api/poly/rooms/${encodeURIComponent(roomId)}/bharatvc/disconnect`, { method: 'POST' }),
+    connectBharatVc: (roomId: string, invitation: { conferenceId: string; gateway: string; pin: string; consent: true }) =>
+        sfuFetch(`/api/poly/rooms/${encodeURIComponent(roomId)}/bharatvc`, { method: 'POST', body: JSON.stringify(invitation) }, 15000),
     startPolyRoom: (roomId: string) =>
         sfuFetch(`/api/poly/rooms/${encodeURIComponent(roomId)}/start`, { method: 'POST' }, 15000),
     polySnapshot: (roomId: string) => sfuFetch(`/api/poly/rooms/${encodeURIComponent(roomId)}/snapshot`, {}, PROBE_TIMEOUT_MS),

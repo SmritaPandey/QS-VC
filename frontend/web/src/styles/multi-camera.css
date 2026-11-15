@@ -1,0 +1,13 @@
+.multi-camera-panel { position: fixed; top: 86px; right: 20px; z-index: 160; width: min(440px, calc(100vw - 40px)); max-height: calc(100dvh - 180px); overflow-y: auto; box-sizing: border-box; border: 1px solid #587387; border-radius: 16px; padding: 20px; color: #edf5fa; background: #162331; font-size: 16px; line-height: 1.5; }
+.multi-camera-panel header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.multi-camera-panel h2 { margin: 0; font-size: 22px; font-weight: 500; }
+.multi-camera-panel p { margin-block: 12px; font-weight: 400; }
+.multi-camera-panel button { min-height: 44px; min-width: 44px; padding: 8px 12px; border: 1px solid #7296ad; border-radius: 8px; background: #203f56; color: #edf5fa; font: inherit; cursor: pointer; }
+.multi-camera-panel button:disabled { opacity: .6; cursor: not-allowed; }
+.multi-camera-panel :is(button,select):focus-visible { outline: 2px solid #43d9c2; outline-offset: 3px; }
+.multi-camera-panel label { display: grid; gap: 8px; }
+.multi-camera-panel select { width: 100%; min-height: 44px; padding: 8px; border: 1px solid #7296ad; border-radius: 8px; background: #102a43; color: #edf5fa; font: inherit; }
+.multi-camera-active { display: grid; gap: 12px; list-style: none; margin: 20px 0; padding: 0; }
+.multi-camera-active li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; overflow-wrap: anywhere; }
+.multi-camera-active li > span:last-child { font-size: 14px; color: #c2cfd8; }
+.multi-camera-start { margin-top: 16px; }

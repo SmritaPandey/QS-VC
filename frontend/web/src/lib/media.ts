@@ -299,6 +299,21 @@ export class MediaManager {
         return Array.from(this.producers.values()).some(p => p.kind === kind && !p.closed && this.hasSource(p, source));
     }
 
+    /** Read actual transport counters; failures stay unavailable rather than synthetic zeroes. */
+    async getTransportStats(): Promise<RTCStatsReport[]> {
+        const transports = [this.sendTransport, this.recvTransport].filter((transport): transport is msTypes.Transport => Boolean(transport && !transport.closed));
+        return Promise.all(transports.map(transport => transport.getStats()));
+    }
+
+    /** Exact ownership prevents a late camera start from closing a newer camera in the same slot. */
+    async closeProducer(producerId: string): Promise<void> {
+        const producer = this.producers.get(producerId);
+        if (!producer) return;
+        this.producers.delete(producerId);
+        producer.close();
+        await signaling.request('closeProducer', { producerId });
+    }
+
     /** Close one media source without interrupting another producer of the same kind. */
     async closeProducerBySource(source: string): Promise<void> {
         const producers = Array.from(this.producers.values()).filter(producer => this.hasSource(producer, source) && !producer.closed);
@@ -364,3 +379,69 @@ export class MediaManager {
 
 // Singleton
 export const media = new MediaManager();
+
+
+export type CameraSource = 'camera:2' | 'camera:3' | 'camera:4';
+export interface AdditionalCamera { source: CameraSource; deviceId: string; track: MediaStreamTrack; }
+type CameraPublisher = Pick<MediaManager, 'produce' | 'closeProducer'>;
+type CameraCapture = (constraints: MediaStreamConstraints) => Promise<MediaStream>;
+
+/** Owns only the three additional captures; the existing meeting camera remains the primary. */
+export class MultiCameraManager {
+    private cameras = new Map<CameraSource, AdditionalCamera & { stream: MediaStream; producerId: string }>();
+    private pending = new Map<CameraSource, { deviceId: string; cancelled: boolean; stream?: MediaStream }>();
+    constructor(private publisher: CameraPublisher = media, private capture: CameraCapture = constraints => navigator.mediaDevices.getUserMedia(constraints),
+        private onChange: (cameras: AdditionalCamera[]) => void = () => {}) {}
+
+    get active(): AdditionalCamera[] { return [...this.cameras.values()].map(({ source, deviceId, track }) => ({ source, deviceId, track })); }
+    private notify() { this.onChange(this.active); }
+
+    async startCamera(deviceId: string, primaryDeviceId?: string): Promise<AdditionalCamera> {
+        if (!deviceId.trim()) throw new Error('Choose a camera first.');
+        if (typeof document !== 'undefined' && document.hidden) throw new Error('Return to the meeting tab to start a camera.');
+        if (deviceId === primaryDeviceId || [...this.cameras.values(), ...this.pending.values()].some(camera => camera.deviceId === deviceId)) throw new Error('This camera is already in use.');
+        const source = (['camera:2', 'camera:3', 'camera:4'] as const).find(slot => !this.cameras.has(slot) && !this.pending.has(slot));
+        if (!source) throw new Error('You can use up to four cameras, including your main camera.');
+        const reservation: { deviceId: string; cancelled: boolean; stream?: MediaStream } = { deviceId, cancelled: false };
+        this.pending.set(source, reservation);
+        let stream: MediaStream | undefined;
+        let producerId: string | undefined;
+        try {
+            stream = await this.capture({ audio: false, video: { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30, max: 30 } } });
+            reservation.stream = stream;
+            const track = stream.getVideoTracks()[0];
+            if (reservation.cancelled || !track || track.readyState !== 'live') throw new Error('Camera start was cancelled.');
+            const actualDeviceId = track.getSettings().deviceId || deviceId;
+            if (actualDeviceId === primaryDeviceId || [...this.cameras.values()].some(camera => camera.deviceId === actualDeviceId) || [...this.pending.values()].some(other => other !== reservation && other.deviceId === actualDeviceId)) throw new Error('This camera is already in use.');
+            reservation.deviceId = actualDeviceId;
+            const producer = await this.publisher.produce(track, { source });
+            producerId = producer.id;
+            if (reservation.cancelled || track.readyState !== 'live') throw new Error('Camera start was cancelled.');
+            this.cameras.set(source, { source, deviceId: actualDeviceId, track, stream, producerId });
+            track.onended = () => { void this.stopCamera(source).catch(() => undefined); };
+            this.notify();
+            return { source, deviceId: actualDeviceId, track };
+        } catch (error) {
+            stream?.getTracks().forEach(track => { track.onended = null; track.stop(); });
+            if (producerId) await this.publisher.closeProducer(producerId).catch(() => undefined);
+            throw error;
+        } finally { if (this.pending.get(source) === reservation) this.pending.delete(source); }
+    }
+
+    async stopCamera(source: CameraSource): Promise<void> {
+        const reservation = this.pending.get(source);
+        if (reservation) { reservation.cancelled = true; reservation.stream?.getTracks().forEach(track => { track.onended = null; track.stop(); }); this.pending.delete(source); }
+        const camera = this.cameras.get(source);
+        if (!camera) return;
+        this.cameras.delete(source);
+        camera.stream.getTracks().forEach(track => { track.onended = null; track.stop(); });
+        this.notify();
+        await this.publisher.closeProducer(camera.producerId);
+    }
+
+    async stopAll(): Promise<void> {
+        for (const reservation of this.pending.values()) { reservation.cancelled = true; reservation.stream?.getTracks().forEach(track => { track.onended = null; track.stop(); }); }
+        this.pending.clear();
+        await Promise.all([...this.cameras.keys()].map(source => this.stopCamera(source)));
+    }
+}

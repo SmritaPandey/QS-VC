@@ -1,3 +1,5 @@
+import OrganisationBranding from '../components/OrganisationBranding';
+import AdminMeetingControls from '../components/AdminMeetingControls';
 import DownloadLeads from '../components/DownloadLeads';
 import AdminAnalytics from '../components/AdminAnalytics';
 import ThemeSelect from '../components/ThemeSelect';
@@ -23,14 +25,6 @@ interface DashboardStats {
     totalMeetingsToday: number;
     avgMeetingDuration: string;
     peakConcurrent: number;
-}
-
-interface ActiveMeeting {
-    meetingCode: string;
-    host: string;
-    participants: number;
-    startedAt: string;
-    isRecording: boolean;
 }
 
 interface UserRecord {
@@ -91,7 +85,6 @@ const AdminDashboard: React.FC = () => {
         authHealth: 'healthy', recordingHealth: 'healthy', uptime: '0h',
         totalMeetingsToday: 0, avgMeetingDuration: '0m', peakConcurrent: 0,
     });
-    const [meetings, setMeetings] = useState<ActiveMeeting[]>([]);
     const [users, setUsers] = useState<UserRecord[]>([]);
     const [recordings, setRecordings] = useState<RecordingRecord[]>([]);
     const [activeTab, setActiveTab] = useState<TabName>('overview');
@@ -143,21 +136,8 @@ const AdminDashboard: React.FC = () => {
             } catch { /* silent */ }
         };
 
-        const fetchMeetings = async () => {
-            try {
-                const res = await fetch(`${MEETING_URL}/api/meetings?status=active`, {
-                    headers: { Authorization: `Bearer ${getToken()}` },
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    setMeetings(data.meetings || []);
-                }
-            } catch { /* silent */ }
-        };
-
         fetchStats();
         fetchRecordings();
-        fetchMeetings();
 
         const interval = setInterval(fetchStats, 10000);
         return () => clearInterval(interval);
@@ -245,52 +225,7 @@ const AdminDashboard: React.FC = () => {
                 {activeTab === 'overview' && <AdminAnalytics onManageAccess={() => setActiveTab('users')} />}
 
                 {/* ━━━ MEETINGS TAB ━━━ */}
-                {activeTab === 'meetings' && (
-                    <div className="admin-meetings">
-                        <div className="tab-header">
-                            <h2>Active Meetings</h2>
-                            <span className="badge">{meetings.length} active</span>
-                        </div>
-                        {meetings.length === 0 ? (
-                            <div className="empty-state">
-                                <div className="empty-icon"><span className="mi" style={{ fontSize: '48px' }}>videocam</span></div>
-                                <p>No active meetings right now</p>
-                            </div>
-                        ) : (
-                            <table className="admin-table">
-                                <thead>
-                                    <tr>
-                                        <th>Meeting Code</th>
-                                        <th>Host</th>
-                                        <th>Participants</th>
-                                        <th>Started</th>
-                                        <th>Recording</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {meetings.map(m => (
-                                        <tr key={m.meetingCode}>
-                                            <td><code>{m.meetingCode}</code></td>
-                                            <td>{m.host}</td>
-                                            <td>{m.participants}</td>
-                                            <td>{new Date(m.startedAt).toLocaleTimeString()}</td>
-                                            <td>{m.isRecording ? <span style={{ color: 'var(--accent-danger)' }}><span className="mi mi-sm" style={{ verticalAlign: 'middle' }}>fiber_manual_record</span> Recording</span> : '—'}</td>
-                                            <td>
-                                                <button
-                                                    className="btn-sm"
-                                                    onClick={() => navigate(`/meeting/${m.meetingCode}`)}
-                                                >
-                                                    Join
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        )}
-                    </div>
-                )}
+                {activeTab === 'meetings' && <AdminMeetingControls />}
 
                 {/* ━━━ USERS TAB ━━━ */}
                 {activeTab === 'users' && (
@@ -448,6 +383,7 @@ const AdminDashboard: React.FC = () => {
                         <h2>Service status</h2>
 
                         <div className="system-sections">
+                            <OrganisationBranding />
                             <section className="system-section">
                                 <h3>Availability</h3>
                                 <div className="health-grid">

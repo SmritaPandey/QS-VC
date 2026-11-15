@@ -115,6 +115,11 @@ export class FreeSwitch extends EventEmitter {
     const dest = protocol === "h323" ? `h323/${target}` : `sofia/qsvc-poly/${target}`;
     return this.api(`originate {${vars}}${dest} qsvc-join-${room} XML qsvc-admitted`);
   }
+  dialBharatVc(room: string, target: string, pin: string, callId: string) {
+    // Values validated again at the command boundary; no FreeSWITCH expression is caller-controlled.
+    if (!/^[a-zA-Z0-9-]{1,80}$/.test(room) || !/^[0-9]{6,16}@(sip\.bharatvc\.nic\.in|bhvc\.nic\.in)$/.test(target) || !/^[0-9]{4,16}$/.test(pin) || !/^[0-9a-f-]{36}$/.test(callId)) throw new Error("Invalid Bharat VC destination");
+    return this.api(`originate {origination_uuid=${callId},originate_timeout=8,qsvc_room=${room},rtp_secure_media=mandatory,absolute_codec_string='G722,PCMU,PCMA,H264',execute_on_answer='send_dtmf ${pin}#'}sofia/qsvc-poly/${target};transport=tls qsvc-join-${room} XML qsvc-admitted`);
+  }
   listRoom(room: string) {
     return this.api(`conference ${room} json_list`);
   }

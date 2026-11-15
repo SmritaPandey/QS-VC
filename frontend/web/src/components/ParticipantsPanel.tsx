@@ -1,10 +1,12 @@
-import { useState, type CSSProperties } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import { isOnStage } from '../lib/meeting-layout';
 import { signaling } from '../lib/signaling';
 
 interface PeerData {
     peerId: string;
     displayName: string;
+    userId?: string | null;
+    isGuest?: boolean;
     audioTrack?: MediaStreamTrack;
     videoTrack?: MediaStreamTrack;
     role?: string;
@@ -31,6 +33,7 @@ interface Props {
     canManage?: boolean;
     onSpotlight?: (peerId: string | null) => void;
     onToggleStage?: (peerId: string, onStage: boolean) => void;
+    onTransferHost?: (peerId: string) => Promise<void>;
     canStartPrivateConversation?: boolean;
     privateConversationLimitLabel?: string;
     privateConversationPeerId?: string | null;
@@ -39,15 +42,18 @@ interface Props {
     onClose: () => void;
 }
 
-type Row = { peerId: string; displayName: string; isLocal: boolean; role?: string; micOn: boolean; camOn: boolean; handRaised: boolean; presenting: boolean; onStage?: boolean };
+type Row = { peerId: string; displayName: string; isLocal: boolean; userId?: string | null; isGuest?: boolean; role?: string; micOn: boolean; camOn: boolean; handRaised: boolean; presenting: boolean; onStage?: boolean };
 
-export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self', myRole = 'member', myOnStage = false, audioMuted = false, videoOff = false, handRaised = false, presenting = false, speaking = new Set(), webinar = false, spotlightId = null, canManage = false, onSpotlight, onToggleStage, canStartPrivateConversation = false, privateConversationLimitLabel = '2 min', privateConversationPeerId = null, privateConversationStatus = 'idle', onStartPrivateConversation, onClose }: Props) {
+export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self', myRole = 'member', myOnStage = false, audioMuted = false, videoOff = false, handRaised = false, presenting = false, speaking = new Set(), webinar = false, spotlightId = null, canManage = false, onSpotlight, onToggleStage, onTransferHost, canStartPrivateConversation = false, privateConversationLimitLabel = '2 min', privateConversationPeerId = null, privateConversationStatus = 'idle', onStartPrivateConversation, onClose }: Props) {
     const [searchQuery, setSearchQuery] = useState('');
+    const [transferringPeerId, setTransferringPeerId] = useState<string | null>(null);
+    const [transferError, setTransferError] = useState('');
+    const transferInFlight = useRef(false);
 
     const all: Row[] = [
         { peerId: myPeerId, displayName: `${displayName} (You)`, isLocal: true, role: myRole, micOn: !audioMuted, camOn: !videoOff, handRaised, presenting, onStage: myOnStage },
         ...Array.from(peers.values()).map(p => ({
-            peerId: p.peerId, displayName: p.displayName, isLocal: false, role: p.role, onStage: p.onStage,
+            peerId: p.peerId, displayName: p.displayName, isLocal: false, userId: p.userId, isGuest: p.isGuest, role: p.role, onStage: p.onStage,
             micOn: p.audioMuted !== undefined ? !p.audioMuted : !!p.audioTrack,
             camOn: p.videoOff !== undefined ? !p.videoOff && !!p.videoTrack : !!p.videoTrack,
             handRaised: !!p.handRaised, presenting: !!p.presenting,
@@ -86,9 +92,26 @@ export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self
         }
     };
 
+    const handleTransferHost = async (p: Row) => {
+        if (transferInFlight.current || !onTransferHost) return;
+        if (!window.confirm(`Make ${p.displayName} the host? They will receive host controls and you will no longer be the host. The meeting organiser will stay the same.`)) return;
+        transferInFlight.current = true;
+        setTransferringPeerId(p.peerId);
+        setTransferError('');
+        try {
+            await onTransferHost(p.peerId);
+        } catch (error) {
+            setTransferError(error instanceof Error && error.message ? error.message : 'Could not transfer host controls. Please try again.');
+        } finally {
+            transferInFlight.current = false;
+            setTransferringPeerId(null);
+        }
+    };
+
     const row = (p: Row) => {
         const isSpeaking = speaking.has(p.peerId) && p.micOn;
         const manageable = canManage && !p.isLocal && p.role !== 'host';
+        const canTransferHost = manageable && myRole === 'host' && p.peerId !== myPeerId && !!p.userId && !p.isGuest && p.role !== 'guest' && !!onTransferHost;
         const isPrivateConversationPeer = privateConversationPeerId === p.peerId;
         return <div key={p.peerId} className="participant-item" data-speaking={isSpeaking || undefined}>
             <div className="participant-avatar" data-speaking={isSpeaking || undefined}>{p.displayName[0]?.toUpperCase() || '?'}</div>
@@ -125,6 +148,9 @@ export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self
                         {p.role === 'co-host' ? 'Remove co-host' : 'Make co-host'}
                     </button>
                 )}
+                {canTransferHost && <button type="button" className="participant-action participant-transfer-action" aria-label={`Make ${p.displayName} host`} disabled={transferringPeerId !== null} onClick={() => void handleTransferHost(p)}>
+                    {transferringPeerId === p.peerId ? 'Transferring…' : 'Make host'}
+                </button>}
                 {manageable && (
                     <button type="button" className="participant-icon-action host-danger" aria-label={`Remove ${p.displayName}`} title="Remove from meeting" onClick={() => void handleKickPeer(p.peerId, p.displayName)}>
                         <span className="mi mi-sm" aria-hidden="true">person_remove</span>
@@ -153,6 +179,8 @@ export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self
                 />
             </div>
 
+            {transferError && <p className="participant-transfer-error" role="alert">{transferError}</p>}
+            <p className="sr-only" role="status">{transferringPeerId ? 'Transferring host controls. Please wait.' : ''}</p>
             <div className="participants-list">
                 {groups.map(([title, rows]) => <section key={title} aria-label={title}>
                     {webinar && <h4 className="participants-group">{title} · {rows.length}</h4>}

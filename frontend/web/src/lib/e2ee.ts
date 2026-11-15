@@ -1,3 +1,4 @@
+import { E2EEDataCipher, type EncryptedChatEnvelope } from './e2ee-data';
 import { PQCManager, PQC_ALGORITHMS, type PQCSignature } from '../../../../shared/crypto/pqc';
 import { clearPrefixLength, FrameCrypto, KEY_ROTATION_MS } from './e2ee-frame';
 
@@ -80,6 +81,8 @@ export class E2EEManager {
     private active = false;
     private readonly keyListeners = new Set<() => void>();
     private senderFramesSeen = 0;
+    private data: E2EEDataCipher | null = null;
+    private readonly acceptedMeetingKeys = new Set<string>();
 
     constructor(private readonly meetingCode: string) {
         // Development-only switch to exercise the Safari/Firefox (worker) path in Chrome.
@@ -93,6 +96,9 @@ export class E2EEManager {
     /** Create this participant's ML-KEM-1024 / ML-DSA-87 identity and the signed bundle to publish. */
     async init(peerId: string): Promise<E2EEKeyBundle> {
         this.peerId = peerId;
+        this.data = new E2EEDataCipher(this.meetingCode, peerId,
+            async body => toBase64((await this.pqc.sign(body)).signature),
+            async (body, signature, publicKey) => this.pqc.verify(body, signatureRecord(signature), fromBase64(publicKey)));
         await this.pqc.init();
         if (this.mode !== 'script') this.frames = new FrameCrypto(this.meetingCode, peerId, this.prefix.slice());
         else {
@@ -135,6 +141,7 @@ export class E2EEManager {
         this.mek?.fill(0);
         this.mek = mek.slice();
         this.keyId = keyId;
+        this.data?.install(keyId, mek);
         if (this.frames) this.frames.setKey(keyId, mek);
         if (this.worker) this.worker.postMessage({ type: 'key', keyId, mek: mek.slice() });
         mek.fill(0);
@@ -181,8 +188,15 @@ export class E2EEManager {
         finally { shared.fill(0); }
         const associatedData = encoder.encode(`${ENVELOPE_LABEL}|${this.meetingCode}|${holderPeerId}|${ownPeerId}|${keyId}|${ciphertext}`);
         const mek = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: arrayBuffer(fromBase64(iv)), additionalData: arrayBuffer(associatedData) }, wrappingKey, arrayBuffer(fromBase64(encryptedKey))));
-        if (mek.length !== 32) throw new Error('Invalid meeting key length');
-        this.install(keyId, mek);
+        try {
+            if (mek.length !== 32) throw new Error('Invalid meeting key length');
+            const fingerprint = `${holderPeerId}:${toBase64(new Uint8Array(await crypto.subtle.digest('SHA-256', arrayBuffer(mek))))}`;
+            if (this.acceptedMeetingKeys.has(fingerprint)) throw new Error('Repeated meeting key envelope');
+            // Keep the complete session history: dropping old entries would reopen replay attacks.
+            if (this.acceptedMeetingKeys.size >= 1024) throw new Error('Secure session key history is full. Rejoin the meeting.');
+            this.acceptedMeetingKeys.add(fingerprint);
+            this.install(keyId, mek);
+        } finally { mek.fill(0); }
     }
 
     async waitUntilActive(timeoutMs = 15_000): Promise<void> {
@@ -250,12 +264,22 @@ export class E2EEManager {
      */
     getSenderFramesSeen(): number { return this.senderFramesSeen; }
 
+    async encryptChat(content: string): Promise<EncryptedChatEnvelope> {
+        if (!this.active || !this.data) throw new Error('Secure chat is waiting for the meeting key.');
+        return this.data.encrypt(content);
+    }
+    async decryptChat(envelope: EncryptedChatEnvelope, senderPeerId: string, signingPublicKey: string): Promise<string> {
+        if (!this.active || !this.data) throw new Error('Secure chat is waiting for the meeting key.');
+        return this.data.decrypt(envelope, senderPeerId, signingPublicKey);
+    }
+
     isActive(): boolean { return this.active; }
     getKeyId(): number { return this.keyId; }
     getCurrentEpoch(): number { return Math.floor(Date.now() / KEY_ROTATION_MS); }
 
     destroy(): void {
         this.active = false;
+        this.data?.destroy(); this.data = null;
         this.mek?.fill(0);
         this.mek = null;
         this.frames?.destroy();
@@ -263,6 +287,7 @@ export class E2EEManager {
         if (this.worker) { this.worker.postMessage({ type: 'destroy' }); this.worker.terminate(); this.worker = null; }
         this.prefix.fill(0);
         this.keyListeners.clear();
+        this.acceptedMeetingKeys.clear();
         this.pqc.destroy();
     }
 }

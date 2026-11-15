@@ -1,0 +1,10 @@
+.meeting-room .connection-quality-panel { position: absolute; z-index: 45; top: 76px; right: 16px; box-sizing: border-box; width: min(360px, calc(100% - 32px)); max-height: calc(100dvh - 180px); overflow: auto; padding: 16px; border: 1px solid #476174; border-radius: 16px; background: #162b3b; color: #edf5fa; font: 400 16px/1.5 'IBM Plex Sans', sans-serif; }
+.connection-quality-panel header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.connection-quality-panel h2 { margin: 0; font-size: 20px; font-weight: 500; }
+.connection-quality-panel button { min-width: 44px; min-height: 44px; border: 0; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; }
+.connection-quality-panel button:focus-visible { outline: 2px solid #71e4d3; }
+.connection-quality-panel dl { margin-block: 16px; }
+.connection-quality-panel dl div { display: flex; justify-content: space-between; gap: 16px; padding-block: 8px; }
+.connection-quality-panel dd { margin: 0; font-variant-numeric: tabular-nums; }
+.connection-quality-panel p { font-size: 14px; font-weight: 400; overflow-wrap: anywhere; }
+@media(max-width: 600px) { .meeting-room .connection-quality-panel { top: 64px; right: 12px; width: calc(100% - 24px); } }

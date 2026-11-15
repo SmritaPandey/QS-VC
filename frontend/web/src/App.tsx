@@ -19,6 +19,9 @@ import SsoComplete from './pages/SsoComplete';
 import PersonalSignInComplete from './pages/PersonalSignInComplete';
 import AdminDashboard from './pages/AdminDashboard';
 import ScheduleMeeting from './pages/ScheduleMeeting';
+import WebinarsPage from './pages/WebinarsPage';
+import WebinarPreviewPage from './pages/WebinarPreviewPage';
+import WebinarRegistrationPage from './pages/WebinarRegistrationPage';
 import { EntitlementsProvider } from './lib/entitlements';
 import { Gate, TrialEndedPrompt, UpgradePromptListener } from './components/PlanAccess';
 
@@ -90,6 +93,9 @@ export default function App() {
                 <Route path="/sso/complete" element={<SsoComplete />} />
                 <Route path="/organisation/sso" element={<OrganisationSso />} />
                 <Route path="/app" element={<OnPremAccess><Landing /></OnPremAccess>} />
+                <Route path="/webinars" element={<Gate feature="meeting_scheduling"><WebinarsPage /></Gate>} />
+                <Route path="/webinars/:id/preview" element={<Gate feature="meeting_scheduling"><WebinarPreviewPage /></Gate>} />
+                <Route path="/webinars/register/:publicId" element={<WebinarRegistrationPage />} />
                 <Route path="/schedule" element={<Gate feature="meeting_scheduling"><ScheduleMeeting /></Gate>} />
                 <Route path="/meeting/:meetingCode/preview" element={<OnPremAccess><PreMeeting /></OnPremAccess>} />
                 <Route path="/meeting/:meetingCode" element={<OnPremAccess><MeetingRoom /></OnPremAccess>} />

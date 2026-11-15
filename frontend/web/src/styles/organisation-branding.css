@@ -1,0 +1,16 @@
+.tenant-brand { display:inline-flex; align-items:center; gap:10px; min-width:0; max-width:100%; padding-inline-start:10px; border-inline-start:4px solid; color:var(--text-primary,#102a43); }
+.tenant-brand img { flex:none; object-fit:contain; max-width:72px; }
+.tenant-brand-copy { display:grid; min-width:0; gap:2px; }
+.tenant-brand strong { font-size:15px; font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:240px; }
+.tenant-brand small { font-size:10px; line-height:1.4; color:var(--text-secondary,#526b7a); }
+.tenant-brand--meeting strong { max-width:180px; }
+.pre-meeting-brand { grid-column:1/-1; margin-bottom:-18px; }
+.organisation-branding fieldset { display:grid; gap:14px; min-width:0; margin:0; padding:0; border:0; }
+.organisation-branding label { display:grid; gap:6px; font-weight:500; }
+.organisation-branding input { max-width:100%; min-height:44px; }
+.organisation-branding input[type=color] { width:80px; padding:4px; }
+.organisation-branding .branding-help { margin:0; color:var(--text-secondary); font-size:13px; line-height:1.6; }
+.organisation-branding button { min-height:44px; width:fit-content; }
+.branding-preview { padding:16px; background:var(--bg-secondary); border:1px solid var(--border-primary,var(--border-color,#d6e2e8)); border-radius:10px; }
+@media(max-width:600px) { .tenant-brand--meeting strong { max-width:100px; font-size:13px; } .pre-meeting-brand { margin-bottom:-16px; } }
+@media(forced-colors:active) { .tenant-brand { border-color:CanvasText !important; } }

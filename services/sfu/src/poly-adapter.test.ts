@@ -61,3 +61,19 @@ describe('Poly SFU adapter', () => {
         expect(adapter.snapshot('room')).toEqual({ producers: [], lobby: [], roster: [] });
     });
 });
+
+
+it('never exposes existing or newly created private conversation producers to the media bridge', async () => {
+    for (const appData of [{ type: 'private-audio' }, { source: 'private-audio' }]) {
+        const { adapter, room, producer } = fixture();
+        producer.appData = appData;
+        expect(await adapter.listBrowserProducers('room')).toEqual([]);
+        const handlers = { added: vi.fn(), removed: vi.fn() };
+        const unsubscribe = adapter.onBrowserProducers('room', handlers);
+        room.emit('newProducer', { peerId: 'browser', producer });
+        producer.observer.emit('close');
+        expect(handlers.added).not.toHaveBeenCalled();
+        expect(handlers.removed).not.toHaveBeenCalled();
+        unsubscribe();
+    }
+});

@@ -2,12 +2,14 @@
 # Convert the appliance QCOW2 into VMware OVA and Hyper-V VHDX (zipped), with SHA-256 files.
 #   bash make-images.sh out-<version>/qsvc-appliance-<version>.qcow2 <version> OUTPUT_DIR
 set -euo pipefail
+# Portable between the Ubuntu runner and macOS (BSD tools).
+sha256() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
 [[ $# == 3 ]] || { echo 'Usage: make-images.sh APPLIANCE.qcow2 VERSION OUTPUT_DIR' >&2; exit 2; }
 src=$1; ver=$2; out=$3; mkdir -p "$out"; work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 name="QS-VC-Server-Appliance-$ver"
 cp "$src" "$out/$name.qcow2"
 qemu-img convert -O vmdk -o subformat=streamOptimized "$src" "$work/$name-disk1.vmdk"
-vmdk_size=$(stat -c %s "$work/$name-disk1.vmdk"); cap=$(qemu-img info --output=json "$src" | python3 -c 'import json,sys;print(json.load(sys.stdin)["virtual-size"])')
+vmdk_size=$(wc -c <"$work/$name-disk1.vmdk" | tr -d " "); cap=$(qemu-img info --output=json "$src" | python3 -c 'import json,sys;print(json.load(sys.stdin)["virtual-size"])')
 cat >"$work/$name.ovf" <<OVF
 <?xml version="1.0" encoding="UTF-8"?>
 <Envelope xmlns="http://schemas.dmtf.org/ovf/envelope/1" xmlns:ovf="http://schemas.dmtf.org/ovf/envelope/1"
@@ -31,9 +33,9 @@ cat >"$work/$name.ovf" <<OVF
  </VirtualSystem>
 </Envelope>
 OVF
-( cd "$work" && sha256sum "$name.ovf" "$name-disk1.vmdk" | sed -E 's/^([0-9a-f]+)  (.*)$/SHA256(\2)= \1/' > "$name.mf" )
-tar -C "$work" -cf "$out/$name.ova" "$name.ovf" "$name.mf" "$name-disk1.vmdk"
+( cd "$work" && sha256 "$name.ovf" "$name-disk1.vmdk" | sed -E 's/^([0-9a-f]+)  (.*)$/SHA256(\2)= \1/' > "$name.mf" )
+COPYFILE_DISABLE=1 tar --format=ustar -C "$work" -cf "$out/$name.ova" "$name.ovf" "$name.mf" "$name-disk1.vmdk"
 qemu-img convert -O vhdx -o subformat=dynamic "$src" "$work/$name.vhdx"
 ( cd "$work" && zip -q -0 "$out/$name-HyperV.zip" "$name.vhdx" )
-( cd "$out" && sha256sum "$name.ova" > "$name.ova.sha256" && sha256sum "$name.qcow2" > "$name.qcow2.sha256" && sha256sum "$name-HyperV.zip" > "$name-HyperV.zip.sha256" )
+( cd "$out" && sha256 "$name.ova" > "$name.ova.sha256" && sha256 "$name.qcow2" > "$name.qcow2.sha256" && sha256 "$name-HyperV.zip" > "$name-HyperV.zip.sha256" )
 ls -la "$out"

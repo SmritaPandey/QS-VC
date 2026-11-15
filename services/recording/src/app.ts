@@ -3,6 +3,7 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createS3Storage, type RecordingStorage } from './storage.js';
+import { createLiveStreaming } from './live-streaming.js';
 import { FEATURE_MIN_PLAN } from '../../../shared/entitlements.cjs';
 
 export const MAX_RECORDING_BYTES = 80 * 1024 * 1024;
@@ -66,6 +67,9 @@ export function createRecordingApp(options: Options = {}) {
     app.use(cors({ origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:5173'], methods: ['GET', 'POST', 'DELETE'], credentials: true }));
     app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
     app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'qsvc-recording', recordingEnabled: !!storage }));
+    const liveStreaming = createLiveStreaming({ authenticate: verify, authorizeFeature: authorize, meeting });
+    app.locals.liveStreaming = liveStreaming;
+    app.use('/api/live-streams', liveStreaming.router);
     app.use('/api', rateLimit({ windowMs: 60_000, max: 120, standardHeaders: true, legacyHeaders: false }));
     app.use('/api', (_req, res, next) => storage ? next() : res.status(503).json({ code: 'RECORDING_UNAVAILABLE', error: 'Cloud recording storage is not configured.' }));
 

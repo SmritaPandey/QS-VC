@@ -12,6 +12,8 @@ export const MAX_CO_HOSTS = 5;
 export interface PeerState {
     id: string;
     displayName: string;
+    /** Optional participant-entered site label; never inferred from location services. */
+    siteLocation?: string;
     userId?: string;
     /** Platform admin (server-verified): joins any meeting with host controls. */
     platformAdmin?: boolean;
@@ -43,6 +45,7 @@ export interface VerifiedSignalingUser {
 export interface WaitingPeer {
     id: string;
     displayName: string;
+    siteLocation?: string;
     ws: any;
     rtpCapabilities: any;
     requestedAt: Date;
@@ -98,10 +101,23 @@ export interface PersistentRoomOptions {
     displayName?: string;
 }
 
+export interface BreakoutRoom {
+    roomId: string;
+    name: string;
+    open: boolean;
+    assignedPeerIds: Set<string>;
+}
+
 export interface RoomState {
     id: string;
     meetingCode: string;
     hostPeerId: string | null;
+    /** Internal child rooms are entered only through an admitted parent-room session. */
+    externalConference?: { provider: 'Bharat VC'; status: 'connecting' | 'connected' | 'unknown' } | null;
+    liveStream?: { active: true; provider: string; displayName: string; peerId: string } | null;
+    parentRoomId?: string;
+    breakoutRooms?: Map<string, BreakoutRoom>;
+    breakoutParticipants?: Map<string, PeerState>;
     ownerUserId?: string | null;
     peers: Map<string, PeerState>;
     waitingRoom: Map<string, WaitingPeer>;
@@ -240,10 +256,17 @@ export class RoomManager {
             throw new Error('Room is locked');
         }
 
+        // Internal breakout joins supply the role from an already-admitted parent session.
+        if (room.parentRoomId) {
+            peer.role = peer.initialRole || (peer.isGuest ? 'guest' : 'member');
+            if (peer.role === 'host') room.hostPeerId = peer.id;
+            room.peers.set(peer.id, peer);
+            return;
+        }
         // Roles on join are server-owned. Only the host can promote an existing member.
         peer.role = 'member';
         // First peer becomes host
-        if ((!room.ownerUserId && !room.hostPeerId) || (!!room.ownerUserId && room.ownerUserId === peer.userId && ![...room.peers.values()].some(p => p.userId === peer.userId && p.role === 'host'))) {
+        if (room.hostPeerId === peer.id || (!room.ownerUserId && !room.hostPeerId) || (!!room.ownerUserId && room.ownerUserId === peer.userId && ![...room.peers.values()].some(p => p.userId === peer.userId && p.role === 'host'))) {
             peer.role = 'host';
             room.hostPeerId = peer.id;
         }
@@ -367,7 +390,7 @@ export class RoomManager {
         const previous = this.emptyRoomTimers.get(room);
         if (previous) clearTimeout(previous);
         this.emptyRoomTimers.delete(room);
-        if (room.peers.size === 0 && room.waitingRoom.size === 0) {
+        if (room.peers.size === 0 && room.waitingRoom.size === 0 && !room.parentRoomId && !room.breakoutParticipants?.size) {
             const timer = setTimeout(() => {
                 this.emptyRoomTimers.delete(room);
                 const r = this.rooms.get(roomId);
@@ -381,11 +404,12 @@ export class RoomManager {
         }
     }
 
-    removePeer(roomId: string, peerId: string): PeerState | undefined {
+    removePeer(roomId: string, peerId: string, movingToBreakout = false): PeerState | undefined {
         const room = this.rooms.get(roomId);
         if (!room) return undefined;
 
         const peer = room.peers.get(peerId);
+        if (room.liveStream?.peerId === peerId) this.updateLiveStream(roomId, null);
         room.peers.delete(peerId);
         room.waitingRoom.delete(peerId);
         if (room.recording?.peerId === peerId) this.updateRecording(roomId, null);
@@ -399,7 +423,7 @@ export class RoomManager {
 
         // Host left. Owned meetings keep running (like Google Meet) and only a co-host takes over;
         // nobody else is promoted. Ad-hoc rooms without an owner hand over to the longest-present peer.
-        if (room.hostPeerId === peerId && room.peers.size > 0) {
+        if (!movingToBreakout && room.hostPeerId === peerId && room.peers.size > 0) {
             room.hostPeerId = null;
             const others = [...room.peers.values()];
             const nextHost = others.find(p => p.role === 'host')
@@ -417,7 +441,7 @@ export class RoomManager {
             }
         }
 
-        if (room.peers.size === 0) room.hostPeerId = null;
+        if (room.peers.size === 0 && !movingToBreakout) room.hostPeerId = null;
 
         this.scheduleEmptyRoomCleanup(roomId);
         if (room.peers.size === 0 && room.ownerUserId && room.settings.waitingRoomEnabled) {
@@ -439,6 +463,28 @@ export class RoomManager {
         return peer?.role === 'host' || peer?.role === 'co-host';
     }
 
+    /** Transfer live moderation without changing the persisted meeting organiser. */
+    transferHost(roomId: string, actorId: string, targetId: string): void {
+        const room = this.rooms.get(roomId);
+        const actor = room?.peers.get(actorId), target = room?.peers.get(targetId);
+        if (!room || room.hostPeerId !== actorId || actor?.role !== 'host') throw new Error('Only the current host can transfer host controls.');
+        if (!target || targetId === actorId || !target.userId || target.isGuest) throw new Error('Choose a signed-in participant in this meeting.');
+        const coHostCount = [...room.peers.values()].filter(peer => peer.role === 'co-host' && peer.id !== targetId).length;
+        this.updateLiveStream(roomId, null);
+        actor.role = coHostCount < MAX_CO_HOSTS ? 'co-host' : 'member';
+        target.role = 'host';
+        room.hostPeerId = target.id;
+        this.broadcast(roomId, 'roleChanged', { peerId: actor.id, role: actor.role, displayName: actor.displayName });
+        this.broadcast(roomId, 'roleChanged', { peerId: target.id, role: target.role, displayName: target.displayName });
+        this.broadcast(roomId, 'hostTransferred', { newHostId: target.id, previousHostId: actor.id });
+    }
+
+    updateLiveStream(roomId: string, state: RoomState['liveStream']): void {
+        const room = this.rooms.get(roomId); if (!room) return;
+        room.liveStream = state || null;
+        this.broadcast(roomId, 'liveStreamState', state || { active: false });
+    }
+
     /** Update room settings (host only). */
     updateSettings(roomId: string, settings: Partial<RoomSettings>): void {
         const room = this.rooms.get(roomId);
@@ -447,6 +493,7 @@ export class RoomManager {
         Object.assign(room.settings, settings, { waitingRoomEnabled: true });
         if (!room.settings.allowRecording && room.recording) this.updateRecording(roomId, null);
         this.broadcast(roomId, 'settingsUpdated', { settings: { ...room.settings, password: undefined } });
+        if (settings.locked !== undefined) this.broadcast(roomId, 'lockStateChanged', { locked: room.settings.locked });
     }
 
     updateRecording(roomId: string, recording: RoomState['recording']): void {
@@ -526,6 +573,10 @@ export class RoomManager {
 
         const peer = room.peers.get(peerId);
         this.sendToSocket(peer?.ws, method, params, peerId);
+    }
+
+    getRooms(): RoomState[] {
+        return [...this.rooms.values()];
     }
 
     getRoomCount(): number {

@@ -11,6 +11,7 @@ vi.mock('../sfu-client.js', () => ({ sfuClient: {
     removePeer: vi.fn().mockResolvedValue({}),
 } }));
 import { handlePeerDisconnect, handleRpcMessage } from './handler.js';
+import { sfuClient } from '../sfu-client.js';
 import { roomManager } from '../room-manager.js';
 
 const socket = () => ({ readyState: 1, send: vi.fn(), close: vi.fn() });
@@ -96,5 +97,80 @@ describe('recording notifications', () => {
         roomManager.updateSettings(room.id, { allowRecording: false });
         expect(room.recording).toBeNull();
         expect(notifications(host.ws).at(-1).params.recording).toBeNull();
+    });
+});
+
+describe('public broadcast visibility', () => {
+    it('announces to all admitted participants, includes late joiners, and clears on host transfer', async () => {
+        const code = `live-${crypto.randomUUID().slice(0, 10)}`;
+        const host = await join(code, 'owner'), member = await join(code, 'member');
+        const room = roomManager.getRoom(host.state.roomId)!;
+        roomManager.updateSettings(room.id, { e2eeRequired: false });
+        expect((await rpc(member.ws, member.state, 'liveStreamState', { active: true, provider: 'youtube' }))?.error?.code).toBe(-32005);
+        expect((await rpc(host.ws, host.state, 'liveStreamState', { active: true, provider: 'youtube' }))?.result).toEqual({ notified: true });
+        expect(member.ws.send.mock.calls.map(([raw]) => JSON.parse(raw))).toContainEqual(expect.objectContaining({ method: 'liveStreamState', params: expect.objectContaining({ active: true, provider: 'youtube', displayName: 'owner' }) }));
+        const late = await join(code, 'late');
+        // Waiting-room admission returns its snapshot through the socket.
+        const admission = late.ws.send.mock.calls.map(([raw]) => JSON.parse(raw)).find(message => message.method === 'admitted');
+        expect(room.liveStream?.active).toBe(true);
+        if (late.result?.result?.status !== 'waiting') expect(late.result?.result?.liveStream?.active).toBe(true);
+        else expect(admission?.params?.liveStream?.active).toBe(true);
+        expect((await rpc(host.ws, host.state, 'transferHost', { targetPeerId: member.state.peerId }))?.result).toEqual({ newHostId: member.state.peerId });
+        expect(room.liveStream).toBeNull();
+        expect(room.peers.get(host.state.peerId)?.role).toBe('co-host');
+        expect(room.peers.get(member.state.peerId)?.role).toBe('host');
+        expect((await rpc(host.ws, host.state, 'transferHost', { targetPeerId: late.state.peerId }))?.error).toBeDefined();
+    });
+
+    it('blocks public broadcast for E2EE meetings and clears its status when broadcaster leaves', async () => {
+        const host = await join(`live-${crypto.randomUUID().slice(0, 10)}`, 'owner');
+        const room = roomManager.getRoom(host.state.roomId)!;
+        expect((await rpc(host.ws, host.state, 'liveStreamState', { active: true, provider: 'facebook' }))?.error?.code).toBe(-32005);
+        roomManager.updateSettings(room.id, { e2eeRequired: false });
+        await rpc(host.ws, host.state, 'liveStreamState', { active: true, provider: 'facebook' });
+        expect(room.liveStream?.provider).toBe('facebook');
+        await handlePeerDisconnect(host.state);
+        expect(room.liveStream).toBeNull();
+    });
+});
+
+describe('breakout admission and return', () => {
+    it('requires host assignment, reuses admission, and returns through repeated visits', async () => {
+        const code = `break-${crypto.randomUUID().slice(0, 8)}`;
+        const host = await join(code, 'owner'), member = await join(code, 'member');
+        const parentId = host.state.roomId;
+        expect((await rpc(member.ws, member.state, 'createBreakoutRoom', { name: 'Team' }))?.error?.code).toBe(-32005);
+        const created = await rpc(host.ws, host.state, 'createBreakoutRoom', { name: 'Team' });
+        const childId = created?.result.rooms[0].roomId;
+        expect(childId).toBeTruthy();
+        expect((await rpc(member.ws, member.state, 'joinBreakoutRoom', { breakoutRoomId: childId }))?.error).toBeDefined();
+        await rpc(host.ws, host.state, 'assignBreakoutParticipants', { breakoutRoomId: childId, peerIds: [member.state.peerId] });
+        await rpc(host.ws, host.state, 'openBreakoutRooms');
+        const peerId = member.state.peerId;
+        for (let visit = 0; visit < 2; visit++) {
+            const child = await rpc(member.ws, member.state, 'joinBreakoutRoom', { breakoutRoomId: childId });
+            expect(child?.error).toBeUndefined();
+            expect(member.state.roomId).toBe(childId);
+            expect(member.state.peerId).toBe(peerId);
+            expect(roomManager.getRoom(parentId)?.peers.has(peerId)).toBe(false);
+            const back = await rpc(member.ws, member.state, 'joinBreakoutRoom', { breakoutRoomId: null });
+            expect(back?.error).toBeUndefined();
+            expect(member.state.roomId).toBe(parentId);
+            expect(roomManager.getRoom(parentId)?.peers.has(peerId)).toBe(true);
+            expect((await rpc(member.ws, member.state, 'meetingDiagnosticsSample', { rttMs: 25, jitterMs: 1, packetLossPercent: 0, audioActive: false }))?.result.accepted).toBe(true);
+        }
+        await rpc(member.ws, member.state, 'joinBreakoutRoom', { breakoutRoomId: childId });
+        let finishRemoval!: (value: unknown) => void;
+        vi.mocked(sfuClient.removePeer).mockImplementationOnce(() => new Promise(resolve => { finishRemoval = resolve; }));
+        const closing = rpc(host.ws, host.state, 'closeBreakoutRooms');
+        try {
+            expect((await rpc(host.ws, host.state, 'openBreakoutRooms'))?.error?.message).toBe('Wait for breakout rooms to close.');
+        } finally {
+            finishRemoval({});
+            await closing;
+        }
+        expect(member.ws.send.mock.calls.map(([raw]) => JSON.parse(raw))).toContainEqual(expect.objectContaining({ method: 'breakoutReturnRequired', params: expect.objectContaining({ mainRoomId: parentId }) }));
+        expect((await rpc(member.ws, member.state, 'joinBreakoutRoom', { breakoutRoomId: null }))?.error).toBeUndefined();
+        expect((await rpc(member.ws, member.state, 'joinBreakoutRoom', { breakoutRoomId: childId }))?.error).toBeDefined();
     });
 });

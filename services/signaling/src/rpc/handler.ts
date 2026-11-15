@@ -1,3 +1,5 @@
+import { bharatVcDial, disconnectBharatVc } from '../bharat-vc.js';
+import { meetingObservability } from '../meeting-observability.js';
 import { admittedPeerIceServers } from '../turn.js';
 import { loadMeetingPolicy, reportMeetingStatus, endHostedMeetingStatus, verifySignalingAccess } from '../meeting-policy.js';
 /**
@@ -8,7 +10,7 @@ import { loadMeetingPolicy, reportMeetingStatus, endHostedMeetingStatus, verifyS
  */
 import { collaborationRpc } from '../collaboration.js';
 import { sfuClient } from '../sfu-client.js';
-import { roomManager, PeerState, PeerRole, type PrivateConversation, type VerifiedSignalingUser } from '../room-manager.js';
+import { roomManager, PeerState, PeerRole, type PrivateConversation, type VerifiedSignalingUser, type RoomState } from '../room-manager.js';
 import { logger } from '../logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
@@ -25,6 +27,10 @@ const roomTeardowns = new WeakMap<object, Promise<void>>();
 const dashboardControls = new WeakMap<object, { sub: string; tenantId: string; action: 'end' | 'cancel'; promise: Promise<void> }>();
 const cancelledRooms = new WeakSet<object>();
 const roomEpochs = new WeakMap<object, number>();
+const closingBreakouts = new WeakSet<RoomState>();
+const movingBreakoutPeers = new Set<string>();
+const detachedBreakoutPeers = new WeakSet<PeerState>();
+const pendingVideoSources = new WeakMap<object, Map<string, Set<string>>>();
 const roomIsEnding = (room: object) => endingRooms.has(room) || dashboardControls.has(room);
 const admittingPeers = new Set<string>();
 const relayConfigurations = new WeakMap<object, { until: number; request: ReturnType<typeof admittedPeerIceServers> }>();
@@ -71,13 +77,33 @@ async function admitWaitingPeer(roomId: string, targetId: string) {
     if (admittingPeers.has(targetId)) throw createError(-32000, 'Admission already in progress');
     admittingPeers.add(targetId);
     try {
-        const result = await joinPeerToRoom(waiting.ws, roomId, waiting.id, waiting.displayName, waiting.rtpCapabilities, { authUser: waiting.authUser }, null,
+        const result = await joinPeerToRoom(waiting.ws, roomId, waiting.id, waiting.displayName, waiting.rtpCapabilities, { authUser: waiting.authUser, siteLocation: waiting.siteLocation }, null,
             () => { if (room.waitingRoom.get(targetId) !== waiting) throw createError(-32000, 'Admission cancelled'); },
             waiting.isGuest ? 'guest' : undefined);
         room.waitingRoom.delete(targetId);
         roomManager.sendToSocket(waiting.ws, 'admitted', result?.result || {}, waiting.id);
         return result;
     } finally { admittingPeers.delete(targetId); }
+}
+
+function breakoutParent(room: RoomState): RoomState {
+    const parent = room.parentRoomId ? roomManager.getRoom(room.parentRoomId) : room;
+    if (!parent) throw createError(-32000, 'The main meeting is no longer available.');
+    return parent;
+}
+
+function breakoutState(parent: RoomState, peerId: string) {
+    const manage = parent.hostPeerId === peerId;
+    const rooms = [...(parent.breakoutRooms?.values() || [])].filter(child => manage || child.assignedPeerIds.has(peerId));
+    return { mainRoomId: parent.id, mainMeetingCode: parent.meetingCode, rooms: rooms.map(child => ({ roomId: child.roomId, name: child.name, open: child.open, ...(manage ? { assignedPeerIds: [...child.assignedPeerIds] } : {}) })) };
+}
+
+function publishBreakouts(parent: RoomState) {
+    const recipients = new Map(parent.peers);
+    for (const child of parent.breakoutRooms?.values() || []) {
+        for (const [id, peer] of roomManager.getRoom(child.roomId)?.peers || []) recipients.set(id, peer);
+    }
+    for (const [id, peer] of recipients) roomManager.sendToSocket(peer.ws, 'breakoutRoomsUpdated', breakoutState(parent, id), id);
 }
 
 // Input sanitization helpers
@@ -166,6 +192,7 @@ const closeProducerSchema = z.object({ producerId: z.string().min(1).max(128) })
 const joinRoomSchema = z.object({
     meetingCode: z.string().min(1).max(30),
     displayName: z.string().min(1).max(100),
+    siteLocation: z.string().trim().max(120).optional(),
     inviteToken: z.string().max(128).optional(),
     guestToken: z.string().max(128).optional(),
     rtpCapabilities: z.record(z.string(), z.unknown()).optional(),
@@ -216,6 +243,10 @@ async function endRoomForEveryone(roomId: string, by: string, peerId?: string, a
             await sfuClient.removePeer(roomId, pid).catch(() => { });
             if (p.ws && p.ws.readyState === 1) p.ws.close(4000, closeReason);
         }
+        meetingObservability.ended(roomId);
+        for (const child of room.breakoutRooms?.values() || []) await endRoomForEveryone(child.roomId, by, peerId, action);
+        room.breakoutParticipants?.clear();
+        room.breakoutRooms?.clear();
         room.peers.clear();
         room.hostPeerId = null;
         room.hostStarted = false;
@@ -243,7 +274,7 @@ const CAPTION_SPEAKER_PLAN_MESSAGE = 'Sign in with a plan that includes captions
 export async function handleRpcMessage(
     ws: any,
     message: RpcRequest,
-    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: VerifiedSignalingUser | null; expectedMeetingCode?: string; joinAttempts?: number }
+    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: VerifiedSignalingUser | null; expectedMeetingCode?: string; joinAttempts?: number; siteLocation?: string; mainRoomId?: string }
 ): Promise<RpcResponse | null> {
     const { method, params, id } = message;
 
@@ -252,6 +283,11 @@ export async function handleRpcMessage(
         const peer = roomManager.getRoom(connectionState.roomId || '')?.peers.get(connectionState.peerId || '');
         if (!peer || peer.ws !== ws) {
             return { jsonrpc: '2.0', id: id!, error: { code: -32000, message: 'Not joined a room' } };
+        }
+        const activeRoom = roomManager.getRoom(connectionState.roomId!);
+        const child = activeRoom?.parentRoomId ? roomManager.getRoom(activeRoom.parentRoomId)?.breakoutRooms?.get(activeRoom.id) : undefined;
+        if (activeRoom?.parentRoomId && !child?.open && !['joinBreakoutRoom', 'getBreakoutRooms'].includes(method)) {
+            return { jsonrpc: '2.0', id: id!, error: { code: -32004, message: 'This breakout is closed. Return to the main meeting.' } };
         }
     }
 
@@ -265,6 +301,129 @@ export async function handleRpcMessage(
     }
     try {
         switch (method) {
+            case 'meetingDiagnosticsSample': {
+                return { jsonrpc: '2.0', id: id!, result: meetingObservability.sample(connectionState.roomId!, connectionState.peerId!, params) };
+            }
+            case 'getMeetingDiagnostics': {
+                return { jsonrpc: '2.0', id: id!, result: meetingObservability.report(connectionState.roomId!, connectionState.peerId!, connectionState.authUser?.sub) };
+            }
+            case 'liveStreamState': {
+                const parsed = z.object({ active: z.boolean(), provider: z.enum(['youtube', 'facebook', 'custom']).optional() }).strict().safeParse(params);
+                if (!parsed.success) throw createError(-32602, 'Invalid live-stream state.');
+                const room = roomManager.getRoom(connectionState.roomId!)!;
+                if (room.hostPeerId !== connectionState.peerId || !connectionState.authUser?.sub) throw createError(-32005, 'Only the signed-in host can control live streaming.');
+                if (parsed.data.active && room.settings.e2eeRequired) throw createError(-32005, 'Live streaming is unavailable in an end-to-end encrypted meeting.');
+                roomManager.updateLiveStream(room.id, parsed.data.active ? { active: true, provider: parsed.data.provider || 'custom', displayName: connectionState.displayName || 'Host', peerId: connectionState.peerId! } : null);
+                return { jsonrpc: '2.0', id: id!, result: { notified: true } };
+            }
+            case 'getBreakoutRooms':
+            case 'createBreakoutRoom':
+            case 'assignBreakoutParticipants':
+            case 'openBreakoutRooms':
+            case 'closeBreakoutRooms': {
+                const current = roomManager.getRoom(connectionState.roomId!)!;
+                const parent = breakoutParent(current);
+                const actorId = connectionState.peerId!;
+                if (method === 'getBreakoutRooms') return { jsonrpc: '2.0', id: id!, result: breakoutState(parent, actorId) };
+                const actor = parent.peers.get(actorId) || parent.breakoutParticipants?.get(actorId);
+                if (parent.hostPeerId !== actorId || actor?.role !== 'host' || actor.ws !== ws || !actor.userId) throw createError(-32005, 'Only the signed-in main-meeting host can manage breakouts.');
+                if (closingBreakouts.has(parent)) throw createError(-32004, 'Wait for breakout rooms to close.');
+                parent.breakoutRooms ||= new Map();
+                parent.breakoutParticipants ||= new Map();
+                if (method === 'createBreakoutRoom') {
+                    const parsed = z.object({ name: z.string().trim().min(1).max(60) }).strict().safeParse(params);
+                    if (!parsed.success || !sanitizeString(parsed.data.name, 60)) throw createError(-32602, 'Enter a breakout name.');
+                    if (parent.breakoutRooms.size >= 20) throw createError(-32004, 'This meeting already has twenty breakout rooms.');
+                    const child = roomManager.getOrCreateRoom(`B-${uuidv4().replace(/-/g, '').slice(0, 20)}`, { ...parent.settings, locked: false, password: null, webinar: false, meetingKind: 'conference', allowRecording: false });
+                    child.parentRoomId = parent.id;
+                    child.ownerUserId = `breakout:${parent.id}`;
+                    child.hostStarted = true;
+                    parent.breakoutRooms.set(child.id, { roomId: child.id, name: sanitizeString(parsed.data.name, 60), open: false, assignedPeerIds: new Set() });
+                } else if (method === 'assignBreakoutParticipants') {
+                    const parsed = z.object({ breakoutRoomId: z.string().uuid(), peerIds: z.array(z.string().uuid()).max(parent.settings.maxParticipants) }).strict().safeParse(params);
+                    if (!parsed.success) throw createError(-32602, 'Invalid breakout assignment.');
+                    const child = parent.breakoutRooms.get(parsed.data.breakoutRoomId);
+                    if (!child) throw createError(-32602, 'Breakout not found in this meeting.');
+                    if ([...parent.breakoutRooms.values()].some(room => room.open)) throw createError(-32004, 'Close breakout rooms before changing assignments.');
+                    if (new Set(parsed.data.peerIds).size !== parsed.data.peerIds.length || parsed.data.peerIds.some(peerId => !parent.peers.has(peerId))) throw createError(-32602, 'Choose admitted participants from this meeting.');
+                    for (const other of parent.breakoutRooms.values()) for (const peerId of parsed.data.peerIds) other.assignedPeerIds.delete(peerId);
+                    child.assignedPeerIds = new Set(parsed.data.peerIds);
+                } else if (method === 'openBreakoutRooms') {
+                    for (const child of parent.breakoutRooms.values()) child.open = true;
+                } else {
+                    closingBreakouts.add(parent);
+                    try {
+                        for (const child of parent.breakoutRooms.values()) child.open = false;
+                        for (const child of parent.breakoutRooms.values()) {
+                            const room = roomManager.getRoom(child.roomId);
+                            for (const peer of room?.peers.values() || []) {
+                                // Remove the old SFU session before requesting a client return; ignored notices cannot keep media flowing.
+                                try { await sfuClient.removePeer(child.roomId, peer.id); detachedBreakoutPeers.add(peer); }
+                                catch { peer.ws?.close(4000, 'Breakout closed. Rejoin the main meeting.'); }
+                                roomManager.sendToSocket(peer.ws, 'breakoutReturnRequired', { mainRoomId: parent.id, mainMeetingCode: parent.meetingCode }, peer.id);
+                            }
+                        }
+                    } finally { closingBreakouts.delete(parent); }
+                }
+                publishBreakouts(parent);
+                return { jsonrpc: '2.0', id: id!, result: breakoutState(parent, actorId) };
+            }
+            case 'joinBreakoutRoom': {
+                const parsed = z.object({ breakoutRoomId: z.string().uuid().nullable() }).strict().safeParse(params);
+                if (!parsed.success) throw createError(-32602, 'Invalid breakout room.');
+                const current = roomManager.getRoom(connectionState.roomId!)!;
+                const parent = breakoutParent(current);
+                const peerId = connectionState.peerId!;
+                const peer = current.peers.get(peerId)!;
+                if (movingBreakoutPeers.has(peerId)) throw createError(-32004, 'A room transition is already in progress.');
+                const destination = parsed.data.breakoutRoomId ? roomManager.getRoom(parsed.data.breakoutRoomId) : parent;
+                if (!destination || (destination !== parent && destination.parentRoomId !== parent.id)) throw createError(-32005, 'This breakout does not belong to your meeting.');
+                if (destination === current) throw createError(-32004, 'You are already in this room.');
+                if (roomIsEnding(parent) || roomIsEnding(current)) throw createError(-32004, 'This meeting is ending.');
+                const child = destination !== parent && parent.breakoutRooms?.get(destination.id);
+                const mainPeer = parent.peers.get(peerId) || parent.breakoutParticipants?.get(peerId);
+                if (!mainPeer || mainPeer.ws !== ws || mainPeer.userId !== connectionState.authUser?.sub) throw createError(-32005, 'Your main-meeting admission is no longer valid.');
+                if (child && (!child.open || (!child.assignedPeerIds.has(peerId) && parent.hostPeerId !== peerId))) throw createError(-32005, 'The host has not opened or assigned this breakout to you.');
+                if (destination !== parent && !child) throw createError(-32005, 'This breakout is no longer available.');
+                if (current.recording?.peerId === peerId) throw createError(-32004, 'Stop your recording before moving to another room.');
+                movingBreakoutPeers.add(peerId);
+                try {
+                    await finishPrivateConversationsForPeer(current.id, peerId, 'participant-left');
+                    if (!detachedBreakoutPeers.has(peer)) await sfuClient.removePeer(current.id, peerId);
+                    detachedBreakoutPeers.delete(peer);
+                    stopAsrForPeer(current.id, peerId); forgetPeerCaptions(current.id, peerId);
+                    meetingObservability.left(current.id, peerId);
+                    parent.breakoutParticipants ||= new Map();
+                    parent.breakoutParticipants.set(peerId, mainPeer);
+                    roomManager.removePeer(current.id, peerId, current === parent);
+                    roomManager.broadcast(current.id, 'peerLeft', { peerId, displayName: peer.displayName });
+                    connectionState.mainRoomId = parent.id;
+                    connectionState.roomId = undefined; connectionState.peerId = undefined;
+                    const role = mainPeer.role;
+                    const verifyTransition = () => {
+                        if (roomIsEnding(parent) || ws.readyState !== 1 || (child && !child.open)) throw createError(-32004, 'The breakout closed while joining.');
+                    };
+                    try {
+                        const joined = await joinPeerToRoom(ws, destination.id, peerId, peer.displayName, peer.rtpCapabilities, connectionState, id!, verifyTransition, role, true);
+                        if (destination === parent) parent.breakoutParticipants.delete(peerId);
+                        publishBreakouts(parent);
+                        return joined;
+                    } catch (error) {
+                        // Restore an actual parent SFU session when a child join fails after detaching the old room.
+                        try {
+                            const recovered = await joinPeerToRoom(ws, parent.id, peerId, peer.displayName, peer.rtpCapabilities, connectionState, id!, () => { if (roomIsEnding(parent)) throw createError(-32004, 'The main meeting ended.'); }, role, true);
+                            parent.breakoutParticipants.delete(peerId);
+                            if (recovered?.result) recovered.result.transitionError = 'The breakout could not be opened. You are back in the main meeting.';
+                            publishBreakouts(parent);
+                            return recovered;
+                        } catch {
+                            parent.breakoutParticipants.delete(peerId);
+                            ws.close(4000, 'Room transition failed. Rejoin the main meeting.');
+                            throw createError(-32004, 'The room transition failed. Rejoin the main meeting.');
+                        }
+                    }
+                } finally { movingBreakoutPeers.delete(peerId); }
+            }
             case 'getIceServers': {
                 let cached = relayConfigurations.get(ws);
                 if (!cached || cached.until < Date.now()) {
@@ -296,9 +455,18 @@ export async function handleRpcMessage(
                 roomManager.updateRecording(room.id, parsed.data.recording ? { peerId: peer.id, displayName: peer.displayName } : null);
                 return { jsonrpc: '2.0', id: id!, result: { recording: room.recording } };
             }
+            case 'disconnectBharatVc': {
+                const result = await disconnectBharatVc({ ...connectionState, authUser: connectionState.authUser || undefined });
+                return { jsonrpc: '2.0', id: id!, result };
+            }
+            case 'connectBharatVc': {
+                const result = await bharatVcDial({ ...connectionState, authUser: connectionState.authUser || undefined }, params);
+                return { jsonrpc: '2.0', id: id!, result };
+            }
             case 'getCollaborationState':
             case 'getCollaborationFile':
             case 'collaborationAction':
+                if (roomManager.getRoom(connectionState.roomId!)?.settings.e2eeRequired) throw createError(-32005, 'Shared activities are unavailable in end-to-end encrypted meetings until encrypted collaboration is supported.');
                 return { jsonrpc: '2.0', id: id!, result: collaborationRpc(ws, connectionState.roomId!, connectionState.peerId!, method, params) };
             case 'captionPublish': {
                 const room = roomManager.getRoom(connectionState.roomId!);
@@ -386,12 +554,15 @@ export async function handleRpcMessage(
                     throw createError(-32001, 'This signaling ticket is valid for a different meeting. Reconnect and try again.');
                 }
                 const displayName = sanitizeString(rawName);
+                const siteLocation = sanitizeString(joinParams.data.siteLocation || '', 120);
+                connectionState.siteLocation = siteLocation;
                 const peerId = uuidv4();
 
                 // Get or create the signaling room
                 // Always resolve persisted ownership before creating a room. An unavailable
                 // database must not turn a scheduled meeting into a guest-owned room.
                 const previousRoom = roomManager.getRoomByCode(meetingCode);
+                if (previousRoom?.parentRoomId) throw createError(-32005, 'Enter a breakout through your admitted main-meeting session.');
                 const epoch = previousRoom ? roomEpochs.get(previousRoom) || 0 : 0;
                 const policy = await loadMeetingPolicy(meetingCode);
                 const room = roomManager.getOrCreateRoom(meetingCode, { ...policy?.settings, waitingRoomEnabled: true });
@@ -429,7 +600,7 @@ export async function handleRpcMessage(
                     if (room.settings.password && room.settings.password !== password) {
                         return { jsonrpc: '2.0', id: id!, error: { code: -32001, message: 'Invalid meeting password' } };
                     }
-                    roomManager.addToWaitingRoom(room.id, { id: peerId, displayName, ws, rtpCapabilities, requestedAt: new Date(), authUser: connectionState.authUser, awaitingHost: true, invited: isInvited, isGuest: isGuestUser });
+                    roomManager.addToWaitingRoom(room.id, { id: peerId, displayName, siteLocation, ws, rtpCapabilities, requestedAt: new Date(), authUser: connectionState.authUser, awaitingHost: true, invited: isInvited, isGuest: isGuestUser });
                     connectionState.peerId = peerId;
                     connectionState.roomId = room.id;
                     connectionState.displayName = displayName;
@@ -465,6 +636,7 @@ export async function handleRpcMessage(
                     roomManager.addToWaitingRoom(room.id, {
                         id: peerId,
                         displayName,
+                        siteLocation,
                         ws,
                         rtpCapabilities,
                         requestedAt: new Date(),
@@ -551,7 +723,38 @@ export async function handleRpcMessage(
                     if (!screen && kind === 'video' && !policyRoom.settings.allowCamera) throw createError(-32004, PERMISSION_MESSAGES.video);
                 }
 
-                const result = await sfuClient.produce(roomId, peerId, transportId, kind, rtpParameters, appData);
+                let reservedSources: Set<string> | undefined;
+                let source = '';
+                if (kind === 'video') {
+                    source = screen ? 'screen' : String(appData?.source || 'camera');
+                    if (!screen && !['camera', 'camera:2', 'camera:3', 'camera:4'].includes(source)) throw createError(-32602, 'Invalid camera source.');
+                    let pending = pendingVideoSources.get(policyRoom);
+                    if (!pending) { pending = new Map(); pendingVideoSources.set(policyRoom, pending); }
+                    const reservations = pending.get(peerId) || new Set<string>();
+                    const active = [...(producerPeer?.producers.values() || [])].filter(producer => producer.kind === 'video');
+                    const sameSource = active.some(producer => (producer.appData?.type === 'screen' || producer.appData?.source === 'screen' ? 'screen' : producer.appData?.source || 'camera') === source);
+                    if (sameSource || reservations.has(source)) throw createError(-32004, 'This media source is already being shared.');
+                    if (screen) {
+                        const activeShares = [...policyRoom.peers.values()].filter(peer => [...peer.producers.values()].some(producer => producer.kind === 'video' && (producer.appData?.source === 'screen' || producer.appData?.type === 'screen'))).length;
+                        const pendingShares = [...pending.values()].filter(sources => sources.has('screen')).length;
+                        if (activeShares + pendingShares >= 4) throw createError(-32004, 'Four screens are already being shared. Stop one before adding another.');
+                    } else {
+                        const cameras = active.filter(producer => producer.appData?.source !== 'screen' && producer.appData?.type !== 'screen').length;
+                        if (cameras + [...reservations].filter(value => value !== 'screen').length >= 4) throw createError(-32004, 'You can share up to four cameras.');
+                    }
+                    reservations.add(source); pending.set(peerId, reservations); reservedSources = reservations;
+                }
+                let result;
+                try { result = await sfuClient.produce(roomId, peerId, transportId, kind, rtpParameters, appData); }
+                finally {
+                    reservedSources?.delete(source);
+                    if (reservedSources?.size === 0) pendingVideoSources.get(policyRoom)?.delete(peerId);
+                }
+                if (policyRoom.peers.get(peerId) !== producerPeer || producerPeer?.ws !== ws || roomIsEnding(policyRoom)) {
+                    await sfuClient.closeProducer(roomId, peerId, result.producerId).catch(() => {});
+                    throw createError(-32004, 'The meeting media session changed.');
+                }
+
 
                 // The session can expire or be ended while the SFU request is in flight.
                 if (isPrivateSideAudio && policyRoom.privateConversations.get(privateConversationId!) !== privateConversation) {
@@ -571,7 +774,7 @@ export async function handleRpcMessage(
                         kind,
                         appData: appData || {},
                     });
-                    if (appData?.type === 'screen') {
+                    if (screen && kind === 'video') {
                         peer.screenSharing = true;
                     }
                 }
@@ -850,25 +1053,28 @@ export async function handleRpcMessage(
             // CHAT MESSAGE
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             case 'chatMessage': {
-                const { content, type } = params;
                 const { peerId, roomId, displayName } = connectionState;
                 if (!peerId || !roomId) throw createError(-32000, 'Not joined a room');
-
-                // Check chat permission
                 const room = roomManager.getRoom(roomId);
-                if (room && !room.settings.allowChat) {
-                    throw createError(-32004, 'Chat is disabled by host');
+                if (!room || !room.settings.allowChat) throw createError(-32004, 'Chat is disabled by host');
+                let payload: Record<string, unknown>;
+                if (room.settings.e2eeRequired) {
+                    const b64 = (max: number, min = 1) => z.string().min(min).max(max).regex(/^[A-Za-z0-9+/]+={0,2}$/).refine(value => value.length % 4 === 0);
+                    const parsed = z.object({ encrypted: z.object({
+                        version: z.literal(1), room: z.literal(room.id), keyId: z.number().int().min(0).max(255), epoch: b64(44, 44),
+                        senderPeerId: z.literal(peerId), messageId: z.string().uuid(), type: z.literal('chat'), createdAt: z.number().int(),
+                        nonce: b64(16, 16), ciphertext: b64(22000, 24), signature: b64(8192, 6000),
+                    }).strict() }).strict().safeParse(params);
+                    if (!parsed.success) throw createError(-32602, 'This meeting accepts signed encrypted chat only.');
+                    if (!room.peers.get(peerId)?.e2eeKeyBundle) throw createError(-32005, 'Register your encryption identity before sending chat.');
+                    if (parsed.data.encrypted.createdAt < Date.now() - 120000 || parsed.data.encrypted.createdAt > Date.now() + 30000) throw createError(-32602, 'Encrypted chat message has expired.');
+                    payload = { encrypted: parsed.data.encrypted, type: 'encrypted' };
+                } else {
+                    const parsed = z.object({ content: z.string().trim().min(1).max(4000), type: z.literal('text').optional() }).strict().safeParse(params);
+                    if (!parsed.success) throw createError(-32602, 'Invalid chat message.');
+                    payload = { content: parsed.data.content, type: 'text' };
                 }
-
-                const chatMsg = {
-                    id: uuidv4(),
-                    peerId,
-                    displayName,
-                    type: type || 'text',
-                    content,
-                    timestamp: new Date().toISOString(),
-                };
-
+                const chatMsg = { id: uuidv4(), peerId, displayName, ...payload, timestamp: new Date().toISOString() };
                 roomManager.broadcast(roomId, 'chatMessage', chatMsg);
                 return { jsonrpc: '2.0', id: id!, result: { sent: true, messageId: chatMsg.id } };
             }
@@ -1175,6 +1381,7 @@ export async function handleRpcMessage(
                 // Remove from SFU and signaling
                 await finishPrivateConversationsForPeer(roomId, targetPeerId, 'participant-left');
                 await sfuClient.removePeer(roomId, targetPeerId).catch(() => { });
+                meetingObservability.left(roomId, targetPeerId);
                 const kicked = roomManager.removePeer(roomId, targetPeerId);
 
                 // Close their WebSocket
@@ -1194,8 +1401,22 @@ export async function handleRpcMessage(
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             // HOST CONTROLS — Lock / Unlock meeting
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            case 'transferHost': {
+                const parsed = waitingPeerSchema.safeParse(params);
+                if (!parsed.success) throw createError(-32602, 'Invalid participant');
+                const { peerId, roomId } = connectionState;
+                const room = roomManager.getRoom(roomId!);
+                if (!room || room.hostPeerId !== peerId || room.peers.get(peerId!)?.role !== 'host') throw createError(-32005, 'Only the current host can transfer host controls.');
+                const target = room.peers.get(parsed.data.targetPeerId);
+                if (!target || target.id === peerId || !target.userId || target.isGuest) throw createError(-32602, 'Choose a signed-in participant in this meeting.');
+                roomManager.transferHost(roomId!, peerId!, target.id);
+                return { jsonrpc: '2.0', id: id!, result: { newHostId: target.id } };
+            }
+
             case 'lockMeeting': {
-                const { locked } = params;
+                const parsed = z.object({ locked: z.boolean() }).strict().safeParse(params);
+                if (!parsed.success) throw createError(-32602, 'Invalid lock state');
+                const { locked } = parsed.data;
                 const { peerId, roomId } = connectionState;
                 if (!peerId || !roomId) throw createError(-32000, 'Not joined a room');
                 if (!roomManager.isHostOrCoHost(roomId, peerId)) {
@@ -1378,6 +1599,8 @@ export async function handleRpcMessage(
                 const peers = Array.from(room.peers.values()).map(p => ({
                     peerId: p.id,
                     displayName: p.displayName,
+                    userId: p.userId || null,
+                    siteLocation: p.siteLocation || '',
                     role: p.role,
                     audioMuted: p.audioMuted,
                     videoOff: p.videoOff,
@@ -1552,7 +1775,8 @@ async function joinPeerToRoom(
     connectionState: any,
     rpcId: number | string | null,
     beforeRegister?: () => void,
-    initialRole?: PeerRole
+    initialRole?: PeerRole,
+    requireMedia = false
 ): Promise<RpcResponse | null> {
     const room = roomManager.getRoom(roomId);
     if (!room) throw createError(-32000, 'Room not found');
@@ -1576,10 +1800,16 @@ async function joinPeerToRoom(
         logger.warn(`SFU unavailable — joining room ${roomId} in signaling-only mode (chat, presence, reactions work; media relay disabled): ${sfuErr.message}`);
     }
 
+    if (requireMedia && !sfuAvailable) {
+        await sfuClient.removePeer(roomId, peerId).catch(() => {});
+        throw createError(-32004, 'The breakout media service is unavailable.');
+    }
+
     // Register peer
     const peerState: PeerState = {
         id: peerId,
         displayName,
+        siteLocation: connectionState.siteLocation || '',
         ws,
         rtpCapabilities,
         producers: new Map(),
@@ -1599,6 +1829,7 @@ async function joinPeerToRoom(
         if (roomIsEnding(room) || (roomEpochs.get(room) || 0) !== epoch) throw createError(-32004, 'This meeting has ended');
         beforeRegister?.();
         roomManager.addPeer(roomId, peerState);
+        meetingObservability.joined(room, peerState);
     } catch (error) {
         await sfuClient.removePeer(roomId, peerId).catch(() => { });
         throw error;
@@ -1617,6 +1848,8 @@ async function joinPeerToRoom(
         .map(([id, p]) => ({
             peerId: id,
             displayName: p.displayName,
+            userId: p.userId || null,
+            siteLocation: p.siteLocation || '',
             role: p.role,
             audioMuted: p.audioMuted,
             videoOff: p.videoOff,
@@ -1631,18 +1864,24 @@ async function joinPeerToRoom(
     roomManager.broadcast(roomId, 'newPeer', {
         peerId,
         displayName,
+        userId: peerState.userId || null,
+        siteLocation: peerState.siteLocation || '',
         role: peerState.role,
     }, peerId);
 
     const result: any = {
         peerId,
         roomId,
+        externalConference: room.externalConference || null,
         role: peerState.role,
+        userId: peerState.userId || null,
+        siteLocation: peerState.siteLocation || '',
         routerRtpCapabilities: routerCaps,
         canPublish: canPublishInRoom(roomId, peerId, connectionState.authUser?.sub),
         spotlightPeerId: room.spotlightPeerId,
         settings: { ...room.settings, password: undefined },
         recording: room.recording,
+        liveStream: room.liveStream || null,
         sendTransport: sfuAvailable ? {
             id: sendTransport.id,
             iceParameters: sendTransport.iceParameters,
@@ -1660,6 +1899,7 @@ async function joinPeerToRoom(
         sfuAvailable,
         polyBridgeEnabled: process.env.POLY_BRIDGE_ENABLED === 'true',
         hostPresent: !!room.hostPeerId,
+        breakout: room.parentRoomId ? { mainRoomId: room.parentRoomId, mainMeetingCode: roomManager.getRoom(room.parentRoomId)?.meetingCode, roomId: room.id, name: roomManager.getRoom(room.parentRoomId)?.breakoutRooms?.get(room.id)?.name } : null,
         isOwner: !!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub,
     };
 
@@ -1673,7 +1913,7 @@ async function joinPeerToRoom(
  * Handle peer disconnect (WebSocket close or leaveRoom).
  */
 export async function handlePeerDisconnect(
-    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: VerifiedSignalingUser | null }
+    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: VerifiedSignalingUser | null; mainRoomId?: string }
 ): Promise<void> {
     const { peerId, roomId, displayName } = connectionState;
     if (!peerId || !roomId) return;
@@ -1684,6 +1924,7 @@ export async function handlePeerDisconnect(
 
         stopAsrForPeer(roomId, peerId);
         forgetPeerCaptions(roomId, peerId);
+        meetingObservability.left(roomId, peerId);
         roomManager.removePeer(roomId, peerId);
         clearEmptyRoomCaptions(roomId);
         roomManager.broadcast(roomId, 'peerLeft', { peerId, displayName });
@@ -1691,6 +1932,14 @@ export async function handlePeerDisconnect(
         logger.error(err, `Error during peer disconnect: ${peerId}`);
     }
 
+    const main = connectionState.mainRoomId && roomManager.getRoom(connectionState.mainRoomId);
+    if (main) {
+        main.breakoutParticipants?.delete(peerId);
+        for (const child of main.breakoutRooms?.values() || []) child.assignedPeerIds.delete(peerId);
+        if (main.id !== roomId && main.hostPeerId === peerId) roomManager.removePeer(main.id, peerId);
+        publishBreakouts(main);
+    }
+    connectionState.mainRoomId = undefined;
     connectionState.peerId = undefined;
     connectionState.roomId = undefined;
     connectionState.displayName = undefined;

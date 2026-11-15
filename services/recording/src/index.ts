@@ -19,7 +19,10 @@ const server = app.listen(PORT, () => {
     logger.info(`QS-VC Recording Service running on port ${PORT}; cloud storage ${process.env.RECORDING_BUCKET ? 'configured' : 'not configured'}`);
 });
 
+app.locals.liveStreaming.attach(server);
+
 function shutdown() {
+    app.locals.liveStreaming.close();
     server.close(() => process.exit(0));
 }
 process.on('SIGTERM', shutdown);

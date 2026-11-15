@@ -132,3 +132,94 @@ describe('remote producer removal', () => {
         expect(made[0].close).toHaveBeenCalledOnce(); expect(manager.getConsumers()).toEqual([]);
     });
 });
+
+
+describe('simultaneous camera capture ownership', () => {
+    function captured(deviceId: string) {
+        const track = { id: deviceId, kind: 'video', readyState: 'live', onended: null as (() => void) | null, getSettings: () => ({ deviceId }),
+            stop: vi.fn(function (this: { readyState: string }) { this.readyState = 'ended'; }) };
+        const stream = { getVideoTracks: () => [track], getTracks: () => [track] } as unknown as MediaStream;
+        return { track, stream };
+    }
+    async function setup() {
+        const { MultiCameraManager } = await import('./media');
+        const made: ReturnType<typeof captured>[] = [];
+        const capture = vi.fn(async (constraints: MediaStreamConstraints) => {
+            const id = ((constraints.video as MediaTrackConstraints).deviceId as ConstrainDOMStringParameters).exact as string;
+            const source = captured(id); made.push(source); return source.stream;
+        });
+        const publisher = { produce: vi.fn(async (track: MediaStreamTrack) => ({ id: track.id })), closeProducer: vi.fn().mockResolvedValue(undefined) };
+        const changed = vi.fn();
+        return { manager: new MultiCameraManager(publisher as any, capture, changed), capture, publisher, made, changed, MultiCameraManager };
+    }
+    it('publishes three separate extra cameras without microphones and refuses a fifth total camera', async () => {
+        const { manager, capture, publisher } = await setup();
+        await Promise.all(['second', 'third', 'fourth'].map(device => manager.startCamera(device, 'primary')));
+        expect(manager.active.map(camera => camera.source)).toEqual(['camera:2', 'camera:3', 'camera:4']);
+        expect(publisher.produce.mock.calls.map((call: any[]) => call[1].source)).toEqual(['camera:2', 'camera:3', 'camera:4']);
+        expect(capture.mock.calls.every(call => call[0].audio === false)).toBe(true);
+        await expect(manager.startCamera('fifth', 'primary')).rejects.toThrow('up to four');
+        expect(capture).toHaveBeenCalledTimes(3);
+    });
+    it('rejects the primary device and duplicate pending captures before requesting permissions twice', async () => {
+        const { manager, capture, made } = await setup();
+        await expect(manager.startCamera('primary', 'primary')).rejects.toThrow('already in use');
+        let resolve!: (stream: MediaStream) => void;
+        capture.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+        const pending = manager.startCamera('same', 'primary');
+        await expect(manager.startCamera('same', 'primary')).rejects.toThrow('already in use');
+        const input = captured('same'); made.push(input); resolve(input.stream);
+        await pending;
+        expect(capture).toHaveBeenCalledOnce();
+    });
+    it('stops late permission results after leave or hiding without publishing them', async () => {
+        const { manager, capture, publisher } = await setup();
+        let resolve!: (stream: MediaStream) => void;
+        capture.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+        const pending = manager.startCamera('late', 'primary');
+        await manager.stopAll();
+        const input = captured('late'); resolve(input.stream);
+        await expect(pending).rejects.toThrow('cancelled');
+        expect(input.track.stop).toHaveBeenCalled();
+        expect(publisher.produce).not.toHaveBeenCalled();
+        expect(manager.active).toEqual([]);
+    });
+    it('stops captures immediately while publication is pending and closes only their exact late producer', async () => {
+        const { manager, publisher, made } = await setup();
+        let resolve!: (producer: { id: string }) => void;
+        publisher.produce.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+        const pending = manager.startCamera('old-device', 'primary');
+        await vi.waitFor(() => expect(resolve).toBeTypeOf('function'));
+        await manager.stopAll();
+        expect(made[0].track.stop).toHaveBeenCalled();
+        await manager.startCamera('replacement', 'primary');
+        resolve({ id: 'old-producer' });
+        await expect(pending).rejects.toThrow('cancelled');
+        expect(publisher.closeProducer).toHaveBeenCalledWith('old-producer');
+        expect(publisher.closeProducer).not.toHaveBeenCalledWith('replacement');
+        expect(manager.active.map(camera => camera.deviceId)).toEqual(['replacement']);
+    });
+    it('releases all owned tracks when publishing fails or an extra camera is stopped', async () => {
+        const { manager, publisher, made, changed } = await setup();
+        publisher.produce.mockRejectedValueOnce(new Error('Encrypted transport unavailable'));
+        await expect(manager.startCamera('failed', 'primary')).rejects.toThrow('Encrypted transport');
+        expect(made[0].track.stop).toHaveBeenCalled();
+        await manager.startCamera('working', 'primary');
+        await manager.stopCamera('camera:2');
+        expect(made[1].track.stop).toHaveBeenCalled();
+        expect(publisher.closeProducer).toHaveBeenCalledWith('working');
+        expect(changed).toHaveBeenLastCalledWith([]);
+    });
+});
+
+describe('real media transport statistics', () => {
+    it('returns unavailable as no transport and rejects failed live transport reads', async () => {
+        const empty = new MediaManager();
+        expect(await empty.getTransportStats()).toEqual([]);
+        const manager = await managerWithTransport(vi.fn());
+        mocks.transport.getStats = vi.fn().mockResolvedValue(new Map([['sample', { type: 'outbound-rtp', bytesSent: 123 }]]));
+        expect((await manager.getTransportStats())[0].get('sample').bytesSent).toBe(123);
+        mocks.transport.getStats.mockRejectedValueOnce(new Error('transport stats unavailable'));
+        await expect(manager.getTransportStats()).rejects.toThrow('stats unavailable');
+    });
+});

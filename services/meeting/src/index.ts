@@ -1,3 +1,6 @@
+import { registerBrandingRoutes } from './branding.js';
+import { webinarsRouter } from './webinars.js';
+import { registerSessionReportRoutes } from './session-reports.js';
 import { roomDialHandler } from './room-dial.js';
 import { serviceSecret } from '../../../shared/service-secrets.cjs';
 import { insertSchedule, scheduleOccurrences } from './schedule-occurrences.js';
@@ -159,6 +162,9 @@ rawPool.on('error', () => logger.warn('Database connection lost; the pool will r
 
 const authMiddleware = meetingAuth(AUTH_URL, (tenantId, next) => pool.runWithTenant(tenantId, next));
 const scheduleFeature = requireFeature(AUTH_URL, 'meeting_scheduling');
+registerSessionReportRoutes(app, pool, rawPool, authMiddleware);
+registerBrandingRoutes(app, pool, rawPool, authMiddleware);
+app.use('/api/meetings/webinars', webinarsRouter(rawPool, authMiddleware, scheduleFeature));
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // MEETING CODE GENERATOR

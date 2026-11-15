@@ -1,0 +1,15 @@
+.admin-meeting-controls { max-width: 100%; }
+.admin-meeting-controls header { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; }
+.admin-meeting-controls h2 { margin: 0; }
+.admin-meeting-controls p { line-height: 1.5; max-width: 78ch; }
+.admin-meeting-controls button { min-height: 44px; padding: 10px 14px; border: 1px solid var(--border-color, #687d8b); border-radius: 8px; color: var(--text-primary); background: var(--bg-secondary); font: inherit; cursor: pointer; }
+.admin-meeting-controls button:disabled { opacity: .55; cursor: wait; }
+.admin-meeting-controls :focus-visible { outline: 2px solid var(--accent-primary, #197c72); outline-offset: 3px; }
+.admin-meeting-controls details { margin-top: 16px; border: 1px solid var(--border-color, #687d8b); border-radius: 12px; padding: 16px; }
+.admin-meeting-controls summary { min-height: 44px; align-content: center; cursor: pointer; overflow-wrap: anywhere; }
+.admin-meeting-controls ul { list-style: none; padding: 0; margin: 0; }
+.admin-meeting-controls li { display: flex; justify-content: space-between; gap: 16px; align-items: center; flex-wrap: wrap; padding: 16px 0; border-top: 1px solid var(--border-color, #687d8b); }
+.admin-meeting-controls li > div { min-width: 0; overflow-wrap: anywhere; }
+.admin-meeting-controls small { display: block; margin-top: 4px; line-height: 1.5; }
+.admin-media-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 600px) { .admin-media-actions { width: 100%; } .admin-media-actions button { flex: 1 1 140px; } }

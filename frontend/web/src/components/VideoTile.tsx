@@ -1,6 +1,7 @@
 import { useRef, useEffect, useState } from 'react';
 import { watchVoiceLevel } from '../lib/voice-activity';
 import '../styles/speaking-indicator.css';
+import '../styles/multi-content-stage.css';
 
 export interface TileActions {
     pinned?: boolean;
@@ -15,6 +16,8 @@ export interface TileActions {
 
 interface Props extends TileActions {
     displayName: string;
+    siteLocation?: string;
+    userId?: string | null;
     mediaLabel?: 'Camera' | 'Screen';
     stream?: MediaStream | null;
     videoTrack?: MediaStreamTrack;
@@ -39,7 +42,7 @@ export function initialsOf(name: string): string {
     return (first + last).toUpperCase() || '?';
 }
 
-export default function VideoTile({ displayName, mediaLabel, stream, audioTrack, videoTrack, isLocal, videoOff, audioMuted, handRaised, sharing, speaking = false, role, size = 'grid', pinned, onPin, spotlighted, onSpotlight, onStage, onToggleStage }: Props) {
+export default function VideoTile({ displayName, siteLocation, userId, mediaLabel, stream, audioTrack, videoTrack, isLocal, videoOff, audioMuted, handRaised, sharing, speaking = false, role, size = 'grid', pinned, onPin, spotlighted, onSpotlight, onStage, onToggleStage }: Props) {
     const micOn = audioMuted !== undefined ? !audioMuted : !!audioTrack;
     const tileRef = useRef<HTMLDivElement>(null);
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -138,7 +141,7 @@ export default function VideoTile({ displayName, mediaLabel, stream, audioTrack,
                 {micOn && !videoOff ? <span ref={indicatorRef} className="qsvc-speaking" role="img" aria-label="Microphone on"><i aria-hidden="true" /><i aria-hidden="true" /><i aria-hidden="true" /></span> : <span className="mi mi-sm" aria-label={micOn ? 'Microphone on' : 'Microphone off'} style={{ color: micOn ? 'var(--accent-success)' : 'var(--accent-danger)' }}>
                     {micOn ? 'mic' : 'mic_off'}
                 </span>}
-                <span className="tile-name">{displayName}{mediaLabel ? ` · ${mediaLabel}` : ''}</span>
+                <span className="tile-identity"><span className="tile-name">{displayName}{mediaLabel ? ` · ${mediaLabel}` : ''}</span>{(siteLocation || userId) && <span className="tile-site-identity">{siteLocation && <span>Site: {siteLocation}</span>}{userId && <span>User ID: {userId}</span>}</span>}</span>
                 {(role === 'host' || role === 'co-host') && <span className="qs-role">{role === 'host' ? 'Host' : 'Co-host'}</span>}
                 {handRaised && <span className="mi mi-sm tile-hand" aria-label="Hand raised">front_hand</span>}
             </div>

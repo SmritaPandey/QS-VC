@@ -31,6 +31,7 @@ export function createPolyAdapter(findRoom: (id: string) => Room | undefined, en
         }
         return snapshot;
     };
+    const publicProducer = (producer: ms.Producer) => !producer.closed && producer.appData.type !== 'private-audio' && producer.appData.source !== 'private-audio';
     const describe = (room: Room, peerId: string, producer: ms.Producer): BrowserProducer => ({
         producerId: producer.id,
         peerId,
@@ -65,20 +66,20 @@ export function createPolyAdapter(findRoom: (id: string) => Room | undefined, en
         async listBrowserProducers(roomId: string) {
             const room = requireRoom(roomId);
             return room.getPeers().flatMap(peer => peer.getProducers()
-                .filter(producer => !producer.closed)
+                .filter(publicProducer)
                 .map(producer => describe(room, peer.id, producer)));
         },
         onBrowserProducers(roomId: string, handlers: { added: (value: BrowserProducer) => void; removed: (id: string) => void }) {
             const room = requireRoom(roomId);
             const watched = new Map<ms.Producer, () => void>();
             const watch = (producer: ms.Producer) => {
-                if (producer.closed || watched.has(producer)) return;
+                if (!publicProducer(producer) || watched.has(producer)) return;
                 const close = () => { watched.delete(producer); handlers.removed(producer.id); };
                 watched.set(producer, close);
                 producer.observer.once('close', close);
             };
             const added = ({ peerId, producer }: { peerId: string; producer: ms.Producer }) => {
-                if (producer.closed) return;
+                if (!publicProducer(producer)) return;
                 watch(producer);
                 handlers.added(describe(room, peerId, producer));
             };

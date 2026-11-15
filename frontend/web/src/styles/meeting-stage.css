@@ -160,6 +160,10 @@
 .participants-empty { margin:4px 8px 10px; font-size:13px; color:#8fa7b5; }
 .participants-panel .participant-status { flex-wrap:wrap; justify-content:flex-end; }
 .participants-panel .participant-private-action { min-height:44px; }
+.participants-panel .participant-transfer-action { min-height:44px; }
+.participant-transfer-action:focus-visible { outline:2px solid #a6f2e4; outline-offset:3px; }
+.participant-transfer-action:disabled { opacity:.55; cursor:wait; }
+.participant-transfer-error { margin:8px 16px; color:#ffc1c1; font-size:13px; line-height:1.5; overflow-wrap:anywhere; }
 
 /* More menu additions */
 .meeting-room .meeting-more-panel { width:300px; max-height:min(560px, calc(100dvh - 160px)); }

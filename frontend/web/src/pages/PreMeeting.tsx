@@ -1,3 +1,5 @@
+import TenantBrand from '../components/TenantBrand';
+import { useMeetingBranding } from '../lib/branding';
 import ThemeSelect from '../components/ThemeSelect';
 import ActionContents from '../components/ActionContents';
 import { useState, useEffect, useRef } from 'react';
@@ -8,6 +10,7 @@ import { CameraCapture, watchCameraVisibility, watchCameraTrack, cameraAccessMes
 
 export default function PreMeeting() {
     const { meetingCode } = useParams<{ meetingCode: string }>();
+    const organisationBranding = useMeetingBranding(meetingCode);
     const navigate = useNavigate();
     const location = useLocation();
     const videoRef = useRef<HTMLVideoElement>(null);
@@ -49,7 +52,8 @@ export default function PreMeeting() {
 
     const searchParams = new URLSearchParams(location.search);
     const inviteToken = searchParams.get('invite');
-    const guestToken = searchParams.get('guest');
+    const [siteLocation, setSiteLocation] = useState('');
+    const guestToken = searchParams.get('guest') || (() => { try { return sessionStorage.getItem(`qsvc:webinar:${meetingCode?.toUpperCase()}`); } catch { return null; } })();
     const [guestTokenStatus, setGuestTokenStatus] = useState<'valid' | 'invalid' | 'checking' | null>(guestToken ? 'checking' : null);
     const [guestTokenError, setGuestTokenError] = useState('');
 
@@ -82,7 +86,7 @@ export default function PreMeeting() {
 
     const inviteParams = new URLSearchParams();
     if (inviteToken) inviteParams.set('invite', inviteToken);
-    if (guestToken) inviteParams.set('guest', guestToken);
+    if (searchParams.get('guest')) inviteParams.set('guest', searchParams.get('guest')!);
     const inviteQuery = inviteParams.toString() ? `?${inviteParams.toString()}` : '';
     const inviteLink = `${window.location.origin}/meeting/${meetingCode}/preview${inviteQuery}`;
 
@@ -246,6 +250,7 @@ export default function PreMeeting() {
         navigate(`/meeting/${meetingCode}${inviteQuery}`, {
             state: {
                 displayName: name,
+                siteLocation: siteLocation.trim(),
                 audioMuted,
                 videoOff,
                 guestToken: guestToken || undefined,
@@ -263,6 +268,7 @@ export default function PreMeeting() {
                 Back to meetings
             </button>
             <div className="pre-meeting-container">
+                <div className="pre-meeting-brand"><TenantBrand branding={organisationBranding} /></div>
                 <div className="preview-section">
                     <div className="video-preview-wrapper">
                         <video
@@ -344,6 +350,8 @@ export default function PreMeeting() {
                         <button type="button" onClick={() => setShareOpen(false)}>Close</button>
                     </div>}
 
+                    <label className="field-label" htmlFor="site-location">Site or office (optional)</label>
+                    <input id="site-location" className="input-name" type="text" value={siteLocation} maxLength={120} onChange={event => setSiteLocation(event.target.value)} autoComplete="organization" placeholder="For example, Lucknow headquarters" />
                     <label className="field-label" htmlFor="display-name">Your name</label>
                     <input
                         id="display-name"

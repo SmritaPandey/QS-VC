@@ -417,6 +417,7 @@ describe('production meeting permissions', () => {
         const sa: any = {}, sb: any = {};
         await rpc(a, sa, 'joinRoom', { meetingCode: `board-a-${crypto.randomUUID().slice(0, 8)}`, displayName: 'A' });
         await rpc(b, sb, 'joinRoom', { meetingCode: `board-b-${crypto.randomUUID().slice(0, 8)}`, displayName: 'B' });
+        for (const state of [sa, sb]) roomManager.getRoom(state.roomId)!.settings.e2eeRequired = false;
         expect((await rpc(a, sa, 'collaborationAction', { type: 'notes:update', text: 'Private room A', version: 0 }))?.result.notes.text).toBe('Private room A');
         expect((await rpc(b, sb, 'getCollaborationState'))?.result.notes.text).toBe('');
         expect((await rpc(visitor, sa, 'getCollaborationState'))?.error).toBeDefined();
@@ -480,7 +481,7 @@ describe('production meeting permissions', () => {
         expect((await rpc(guestWs, guest, 'joinRoom', { meetingCode: code, displayName: 'Waiting', role: 'co-host' }))?.result.status).toBe('waiting');
         expect((await rpc(guestWs, guest, 'chatMessage', { content: 'Not admitted' }))?.error).toBeDefined();
         await rpc(hostWs, host, 'admitPeer', { targetPeerId: guest.peerId });
-        expect((await rpc(guestWs, guest, 'chatMessage', { content: 'Admitted' }))?.result.sent).toBe(true);
+        expect((await rpc(guestWs, guest, 'chatMessage', { content: 'Admitted' }))?.error?.code).toBe(-32602); // Encrypted meetings reject legacy plaintext even after admission.
         expect((await rpc(guestWs, guest, 'muteAll'))?.error?.code).toBe(-32005);
         await handlePeerDisconnect(guest);
         await handlePeerDisconnect(host);

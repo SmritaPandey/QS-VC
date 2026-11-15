@@ -54,6 +54,10 @@ interface Props {
     effectsOn?: boolean;
     onOpenEffects?: () => void;
     onReportProblem?: () => void;
+    onOpenBreakouts?: () => void;
+    onOpenQuality?: () => void;
+    onOpenMultiCamera?: () => void;
+    onRecordLocally?: () => void;
     tilesPerPage?: TilesPerPage;
     onChangeTilesPerPage?: (value: TilesPerPage) => void;
     audioOutputId?: string;
@@ -151,7 +155,7 @@ export default function ControlBar({
     chatOpen, participantsOpen, handRaised, reactionsOpen = false, languageOpen = false, languageLabel, languageCode,
     onToggleAudio, onToggleVideo, onToggleScreen, onOpenInvite,
     onToggleChat, onToggleParticipants, onRaiseHand, onToggleReactions, onToggleLanguage,
-    captionsOn = false, onToggleCaptions, pictureInPicture = false, onTogglePictureInPicture, fullscreen = false, onToggleFullscreen, effectsOn = false, onOpenEffects, onReportProblem,
+    captionsOn = false, onToggleCaptions, pictureInPicture = false, onTogglePictureInPicture, fullscreen = false, onToggleFullscreen, effectsOn = false, onOpenEffects, onReportProblem, onOpenBreakouts, onOpenQuality, onOpenMultiCamera, onRecordLocally,
     tilesPerPage = 'auto', onChangeTilesPerPage,
     audioOutputId = '', audioOutputDevices = [], audioOutputSupported = false, onAudioOutputChange, onChooseAudioOutput,
     onLeave, viewMode, onChangeView, activitySignal = 0, keepSideVisible = false,
@@ -269,6 +273,10 @@ export default function ControlBar({
                         {onToggleFullscreen && <button type="button" aria-pressed={fullscreen} onClick={() => { setMoreOpen(false); onToggleFullscreen(); }}><span className="mi" aria-hidden="true">{fullscreen ? 'fullscreen_exit' : 'fullscreen'}</span>{fullscreen ? 'Exit full screen' : 'Full screen'}</button>}
                         {(onToggleLanguage || onSignInForExtras) && <RestrictedFeatureButton label="Captions and language settings" icon="translate" active={languageOpen} requirement={languageRequirement}
                             onActivate={() => { setMoreOpen(false); onToggleLanguage?.(); }} onResolve={() => { setMoreOpen(false); resolvePlanAccess('ai_captions'); }} />}
+                        {onOpenBreakouts && <button type="button" onClick={() => { setMoreOpen(false); onOpenBreakouts(); }}><span className="mi" aria-hidden="true">workspaces</span>Breakout rooms</button>}
+                        {onOpenQuality && <button type="button" onClick={() => { setMoreOpen(false); onOpenQuality(); }}><span className="mi" aria-hidden="true">monitoring</span>Connection quality and reports</button>}
+                        {onOpenMultiCamera && <button type="button" onClick={() => { setMoreOpen(false); onOpenMultiCamera(); }}><span className="mi" aria-hidden="true">video_camera_front</span>Additional cameras</button>}
+                        {onRecordLocally && canRecord && <button type="button" onClick={() => { setMoreOpen(false); onRecordLocally(); }}><span className="mi" aria-hidden="true">save</span>{isRecording ? 'Stop recording' : 'Record on this device'}</button>}
                         {onReportProblem && <button type="button" onClick={() => { setMoreOpen(false); onReportProblem(); }}><span className="mi" aria-hidden="true">feedback</span>Report a problem</button>}
                         <h3>Microphone noise</h3>
                         <div className="meeting-view-options" role="group" aria-label="Microphone noise suppression">

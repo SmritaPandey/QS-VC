@@ -1,4 +1,4 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import express, { Router } from "express";
 import { config } from "./config";
 import { FreeSwitch } from "./esl";
@@ -18,6 +18,9 @@ export function createPolyBridge(sfu: SfuAdapter) {
   const waitingCalls = new Map<string, string>();
   const rooms = new Map<string, RoomBridge>();
   const starting = new Map<string, Promise<void>>();
+  const externalCalls = new Map<string, string>();
+  const pendingExternalCalls = new Set<string>();
+  const externalDialTasks = new Map<string, Promise<string>>();
 
   fs.on("member-add", (e) => rooms.get(e.room)?.onMemberAdd(e).catch(console.error));
   fs.on("member-del", (e) => rooms.get(e.room)?.onMemberDel(e).catch(console.error));
@@ -141,6 +144,10 @@ export function createPolyBridge(sfu: SfuAdapter) {
       waitingCalls.delete(callId);
       await sfu.notifyLobbyLeft(roomId, callId);
     }
+    await externalDialTasks.get(roomId)?.catch(() => undefined);
+    const externalCall = externalCalls.get(roomId);
+    externalCalls.delete(roomId);
+    if (externalCall) await fs.api(`uuid_kill ${externalCall} NORMAL_CLEARING`).catch(() => undefined);
     await bridge?.stop();
   }
 
@@ -178,6 +185,37 @@ export function createPolyBridge(sfu: SfuAdapter) {
     const m = room(req).findMember(req.params.id);
     if (!m) return res.status(404).end();
     res.json({ result: await fs.mute(req.params.room, m.memberId, req.body?.muted !== false) });
+  }));
+
+  http.post("/rooms/:room/bharatvc/disconnect", wrap(async (req, res) => {
+    if (pendingExternalCalls.has(req.params.room)) return res.status(409).json({ error: "Wait for the dial request to finish before disconnecting" });
+    const callId = externalCalls.get(req.params.room);
+    if (!callId) return res.json({ disconnected: true });
+    const result = await fs.api(`uuid_kill ${callId} NORMAL_CLEARING`);
+    if (!result.startsWith("+OK") && !result.includes("No such channel")) return res.status(502).json({ error: "External call termination could not be confirmed" });
+    externalCalls.delete(req.params.room);
+    res.json({ disconnected: true });
+  }));
+
+  // The internal bridge token authorizes this route; the signaling host gate runs before forwarding.
+  http.post("/rooms/:room/bharatvc", wrap(async (req, res) => {
+    const { conferenceId, gateway, pin, consent } = req.body ?? {};
+    if (consent !== true || typeof conferenceId !== "string" || !/^[0-9]{6,16}$/.test(conferenceId) ||
+        !["sip.bharatvc.nic.in", "bhvc.nic.in"].includes(gateway) || typeof pin !== "string" || !/^[0-9]{4,16}$/.test(pin) ||
+        Object.keys(req.body).some(key => !["conferenceId", "gateway", "pin", "consent"].includes(key))) return res.status(400).json({ error: "Invalid Bharat VC SIP invitation" });
+    room(req);
+    if (externalCalls.has(req.params.room)) return res.status(409).json({ error: "An external connection already exists for this room" });
+    const callId = randomUUID();
+    externalCalls.set(req.params.room, callId);
+    pendingExternalCalls.add(req.params.room);
+    let result: string;
+    const dialTask = fs.dialBharatVc(req.params.room, `${conferenceId}@${gateway}`, pin, callId);
+    externalDialTasks.set(req.params.room, dialTask);
+    try { result = await dialTask; }
+    finally { pendingExternalCalls.delete(req.params.room); externalDialTasks.delete(req.params.room); }
+    if (!rooms.has(req.params.room)) { await fs.api(`uuid_kill ${callId} NORMAL_CLEARING`); return res.status(409).json({ error: "Meeting ended while dialing" }); }
+    if (!result.startsWith("+OK")) return res.status(502).json({ error: "Bharat VC dial request rejected" });
+    res.status(202).json({ requested: true, callId });
   }));
 
   // Dial-out to a Poly endpoint (SIP URI or H.323 IP/alias)
