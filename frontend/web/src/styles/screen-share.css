@@ -7,7 +7,7 @@
     color: var(--text-primary, #f0f4f8);
     padding: 0;
     width: min(560px, calc(100vw - 32px));
-    max-height: calc(100dvh - 48px);
+    max-height: calc(100dvh - 32px);
     box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.05);
     overflow: hidden;
 }
@@ -20,8 +20,11 @@
 .share-screen-modal-content {
     display: flex;
     flex-direction: column;
-    padding: 28px;
-    gap: 20px;
+    padding: 24px;
+    gap: 18px;
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    box-sizing: border-box;
 }
 
 .share-screen-header {
@@ -251,26 +254,27 @@
 /* Presenting Banner (Google Meet / Zoom style) */
 .presenting-banner {
     position: fixed;
-    top: 16px;
+    top: calc(56px + 10px);
     left: 50%;
     transform: translateX(-50%);
-    z-index: 900;
+    z-index: 40;
     pointer-events: auto;
     width: max-content;
-    max-width: calc(100% - 24px);
+    max-width: min(540px, calc(100vw - 24px));
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: center;
     align-items: center;
-    gap: 14px;
-    padding: 10px 18px;
+    gap: 12px;
+    padding: 8px 16px;
     border-radius: 30px;
-    background: rgba(14, 23, 36, 0.92);
-    backdrop-filter: blur(12px);
+    background: rgba(14, 23, 36, 0.94);
+    backdrop-filter: blur(14px);
     border: 1px solid rgba(0, 163, 255, 0.35);
     box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4), 0 0 15px rgba(0, 163, 255, 0.2);
     color: #f0f4f8;
     animation: slideDownBanner 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    box-sizing: border-box;
 }
 
 @keyframes slideDownBanner {
@@ -356,19 +360,25 @@
 
 @media (max-width: 767px) {
     .presenting-banner {
+        top: calc(52px + 6px);
+        max-width: calc(100vw - 16px);
+        padding: 6px 12px;
         gap: 8px;
-        padding: 8px 12px;
         border-radius: var(--radius-xl, 18px);
     }
 
     .presenting-banner-text {
         flex: 1;
         min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 12px;
     }
 
     .presenting-banner-actions {
-        justify-content: center;
-        width: 100%;
+        justify-content: flex-end;
+        flex-shrink: 0;
     }
 }
 

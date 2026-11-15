@@ -2,13 +2,15 @@
 .meeting-room .meeting-live-captions.caption-overlay {
     inset-inline: 16px;
     bottom: var(--meeting-overlay-bottom, 16px);
+    display: flex;
+    justify-content: center;
     align-items: center;
-    z-index: 10;
+    z-index: 15;
     pointer-events: none;
 }
 .meeting-room .meeting-live-captions .caption-container {
     width: min(100%, 680px);
-    max-height: min(38dvh, 280px);
+    max-height: min(32dvh, 220px);
     display: flex;
     flex-direction: column;
     justify-content: flex-end;
@@ -39,33 +41,15 @@
 .meeting-live-captions .caption-line[data-current='false'] .caption-text { max-height: 3em; }
 @media (max-width: 767px) {
     .meeting-room .meeting-live-captions.caption-overlay { inset-inline: 12px; bottom: var(--meeting-overlay-bottom, 12px); }
-    .meeting-room .meeting-live-captions .caption-line { font-size: var(--caption-size, 16px); padding: 7px 10px; }
-    .meeting-room .meeting-live-captions .caption-container { max-height: min(34dvh, 240px); }
+    .meeting-room .meeting-live-captions .caption-line { font-size: var(--caption-size, 15px); padding: 6px 10px; }
+    .meeting-room .meeting-live-captions .caption-container { max-height: min(28dvh, 180px); }
 }
 @media (max-height: 500px) {
-    .meeting-room .meeting-live-captions .caption-container { max-height: 116px; }
+    .meeting-room .meeting-live-captions .caption-container { max-height: 100px; }
     .meeting-live-captions .caption-line:not(:last-child) { display: none; }
-    .meeting-live-captions .caption-text { max-height: 3em; }
+    .meeting-live-captions .caption-text { max-height: 2.6em; }
 }
 
-/* With captions visible, chat uses the top of the meeting instead of covering speech. */
-.meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-chat-overlay {
-    top: 16px;
-    bottom: auto;
-}
-.meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-chat-overlay .chat-messages {
-    height: min(var(--recent-chat-height, 200px), 28dvh);
-}
-@media (max-width: 767px) {
-    .meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-chat-overlay { top: 76px; bottom: auto; }
-    .meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-chat-overlay .chat-messages { height: min(var(--recent-chat-height, 160px), 22dvh); }
-}
-@media (max-height: 500px) {
-    .meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-chat-overlay { top: 8px; left: 12px; right: auto; width: min(300px, 44vw); }
-    .meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-chat-overlay .chat-messages { height: min(var(--recent-chat-height, 80px), 18dvh); }
-    .meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-live-captions.caption-overlay { left: auto; right: 12px; width: calc(52% - 24px); }
-}
-
-.meeting-room .meeting-feedback.meeting-caption-diagnostic { position: absolute; top: 52px; right: 12px; z-index: 36; width: min(320px, calc(100% - 24px)); }
+.meeting-room .meeting-feedback.meeting-caption-diagnostic { position: absolute; top: calc(56px + 10px); right: 12px; z-index: 36; width: min(320px, calc(100% - 24px)); }
 .meeting-room .transcript-indicator { box-sizing: border-box; max-width: calc(100% - 24px); padding: 5px 10px; border-radius: 8px; font-size: 13px; font-weight: 400; line-height: 1.4; overflow-wrap: anywhere; }
-@media (max-width: 767px) { .meeting-room .meeting-feedback.meeting-caption-diagnostic { top: 84px; } }
+@media (max-width: 767px) { .meeting-room .meeting-feedback.meeting-caption-diagnostic { top: calc(52px + 8px); } }

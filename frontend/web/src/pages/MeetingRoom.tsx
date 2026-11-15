@@ -2039,18 +2039,20 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 <div className="top-bar-center">
                     <h1 className="meeting-room-title" data-length={meetingTitleLength} title={meetingTitle || 'Meeting'} aria-label={meetingTitle || 'Meeting'}>{displayedMeetingTitle}</h1>
                     <span className="meeting-timer">{formatDuration(duration)}</span>
-                    {roomSettings.locked && <span className="qs-topchip" role="status"><span className="mi" aria-hidden="true">lock</span>Meeting locked</span>}
-                    {liveStreaming?.active && <span className="recording-indicator" role="status"><span className="mi" aria-hidden="true">live_tv</span>Streaming to {liveStreaming.provider}</span>}
-                    {roomRecording && <span className="recording-indicator" role="status"><span className="mi mi-sm" aria-hidden="true">fiber_manual_record</span> {roomRecording.displayName} is recording</span>}
-                    {(() => {
-                        const presenters = [...(screenSharing ? ['You'] : []), ...Array.from(peers.values()).filter(p => p.presenting).map(p => p.displayName)];
-                        return presenters.length > 0 && <span className="qs-topchip" role="status"><span className="mi" aria-hidden="true">present_to_all</span>{presenters.length === 1 ? (presenters[0] === 'You' ? 'You are presenting' : `${presenters[0]} is presenting`) : `${presenters.join(', ')} are presenting`}</span>;
-                    })()}
-                    {spotlightId && <span className="qs-topchip qs-topchip--spot"><span className="mi" aria-hidden="true">star</span>Spotlight: {spotlightId === myPeerIdRef.current ? 'You' : peers.get(spotlightId)?.displayName || 'participant'}{manager && <button type="button" onClick={() => setSpotlightFor(null)}>Remove</button>}</span>}
-                    {webinar && (() => {
-                        const audience = (manager || myOnStage ? 0 : 1) + Array.from(peers.values()).filter(p => p.role !== 'host' && p.role !== 'co-host' && !p.onStage).length;
-                        return <span className="qs-topchip qs-topchip--spot" title="Webinar"><span className="mi" aria-hidden="true">podium</span>{!manager && !myOnStage ? 'You’re in the audience' : myOnStage && !manager ? 'You’re on stage' : 'Webinar'}{audience > 0 ? ` · ${audience} watching` : ''}</span>;
-                    })()}
+                    <div className="top-bar-chips">
+                        {roomSettings.locked && <span className="qs-topchip" role="status"><span className="mi" aria-hidden="true">lock</span>Meeting locked</span>}
+                        {liveStreaming?.active && <span className="recording-indicator" role="status"><span className="mi" aria-hidden="true">live_tv</span>Streaming to {liveStreaming.provider}</span>}
+                        {roomRecording && <span className="recording-indicator" role="status"><span className="mi mi-sm" aria-hidden="true">fiber_manual_record</span> {roomRecording.displayName} is recording</span>}
+                        {(() => {
+                            const presenters = [...(screenSharing ? ['You'] : []), ...Array.from(peers.values()).filter(p => p.presenting).map(p => p.displayName)];
+                            return presenters.length > 0 && <span className="qs-topchip" role="status"><span className="mi" aria-hidden="true">present_to_all</span>{presenters.length === 1 ? (presenters[0] === 'You' ? 'You are presenting' : `${presenters[0]} is presenting`) : `${presenters.join(', ')} are presenting`}</span>;
+                        })()}
+                        {spotlightId && <span className="qs-topchip qs-topchip--spot"><span className="mi" aria-hidden="true">star</span>Spotlight: {spotlightId === myPeerIdRef.current ? 'You' : peers.get(spotlightId)?.displayName || 'participant'}{manager && <button type="button" onClick={() => setSpotlightFor(null)}>Remove</button>}</span>}
+                        {webinar && (() => {
+                            const audience = (manager || myOnStage ? 0 : 1) + Array.from(peers.values()).filter(p => p.role !== 'host' && p.role !== 'co-host' && !p.onStage).length;
+                            return <span className="qs-topchip qs-topchip--spot" title="Webinar"><span className="mi" aria-hidden="true">podium</span>{!manager && !myOnStage ? 'You’re in the audience' : myOnStage && !manager ? 'You’re on stage' : 'Webinar'}{audience > 0 ? ` · ${audience} watching` : ''}</span>;
+                        })()}
+                    </div>
                 </div>
                 <div className="top-bar-right">
                     {externalConference && <span className="qs-topchip" role="status">External conference: Bharat VC{externalConference.status === 'connecting' ? ' · Connecting' : externalConference.status === 'unknown' ? ' · Status uncertain' : ''}</span>}

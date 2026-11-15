@@ -73,6 +73,7 @@ export default function MeetingChat({ messages, onSend, onClose }: Props) {
         if (event.key === 'Escape') { event.stopPropagation(); onClose(); }
     }}>
         <div className="panel-header">
+            <h3>In-call messages</h3>
             <button type="button" className="panel-close" aria-label="Close chat" onClick={onClose}><span className="mi mi-sm" aria-hidden="true">close</span></button>
         </div>
         <div ref={logRef} className="chat-messages" role="log" tabIndex={0} aria-label="Meeting chat history" aria-live="polite" aria-relevant="additions text"
