@@ -321,8 +321,8 @@ it('preserves and resumes a stale pending PayPal checkout instead of expiring or
 
     expect(res.statusCode).toBe(200);
     expect(res.body).toMatchObject({ provider: 'paypal', approvalUrl, subscriptionId: 'I-EXISTING', recurring: true });
-    const staleUpdate = queries.find(query => query.sql.includes("SET status = 'failed'") && query.sql.includes('checkout_expires_at <= NOW()'));
-    expect(staleUpdate?.sql).toContain("AND (status = 'creating' OR (provider <> 'paypal' AND replaces_subscription_id IS NULL))");
+    expect(res.body).toMatchObject({ expiresAt: null, authorizationPending: false });
+    expect(queries.some(query => query.sql.includes("SET status = 'failed'") && query.sql.includes('checkout_expires_at <= NOW()'))).toBe(false);
     expect(queries.some(query => query.sql.includes('INSERT INTO public.payment_subscriptions'))).toBe(false);
     expect(calls.some(call => call.url.includes('/v1/billing/subscriptions') && call.method === 'POST')).toBe(false);
 });
@@ -426,13 +426,43 @@ it('creates a Cashfree trial subscription with GST, account email and normalized
         authorization_details: { payment_methods: ['upi', 'card'] },
         subscription_tags: { qsvc_checkout_id: sentBody?.subscription_id, plan: 'starter', trial_days: '14' },
     });
+    expect(sentBody?.subscription_meta).not.toHaveProperty('notification_channel');
+    expect(sentBody?.subscription_meta.return_url).toContain('/api/auth/billing/cashfree/return');
     expect(sentBody?.subscription_first_charge_time).toBe(res.body && typeof res.body === 'object'
         ? (res.body as Record<string, unknown>).trialEndsAt : undefined);
+    const receipt = res.body as { checkoutId: string; expiresAt: string; serverNow: string };
+    expect(receipt.checkoutId).toBe(sentBody?.subscription_id);
+    expect(Date.parse(receipt.expiresAt) - before).toBeGreaterThanOrEqual(180_000);
+    expect(Date.parse(receipt.expiresAt) - Date.parse(receipt.serverNow)).toBeLessThanOrEqual(180_000);
+    expect(Date.parse(sentBody?.subscription_meta.session_id_expiry) - Date.parse(receipt.expiresAt)).toBeGreaterThan(26 * 60_000);
     const scheduledAt = Date.parse(String(sentBody?.subscription_first_charge_time));
     expect(scheduledAt).toBeGreaterThanOrEqual(before + 14 * 24 * 60 * 60 * 1000);
     expect(scheduledAt).toBeLessThanOrEqual(Date.now() + 14 * 24 * 60 * 60 * 1000 + 31 * 60 * 1000);
     const insert = queries.find(query => query.sql.includes('INSERT INTO public.payment_subscriptions'));
     expect(insert?.values).toEqual(expect.arrayContaining(['starter', 'INR', '309.00', 18, '55.62', '364.62']));
+});
+
+it('resumes a pending Cashfree subscription session without creating another mandate or sending a new invitation', async () => {
+    enableCashfree();
+    const { pool, queries } = makePool({ openSubscription: {
+        id: cashfreeSubscriptionId, provider: 'cashfree', plan: 'starter', status: 'pending',
+        provider_subscription_id: cashfreeSubscriptionId, provider_session_id: 'existing_subscription_session',
+        checkout_window_enforced: true, checkout_expires_at: new Date(Date.now() + 60_000),
+        billing_mode: 'subscription', trial_checkout: false, trial_ends_at: null,
+        billing_period: 'monthly', trial_days: 14, total_amount: '364.62', provider_plan_id: 'existing_plan',
+    } });
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+    const res = makeResponse();
+    await route(makeRouter(pool), '/checkout')(
+        makeRequest({ provider: 'cashfree', plan: 'Starter', trial: false, mandateConsent: true }) as unknown as Request,
+        res as unknown as Response, vi.fn(),
+    );
+    expect(res.statusCode).toBe(200);
+    expect(res.body).toMatchObject({ provider: 'cashfree', sessionId: 'existing_subscription_session', mode: 'sandbox', recurring: true, checkoutId: cashfreeSubscriptionId });
+    const receipt = res.body as { expiresAt: string; serverNow: string };
+    expect(Date.parse(receipt.expiresAt) - Date.parse(receipt.serverNow)).toBeLessThanOrEqual(60_000);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(queries.some(query => query.sql.includes('INSERT INTO public.payment_subscriptions'))).toBe(false);
 });
 
 it('rejects a Cashfree webhook with an invalid signature before provider or database access', async () => {
@@ -574,9 +604,9 @@ it.each([
     expect(queries.some(query => query.sql.includes('INSERT INTO public.payment_mandate_cancellations'))).toBe(!eligible);
 });
 
-it.each(['cancelled', 'failed', 'expired', 'overlap', 'missing-period'])('records one Cashfree capture even for a %s subscription', async scenario => {
+it.each(['cancelled', 'failed', 'expired', 'overlap', 'missing-period', 'checkout-expired'])('records one Cashfree capture even for a %s subscription', async scenario => {
     enableCashfree();
-    const needsReview = ['overlap', 'missing-period'].includes(scenario);
+    const needsReview = ['overlap', 'missing-period', 'checkout-expired'].includes(scenario);
     const status = needsReview ? 'failed' : scenario;
     const context = {
         id: cashfreeSubscriptionId, tenant_id: user.tenantId, user_id: user.sub, plan: 'starter',
@@ -590,6 +620,7 @@ it.each(['cancelled', 'failed', 'expired', 'overlap', 'missing-period'])('record
         query: vi.fn(async (sql: string, values: unknown[] = []) => {
             queries.push({ sql, values });
             if (sql.includes('qsvc_payment_subscription_context')) return { rows: [context], rowCount: 1 };
+            if (sql.includes('SELECT replaces_subscription_id') && scenario === 'checkout-expired') return { rows: [{ checkout_window_enforced: true, checkout_expires_at: new Date(Date.now() - 60_000), status: 'expired' }], rowCount: 1 };
             if (sql.includes('AND id <> $3') && scenario === 'overlap') return { rows: [{ id: 'other-subscription' }], rowCount: 1 };
             if (sql.includes('INSERT INTO public.payment_captures')) {
                 if (captured.has(values[2])) return { rows: [], rowCount: 0 };
@@ -1080,4 +1111,92 @@ it('switches plans only on a verified capture and keeps late old-plan payments f
     expect([...queued]).toEqual([previousId]);
     expect(client.query.mock.calls.filter(([sql]) => sql.includes('UPDATE public.users SET subscription_plan'))).toHaveLength(1);
     expect(client.query.mock.calls.some(([sql]) => sql.includes("review_reason = 'superseded_subscription'"))).toBe(true);
+});
+
+it.each(['unapproved', 'approved-unknown-time', 'provider-unavailable', 'creation-unknown'])('reconciles expired checkout candidates safely (%s)', async scenario => {
+    enableCashfree();
+    const row = { id: cashfreeSubscriptionId, tenant_id: user.tenantId, user_id: user.sub, provider: 'cashfree',
+        provider_subscription_id: scenario === 'creation-unknown' ? null : 'provider-subscription', status: scenario === 'creation-unknown' ? 'creating' : 'pending',
+        checkout_expires_at: new Date(Date.now() - 1000), checkout_window_enforced: true, checkout_authorized_at: null, current_period_end: null };
+    const { pool, client, queries } = makePool();
+    const base = client.query.getMockImplementation()!;
+    client.query.mockImplementation(async (sql, values) => sql.includes('SELECT * FROM public.payment_subscriptions WHERE id =')
+        ? { rows: [row], rowCount: 1 } : base(sql, values));
+    Object.assign(pool, { query: vi.fn(async (sql: string) => ({ rows: sql.includes('qsvc_expired_checkout_candidates') ? [row] : [] })) });
+    const fetch = vi.fn(async () => {
+        if (scenario === 'provider-unavailable') throw new Error('unavailable');
+        return Response.json({ subscription_status: scenario === 'unapproved' ? 'INITIALIZED' : 'ACTIVE',
+            authorization_details: { authorization_status: scenario === 'unapproved' ? 'INITIALIZED' : 'ACTIVE' } });
+    });
+    vi.stubGlobal('fetch', fetch);
+    await processMandateCancellations(pool as never, { error: vi.fn(), warn: vi.fn() });
+    expect(queries.some(query => query.sql.includes("SET status = 'expired'"))).toBe(scenario === 'unapproved');
+    expect(queries.some(query => query.sql.includes('INSERT INTO public.payment_mandate_cancellations'))).toBe(scenario === 'unapproved');
+    if (scenario === 'creation-unknown') expect(fetch).not.toHaveBeenCalled();
+});
+
+it.each(['pending', 'active'])('invalidates a queued expiry cancellation after timely authorization restores %s', async status => {
+    enableCashfree();
+    const row = { id: cashfreeSubscriptionId, tenant_id: user.tenantId, user_id: user.sub,
+        checkout_window_enforced: true, status, checkout_expires_at: new Date(Date.now() - 10_000), checkout_authorized_at: new Date(Date.now() - 20_000) };
+    const job = { subscription_id: row.id, tenant_id: row.tenant_id, provider: 'cashfree', provider_subscription_id: 'provider-subscription' };
+    const { pool, client, queries } = makePool();
+    const base = client.query.getMockImplementation()!;
+    client.query.mockImplementation(async (sql, values) => sql.includes('SELECT user_id FROM public.payment_subscriptions')
+        ? { rows: [{ user_id: user.sub }], rowCount: 1 } : sql.includes('SELECT * FROM public.payment_subscriptions WHERE id =')
+            ? { rows: [row], rowCount: 1 } : base(sql, values));
+    Object.assign(pool, { query: vi.fn(async (sql: string) => ({ rows: sql.includes('qsvc_claim_mandate_cancellations') ? [job] : [] })) });
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch);
+    await processMandateCancellations(pool as never, { error: vi.fn(), warn: vi.fn() });
+    expect(fetch).not.toHaveBeenCalled();
+    expect(queries.some(query => query.sql.includes('completed_at = NOW()'))).toBe(true);
+    expect(queries.findIndex(query => query.sql.includes('FROM public.users') && query.sql.includes('FOR UPDATE'))).toBeGreaterThan(-1);
+});
+
+it('blocks a new mandate while an enforced expired checkout awaits cancellation', async () => {
+    enableCashfree();
+    const { pool, client } = makePool(); const base = client.query.getMockImplementation()!;
+    client.query.mockImplementation(async (sql, values) => sql.includes('SELECT s.id FROM public.payment_subscriptions s')
+        ? { rows: [{ id: cashfreeSubscriptionId }], rowCount: 1 } : base(sql, values));
+    const fetch = vi.fn(); vi.stubGlobal('fetch', fetch); const res = makeResponse();
+    await route(makeRouter(pool), '/checkout')(makeRequest({ provider: 'cashfree', plan: 'Starter', trial: false, mandateConsent: true }) as unknown as Request,
+        res as unknown as Response, vi.fn());
+    expect(res.statusCode).toBe(409); expect(res.body).toMatchObject({ code: 'CHECKOUT_RECONCILING' });
+    expect(fetch).not.toHaveBeenCalled();
+});
+
+it.each(['timely-delayed', 'late', 'unknown-time'])('uses signed provider authorization time for a newly enforced checkout (%s)', async scenario => {
+    enableCashfree();
+    const deadline = new Date(Date.now() - 10_000);
+    const context = { id: cashfreeSubscriptionId, tenant_id: user.tenantId, user_id: user.sub,
+        plan: 'starter', provider_plan_id: 'cashfree_plan_test', status: 'pending', current_period_end: null,
+        currency: 'INR', base_amount: '309.00', tax_percent: '18', tax_amount: '55.62', total_amount: '364.62',
+        trial_checkout: false, trial_ends_at: null, trial_days: 14, billing_period: 'monthly' };
+    const queries: Array<{ sql: string; values: unknown[] }> = [];
+    const client = { query: vi.fn(async (sql: string, values: unknown[] = []) => {
+        queries.push({ sql, values });
+        if (sql.includes('qsvc_payment_subscription_context')) return { rows: [context], rowCount: 1 };
+        if (sql.includes('SELECT replaces_subscription_id')) return { rows: [{ status: 'expired', checkout_window_enforced: true,
+            checkout_expires_at: deadline, checkout_authorized_at: null }], rowCount: 1 };
+        return { rows: [], rowCount: 1 };
+    }), release: vi.fn() };
+    const pool = { connect: vi.fn(async () => client) };
+    vi.stubGlobal('fetch', vi.fn(async () => Response.json({ subscription_id: 'cashfree_sub_provider', subscription_status: 'ACTIVE',
+        authorization_details: { authorization_status: 'ACTIVE' },
+        plan_details: { plan_id: 'cashfree_plan_test', plan_currency: 'INR', plan_interval_type: 'MONTH', plan_intervals: 1, plan_max_cycles: 100, plan_amount: 364.62 },
+        subscription_tags: { qsvc_checkout_id: cashfreeSubscriptionId } })));
+    const eventTime = scenario === 'unknown-time' ? undefined : new Date(deadline.getTime() + (scenario === 'late' ? 1000 : -1000)).toISOString();
+    const rawBody = Buffer.from(JSON.stringify({ type: 'SUBSCRIPTION_AUTH_STATUS', event_time: eventTime,
+        data: { subscription_id: 'cashfree_sub_provider', payment_status: 'SUCCESS' } }));
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const signature = crypto.createHmac('sha256', cashfreeWebhookSecret).update(timestamp).update(rawBody).digest('base64');
+    const res = makeResponse();
+    await route(makeRouter(pool), '/webhooks/cashfree')(makeRequest({}, { 'x-webhook-signature': signature, 'x-webhook-timestamp': timestamp }, {}, rawBody) as unknown as Request,
+        res as unknown as Response, vi.fn());
+    expect(res.statusCode).toBe(200);
+    const authorizationUpdate = queries.find(query => query.sql.includes('SET checkout_authorized_at'));
+    expect(Boolean(authorizationUpdate)).toBe(scenario !== 'unknown-time');
+    if (authorizationUpdate) expect(authorizationUpdate.values[3]).toBe(scenario === 'timely-delayed');
+    expect(queries.some(query => query.sql.includes('INSERT INTO public.payment_mandate_cancellations'))).toBe(scenario === 'late');
+    expect(queries.some(query => query.sql.includes('UPDATE public.users SET subscription_plan'))).toBe(false);
 });

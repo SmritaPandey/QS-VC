@@ -1,10 +1,11 @@
 import { playbackFailure, type SpeechDiagnostic } from '../lib/translated-speech-status';
-import { useEffect, useRef, useState, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { signaling } from '../lib/signaling';
 import { SpeechToTextEngine } from '../lib/speech-to-text';
 import { ServerSpeechEngine } from '../lib/server-speech';
 import { LANGUAGES, TextToSpeechEngine } from '../lib/realtime-translation';
 import { captionLanguageOptions, downloadText, transcriptToSrt, transcriptToText, upsertCaption, type TranscriptEntry } from '../lib/caption-stream';
+import MeetingToast from './MeetingToast';
 import CaptionOverlay, { type CaptionEntry } from './CaptionOverlay';
 
 interface RoomCaption { id: string; peerId: string; displayName: string; text: string; language: string; isFinal: boolean; timestamp: number; source?: 'browser' | 'server' }
@@ -52,6 +53,11 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     const [capabilityError, setCapabilityError] = useState('');
     const [status, setStatus] = useState('');
     const [voiceDiagnostic, setVoiceDiagnostic] = useState<SpeechDiagnostic | null>(null);
+    const [dismissedVoiceDiagnostics, setDismissedVoiceDiagnostics] = useState<Set<string>>(() => new Set());
+    const voiceDiagnosticKey = voiceDiagnostic ? `${voiceDiagnostic.gate}:${voiceDiagnostic.message}` : '';
+    const dismissVoiceDiagnostic = useCallback(() => {
+        setDismissedVoiceDiagnostics(previous => new Set(previous).add(voiceDiagnosticKey));
+    }, [voiceDiagnosticKey]);
     const [captions, setCaptions] = useState<CaptionEntry[]>([]);
     const [autoDetect, setAutoDetect] = useState(false);
     const [transcriptSaving, setTranscriptSaving] = useState(false);
@@ -138,7 +144,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
                 if (!active) return;
                 if (!caption.isFinal) {
                     signaling.request('captionInterim', { id: caption.id, text: caption.text.slice(0, 500), language: speakingLanguage }).catch(() => {});
-                    if (prefs.current.showCaptions) setCaptions(previous => upsertCaption(previous, { ...caption, id: `${myPeerId()}:${caption.id}`, isFinal: false, label: 'You' }));
+                    if (prefs.current.showCaptions) setCaptions(previous => upsertCaption(previous, { ...caption, id: `${myPeerId()}:${caption.id}`, peerId: myPeerId(), speakerName: `${displayName} (You)`, receivedAt: Date.now(), isFinal: false }));
                     return;
                 }
                 const recognizedAt = performance.now();
@@ -184,18 +190,23 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     // ── Incoming captions ────────────────────────────────────────────
     useEffect(() => {
         if (!connected) return;
-        const show = (entry: CaptionEntry) => { if (prefs.current.showCaptions) setCaptions(previous => upsertCaption(previous, entry)); };
+        const show = (entry: CaptionEntry) => {
+            if (prefs.current.showCaptions) setCaptions(previous => upsertCaption(previous, {
+                ...entry, receivedAt: Date.now(),
+                speakerName: entry.peerId === myPeerId() ? `${displayName} (You)` : entry.speakerName || 'Participant',
+            }));
+        };
         const offInterim = signaling.on('captionInterim', (caption: Interim) => {
-            show({ id: caption.id, speakerName: caption.displayName, text: caption.text, isFinal: false, timestamp: Date.now(), language: caption.language });
+            show({ id: caption.id, peerId: caption.peerId, speakerName: caption.displayName, text: caption.text, isFinal: false, timestamp: Date.now(), language: caption.language });
         });
         const offFinal = signaling.on('captionReceived', (caption: RoomCaption) => {
             const { captionLanguage: target } = prefs.current;
             const needsTranslation = target !== 'original' && !same(target, caption.language) && capabilities.configured;
-            show({ id: caption.id, speakerName: caption.displayName, text: caption.text, isFinal: !needsTranslation, timestamp: caption.timestamp, language: caption.language, label: needsTranslation ? 'Translating…' : 'Original' });
+            show({ id: caption.id, peerId: caption.peerId, speakerName: caption.displayName, text: caption.text, isFinal: !needsTranslation, timestamp: caption.timestamp, language: caption.language, label: needsTranslation ? 'Translating…' : 'Original' });
         });
         const offTranslated = signaling.on('captionTranslated', (result: Translated) => {
             const { captionLanguage: target, hearLanguage: voice, voiceEnabled: speak } = prefs.current;
-            if (same(result.target, target)) show({ id: result.id, speakerName: result.displayName, text: result.translatedText, isFinal: true, timestamp: result.timestamp, language: result.target, label: 'Translated' });
+            if (same(result.target, target)) show({ id: result.id, peerId: result.peerId, speakerName: result.displayName, text: result.translatedText, isFinal: true, timestamp: result.timestamp, language: result.target, label: 'Translated' });
             if (speak && voice && same(result.target, voice) && result.peerId !== myPeerId()) {
                 const tts = ttsRef.current;
                 if (!tts?.getBestVoice(voice)) setVoiceDiagnostic({ gate: 'voice', message: 'No device voice matches your selected language.' });
@@ -208,7 +219,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
             setStatus(result.reason === 'busy' ? 'Translation is busy. Some lines are shown in the original language.' : result.reason === 'consent' ? 'The speaker has not allowed this translation provider.' : 'Translation unavailable for the selected caption language.');
         });
         return () => { offInterim(); offFinal(); offTranslated(); offFailed(); };
-    }, [connected, capabilities.configured, myPeerId]);
+    }, [connected, capabilities.configured, myPeerId, displayName]);
 
     // ── Transcript and minutes ───────────────────────────────────────
     const toggleTranscript = (enabled: boolean) => {
@@ -239,9 +250,9 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     const name = (code: string, fallback: string) => LANGUAGES.find(item => item.code === code)?.name || LANGUAGES.find(item => item.code.split('-')[0] === code)?.name || fallback;
     const speakOptions = captionLanguageOptions(serverAsr ? asrLanguages : null, speakingLanguage);
     return <>
-        {voiceEnabled && voiceDiagnostic && !open && <div className="meeting-notice" role="status" data-speech-gate={voiceDiagnostic.gate}>
-            {voiceDiagnostic.message} Original meeting audio stays on.
-        </div>}
+        {voiceEnabled && voiceDiagnostic && !open && !dismissedVoiceDiagnostics.has(voiceDiagnosticKey) && <MeetingToast key={voiceDiagnosticKey} className="meeting-caption-diagnostic" onDismiss={dismissVoiceDiagnostic}>
+            <span data-speech-gate={voiceDiagnostic.gate}>{voiceDiagnostic.message} Original meeting audio stays on.</span>
+        </MeetingToast>}
         {(transcriptSaving || processorParticipants.length > 0) && <div className="transcript-indicator" role="status">
             {processorParticipants.length > 0 && <span>Transcription processor receiving audio from {processorParticipants.map(peer => peer.displayName).join(', ')}. </span>}
             {transcriptSaving && <span>Transcript is being saved.</span>}

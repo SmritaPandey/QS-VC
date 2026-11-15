@@ -49,47 +49,131 @@ const razorpayOrderVerifySchema = z.object({
 });
 const cancelSchema = z.object({ subscriptionId: z.string().uuid() });
 const PROVIDER_TIMEOUT_MS = 8000;
-const CHECKOUT_TTL_MS = 30 * 60 * 1000;
+const CHECKOUT_TTL_MS = 3 * 60 * 1000;
+// Cashfree hosted-session validity is separate from the QS-VC checkout decision window.
+const CASHFREE_SESSION_TTL_MS = 30 * 60 * 1000;
 const MAX_BILLING_CYCLES = 100;
 
-async function enqueueMandateCancellation(client: PoolClient, context: BillingContext) {
+async function enqueueMandateCancellation(client: PoolClient, context: Pick<BillingContext, 'id' | 'tenant_id'>) {
     await client.query(`INSERT INTO public.payment_mandate_cancellations (subscription_id, tenant_id)
         VALUES ($1, $2) ON CONFLICT (subscription_id) DO NOTHING`, [context.id, context.tenant_id]);
 }
 
+type CheckoutExpiryRow = {
+    id: string; tenant_id: string; user_id: string; provider: Provider; provider_subscription_id: string | null;
+    status: string; checkout_expires_at: Date; checkout_window_enforced?: boolean; checkout_authorized_at?: Date | null;
+    current_period_end?: Date | null;
+};
+
+async function providerSubscriptionState(provider: Provider, id: string) {
+    const reference = encodeURIComponent(id);
+    const value = provider === 'razorpay' ? await razorpayRequest(`/subscriptions/${reference}`, 'GET')
+        : provider === 'paypal' ? await paypalRequest(`/v1/billing/subscriptions/${reference}`, 'GET')
+            : await cashfreeRequest(`/subscriptions/${reference}`, 'GET');
+    const status = String(provider === 'cashfree' ? value.subscription_status : value.status).toUpperCase();
+    const authorization = value.authorisation_details || value.authorization_details || {};
+    const authorized = provider === 'cashfree' ? String(authorization.authorization_status || authorization.authorizationStatus).toUpperCase() === 'ACTIVE'
+        : provider === 'paypal' ? ['APPROVED', 'ACTIVE', 'SUSPENDED'].includes(status)
+            : ['AUTHENTICATED', 'ACTIVE', 'HALTED', 'COMPLETED'].includes(status);
+    const terminal = ['CANCELLED', 'CUSTOMER_CANCELLED', 'COMPLETED', 'EXPIRED'].includes(status);
+    const unapproved = provider === 'paypal' ? status === 'APPROVAL_PENDING'
+        : provider === 'razorpay' ? status === 'CREATED'
+            : ['INITIALIZED', 'INITIALISED', 'BANK_APPROVAL_PENDING'].includes(status)
+                || (status === 'ACTIVE' && ['INITIALIZED', 'PENDING', 'FAILED'].includes(String(authorization.authorization_status || '').toUpperCase()));
+    return { value, status, authorized, terminal, unapproved };
+}
+
+async function expireCheckout(pool: Pool, row: CheckoutExpiryRow) {
+    // A timed-out creation without its provider reference is uncertain, never safe to retry.
+    if (!row.provider_subscription_id) return;
+    const state = await providerSubscriptionState(row.provider, row.provider_subscription_id);
+    // The provider can have approved already while its signed webhook is delayed.
+    if (state.authorized || (!state.terminal && !state.unapproved)) return;
+    await inTenant(pool, row.tenant_id, async client => {
+        await client.query('SELECT id FROM public.users WHERE id = $1 AND tenant_id = $2 FOR UPDATE', [row.user_id, row.tenant_id]);
+        const current = (await client.query<CheckoutExpiryRow>(
+            `SELECT * FROM public.payment_subscriptions WHERE id = $1 AND tenant_id = $2 FOR UPDATE`, [row.id, row.tenant_id],
+        )).rows[0];
+        if (!current?.checkout_window_enforced || !['creating', 'pending'].includes(current.status)
+            || current.checkout_authorized_at || current.current_period_end || new Date(current.checkout_expires_at).getTime() > Date.now()) return;
+        await client.query(`UPDATE public.payment_subscriptions SET status = 'expired', updated_at = NOW()
+            WHERE id = $1 AND tenant_id = $2`, [row.id, row.tenant_id]);
+        await enqueueMandateCancellation(client, row);
+        if (state.terminal) await client.query(`UPDATE public.payment_mandate_cancellations SET completed_at = NOW()
+            WHERE subscription_id = $1 AND tenant_id = $2`, [row.id, row.tenant_id]);
+    });
+}
+
+async function expireUserCheckouts(pool: Pool, user: BillingUser) {
+    const result = await inTenant(pool, user.tenantId, client => client.query<CheckoutExpiryRow>(
+        `SELECT * FROM public.payment_subscriptions WHERE tenant_id = $1 AND user_id = $2
+         AND checkout_window_enforced AND status IN ('creating', 'pending') AND checkout_expires_at <= NOW()
+         AND checkout_authorized_at IS NULL AND current_period_end IS NULL`, [user.tenantId, user.sub],
+    ));
+    for (const row of result.rows) await expireCheckout(pool, row);
+}
+
 export async function processMandateCancellations(pool: Pool, logger: Logger) {
+    const expired = await pool.query('SELECT * FROM public.qsvc_expired_checkout_candidates()');
+    for (const row of expired.rows) {
+        if (!row.id) continue;
+        try { await expireCheckout(pool, row); }
+        catch { logger.warn({ subscriptionId: row.id }, 'Checkout expiry awaits provider reconciliation'); }
+    }
     const jobs = await pool.query('SELECT * FROM public.qsvc_claim_mandate_cancellations()');
     for (const job of jobs.rows) {
         try {
-            const id = encodeURIComponent(job.provider_subscription_id);
-            if (job.provider === 'razorpay') {
-                let current = await razorpayRequest(`/subscriptions/${id}`, 'GET');
-                if (!['cancelled', 'completed', 'expired'].includes(current.status)) {
-                    await razorpayRequest(`/subscriptions/${id}/cancel`, 'POST', { cancel_at_cycle_end: false });
-                    current = await razorpayRequest(`/subscriptions/${id}`, 'GET');
+            await inTenant(pool, job.tenant_id, async client => {
+                const owner = (await client.query('SELECT user_id FROM public.payment_subscriptions WHERE id = $1 AND tenant_id = $2', [job.subscription_id, job.tenant_id])).rows[0];
+                if (owner) await client.query('SELECT id FROM public.users WHERE id = $1 AND tenant_id = $2 FOR UPDATE', [owner.user_id, job.tenant_id]);
+                const local = (await client.query<CheckoutExpiryRow>('SELECT * FROM public.payment_subscriptions WHERE id = $1 AND tenant_id = $2 FOR UPDATE', [job.subscription_id, job.tenant_id])).rows[0];
+                let expiryState: Awaited<ReturnType<typeof providerSubscriptionState>> | undefined;
+                if (local?.checkout_window_enforced && ['pending', 'active'].includes(local.status)
+                    && (local.current_period_end || local.checkout_authorized_at && new Date(local.checkout_authorized_at).getTime() <= new Date(local.checkout_expires_at).getTime())) {
+                    await client.query('UPDATE public.payment_mandate_cancellations SET completed_at = NOW() WHERE subscription_id = $1 AND tenant_id = $2', [job.subscription_id, job.tenant_id]);
+                    return;
                 }
-                if (!['cancelled', 'completed', 'expired'].includes(current.status)) throw new Error('Cancellation not yet confirmed');
-            } else if (job.provider === 'paypal') {
-                let current = await paypalRequest(`/v1/billing/subscriptions/${id}`, 'GET');
-                if (!['CANCELLED', 'EXPIRED'].includes(current.status)) {
-                    await paypalRequest(`/v1/billing/subscriptions/${id}/cancel`, 'POST', { reason: 'Trial authorization could not be applied.' });
-                    current = await paypalRequest(`/v1/billing/subscriptions/${id}`, 'GET');
+                if (local?.checkout_window_enforced && local.status === 'expired') {
+                    if (local.current_period_end || local.checkout_authorized_at && new Date(local.checkout_authorized_at).getTime() <= new Date(local.checkout_expires_at).getTime()) {
+                        await client.query('UPDATE public.payment_mandate_cancellations SET completed_at = NOW() WHERE subscription_id = $1 AND tenant_id = $2', [job.subscription_id, job.tenant_id]);
+                        return;
+                    }
+                    const state = await providerSubscriptionState(job.provider, job.provider_subscription_id);
+                    expiryState = state;
+                    const lateCapture = (await client.query(`SELECT 1 FROM public.payment_captures WHERE subscription_id = $1 AND needs_review AND review_reason = 'checkout_expired' LIMIT 1`, [local.id])).rows.length > 0;
+                    const knownLateApproval = lateCapture || local.checkout_authorized_at && new Date(local.checkout_authorized_at).getTime() > new Date(local.checkout_expires_at).getTime();
+                    if (!knownLateApproval && (state.authorized || (!state.terminal && !state.unapproved))) throw new Error('Approval timing requires reconciliation');
                 }
-                if (!['CANCELLED', 'EXPIRED'].includes(current.status)) throw new Error('Cancellation not yet confirmed');
-            } else if (job.provider === 'cashfree') {
-                let current = await cashfreeRequest(`/subscriptions/${id}`, 'GET');
-                if (!['CANCELLED', 'CUSTOMER_CANCELLED', 'COMPLETED', 'EXPIRED'].includes(current.subscription_status)) {
-                    await cashfreeRequest(`/subscriptions/${id}/manage`, 'POST', {
-                        subscription_id: job.provider_subscription_id, action: 'CANCEL',
-                    }, crypto.randomUUID());
-                    current = await cashfreeRequest(`/subscriptions/${id}`, 'GET');
-                }
-                if (!['CANCELLED', 'CUSTOMER_CANCELLED', 'COMPLETED', 'EXPIRED'].includes(current.subscription_status)) throw new Error('Cancellation not yet confirmed');
-            } else throw new Error('Unknown cancellation provider');
-            await inTenant(pool, job.tenant_id, client => client.query(
-                'UPDATE public.payment_mandate_cancellations SET completed_at = NOW() WHERE subscription_id = $1 AND tenant_id = $2',
-                [job.subscription_id, job.tenant_id],
-            ));
+                const id = encodeURIComponent(job.provider_subscription_id);
+                if (job.provider === 'razorpay') {
+                    let current = expiryState?.value ?? await razorpayRequest(`/subscriptions/${id}`, 'GET');
+                    if (!['cancelled', 'completed', 'expired'].includes(current.status)) {
+                        await razorpayRequest(`/subscriptions/${id}/cancel`, 'POST', { cancel_at_cycle_end: false });
+                        current = await razorpayRequest(`/subscriptions/${id}`, 'GET');
+                    }
+                    if (!['cancelled', 'completed', 'expired'].includes(current.status)) throw new Error('Cancellation not yet confirmed');
+                } else if (job.provider === 'paypal') {
+                    let current = expiryState?.value ?? await paypalRequest(`/v1/billing/subscriptions/${id}`, 'GET');
+                    if (!['CANCELLED', 'EXPIRED'].includes(current.status)) {
+                        await paypalRequest(`/v1/billing/subscriptions/${id}/cancel`, 'POST', { reason: 'Trial authorization could not be applied.' });
+                        current = await paypalRequest(`/v1/billing/subscriptions/${id}`, 'GET');
+                    }
+                    if (!['CANCELLED', 'EXPIRED'].includes(current.status)) throw new Error('Cancellation not yet confirmed');
+                } else if (job.provider === 'cashfree') {
+                    let current = expiryState?.value ?? await cashfreeRequest(`/subscriptions/${id}`, 'GET');
+                    if (!['CANCELLED', 'CUSTOMER_CANCELLED', 'COMPLETED', 'EXPIRED'].includes(current.subscription_status)) {
+                        await cashfreeRequest(`/subscriptions/${id}/manage`, 'POST', {
+                            subscription_id: job.provider_subscription_id, action: 'CANCEL',
+                        }, crypto.randomUUID());
+                        current = await cashfreeRequest(`/subscriptions/${id}`, 'GET');
+                    }
+                    if (!['CANCELLED', 'CUSTOMER_CANCELLED', 'COMPLETED', 'EXPIRED'].includes(current.subscription_status)) throw new Error('Cancellation not yet confirmed');
+                } else throw new Error('Unknown cancellation provider');
+                await client.query(
+                    'UPDATE public.payment_mandate_cancellations SET completed_at = NOW() WHERE subscription_id = $1 AND tenant_id = $2',
+                    [job.subscription_id, job.tenant_id],
+                );
+            });
         } catch {
             logger.error({ subscriptionId: job.subscription_id, provider: job.provider }, 'Provider mandate cancellation pending; retry scheduled');
         }
@@ -532,6 +616,8 @@ async function applyWebhook(
     verifiedPaidCurrency: string | null = null,
     verifiedTrialEndsAt: Date | null = null,
     verifiedPaidAt: Date | null = null,
+    verifiedAuthorizationAt: Date | null = null,
+    authorizationConfirmed = false,
 ) {
     const client = await pool.connect();
     try {
@@ -558,12 +644,20 @@ async function applyWebhook(
         // Serialize renewals and upgrades for this account, including late old-plan webhooks.
         await client.query('SELECT id FROM public.users WHERE id = $1 AND tenant_id = $2 FOR UPDATE', [context.user_id, context.tenant_id]);
         const links = (await client.query(
-            `SELECT replaces_subscription_id, superseded_by_subscription_id, billing_mode
+            `SELECT replaces_subscription_id, superseded_by_subscription_id, billing_mode, status, checkout_expires_at, checkout_window_enforced, checkout_authorized_at, current_period_end
              FROM public.payment_subscriptions WHERE id = $1 AND tenant_id = $2 FOR UPDATE`,
             [context.id, context.tenant_id],
         )).rows[0];
-        if (!paid && (context.status === 'failed' || (context.status === 'expired' && !context.current_period_end))) {
-            if (trialAuthorized) await enqueueMandateCancellation(client, context);
+        if (links?.status) context.status = links.status;
+        const enforcedWindow = links?.checkout_window_enforced === true;
+        const deadline = links?.checkout_expires_at ? new Date(links.checkout_expires_at).getTime() : Infinity;
+        const acceptedAuthorization = links?.checkout_authorized_at
+            && new Date(links.checkout_authorized_at).getTime() <= deadline;
+        const timelyAuthorization = authorizationConfirmed && verifiedAuthorizationAt
+            && verifiedAuthorizationAt.getTime() <= deadline;
+        if (!paid && (context.status === 'failed' || (context.status === 'expired' && !context.current_period_end))
+            && !(enforcedWindow && authorizationConfirmed)) {
+            if (trialAuthorized || authorizationConfirmed) await enqueueMandateCancellation(client, context);
             await client.query("UPDATE public.payment_webhook_events SET result = 'ignored', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2", [provider, eventId, context.tenant_id]);
             await client.query('COMMIT');
             return 'ignored' as const;
@@ -605,10 +699,52 @@ async function applyWebhook(
         const paidAmountValid = paid && Boolean(paymentId?.trim()) && paymentId!.length <= 255
             && verifiedPaidAmountMinor !== null && verifiedPaidAmountMinor > 0 && verifiedPaidCurrency?.toUpperCase() === storedCurrency
             && (verifiedPaidAmountMinor === decimalToMinor(expectedTotal, storedCurrency) || delayedIntroCapture);
-        if ((paid || trialAuthorized) && (!storedAmountsValid || !providerPlanValid || (paid && !paidAmountValid))) {
+        if ((paid || trialAuthorized || authorizationConfirmed) && (!storedAmountsValid || !providerPlanValid || (paid && !paidAmountValid))) {
             await client.query("UPDATE public.payment_webhook_events SET result = 'ignored', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2", [provider, eventId, context.tenant_id]);
             await client.query('COMMIT');
             return 'ignored' as const;
+        }
+
+        const awaitingFirstPayment = ['creating', 'pending', 'expired', 'failed'].includes(context.status)
+            && !context.current_period_end;
+        if (enforcedWindow && awaitingFirstPayment && authorizationConfirmed && !paid) {
+            // Event time is signed by the provider; receipt time cannot decide whether approval was timely.
+            if (!verifiedAuthorizationAt || !Number.isFinite(verifiedAuthorizationAt.getTime())) {
+                await client.query("UPDATE public.payment_webhook_events SET result = 'ignored', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2", [provider, eventId, context.tenant_id]);
+                await client.query('COMMIT');
+                return 'ignored' as const;
+            }
+            await client.query(`UPDATE public.payment_subscriptions SET checkout_authorized_at = $3,
+                status = CASE WHEN $4 THEN 'pending' ELSE 'expired' END, updated_at = NOW()
+                WHERE id = $1 AND tenant_id = $2`, [context.id, context.tenant_id, verifiedAuthorizationAt, Boolean(timelyAuthorization)]);
+            if (!timelyAuthorization) {
+                await enqueueMandateCancellation(client, context);
+                await client.query("UPDATE public.payment_webhook_events SET result = 'ignored', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2", [provider, eventId, context.tenant_id]);
+                await client.query('COMMIT');
+                return 'ignored' as const;
+            }
+            context.status = 'pending';
+        }
+        if (enforcedWindow && awaitingFirstPayment && paid && !acceptedAuthorization
+            && !(verifiedPaidAt && verifiedPaidAt.getTime() <= deadline)) {
+            if (await recordCapture(client, context.id, provider, paymentId!, verifiedPaidAmountMinor!, storedCurrency)) {
+                await client.query(`UPDATE public.payment_captures SET needs_review = true, review_reason = 'checkout_expired'
+                    WHERE provider = $1 AND provider_payment_id = $2`, [provider, paymentId]);
+            }
+            await client.query(`UPDATE public.payment_subscriptions SET status = 'expired', updated_at = NOW()
+                WHERE id = $1 AND tenant_id = $2`, [context.id, context.tenant_id]);
+            await enqueueMandateCancellation(client, context);
+            await client.query("UPDATE public.payment_webhook_events SET result = 'processed', tenant_id = $3, processed_at = NOW() WHERE provider = $1 AND event_id = $2", [provider, eventId, context.tenant_id]);
+            await client.query('COMMIT');
+            return 'processed' as const;
+        }
+
+        if (enforcedWindow && awaitingFirstPayment && paid
+            && (acceptedAuthorization || verifiedPaidAt && verifiedPaidAt.getTime() <= deadline)
+            && context.status === 'expired') {
+            await client.query(`UPDATE public.payment_subscriptions SET status = 'pending', updated_at = NOW()
+                WHERE id = $1 AND tenant_id = $2`, [context.id, context.tenant_id]);
+            context.status = 'pending';
         }
 
         if (links?.superseded_by_subscription_id) {
@@ -804,6 +940,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
         const user = await requireUser(req, res);
         if (!user) return;
         try {
+            await expireUserCheckouts(pool, user);
             await inTenant(pool, user.tenantId, client => client.query(
                 `UPDATE public.payment_subscriptions SET status = 'expired', updated_at = NOW()
                  WHERE tenant_id = $1 AND user_id = $2
@@ -813,7 +950,15 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
             const latest = await inTenant(pool, user.tenantId, client => client.query(
                 `SELECT id, provider, plan, status, billing_mode AS "billingMode", current_period_end AS "currentPeriodEnd", currency,
                         base_amount AS "baseAmount", tax_amount AS "taxAmount", total_amount AS "totalAmount",
-                        CASE WHEN status IN ('creating', 'pending') THEN replaces_subscription_id END AS "replacesSubscriptionId"
+                        CASE WHEN status IN ('creating', 'pending') THEN replaces_subscription_id END AS "replacesSubscriptionId",
+                        CASE WHEN checkout_window_enforced THEN checkout_expires_at END AS "expiresAt",
+                        NOW() AS "serverNow", (status IN ('creating', 'pending') AND checkout_authorized_at IS NOT NULL AND checkout_authorized_at <= checkout_expires_at) AS "authorizationPending",
+                        current_period_end IS NULL AND (status = 'cancelled' OR (status IN ('expired', 'failed') AND EXISTS (
+                            SELECT 1 FROM public.payment_mandate_cancellations c
+                            WHERE c.subscription_id = payment_subscriptions.id AND c.tenant_id = payment_subscriptions.tenant_id
+                              AND c.completed_at IS NOT NULL
+                        ))) AND NOT EXISTS (SELECT 1 FROM public.payment_captures capture
+                            WHERE capture.subscription_id = payment_subscriptions.id AND capture.needs_review) AS "canRetry"
                  FROM public.payment_subscriptions WHERE tenant_id = $1 AND user_id = $2 AND superseded_by_subscription_id IS NULL
                  ORDER BY CASE WHEN status IN ('creating', 'pending') THEN 0
                     WHEN status IN ('active', 'past_due') THEN 1
@@ -874,6 +1019,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
         // Reserve the authorization window so delayed approval still grants at least fourteen days.
         let trialEndsAt = trial ? new Date(checkoutExpiresAt.getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000) : null;
         try {
+            await expireUserCheckouts(pool, user);
             const attempt = await inTenant(pool, user.tenantId, async client => {
                 const account = await client.query(
                     `SELECT u.email, u.phone_number, u.role, u.subscription_plan, u.trial_started_at, u.trial_ends_at, u.subscription_expires_at,
@@ -897,18 +1043,22 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                        AND (status = 'cancelled' OR (billing_mode = 'one_time' AND status = 'active'))
                        AND current_period_end IS NOT NULL AND current_period_end <= NOW()`, [user.tenantId, user.sub],
                 );
-                // An approved upgrade can await its first charge after the checkout link expires.
-                // Keep that slot reserved until the provider reports a terminal state or the user cancels.
-                await client.query(
-                    `UPDATE public.payment_subscriptions SET status = 'failed', updated_at = NOW()
-                     WHERE tenant_id = $1 AND user_id = $2 AND status IN ('creating', 'pending') AND checkout_expires_at <= NOW()
-                       AND (status = 'creating' OR (provider <> 'paypal' AND replaces_subscription_id IS NULL))`,
-                    [user.tenantId, user.sub],
-                );
+                const unresolved = await client.query(`SELECT s.id FROM public.payment_subscriptions s
+                    WHERE s.tenant_id = $1 AND s.user_id = $2 AND (
+                        EXISTS (SELECT 1 FROM public.payment_captures capture
+                            WHERE capture.subscription_id = s.id AND capture.needs_review)
+                        OR (s.checkout_window_enforced AND (
+                            (s.status IN ('expired', 'failed') AND NOT EXISTS (
+                                SELECT 1 FROM public.payment_mandate_cancellations c
+                                WHERE c.subscription_id = s.id AND c.tenant_id = s.tenant_id AND c.completed_at IS NOT NULL
+                            )) OR (s.status IN ('creating', 'pending') AND s.checkout_expires_at <= NOW())
+                        ))
+                    ) LIMIT 1`, [user.tenantId, user.sub]);
+                if (unresolved.rows.length) throw new Error('CHECKOUT_RECONCILING');
                 const existingSubscription = await client.query(
                     `SELECT id, provider, plan, status, current_period_end, provider_subscription_id, provider_order_id,
                             provider_session_id, billing_mode, approval_url, trial_checkout, trial_ends_at, trial_days, billing_period, provider_plan_id, total_amount,
-                            intro_cycles, regular_total_amount, replaces_subscription_id
+                            intro_cycles, regular_total_amount, replaces_subscription_id, checkout_expires_at, checkout_window_enforced, checkout_authorized_at
                      FROM public.payment_subscriptions
                      WHERE tenant_id = $1 AND user_id = $2
                        AND superseded_by_subscription_id IS NULL
@@ -932,6 +1082,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                             providerSubscriptionId: existingRow.provider_subscription_id,
                             providerSessionId: existingRow.provider_session_id,
                             approvalUrl: existingRow.approval_url,
+                            checkoutExpiresAt: existingRow.checkout_expires_at, windowEnforced: existingRow.checkout_window_enforced, authorizedAt: existingRow.checkout_authorized_at,
                         };
                     }
                     if (!upgradeFrom || existingRow.id !== upgradeFrom
@@ -944,8 +1095,8 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     `INSERT INTO public.payment_subscriptions
                         (id, tenant_id, user_id, provider, plan, provider_plan_id, billing_mode, currency,
                          base_amount, tax_percent, tax_amount, total_amount, status, checkout_expires_at,
-                         trial_checkout, trial_ends_at, provider_subscription_id, trial_days, billing_period, replaces_subscription_id)
-                     VALUES ($1, $2, $3, $4, $5, $6, 'subscription', $7, $8, $9, $10, $11, 'creating', $12, $13, $14, $15, $16, $17, $18)`,
+                         trial_checkout, trial_ends_at, provider_subscription_id, trial_days, billing_period, replaces_subscription_id, checkout_window_enforced)
+                     VALUES ($1, $2, $3, $4, $5, $6, 'subscription', $7, $8, $9, $10, $11, 'creating', $12, $13, $14, $15, $16, $17, $18, true)`,
                     [subscriptionId, user.tenantId, user.sub, provider, plan, providerPlan.id,
                         providerPlan.currency, providerPlan.baseAmount, GST_PERCENT, providerPlan.taxAmount, providerPlan.totalAmount,
                         checkoutExpiresAt, trial, trialEndsAt,
@@ -962,15 +1113,19 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                             minorToDecimal(regular.totalAmountMinor, regular.currency), `qs_${subscriptionId.replace(/-/g, '')}_r`, subscriptionId, user.tenantId],
                     );
                 }
-                return { id: subscriptionId, email: row.email, phone: row.phone_number, reuse: false, providerSubscriptionId: null, providerSessionId: null, approvalUrl: null };
+                return { id: subscriptionId, email: row.email, phone: row.phone_number, reuse: false, providerSubscriptionId: null, providerSessionId: null, approvalUrl: null, checkoutExpiresAt, windowEnforced: true, authorizedAt: null };
             });
+
+            const windowReceipt = () => ({ checkoutId: attempt.id,
+                expiresAt: attempt.windowEnforced ? new Date(attempt.checkoutExpiresAt).toISOString() : null,
+                serverNow: new Date().toISOString(), authorizationPending: Boolean(attempt.authorizedAt), canRetry: false });
 
             if (provider === 'razorpay') {
                 if (attempt.reuse) {
                     const price = getPlanPrice(plan, billing)!;
                     return res.json({ provider, subscription_id: attempt.providerSubscriptionId, keyId: process.env.RAZORPAY_KEY_ID,
                         email: attempt.email, plan: parsed.data.plan, amount: price.totalAmountMinor, currency: price.currency,
-                        recurring: true, trialEndsAt: trialEndsAt?.toISOString() || null });
+                        recurring: true, ...windowReceipt(), trialEndsAt: trialEndsAt?.toISOString() || null });
                 }
                 const price = getPlanPrice(plan, billing)!;
                 const created = await razorpayRequest('/subscriptions', 'POST', {
@@ -992,11 +1147,11 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                 ));
                 return res.json({ provider, subscription_id: created.id, keyId: process.env.RAZORPAY_KEY_ID,
                     email: attempt.email, plan: parsed.data.plan, amount: price.totalAmountMinor, currency: price.currency,
-                    recurring: true, trialEndsAt: trialEndsAt?.toISOString() || null });
+                    recurring: true, ...windowReceipt(), trialEndsAt: trialEndsAt?.toISOString() || null });
             }
 
             if (provider === 'paypal') {
-                if (attempt.reuse && typeof attempt.approvalUrl === 'string') return res.json({ provider, approvalUrl: attempt.approvalUrl, subscriptionId: attempt.providerSubscriptionId, email: attempt.email, plan: parsed.data.plan, recurring: true, trialEndsAt: trialEndsAt?.toISOString() || null });
+                if (attempt.reuse && typeof attempt.approvalUrl === 'string') return res.json({ provider, approvalUrl: attempt.approvalUrl, subscriptionId: attempt.providerSubscriptionId, email: attempt.email, plan: parsed.data.plan, recurring: true, ...windowReceipt(), trialEndsAt: trialEndsAt?.toISOString() || null });
                 const created = await paypalRequest('/v1/billing/subscriptions', 'POST', {
                     plan_id: providerPlan.id,
                     custom_id: attempt.id,
@@ -1021,13 +1176,13 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                         [created.id, approvalUrl.toString(), attempt.id, user.tenantId, user.sub],
                 ));
                 return res.json({ provider, approvalUrl: approvalUrl.toString(), subscriptionId: created.id, email: attempt.email,
-                    plan: parsed.data.plan, recurring: true, trialEndsAt: trialEndsAt?.toISOString() || null });
+                    plan: parsed.data.plan, recurring: true, ...windowReceipt(), trialEndsAt: trialEndsAt?.toISOString() || null });
             }
 
             if (attempt.reuse && typeof attempt.providerSessionId === 'string') {
                 return res.json({ provider, subscription_id: attempt.providerSubscriptionId, sessionId: attempt.providerSessionId,
                     mode: process.env.CASHFREE_ENVIRONMENT === 'production' ? 'production' : 'sandbox', email: attempt.email,
-                    plan: parsed.data.plan, recurring: true, trialEndsAt: trialEndsAt?.toISOString() || null });
+                    plan: parsed.data.plan, recurring: true, ...windowReceipt(), trialEndsAt: trialEndsAt?.toISOString() || null });
             }
             const price = getPlanPrice(plan, billing)!;
             const created = await cashfreeRequest('/subscriptions', 'POST', {
@@ -1042,8 +1197,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                 authorization_details: { payment_methods: ['upi', 'card'] },
                 subscription_meta: {
                     return_url: makeCashfreeReturnUrl(attempt.id, plan, trial, billing),
-                    notification_channel: ['EMAIL'],
-                    session_id_expiry: checkoutExpiresAt.toISOString(),
+                    session_id_expiry: new Date(Date.now() + CASHFREE_SESSION_TTL_MS).toISOString(),
                 },
                 subscription_expiry_time: new Date(Date.now() + (cycles * 31 + TRIAL_DAYS + 1) * 24 * 60 * 60 * 1000).toISOString(),
                 ...(trialEndsAt ? { subscription_first_charge_time: trialEndsAt.toISOString() } : {}),
@@ -1061,10 +1215,11 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
             ));
             res.json({ provider, subscription_id: created.subscription_id, sessionId: created.subscription_session_id,
                 mode: process.env.CASHFREE_ENVIRONMENT === 'production' ? 'production' : 'sandbox', email: attempt.email,
-                plan: parsed.data.plan, recurring: true, trialEndsAt: trialEndsAt?.toISOString() || null });
+                plan: parsed.data.plan, recurring: true, ...windowReceipt(), trialEndsAt: trialEndsAt?.toISOString() || null });
         } catch (error) {
-            if (error instanceof Error && ['ADMIN_ACCESS', 'ALREADY_ENTITLED', 'EXISTING_SUBSCRIPTION', 'ACCOUNT_UNAVAILABLE', 'TRIAL_ALREADY_USED', 'PHONE_REQUIRED', 'UPGRADE_CHANGED'].includes(error.message)) {
+            if (error instanceof Error && ['ADMIN_ACCESS', 'ALREADY_ENTITLED', 'EXISTING_SUBSCRIPTION', 'ACCOUNT_UNAVAILABLE', 'TRIAL_ALREADY_USED', 'PHONE_REQUIRED', 'UPGRADE_CHANGED', 'CHECKOUT_RECONCILING'].includes(error.message)) {
                 const messages: Record<string, string> = {
+                    CHECKOUT_RECONCILING: 'This checkout is being reconciled with the provider. Do not pay again until cancellation or payment is confirmed.',
                     ADMIN_ACCESS: 'Administrators already have full access.',
                     ALREADY_ENTITLED: 'Your account already has this plan or a higher plan.',
                     EXISTING_SUBSCRIPTION: 'Finish or cancel the pending checkout, or choose a higher plan to upgrade.',
@@ -1074,7 +1229,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     PHONE_REQUIRED: 'Add an Indian mobile number to your profile before authorizing UPI AutoPay or card billing.',
                 };
                 return res.status(error.message === 'ACCOUNT_UNAVAILABLE' ? 404 : 409).json({
-                    code: error.message === 'TRIAL_ALREADY_USED' || error.message === 'PHONE_REQUIRED' ? error.message : undefined,
+                    code: ['TRIAL_ALREADY_USED', 'PHONE_REQUIRED', 'CHECKOUT_RECONCILING'].includes(error.message) ? error.message : undefined,
                     error: messages[error.message],
                 });
             }
@@ -1328,7 +1483,9 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                 if (trialAuthorized && typeof verified.start_at === 'number') verifiedTrialEndsAt = new Date(verified.start_at * 1000);
             }
             await applyWebhook(pool, 'razorpay', eventId, event.event, rawBody, subscriptionId, paid, periodEnd,
-                paymentId, verifiedPlan, verifiedCheckoutId, trialAuthorized, verifiedPaidAmountMinor, verifiedPaidCurrency, verifiedTrialEndsAt);
+                paymentId, verifiedPlan, verifiedCheckoutId, trialAuthorized, verifiedPaidAmountMinor, verifiedPaidCurrency, verifiedTrialEndsAt,
+                paid && typeof payment?.created_at === 'number' ? new Date(payment.created_at * 1000) : null,
+                trialAuthorizedEvent && typeof event.created_at === 'number' ? new Date(event.created_at * 1000) : null, trialAuthorized);
             res.status(200).json({ received: true });
         } catch (error) {
             logger.error({ error: error instanceof Error ? error.message : 'webhook error' }, 'Razorpay webhook could not be processed');
@@ -1358,6 +1515,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
             let verifiedPaidCurrency: string | null = null;
             let verifiedTrialEndsAt: Date | null = null;
             let trialAuthorized = false;
+            let authorizationConfirmed = false;
             if ((paid || trialAuthorizedEvent) && subscriptionId) {
                 const verified = await paypalRequest(`/v1/billing/subscriptions/${encodeURIComponent(subscriptionId)}`, 'GET');
                 verifiedCheckoutId = typeof verified.custom_id === 'string' ? verified.custom_id : null;
@@ -1409,6 +1567,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     verifiedPaidAmountMinor = decimalToMinor(String(saleAmount), verifiedPlan.currency);
                     verifiedPaidCurrency = String(saleCurrency);
                 }
+                authorizationConfirmed = trialAuthorizedEvent && verified.status === 'ACTIVE' && Boolean(verifiedCheckoutId);
                 trialAuthorized = trialAuthorizedEvent && verified.status === 'ACTIVE' && Boolean(verifiedCheckoutId)
                     && Boolean(verifiedPlan?.hasTrial) && [7, TRIAL_DAYS].includes(verifiedPlan?.trialDays ?? 0);
                 if (trialAuthorized && typeof verified.start_time === 'string') {
@@ -1417,7 +1576,9 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                 }
             }
             await applyWebhook(pool, 'paypal', event.id, event.event_type, rawBody, subscriptionId, paid, periodEnd,
-                paymentId, verifiedPlan, verifiedCheckoutId, trialAuthorized, verifiedPaidAmountMinor, verifiedPaidCurrency, verifiedTrialEndsAt);
+                paymentId, verifiedPlan, verifiedCheckoutId, trialAuthorized, verifiedPaidAmountMinor, verifiedPaidCurrency, verifiedTrialEndsAt,
+                paid && typeof resource.create_time === 'string' ? new Date(resource.create_time) : null,
+                authorizationConfirmed && typeof event.create_time === 'string' ? new Date(event.create_time) : null, authorizationConfirmed);
             res.status(200).json({ received: true });
         } catch (error) {
             logger.error({ error: error instanceof Error ? error.message : 'webhook error' }, 'PayPal webhook could not be processed');
@@ -1499,7 +1660,8 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
             await applyWebhook(pool, 'cashfree', eventId, `${event.type}${statusSuffix}`, rawBody,
                 subscriptionId, paid, periodEnd, paymentId, verifiedPlan, verifiedCheckoutId,
                 trialAuthorized, verifiedPaidAmountMinor, paymentCurrency, cashfreeDate(verified.subscription_first_charge_time),
-                paid ? cashfreeDate(data.payment_time || event.event_time) : null);
+                paid ? cashfreeDate(data.payment_time || event.event_time) : null,
+                trialAuthorized ? cashfreeDate(event.event_time) : null, trialAuthorized);
             res.status(200).json({ received: true });
         } catch (error) {
             logger.error({ error: error instanceof Error ? error.message : 'webhook error' }, 'Cashfree webhook could not be processed');

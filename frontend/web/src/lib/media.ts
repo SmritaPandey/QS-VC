@@ -15,6 +15,7 @@ export interface ProducerInfo {
 
 export interface ConsumerInfo {
     id: string;
+    producerId: string;
     kind: msTypes.MediaKind;
     track: MediaStreamTrack;
     consumer: msTypes.Consumer;
@@ -29,6 +30,8 @@ export class MediaManager {
     private recvTransport: msTypes.Transport | null = null;
     private producers: Map<string, msTypes.Producer> = new Map();
     private consumers: Map<string, ConsumerInfo> = new Map();
+    // A closed producer must not reappear from a pending consume or stale room snapshot.
+    private closedRemoteProducers = new Set<string>();
     private e2ee: E2EEManager | null = null;
 
     private onNewConsumer: ((info: ConsumerInfo) => void) | null = null;
@@ -212,6 +215,7 @@ export class MediaManager {
         const transport = this.recvTransport;
         const revision = this.revision;
         if (!transport) throw new Error('Recv transport not created');
+        if (this.closedRemoteProducers.has(producerId)) throw new Error('Remote producer closed');
 
         const result = await signaling.request('consume', {
             producerPeerId,
@@ -220,6 +224,7 @@ export class MediaManager {
         });
 
         if (revision !== this.revision || transport.closed) throw new Error('Media session closed');
+        if (this.closedRemoteProducers.has(producerId)) throw new Error('Remote producer closed');
         const consumer = await transport.consume({
             id: result.consumerId,
             producerId: result.producerId,
@@ -237,15 +242,16 @@ export class MediaManager {
             }
         }
 
-        if (revision !== this.revision || transport.closed) { consumer.close(); throw new Error('Media session closed'); }
+        if (revision !== this.revision || transport.closed || this.closedRemoteProducers.has(producerId)) { consumer.close(); throw new Error('Remote producer or media session closed'); }
         // Resume the consumer on the server
-        await signaling.request('resumeConsumer', {
-            consumerId: consumer.id,
-        });
+        try {
+            await signaling.request('resumeConsumer', { consumerId: consumer.id });
+        } catch (error) { consumer.close(); throw error; }
 
-        if (revision !== this.revision || transport.closed) { consumer.close(); throw new Error('Media session closed'); }
+        if (revision !== this.revision || transport.closed || this.closedRemoteProducers.has(producerId)) { consumer.close(); throw new Error('Remote producer or media session closed'); }
         const info: ConsumerInfo = {
             id: consumer.id,
+            producerId,
             kind: consumer.kind,
             track: consumer.track,
             consumer,
@@ -256,15 +262,8 @@ export class MediaManager {
         this.consumers.set(consumer.id, info);
         this.onNewConsumer?.(info);
 
-        consumer.on('transportclose', () => {
-            this.consumers.delete(consumer.id);
-            this.onConsumerRemoved?.(consumer.id);
-        });
-
-        consumer.on('trackended', () => {
-            this.consumers.delete(consumer.id);
-            this.onConsumerRemoved?.(consumer.id);
-        });
+        consumer.on('transportclose', () => this.removeConsumer(consumer.id));
+        consumer.on('trackended', () => this.removeConsumer(consumer.id));
 
         console.log(`[Media] Consuming ${result.kind} from peer ${producerPeerId} [consumer:${consumer.id}]`);
         return info;
@@ -310,6 +309,22 @@ export class MediaManager {
         await Promise.all(producers.map(producer => signaling.request('closeProducer', { producerId: producer.id })));
     }
 
+    /** WebRTC does not forward the SFU's producer-close event to remote tracks. */
+    closeConsumerByProducer(producerId: string): void {
+        this.closedRemoteProducers.add(producerId);
+        for (const info of this.consumers.values()) {
+            if (info.producerId === producerId) this.removeConsumer(info.id);
+        }
+    }
+
+    private removeConsumer(consumerId: string): void {
+        const info = this.consumers.get(consumerId);
+        if (!info) return;
+        this.consumers.delete(consumerId);
+        info.consumer.close();
+        this.onConsumerRemoved?.(consumerId);
+    }
+
     getConsumers(): ConsumerInfo[] {
         return Array.from(this.consumers.values());
     }
@@ -334,6 +349,7 @@ export class MediaManager {
             consumer.close();
         }
         this.consumers.clear();
+        this.closedRemoteProducers.clear();
 
         this.sendTransport?.close();
         this.recvTransport?.close();

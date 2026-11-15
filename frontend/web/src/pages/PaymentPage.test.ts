@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
-import PaymentPage, { PaymentProviderChoices, openCashfreeSubscription } from './PaymentPage';
+import PaymentPage, { PaymentProviderChoices, openCashfreeSubscription, prepareCashfreeSubscription } from './PaymentPage';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -31,6 +31,49 @@ it('rejects an outdated SDK without falling back to the one-time checkout', asyn
 
 it('rejects a missing subscription session before SDK access', async () => {
     await expect(openCashfreeSubscription('', 'production')).rejects.toThrow('We couldn’t open Cashfree');
+});
+
+it('preflights subscription support without starting checkout, then reuses that client for immediate handoff', async () => {
+    const subscriptionsCheckout = vi.fn(async () => ({}));
+    const Cashfree = vi.fn(() => ({ subscriptionsCheckout }));
+    vi.stubGlobal('window', { Cashfree });
+    const ready = await prepareCashfreeSubscription('production');
+    expect(subscriptionsCheckout).not.toHaveBeenCalled();
+    await openCashfreeSubscription('subscription-session', 'production', ready);
+    expect(Cashfree).toHaveBeenCalledTimes(1);
+    expect(subscriptionsCheckout).toHaveBeenCalledWith({ subsSessionId: 'subscription-session', redirectTarget: '_self' });
+});
+
+it('rejects unknown provider mode before SDK or mandate creation', async () => {
+    const Cashfree = vi.fn();
+    vi.stubGlobal('window', { Cashfree });
+    await expect(prepareCashfreeSubscription()).rejects.toThrow('We couldn’t open Cashfree');
+    expect(Cashfree).not.toHaveBeenCalled();
+});
+
+it('removes a failed provider script so retry can load checkout successfully', async () => {
+    const scripts: Array<{ onerror?: () => void; onload?: () => void; remove: () => void; setAttribute: () => void }> = [];
+    const providerWindow = { setTimeout, clearTimeout, Cashfree: undefined as Window['Cashfree'] };
+    vi.stubGlobal('window', providerWindow);
+    vi.stubGlobal('document', {
+        querySelector: () => null,
+        createElement: () => {
+            const script = { remove: vi.fn(), setAttribute: vi.fn() };
+            scripts.push(script);
+            return script;
+        },
+        head: { appendChild: vi.fn() },
+    });
+    const first = prepareCashfreeSubscription('production');
+    scripts[0].onerror!();
+    await expect(first).rejects.toThrow('Check your connection');
+    expect(scripts[0].remove).toHaveBeenCalledOnce();
+    const retry = prepareCashfreeSubscription('production');
+    const subscriptionsCheckout = vi.fn();
+    providerWindow.Cashfree = () => ({ subscriptionsCheckout });
+    scripts[1].onload!();
+    await expect(retry).resolves.toEqual({ subscriptionsCheckout });
+    expect(scripts).toHaveLength(2);
 });
 
 const render = (url: string) => renderToStaticMarkup(createElement(MemoryRouter, { initialEntries: [url] }, createElement(PaymentPage)));
@@ -108,4 +151,58 @@ describe('payment gateway choices', () => {
         expect(radio(html, 'razorpay')).toContain('disabled');
         expect(radio(html, 'cashfree')).not.toContain('disabled');
     });
+});
+
+describe('checkout expiry and confirmation boundaries', () => {
+    const billing = { id: 'attempt', plan: 'pro' as const, status: 'pending', billingMode: 'subscription' as const, currentPeriodEnd: null };
+    it('does not confirm access from a provider callback, pending status or an old upgrade plan', async () => {
+        const { hasConfirmedCheckoutAccess } = await import('./PaymentPage');
+        expect(hasConfirmedCheckoutAccess(billing, { status: 'paid_active', plan: 'pro' }, 'pro', false)).toBe(false);
+        expect(hasConfirmedCheckoutAccess({ ...billing, status: 'active' }, { status: 'paid_active', plan: 'starter' }, 'pro', false)).toBe(false);
+        expect(hasConfirmedCheckoutAccess({ ...billing, status: 'active', plan: 'starter' }, { status: 'paid_active', plan: 'pro' }, 'pro', false)).toBe(false);
+        expect(hasConfirmedCheckoutAccess({ ...billing, status: 'active' }, { status: 'paid_active', plan: 'pro' }, 'pro', false)).toBe(true);
+    });
+    it('confirms a trial mandate only when server authorization and exact trial entitlement agree', async () => {
+        const { hasConfirmedCheckoutAccess } = await import('./PaymentPage');
+        expect(hasConfirmedCheckoutAccess({ ...billing, authorizationPending: true }, { status: 'trial_active', plan: 'pro_trial' }, 'pro', true)).toBe(true);
+        expect(hasConfirmedCheckoutAccess(billing, { status: 'trial_active', plan: 'pro_trial' }, 'pro', true)).toBe(false);
+        expect(hasConfirmedCheckoutAccess({ ...billing, status: 'expired' }, { status: 'trial_active', plan: 'pro_trial' }, 'pro', true)).toBe(false);
+    });
+    it('closes the actual Razorpay handle at the absolute remaining deadline, then reconciles', async () => {
+        vi.useFakeTimers();
+        try {
+            const { armRazorpayExpiry } = await import('./PaymentPage');
+            vi.stubGlobal('window', { setTimeout, clearTimeout });
+            vi.setSystemTime(1000);
+            const close = vi.fn(); const reconcile = vi.fn();
+            armRazorpayExpiry({ close }, 31000, reconcile);
+            await vi.advanceTimersByTimeAsync(29999);
+            expect(close).not.toHaveBeenCalled();
+            await vi.advanceTimersByTimeAsync(1);
+            expect(close).toHaveBeenCalledOnce();
+            expect(reconcile).toHaveBeenCalledOnce();
+        } finally { vi.useRealTimers(); }
+    });
+    it('can cancel the modal timer on dismiss without marking payment failed', async () => {
+        vi.useFakeTimers();
+        try {
+            const { armRazorpayExpiry } = await import('./PaymentPage');
+            vi.stubGlobal('window', { setTimeout, clearTimeout });
+            const close = vi.fn(); const reconcile = vi.fn();
+            const timer = armRazorpayExpiry({ close }, Date.now() + 180000, reconcile);
+            clearTimeout(timer);
+            await vi.advanceTimersByTimeAsync(180001);
+            expect(close).not.toHaveBeenCalled();
+            expect(reconcile).not.toHaveBeenCalled();
+        } finally { vi.useRealTimers(); }
+    });
+});
+
+
+it('leaves verifying after confirmed pending-checkout cancellation while preserving cancelled paid-period access', async () => {
+    const { checkoutPhaseAfterStatus } = await import('./PaymentPage');
+    const cancelled = { id: 'attempt', plan: 'pro' as const, status: 'cancelled', billingMode: 'subscription' as const, currentPeriodEnd: null };
+    expect(checkoutPhaseAfterStatus('verifying', cancelled)).toBe('dismissed');
+    expect(checkoutPhaseAfterStatus('confirmed', { ...cancelled, currentPeriodEnd: '2026-12-15T00:00:00Z' })).toBe('confirmed');
+    expect(checkoutPhaseAfterStatus('verifying', { ...cancelled, status: 'pending', authorizationPending: true })).toBe('verifying');
 });

@@ -1,0 +1,19 @@
+.meeting-pip-window { margin: 0; padding: 0; background: #102a43; }
+.meeting-pip { display: flex; flex-direction: column; min-height: 100dvh; background: #102a43; color: #edf5fa; font-family: 'IBM Plex Sans', sans-serif; font-size: 16px; font-weight: 400; line-height: 1.5; }
+.meeting-pip header { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px; gap: 8px; }
+.meeting-pip button { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; padding: 8px; border: 1px solid #7296ad; border-radius: 12px; color: #edf5fa; background: #203f56; font: inherit; font-weight: 400; cursor: pointer; }
+.meeting-pip button:hover { background: #2c5068; }
+.meeting-pip button:active { background: #355d76; }
+.meeting-pip button:focus-visible { outline: 2px solid #43d9c2; outline-offset: 2px; }
+.meeting-pip button[aria-pressed='false'] { background: #6f2638; border-color: #d28a98; }
+.meeting-pip-preview { display: grid; place-items: center; position: relative; flex: 1; min-height: 180px; overflow: hidden; background: #0b1d2c; }
+.meeting-pip-preview video { position: absolute; width: 100%; height: 100%; object-fit: contain; }
+.meeting-pip-avatar { display: grid; place-items: center; width: 80px; height: 80px; margin-block: 32px; border-radius: 50%; background: #294d66; font-size: 28px; }
+.meeting-pip-preview p { position: absolute; bottom: 8px; left: 12px; max-width: calc(100% - 24px); margin: 0; padding: 4px 8px; border-radius: 8px; background: #102a43; color: #edf5fa; overflow-wrap: anywhere; font-size: 14px; font-weight: 400; }
+.meeting-pip-controls { display: flex; justify-content: center; flex-wrap: wrap; gap: 8px; padding: 12px; }
+.meeting-pip .meeting-pip-return { flex: 1; font-size: 14px; }
+.meeting-pip-inline { position: fixed; z-index: 140; right: 16px; top: 76px; width: min(360px, calc(100vw - 32px)); min-height: 0; max-height: calc(100dvh - 160px); overflow-y: auto; border: 1px solid #7296ad; border-radius: 16px; box-shadow: 0 12px 30px #0005; }
+@media (max-height: 420px) { .meeting-pip-preview { min-height: 120px; } .meeting-pip-inline { top: 12px; max-height: calc(100dvh - 100px); } }
+
+.meeting-pip button:disabled { cursor: not-allowed; opacity: .65; }
+.meeting-pip-camera-hint { margin: 0; padding: 0 12px 12px; color: #edf5fa; font-size: 14px; font-weight: 400; line-height: 1.5; }

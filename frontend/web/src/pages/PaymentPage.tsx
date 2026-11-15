@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import CheckoutProgress, { calibrateCheckoutClock, type CheckoutClock, type CheckoutPhase } from '../components/CheckoutProgress';
 import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
 import CurrencyRateSelector from '../components/CurrencyRateSelector';
@@ -26,9 +27,16 @@ type PaymentStatus = {
     currency?: string;
     totalAmount?: string;
     replacesSubscriptionId?: string | null;
+    expiresAt?: string | null;
+    serverNow?: string;
+    authorizationPending?: boolean;
+    canRetry?: boolean;
 } | null;
 type CheckoutResult = {
     provider: Gateway;
+    checkoutId?: string;
+    expiresAt?: string | null;
+    serverNow?: string;
     subscription_id?: string;
     keyId?: string;
     email?: string;
@@ -39,9 +47,27 @@ type CheckoutResult = {
 };
 type EntitlementSnapshot = { plan?: string; status?: string; trialEndsAt?: string | null };
 
+export function checkoutPhaseAfterStatus(previous: CheckoutPhase, result: PaymentStatus): CheckoutPhase {
+    if (result?.status === 'cancelled' && result.currentPeriodEnd === null) return 'dismissed';
+    if (result?.authorizationPending) return 'verifying';
+    if (result?.status === 'expired') return 'expired';
+    return previous;
+}
+
+export function hasConfirmedCheckoutAccess(billing: NonNullable<PaymentStatus>, current: EntitlementSnapshot | null, plan: string | undefined, trial: boolean) {
+    if (!plan || billing.plan !== plan) return false;
+    if (trial) return current?.status === 'trial_active' && current.plan === `${plan}_trial`
+        && (billing.status === 'active' || (billing.status === 'pending' && billing.authorizationPending === true));
+    return billing.status === 'active' && current?.status === 'paid_active' && current.plan === plan;
+}
+
+export function armRazorpayExpiry(checkout: { close: () => void }, deadline: number, onExpired: () => void) {
+    return window.setTimeout(() => { checkout.close(); onExpired(); }, Math.max(0, deadline - Date.now()));
+}
+
 declare global {
     interface Window {
-        Razorpay?: new (options: Record<string, unknown>) => { open: () => void; on: (event: string, callback: (value: Record<string, unknown>) => void) => void };
+        Razorpay?: new (options: Record<string, unknown>) => { open: () => void; close: () => void; on: (event: string, callback: (value: Record<string, unknown>) => void) => void };
         Cashfree?: (input: { mode: 'sandbox' | 'production' }) => {
             subscriptionsCheckout: (options: { subsSessionId: string; redirectTarget: '_self' }) => Promise<unknown> | unknown;
         };
@@ -94,21 +120,24 @@ function loadProviderScript(name: 'razorpay' | 'cashfree'): Promise<boolean> {
     return new Promise(resolve => {
         let timeout = 0;
         let settled = false;
+        let script: HTMLScriptElement | null = null;
         const finish = (loaded: boolean) => {
             if (settled) return;
             settled = true;
             window.clearTimeout(timeout);
+            if (!loaded) script?.remove();
             resolve(loaded);
         };
         timeout = window.setTimeout(() => finish(isLoaded()), 12000);
         const attribute = `data-qsvc-${name}`;
         const existing = document.querySelector<HTMLScriptElement>(`script[${attribute}]`);
+        script = existing;
         if (existing) {
             existing.addEventListener('load', () => finish(isLoaded()), { once: true });
             existing.addEventListener('error', () => finish(false), { once: true });
             return;
         }
-        const script = document.createElement('script');
+        script = document.createElement('script');
         script.src = name === 'razorpay'
             ? 'https://checkout.razorpay.com/v1/checkout.js'
             : 'https://sdk.cashfree.com/js/v3/cashfree.js';
@@ -124,12 +153,20 @@ function gatewayName(gateway: Gateway) {
     return gateway === 'razorpay' ? 'Razorpay' : gateway === 'cashfree' ? 'Cashfree UPI AutoPay' : 'PayPal';
 }
 
-export async function openCashfreeSubscription(sessionId?: string, mode?: 'sandbox' | 'production') {
-    if (!sessionId?.trim() || (mode !== 'sandbox' && mode !== 'production')) throw new CheckoutError('We couldn’t open Cashfree. Try again or choose another payment option.');
+type CashfreeClient = ReturnType<NonNullable<Window['Cashfree']>>;
+
+export async function prepareCashfreeSubscription(mode?: 'sandbox' | 'production'): Promise<CashfreeClient> {
+    if (mode !== 'sandbox' && mode !== 'production') throw new CheckoutError('We couldn’t open Cashfree. Try again or choose another payment option.');
     const loaded = await loadProviderScript('cashfree');
     if (!loaded || !window.Cashfree) throw new CheckoutError('We couldn’t open Cashfree. Check your connection and try again.');
     const cashfree = window.Cashfree({ mode });
     if (typeof cashfree.subscriptionsCheckout !== 'function') throw new CheckoutError('Cashfree could not load. Refresh this page and try again.');
+    return cashfree;
+}
+
+export async function openCashfreeSubscription(sessionId?: string, mode?: 'sandbox' | 'production', prepared?: CashfreeClient) {
+    if (!sessionId?.trim() || (mode !== 'sandbox' && mode !== 'production')) throw new CheckoutError('We couldn’t open Cashfree. Try again or choose another payment option.');
+    const cashfree = prepared ?? await prepareCashfreeSubscription(mode);
     const result = await cashfree.subscriptionsCheckout({ subsSessionId: sessionId, redirectTarget: '_self' });
     if (result && typeof result === 'object' && 'error' in result && result.error) throw new CheckoutError('We couldn’t open Cashfree. Please try again.');
 }
@@ -192,6 +229,7 @@ async function responseJson(response: Response) {
 function checkoutError(status: number, body: Record<string, unknown> | null) {
     if (status === 401) return 'Your session has expired. Sign in again to continue.';
     if (status === 409) {
+        if (body?.code === 'CHECKOUT_RECONCILING') return 'Your previous checkout is still being checked. Do not pay again. Check payment status before retrying.';
         if (body?.code === 'PHONE_REQUIRED') return 'Add a valid Indian mobile number to continue.';
         if (body?.code === 'TRIAL_ALREADY_USED') return 'This account has already used its free trial. You can choose a paid plan.';
         if (body?.error === 'The payment price changed. Refresh checkout and confirm the new total.') {
@@ -236,6 +274,14 @@ export default function PaymentPage() {
     const [consent, setConsent] = useState(false);
     const [trialRedirectNotice, setTrialRedirectNotice] = useState('');
     const [phoneNumber, setPhoneNumber] = useState('');
+    const [checkoutClock, setCheckoutClock] = useState<CheckoutClock | null>(null);
+    const [checkoutPhase, setCheckoutPhase] = useState<CheckoutPhase>('awaiting');
+    const [checkingPayment, setCheckingPayment] = useState(false);
+    const [statusAttempt, setStatusAttempt] = useState(0);
+    const razorpayRef = useRef<{ close: () => void } | null>(null);
+    const modalExpiryTimer = useRef<number>();
+    const verificationStarted = useRef(false);
+
     const session = useSession();
     const entitlements = useEntitlements();
     const token = getToken();
@@ -288,16 +334,26 @@ export default function PaymentPage() {
     const renewalTermsReady = Boolean(renewalTermCopy);
     const signInNext = `/payment?plan=${encodeURIComponent(plan?.name || '')}${billingQuery}${isTrialIntent ? '&trial=1' : ''}`;
     const formattedEntitlementEnd = formatDate(entitlements.trialEndsAt);
+    const trackedPaymentStatus = !checkoutClock || paymentStatus?.id === checkoutClock.id ? paymentStatus : null;
 
     const refreshPaymentStatus = useCallback(async () => {
         if (!token) return null;
-        const response = await fetch(`${AUTH_API}/api/auth/billing/status`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store' });
+        const response = await fetch(`${AUTH_API}/api/auth/billing/status`, { headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal: AbortSignal.timeout(8000) });
         if (!response.ok) throw new Error('Payment status is temporarily unavailable.');
         const result = await response.json().catch(() => {
             throw new CheckoutError('Payment status is temporarily unavailable.');
         }) as PaymentStatus;
+        if (getToken() !== token) return null;
         setPaymentStatus(result);
         setPaymentStatusReady(true);
+        if (result?.expiresAt && result.serverNow) setCheckoutClock(previous => calibrateCheckoutClock(previous, result));
+        setCheckoutPhase(previous => checkoutPhaseAfterStatus(previous, result));
+        if (result?.status === 'cancelled' && result.currentPeriodEnd === null) {
+            window.clearTimeout(modalExpiryTimer.current);
+            razorpayRef.current?.close(); razorpayRef.current = null;
+            verificationStarted.current = false;
+            setMessage('Checkout cancelled. Review your plan before starting another attempt.');
+        }
         return result;
     }, [token]);
 
@@ -363,68 +419,47 @@ export default function PaymentPage() {
     }, [isTrialIntent, plan?.name, isProviderReturn, session.status, entitlements.loading, entitlements.status, entitlements.plan, entitlements.verified, trialEligible, trialConsumed, isAdmin, formattedEntitlementEnd, navigate, billingQuery]);
 
     useEffect(() => {
-        if (!isProviderReturn || !token || !plan) return;
+        const pending = paymentStatus && (['creating', 'pending', 'expired'].includes(paymentStatus.status) || paymentStatus.authorizationPending);
+        if (!token || !plan || checkoutPhase === 'confirmed' || (!checkoutClock && !isProviderReturn && !pending)) return;
         let cancelled = false;
         let timer = 0;
-        let attempt = 0;
-        setMessage('We’re checking your payment setup. This can take a moment.');
+        let checksAfterWindow = 0;
+        let checking = false;
         const check = async () => {
-            if (cancelled) return;
-            attempt += 1;
+            if (cancelled || checking) return;
+            if (document.hidden) { timer = window.setTimeout(() => void check(), 3000); return; }
+            checking = true;
+            setCheckingPayment(true);
             try {
-                const billing = await refreshPaymentStatus();
-                const response = await fetch(`${AUTH_API}/api/auth/me/entitlements`, {
-                    headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
-                });
-                if (response.ok) {
-                    const current = await response.json() as EntitlementSnapshot;
-                    window.dispatchEvent(new Event('qsvc:entitlements-refresh'));
-                    const trialActive = isTrialIntent && current.status === 'trial_active';
-                    const paidActive = !isTrialIntent && current.status === 'paid_active';
-                    const upgrading = billing?.plan === planKey && Boolean(billing?.replacesSubscriptionId);
-                    if (isTrialIntent && current.status === 'paid_active') {
-                        setMessage('');
-                        setError(`This return was for a ${plan.name} trial, but your account has ${planLabel(current.plan)} paid access. Trial activation was not confirmed.`);
-                        return;
-                    }
-                    if (!isTrialIntent && current.status === 'trial_active' && !upgrading) {
-                        setMessage('');
-                        setError(`This return was for the paid ${plan.name} plan, but your account has an active ${planLabel(current.plan)} trial. Paid access was not confirmed.`);
-                        return;
-                    }
-                    if (trialActive) {
-                        if (current.plan !== `${planKey}_trial`) {
-                            setMessage('');
-                            setError(`Your account shows a ${planLabel(current.plan)} trial, but this checkout requested ${plan.name}. The requested trial was not confirmed.`);
-                            return;
-                        }
-                        const end = formatDate(current.trialEndsAt);
-                        setError('');
-                        setMessage(`Your ${plan.name} trial is active${end ? ` through ${end}` : ''}. The provider confirms the first-charge date.`);
-                        return;
-                    }
-                    if (paidActive && (!upgrading || current.plan === planKey)) {
-                        if (current.plan !== planKey) {
-                            setMessage('');
-                            setError(`Your account shows ${planLabel(current.plan)} access, but this checkout requested ${plan.name}. The requested plan was not confirmed.`);
-                            return;
-                        }
-                        const end = formatDate(billing?.currentPeriodEnd);
-                        setError('');
-                        setMessage(`Your ${plan.name} plan is active${end ? ` through ${end}` : ''}.`);
-                        return;
-                    }
+                const result = await refreshPaymentStatus();
+                if (cancelled) return;
+                if (result?.status === 'active' || result?.authorizationPending) {
+                    setCheckoutPhase('verifying');
+                    const confirmed = await confirmEntitlement(result);
+                    if (cancelled || confirmed) return;
                 }
-            } catch { /* Keep checking; provider confirmation can take a short time. */ }
-            if (attempt < 8 && !cancelled) timer = window.setTimeout(() => void check(), 3000);
-            else if (!cancelled) setMessage('Your payment setup is still pending. Return here later to check your plan status.');
+                if (result?.canRetry && ['expired', 'failed'].includes(result.status)) return;
+            } catch {
+                if (!cancelled) setMessage('Payment status is temporarily unavailable. Do not pay again until it is confirmed.');
+            } finally {
+                checking = false;
+                if (!cancelled) setCheckingPayment(false);
+            }
+            if (cancelled) return;
+            const windowEnded = checkoutClock ? Date.now() >= checkoutClock.deadline : true;
+            if (windowEnded) checksAfterWindow += 1;
+            if (!windowEnded || checksAfterWindow < 8) timer = window.setTimeout(() => void check(), 3000);
         };
+        const wake = () => { if (!document.hidden && !checking) { window.clearTimeout(timer); void check(); } };
         void check();
-        return () => { cancelled = true; window.clearTimeout(timer); };
-    }, [isProviderReturn, isTrialIntent, token, plan?.name, planKey, refreshPaymentStatus]);
+        document.addEventListener('visibilitychange', wake);
+        return () => { cancelled = true; window.clearTimeout(timer); document.removeEventListener('visibilitychange', wake); };
+    }, [token, plan?.name, planKey, isTrialIntent, isProviderReturn, checkoutClock?.id, checkoutClock?.deadline, paymentStatus?.status, paymentStatus?.authorizationPending, checkoutPhase === 'confirmed', statusAttempt, refreshPaymentStatus]);
+
+    useEffect(() => () => { window.clearTimeout(modalExpiryTimer.current); razorpayRef.current?.close(); }, [token]);
 
     useEffect(() => {
-        if (isProviderCancel) setMessage('Checkout was cancelled. You can try again when ready.');
+        if (isProviderCancel) setMessage('The provider checkout was closed. Check payment status before starting another attempt.');
     }, [isProviderCancel]);
 
     useEffect(() => { setConsent(false); }, [gateway, planKey, isTrialCheckout]);
@@ -433,59 +468,38 @@ export default function PaymentPage() {
     async function readEntitlementStatus(): Promise<EntitlementSnapshot | null> {
         if (!token) return null;
         const response = await fetch(`${AUTH_API}/api/auth/me/entitlements`, {
-            headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
+            headers: { Authorization: `Bearer ${token}` }, cache: 'no-store', signal: AbortSignal.timeout(8000),
         });
         if (!response.ok) return null;
         const current = await response.json() as EntitlementSnapshot;
+        if (getToken() !== token) return null;
         window.dispatchEvent(new Event('qsvc:entitlements-refresh'));
         return current;
     }
 
-    async function waitForServerConfirmation(trial: boolean) {
-        for (let attempt = 0; attempt < 8; attempt += 1) {
-            try {
-                const billing = await refreshPaymentStatus();
-                const current = await readEntitlementStatus();
-                if (trial && current?.status === 'paid_active') {
-                    setMessage('');
-                    setError(`This checkout requested a ${plan?.name} trial, but your account has ${planLabel(current.plan)} paid access. Trial activation was not confirmed.`);
-                    return;
-                }
-                if (!trial && current?.status === 'trial_active' && !isUpgrade) {
-                    setMessage('');
-                    setError(`This checkout requested the paid ${plan?.name} plan, but your account has an active ${planLabel(current.plan)} trial. Paid access was not confirmed.`);
-                    return;
-                }
-                if (trial && current?.status === 'trial_active') {
-                    if (current.plan !== `${planKey}_trial`) {
-                        setMessage('');
-                        setError(`Your account shows a ${planLabel(current.plan)} trial, but this checkout requested ${plan?.name}. The requested trial was not confirmed.`);
-                        return;
-                    }
-                    const end = formatDate(current.trialEndsAt);
-                    setError('');
-                    setMessage(`Your ${plan?.name} trial is active${end ? ` through ${end}` : ''}. The provider confirms the first-charge date.`);
-                    return;
-                }
-                if (!trial && current?.status === 'paid_active' && (!isUpgrade || current.plan === planKey)) {
-                    if (current.plan !== planKey) {
-                        setMessage('');
-                        setError(`Your account shows ${planLabel(current.plan)} access, but this checkout requested ${plan?.name}. The requested plan was not confirmed.`);
-                        return;
-                    }
-                    setError('');
-                    const end = formatDate(billing?.currentPeriodEnd);
-                    setMessage(`Your ${plan?.name} plan is active${end ? ` through ${end}` : ''}.`);
-                    return;
-                }
-            } catch { /* Provider and webhook confirmation can arrive asynchronously. */ }
-            await new Promise(resolve => window.setTimeout(resolve, 3000));
-        }
-        setMessage('Your payment setup is still pending. Return here later to check your plan status.');
+    async function confirmEntitlement(billingStatus: NonNullable<PaymentStatus>) {
+        const current = await readEntitlementStatus();
+        if (getToken() !== token) return false;
+        const trial = isTrialIntent || isTrialCheckout;
+        if (!hasConfirmedCheckoutAccess(billingStatus, current, planKey, trial)) return false;
+        const end = formatDate(trial ? current?.trialEndsAt : billingStatus.currentPeriodEnd);
+        setError(''); setCheckoutPhase('confirmed');
+        window.clearTimeout(modalExpiryTimer.current); razorpayRef.current?.close(); razorpayRef.current = null;
+        setMessage(`Your ${plan?.name} ${trial ? 'trial' : 'plan'} is active${end ? ` through ${end}` : ''}.`);
+        return true;
+    }
+
+    function checkoutWindowEnded() {
+        window.clearTimeout(modalExpiryTimer.current);
+        razorpayRef.current?.close(); razorpayRef.current = null;
+        setCheckoutPhase('expired');
+        setMessage('Approval window ended. Checking provider status. If you paid, do not pay again.');
+        setStatusAttempt(value => value + 1);
     }
 
     async function beginCheckout() {
-        if (!plan || !planKey || !isAuthReady || !paymentStatusReady || !priceReady || !checkoutGateways.includes(gateway) || !consent || busy || isCurrentPlan || blockPlanChange || isProviderReturn || !renewalTermsReady) return;
+        if (paymentStatus?.authorizationPending || (checkoutClock && Date.now() >= checkoutClock.deadline && paymentStatus?.canRetry !== true)) return;
+        if (!plan || !planKey || !isAuthReady || !paymentStatusReady || !priceReady || !checkoutGateways.includes(gateway) || !consent || busy || isCurrentPlan || blockPlanChange || isProviderReturn || !renewalTermsReady || (paymentStatus?.status === 'expired' && paymentStatus.canRetry !== true)) return;
         setBusy(true);
         setError('');
         setMessage('');
@@ -503,7 +517,10 @@ export default function PaymentPage() {
                 if (!profileUpdate.ok) throw new CheckoutError('Your mobile number could not be saved. Please try again.');
                 await refreshSession();
             }
-            if (gateway !== 'paypal' && !await loadProviderScript(gateway)) {
+            const cashfreeMode = providerPrice.mode === 'live' ? 'production' : providerPrice.mode === 'test' ? 'sandbox' : undefined;
+            // Check subscription support before creating a mandate that the visitor cannot open.
+            const cashfree = gateway === 'cashfree' ? await prepareCashfreeSubscription(cashfreeMode) : undefined;
+            if (gateway === 'razorpay' && !await loadProviderScript(gateway)) {
                 throw new CheckoutError(`We couldn’t load ${gatewayName(gateway)}. Check your connection and try again.`);
             }
             const response = await fetch(`${AUTH_API}/api/auth/billing/checkout`, {
@@ -519,6 +536,14 @@ export default function PaymentPage() {
             if (!response.ok) throw new CheckoutError(checkoutError(response.status, body));
             const result = body as CheckoutResult | null;
             if (result?.recurring !== true || result.provider !== gateway) throw new CheckoutError('We couldn’t open checkout. Please try again.');
+            const clock = calibrateCheckoutClock(checkoutClock, { id: result.checkoutId, expiresAt: result.expiresAt, serverNow: result.serverNow });
+            if (!clock && result.expiresAt !== null) throw new CheckoutError('Checkout timing could not be verified. Check payment status before trying again.');
+            verificationStarted.current = false;
+            setCheckoutClock(clock); setCheckoutPhase('awaiting');
+            if (clock && clock.deadline <= Date.now()) { checkoutWindowEnded(); return; }
+            setMessage(!clock ? 'Resuming your existing checkout. This earlier attempt uses the provider’s timing.' : gateway === 'razorpay' ? 'Approve recurring payments within the remaining checkout time.' : 'Your approval window lasts three minutes from checkout creation. The provider page uses its own timing; return here to check confirmation.');
+            void refreshPaymentStatus().catch(() => undefined);
+
 
             if (gateway === 'paypal') {
                 if (typeof result.approvalUrl !== 'string') throw new CheckoutError('We couldn’t open PayPal. Try again or choose another payment option.');
@@ -541,7 +566,11 @@ export default function PaymentPage() {
                     description: `QS-VC ${plan.name} ${billing} plan${isTrialCheckout ? ` · ${options.trialDays}-day free trial` : ''}`,
                     prefill: { email: result.email || session.profile?.email || '' },
                     theme: { color: '#087d83' },
+                    ...(clock ? { timeout: Math.max(1, Math.ceil((clock.deadline - Date.now()) / 1000)) } : {}),
                     handler: async (confirmation: Record<string, unknown>) => {
+                        verificationStarted.current = true;
+                        window.clearTimeout(modalExpiryTimer.current);
+                        setCheckoutPhase('verifying');
                         setBusy(true);
                         try {
                             const verified = await fetch(`${AUTH_API}/api/auth/billing/razorpay/verify`, {
@@ -555,23 +584,35 @@ export default function PaymentPage() {
                             });
                             if (!verified.ok) throw new Error();
                             setMessage('We’re confirming your payment setup.');
-                            await waitForServerConfirmation(isTrialCheckout);
+                            const current = await refreshPaymentStatus();
+                            if (current) await confirmEntitlement(current);
+                            setStatusAttempt(value => value + 1);
                         } catch {
                             setError('We couldn’t confirm your payment setup yet. Check your plan status before trying again.');
                         } finally {
                             setBusy(false);
                         }
                     },
-                    modal: { ondismiss: () => setMessage('Checkout closed. Check your plan status if you already approved payment.') },
+                    modal: { ondismiss: () => {
+                        window.clearTimeout(modalExpiryTimer.current); razorpayRef.current = null;
+                        if (verificationStarted.current) return;
+                        setCheckoutPhase(previous => previous === 'confirmed' || previous === 'verifying' || previous === 'expired' ? previous : 'dismissed');
+                        setMessage('Checkout closed. Check your plan status if you already approved payment.');
+                        setStatusAttempt(value => value + 1);
+                    } },
                 });
                 checkout.on('payment.failed', () => {
                     setError('Razorpay couldn’t approve your payment method. Try again or choose another payment option.');
                 });
+                razorpayRef.current = checkout;
+                window.clearTimeout(modalExpiryTimer.current);
+                if (clock) modalExpiryTimer.current = armRazorpayExpiry(checkout, clock.deadline, () => { razorpayRef.current = null; checkoutWindowEnded(); });
                 checkout.open();
                 return;
             }
 
-            await openCashfreeSubscription(result.sessionId, result.mode);
+            if (result.mode !== cashfreeMode) throw new CheckoutError('Payment configuration changed. Refresh this page and try again.');
+            await openCashfreeSubscription(result.sessionId, result.mode, cashfree);
             setMessage('We’re waiting for Cashfree to confirm your payment setup.');
         } catch (cause) {
             setError(cause instanceof CheckoutError ? cause.message : 'We couldn’t open checkout. Please try again.');
@@ -679,7 +720,7 @@ export default function PaymentPage() {
                     {isTrialIntent && isAuthReady && entitlements.loading && <div className="payment-status" role="status"><span className="mi" aria-hidden="true">schedule</span><p>Checking trial eligibility…</p></div>}
                     {optionsError && <div className="payment-status payment-status--error"><span className="mi" aria-hidden="true">error</span><p role="alert">{OPTIONS_UNAVAILABLE}</p><button className="payment-cancel payment-retry" type="button" onClick={() => { setOptionsError(false); setOptionsAttempt(value => value + 1); }}>Try again</button></div>}
                     <h2 id="gateway-title" className="payment-method-title">Choose a payment channel</h2>
-                    <p className="payment-details-intro">Choose a provider here. Add or change your card or UPI details in its checkout.</p>
+                    <p className="payment-details-intro">Choose a provider here. Add or change your card or UPI details in its checkout. Each new approval window lasts three minutes. Cashfree and PayPal open their own pages; return here to check status.</p>
                     <PaymentProviderChoices selected={gateway} available={checkoutGateways} providers={options.providers}
                         loading={!optionsLoaded && !optionsError} disabled={!isAuthReady || busy || isProviderReturn}
                         onSelect={item => { setGateway(item); setConsent(false); }} />
@@ -704,7 +745,14 @@ export default function PaymentPage() {
                         <p>Finish or cancel your pending checkout before choosing another plan.</p>
                     </div>}
                     {isUpgrade && <p className="payment-note" role="status">Your upgrade starts a new billing period at the displayed price after payment is confirmed. Your current plan stays available until then. We’ll cancel its future renewals after the upgrade succeeds. Unused time is not credited, and a second free trial is not included.</p>}
-                    {message && <div className="payment-status payment-status--success" role="status"><span className="mi" aria-hidden="true">info</span><p>{message}</p></div>}
+                    {(checkoutClock || isProviderReturn || paymentStatus?.authorizationPending || paymentStatus?.status === 'expired') && <CheckoutProgress
+                        clock={checkoutClock} phase={paymentStatus?.authorizationPending && checkoutPhase !== 'confirmed' ? 'verifying' : checkoutPhase}
+                        summary={`QS-VC ${plan.name} · ${gatewayName(trackedPaymentStatus?.provider || gateway)}${isTrialIntent || isTrialCheckout ? ` · Plan fee today ${formatMoney(0, trackedPaymentStatus?.currency || providerPrice.currency || 'INR')}. Provider payment-method verification may apply.` : trackedPaymentStatus?.totalAmount && trackedPaymentStatus.currency ? ` · Checkout total ${formatMoney(trackedPaymentStatus.totalAmount, trackedPaymentStatus.currency)}` : priceReady ? ` · Checkout total ${displayedMonthlyTotal}` : ''}`}
+                        hosted={(trackedPaymentStatus?.provider || gateway) !== 'razorpay'} canRetry={paymentStatus?.canRetry === true}
+                        checking={checkingPayment} onExpired={checkoutWindowEnded}
+                        onRefresh={() => setStatusAttempt(value => value + 1)}
+                        onRetry={() => { if (paymentStatus?.canRetry !== true) return; setConsent(false); setCheckoutClock(null); setPaymentStatus(null); setCheckoutPhase('awaiting'); setMessage('Review the total and approve a new checkout.'); navigate(signInNext, { replace: true }); }} />}
+                    {message && <div className={`payment-status${checkoutPhase === 'confirmed' ? ' payment-status--success' : ''}`} role="status"><span className="mi" aria-hidden="true">info</span><p>{message}</p></div>}
                     {error && <div className="payment-status payment-status--error" role="alert"><span className="mi" aria-hidden="true">error</span><p>{error}</p></div>}
                     {isAuthReady && checkoutGateways.length > 0 && !isCurrentPlan && !blockPlanChange && !isProviderReturn && (!showTrialFlow || isTrialCheckout) && <>
                         <label className="payment-consent">
@@ -716,7 +764,7 @@ export default function PaymentPage() {
                                 : `I authorize ${gatewayName(gateway)} to charge the recurring monthly total shown above, including ${options.taxPercent}% GST. ${renewalTermCopy}`}</span>
                         </label>
                         {isTrialCheckout && <p className="payment-trial-first-charge">{trialFirstChargeCopy}</p>}
-                        <button className="btn-primary payment-checkout-button" type="button" onClick={() => void beginCheckout()} disabled={!consent || busy || !paymentStatusReady || !options.paymentsEnabled || !gatewayReady || !priceReady || !renewalTermsReady} aria-busy={busy}>
+                        <button className="btn-primary payment-checkout-button" type="button" onClick={() => void beginCheckout()} disabled={!consent || busy || Boolean(paymentStatus?.authorizationPending) || Boolean(checkoutClock && Date.now() >= checkoutClock.deadline && paymentStatus?.canRetry !== true) || (paymentStatus?.status === 'expired' && paymentStatus.canRetry !== true) || !paymentStatusReady || !options.paymentsEnabled || !gatewayReady || !priceReady || !renewalTermsReady} aria-busy={busy}>
                             {busy ? 'Opening secure checkout…' : isTrialCheckout ? 'Approve recurring payments' : 'Continue to monthly checkout'}
                         </button>
                     </>}

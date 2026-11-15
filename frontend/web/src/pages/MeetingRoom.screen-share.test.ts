@@ -61,6 +61,20 @@ function deferredCapture() {
 }
 
 describe('presenting controls during screen-share startup', () => {
+    it('announces stop immediately even while closing the SFU producer is delayed', async () => {
+        const share = deferredCapture();
+        share.context.sharingRef.current = true;
+        share.context.screenStreamRef.current = { getTracks: () => [share.track] };
+        let finishClose!: () => void;
+        share.context.media.closeProducerBySource = vi.fn(() => new Promise<void>(resolve => { finishClose = resolve; }));
+        const stopping = share.actions().stopScreenShare();
+        expect(share.context.signaling.request).toHaveBeenCalledWith('muteStateChanged', { kind: 'screen', muted: false, presenting: false });
+        expect(share.context.screenSharing).toBe(false);
+        expect(share.track.readyState).toBe('ended');
+        finishClose();
+        await stopping;
+    });
+
     it('keeps Pause disabled and closes a late screen producer when stopped before produce finishes', async () => {
         const share = deferredCapture();
         const startup = share.actions().startScreenShare();

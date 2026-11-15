@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { haptic } from '../lib/haptics';
 import type { TilesPerPage, ViewMode } from './VideoGrid';
+import '../styles/meeting-feature-access.css';
 
 interface Props {
     assistant?: ReactNode;
@@ -22,6 +23,8 @@ interface Props {
     onChangeNoiseMode?: (mode: 'off' | 'standard' | 'ai') => void;
     onRequirePlanFeature?: (feature: string) => void;
     onSignInForExtras?: () => void;
+    onExplainAccess?: (message: string) => void;
+    featureMinimumPlans?: Readonly<Record<string, string>>;
     chatOpen: boolean;
     participantsOpen: boolean;
     handRaised: boolean;
@@ -44,6 +47,8 @@ interface Props {
     /** CC: show meeting captions (and share mine, once agreed) */
     captionsOn?: boolean;
     onToggleCaptions?: () => void;
+    pictureInPicture?: boolean;
+    onTogglePictureInPicture?: () => void;
     fullscreen?: boolean;
     onToggleFullscreen?: () => void;
     effectsOn?: boolean;
@@ -124,20 +129,42 @@ function ToggleControl({ on, label, title, iconOn, iconOff, stateClass = '', loc
     );
 }
 
+export function RestrictedFeatureButton({ label, icon, active, requirement, onActivate, onResolve }: {
+    label: string; icon: string; active?: boolean; requirement?: string;
+    onActivate?: () => void; onResolve?: () => void;
+}) {
+    return <button type="button" title={requirement} aria-label={requirement ? `${label}. ${requirement}.` : undefined}
+        aria-pressed={active} aria-disabled={Boolean(requirement) || undefined} className={requirement ? 'is-feature-locked' : undefined}
+        onClick={() => requirement ? onResolve?.() : onActivate?.()}>
+        <span className="mi" aria-hidden="true">{icon}</span>
+        <span className="meeting-feature-label">{label}{requirement && <span className="meeting-feature-requirement">{requirement}</span>}</span>
+        {requirement && <span className="mi ctrl-plan-lock" aria-hidden="true">lock</span>}
+    </button>;
+}
+
 export default function ControlBar({
     assistant, isRecording, canRecord = false, recordingLocked = false, onToggleRecording,
     signedIn = false, captionsLocked = false, effectsLocked = false, noiseMode = 'standard', aiNoiseSuppressionLocked = false,
-    onChangeNoiseMode, onRequirePlanFeature, onSignInForExtras,
+    onChangeNoiseMode, onRequirePlanFeature, onSignInForExtras, onExplainAccess, featureMinimumPlans = {},
     activitiesOpen = false, hostToolsOpen = false, onToggleActivities, onToggleHostTools,
     audioMuted, videoOff, screenSharing,
     chatOpen, participantsOpen, handRaised, reactionsOpen = false, languageOpen = false, languageLabel, languageCode,
     onToggleAudio, onToggleVideo, onToggleScreen, onOpenInvite,
     onToggleChat, onToggleParticipants, onRaiseHand, onToggleReactions, onToggleLanguage,
-    captionsOn = false, onToggleCaptions, fullscreen = false, onToggleFullscreen, effectsOn = false, onOpenEffects, onReportProblem,
+    captionsOn = false, onToggleCaptions, pictureInPicture = false, onTogglePictureInPicture, fullscreen = false, onToggleFullscreen, effectsOn = false, onOpenEffects, onReportProblem,
     tilesPerPage = 'auto', onChangeTilesPerPage,
     audioOutputId = '', audioOutputDevices = [], audioOutputSupported = false, onAudioOutputChange, onChooseAudioOutput,
     onLeave, viewMode, onChangeView, activitySignal = 0, keepSideVisible = false,
 }: Props) {
+    function minimumPlan(feature: string, fallback: string) {
+        const value = featureMinimumPlans[feature] || fallback;
+        return value.charAt(0).toUpperCase() + value.slice(1);
+    }
+    const effectsRequirement = !signedIn ? `Sign in · ${minimumPlan('background_effects', 'basic')}` : effectsLocked ? `${minimumPlan('background_effects', 'basic')} plan` : undefined;
+    const noiseRequirement = !signedIn ? `Sign in · ${minimumPlan('ai_noise_suppression', 'basic')}` : aiNoiseSuppressionLocked ? `${minimumPlan('ai_noise_suppression', 'basic')} plan` : undefined;
+    const languageRequirement = !signedIn ? 'Sign in to choose your language' : undefined;
+    const recordingRequirement = isRecording ? undefined : !signedIn ? `Sign in as host · ${minimumPlan('cloud_recording', 'pro')}` : !canRecord ? `Host only · ${minimumPlan('cloud_recording', 'pro')}` : recordingLocked ? `${minimumPlan('cloud_recording', 'pro')} plan` : undefined;
+    const resolvePlanAccess = (feature: string) => { if (!signedIn) onSignInForExtras?.(); else onRequirePlanFeature?.(feature); };
     const [moreOpen, setMoreOpen] = useState(false);
     const [sideIdle, setSideIdle] = useState(false);
     const sideRef = useRef<HTMLDivElement>(null);
@@ -189,7 +216,7 @@ export default function ControlBar({
                 <ToggleControl on={!videoOff} label="Camera" title={videoOff ? 'Start video' : 'Stop video'}
                     iconOn="videocam" iconOff="videocam_off" offTone="danger" stateClass={videoOff ? 'active-muted' : ''} onToggle={onToggleVideo} />
                 {onToggleCaptions && (
-                    <ToggleControl on={captionsOn} label="Captions" locked={captionsLocked} title={captionsLocked ? 'AI captions are available on Starter' : captionsOn ? 'Turn off captions' : `Turn on captions${languageLabel ? ` (${languageLabel})` : ''}`}
+                    <ToggleControl on={captionsOn} label="Captions" locked={captionsLocked} title={captionsLocked ? `AI captions require ${minimumPlan('ai_captions', 'starter')}` : captionsOn ? 'Turn off captions' : `Turn on captions${languageLabel ? ` (${languageLabel})` : ''}`}
                         iconOn="closed_caption" iconOff="closed_caption_disabled" stateClass={captionsOn ? 'active' : ''} onToggle={() => { setMoreOpen(false); if (captionsLocked) onRequirePlanFeature?.('ai_captions'); else onToggleCaptions(); }} badge={captionsOn ? languageCode : undefined} />
                 )}
             </div>
@@ -228,18 +255,26 @@ export default function ControlBar({
                         <span className="ctrl-icon mi" aria-hidden="true">more_horiz</span>
                     </button>
                     {moreOpen && <div id="meeting-more-controls" className="meeting-more-panel" role="group" aria-label="Extra meeting controls">
-                        {!signedIn && onSignInForExtras && <button type="button" onClick={() => { setMoreOpen(false); onSignInForExtras(); }}><span className="mi" aria-hidden="true">login</span>Sign in for extra features</button>}
+                        {!signedIn && onSignInForExtras && <RestrictedFeatureButton label="Meeting assistant" icon="support_agent" requirement="Sign in"
+                            onResolve={() => { setMoreOpen(false); onSignInForExtras(); }} />}
                         {onToggleActivities && <button type="button" aria-expanded={activitiesOpen} aria-controls="meeting-activities" onClick={() => { setMoreOpen(false); onToggleActivities(); }}><span className="mi" aria-hidden="true">dashboard</span>Activities</button>}
-                        {onToggleHostTools && <button type="button" aria-expanded={hostToolsOpen} aria-controls="meeting-host-tools" onClick={() => { setMoreOpen(false); onToggleHostTools(); }}><span className="mi" aria-hidden="true">admin_panel_settings</span>Host controls</button>}
-                        {signedIn && canRecord && <button type="button" aria-pressed={isRecording} aria-disabled={recordingLocked && !isRecording || undefined} className={recordingLocked && !isRecording ? 'is-feature-locked' : ''} aria-label={recordingLocked && !isRecording ? 'Record meeting. Available on Pro.' : undefined} title={recordingLocked && !isRecording ? 'Available on Pro' : undefined} onClick={() => { setMoreOpen(false); onToggleRecording(); }}><span className="mi" aria-hidden="true">{isRecording ? 'stop_circle' : 'fiber_manual_record'}</span>{isRecording ? 'Stop recording' : 'Record meeting'}{recordingLocked && !isRecording && <span className="mi ctrl-plan-lock" aria-hidden="true">lock</span>}</button>}
-                        {signedIn && onOpenEffects && <button type="button" title={effectsLocked ? 'Available on Starter' : undefined} aria-label={effectsLocked ? 'Backgrounds and effects. Available on Starter.' : undefined} aria-pressed={effectsOn} aria-disabled={effectsLocked || undefined} className={effectsLocked ? 'is-feature-locked' : ''} onClick={() => { setMoreOpen(false); if (effectsLocked) onRequirePlanFeature?.('background_effects'); else onOpenEffects(); }}><span className="mi" aria-hidden="true">background_replace</span>Backgrounds and effects{effectsLocked && <span className="mi ctrl-plan-lock" aria-hidden="true">lock</span>}</button>}
+                        <RestrictedFeatureButton label="Host controls" icon="admin_panel_settings" active={hostToolsOpen} requirement={!onToggleHostTools ? 'Host or co-host only' : undefined}
+                            onActivate={() => { setMoreOpen(false); onToggleHostTools?.(); }} onResolve={() => { setMoreOpen(false); onExplainAccess?.('Only the host or co-host can manage meeting settings. Ask the host if you need access.'); }} />
+                        <RestrictedFeatureButton label={isRecording ? 'Stop recording' : 'Record meeting'} icon={isRecording ? 'stop_circle' : 'fiber_manual_record'} active={isRecording} requirement={recordingRequirement}
+                            onActivate={() => { setMoreOpen(false); onToggleRecording(); }}
+                            onResolve={() => { setMoreOpen(false); if (!signedIn) onSignInForExtras?.(); else if (!canRecord) onExplainAccess?.('Only the signed-in meeting host can record. Upgrading does not change your meeting role.'); else onRequirePlanFeature?.('cloud_recording'); }} />
+                        {(onOpenEffects || onSignInForExtras) && <RestrictedFeatureButton label="Backgrounds and effects" icon="background_replace" active={effectsOn} requirement={effectsRequirement}
+                            onActivate={() => { setMoreOpen(false); onOpenEffects?.(); }} onResolve={() => { setMoreOpen(false); resolvePlanAccess('background_effects'); }} />}
+                        {onTogglePictureInPicture && <button type="button" aria-pressed={pictureInPicture} onClick={() => { setMoreOpen(false); onTogglePictureInPicture(); }}><span className="mi" aria-hidden="true">picture_in_picture_alt</span>{pictureInPicture ? 'Close floating view' : 'Open floating view'}</button>}
                         {onToggleFullscreen && <button type="button" aria-pressed={fullscreen} onClick={() => { setMoreOpen(false); onToggleFullscreen(); }}><span className="mi" aria-hidden="true">{fullscreen ? 'fullscreen_exit' : 'fullscreen'}</span>{fullscreen ? 'Exit full screen' : 'Full screen'}</button>}
-                        {onToggleLanguage && <button type="button" aria-expanded={languageOpen} aria-controls="meeting-language-settings" onClick={() => { setMoreOpen(false); onToggleLanguage(); }}><span className="mi" aria-hidden="true">translate</span>Captions and language settings</button>}
+                        {(onToggleLanguage || onSignInForExtras) && <RestrictedFeatureButton label="Captions and language settings" icon="translate" active={languageOpen} requirement={languageRequirement}
+                            onActivate={() => { setMoreOpen(false); onToggleLanguage?.(); }} onResolve={() => { setMoreOpen(false); resolvePlanAccess('ai_captions'); }} />}
                         {onReportProblem && <button type="button" onClick={() => { setMoreOpen(false); onReportProblem(); }}><span className="mi" aria-hidden="true">feedback</span>Report a problem</button>}
                         <h3>Microphone noise</h3>
                         <div className="meeting-view-options" role="group" aria-label="Microphone noise suppression">
                             <button type="button" aria-pressed={noiseMode === 'standard'} onClick={() => onChangeNoiseMode?.('standard')}><span className="mi" aria-hidden="true">graphic_eq</span>Noise suppression</button>
-                            {signedIn && <button type="button" title={aiNoiseSuppressionLocked ? 'Available on Starter' : 'AI noise suppression'} aria-label={aiNoiseSuppressionLocked ? 'AI noise suppression. Available on Starter.' : 'AI noise suppression'} aria-pressed={noiseMode === 'ai'} aria-disabled={aiNoiseSuppressionLocked || undefined} className={aiNoiseSuppressionLocked ? 'is-feature-locked' : ''} onClick={() => aiNoiseSuppressionLocked ? onRequirePlanFeature?.('ai_noise_suppression') : onChangeNoiseMode?.(noiseMode === 'ai' ? 'standard' : 'ai')}><span className="mi" aria-hidden="true">auto_awesome</span>AI noise suppression{aiNoiseSuppressionLocked && <span className="mi ctrl-plan-lock" aria-hidden="true">lock</span>}</button>}
+                            <RestrictedFeatureButton label="AI noise suppression" icon="auto_awesome" active={noiseMode === 'ai'} requirement={noiseRequirement}
+                                onActivate={() => onChangeNoiseMode?.(noiseMode === 'ai' ? 'standard' : 'ai')} onResolve={() => { setMoreOpen(false); resolvePlanAccess('ai_noise_suppression'); }} />
                             <button type="button" aria-pressed={noiseMode === 'off'} onClick={() => onChangeNoiseMode?.('off')}><span className="mi" aria-hidden="true">volume_off</span>Off</button>
                         </div>
                         <h3>Audio output</h3>

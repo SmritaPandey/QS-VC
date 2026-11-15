@@ -1,0 +1,71 @@
+/* Captions stay inside the video stage; side panels keep their own layout space. */
+.meeting-room .meeting-live-captions.caption-overlay {
+    inset-inline: 16px;
+    bottom: var(--meeting-overlay-bottom, 16px);
+    align-items: center;
+    z-index: 10;
+    pointer-events: none;
+}
+.meeting-room .meeting-live-captions .caption-container {
+    width: min(100%, 680px);
+    max-height: min(38dvh, 280px);
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 6px;
+    overflow: hidden;
+}
+.meeting-room .meeting-live-captions .caption-line {
+    display: block;
+    -webkit-line-clamp: unset;
+    max-width: none;
+    margin: 0;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: #102333f2;
+    color: #f1f6fa;
+    font-size: var(--caption-size, 16px);
+    font-weight: 400;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    flex: 0 0 auto;
+}
+.meeting-live-captions .caption-line-heading { display: flex; align-items: center; gap: 7px; margin-bottom: 2px; min-width: 0; }
+.meeting-room .meeting-live-captions .caption-speaker { color: #97ecdd; font-size: 13px; line-height: 1.5; font-weight: 500; margin: 0; overflow-wrap: anywhere; }
+.meeting-live-captions .caption-speaker-mark { display: inline-grid; place-items: center; flex: 0 0 20px; width: 20px; height: 20px; border-radius: 50%; color: #dcf7f2; background: #23544f; font-size: 12px; font-weight: 500; line-height: 1; }
+.meeting-room .meeting-live-captions .caption-origin { display: inline; margin-inline-start: auto; color: #c6d5df; font-size: 13px; line-height: 1.5; font-weight: 400; }
+.meeting-live-captions .caption-text { max-height: 4.5em; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #7296ad transparent; pointer-events: auto; }
+.meeting-live-captions .caption-text:focus-visible { outline: 2px solid #97ecdd; outline-offset: 2px; }
+.meeting-live-captions .caption-line[data-current='false'] .caption-text { max-height: 3em; }
+@media (max-width: 767px) {
+    .meeting-room .meeting-live-captions.caption-overlay { inset-inline: 12px; bottom: var(--meeting-overlay-bottom, 12px); }
+    .meeting-room .meeting-live-captions .caption-line { font-size: var(--caption-size, 16px); padding: 7px 10px; }
+    .meeting-room .meeting-live-captions .caption-container { max-height: min(34dvh, 240px); }
+}
+@media (max-height: 500px) {
+    .meeting-room .meeting-live-captions .caption-container { max-height: 116px; }
+    .meeting-live-captions .caption-line:not(:last-child) { display: none; }
+    .meeting-live-captions .caption-text { max-height: 3em; }
+}
+
+/* With captions visible, chat uses the top of the meeting instead of covering speech. */
+.meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-chat-overlay {
+    top: 16px;
+    bottom: auto;
+}
+.meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-chat-overlay .chat-messages {
+    height: min(var(--recent-chat-height, 200px), 28dvh);
+}
+@media (max-width: 767px) {
+    .meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-chat-overlay { top: 76px; bottom: auto; }
+    .meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-chat-overlay .chat-messages { height: min(var(--recent-chat-height, 160px), 22dvh); }
+}
+@media (max-height: 500px) {
+    .meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-chat-overlay { top: 8px; left: 12px; right: auto; width: min(300px, 44vw); }
+    .meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-chat-overlay .chat-messages { height: min(var(--recent-chat-height, 80px), 18dvh); }
+    .meeting-room[data-captions-on='true'][data-chat-open='true'] .meeting-live-captions.caption-overlay { left: auto; right: 12px; width: calc(52% - 24px); }
+}
+
+.meeting-room .meeting-feedback.meeting-caption-diagnostic { position: absolute; top: 52px; right: 12px; z-index: 36; width: min(320px, calc(100% - 24px)); }
+.meeting-room .transcript-indicator { box-sizing: border-box; max-width: calc(100% - 24px); padding: 5px 10px; border-radius: 8px; font-size: 13px; font-weight: 400; line-height: 1.4; overflow-wrap: anywhere; }
+@media (max-width: 767px) { .meeting-room .meeting-feedback.meeting-caption-diagnostic { top: 84px; } }

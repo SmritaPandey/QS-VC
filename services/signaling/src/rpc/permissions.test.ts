@@ -530,6 +530,9 @@ describe('private side conversations', () => {
             expect((await rpc(target, targetState, 'consume', { producerPeerId: hostState.peerId, producerId: 'test-producer', rtpCapabilities: caps }))?.result.appData).toMatchObject({ type: 'private-audio', conversationId });
             expect((await rpc(bystander, bystanderState, 'consume', { producerPeerId: hostState.peerId, producerId: 'test-producer', rtpCapabilities: caps }))?.error?.code).toBe(-32005);
 
+            expect((await rpc(host, hostState, 'closeProducer', { producerId: 'test-producer' }))?.result.closed).toBe(true);
+            expect(sent(target).some(message => message.method === 'producerClosed' && message.params.producerId === 'test-producer')).toBe(true);
+            expect(sent(bystander).some(message => message.method === 'producerClosed')).toBe(false);
             expect((await rpc(target, targetState, 'endPrivateConversation', { conversationId }))?.result.ended).toBe(true);
             expect(room.privateConversations.has(conversationId)).toBe(false);
             expect(room.peers.get(hostState.peerId)?.audioMuted).toBe(false);
@@ -556,6 +559,33 @@ describe('private side conversations', () => {
         }
     });
 
+    it.each([{ source: 'screen' }, { type: 'screen' }])('does not end a replacement presentation when the previous SFU close finishes late: %j', async appData => {
+        const code = `producer-race-${crypto.randomUUID().slice(0, 10)}`;
+        const host = socket(), viewer = socket();
+        const hostState: any = { authUser: { sub: 'host-user' } }, viewerState: any = {};
+        let finishClose!: (result: any) => void;
+        try {
+            await rpc(host, hostState, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+            await rpc(viewer, viewerState, 'joinRoom', { meetingCode: code, displayName: 'Viewer' });
+            await rpc(host, hostState, 'admitPeer', { targetPeerId: viewerState.peerId });
+            const peer = roomManager.getRoom(hostState.roomId)!.peers.get(hostState.peerId)!;
+            peer.producers.set('screen-old', { id: 'screen-old', kind: 'video', appData: { source: 'screen' } });
+            peer.screenSharing = true;
+            vi.mocked(sfuClient.closeProducer).mockImplementationOnce(() => new Promise(resolve => { finishClose = resolve; }));
+            const pending = rpc(host, hostState, 'closeProducer', { producerId: 'screen-old' });
+            await vi.waitFor(() => expect(finishClose).toBeTypeOf('function'));
+            peer.producers.set('screen-new', { id: 'screen-new', kind: 'video', appData });
+            finishClose({ closed: true });
+            expect((await pending)?.result.closed).toBe(true);
+            expect(peer.screenSharing).toBe(true);
+            expect(peer.producers.has('screen-new')).toBe(true);
+            expect(sent(viewer).some(message => message.method === 'producerClosed' && message.params.producerId === 'screen-old')).toBe(true);
+            expect(sent(viewer).some(message => message.method === 'presenterChanged' && message.params.presenting === false)).toBe(false);
+        } finally {
+            await handlePeerDisconnect(viewerState); await handlePeerDisconnect(hostState);
+        }
+    });
+
     it('closes only the caller-owned producer and publishes the screen-share stop state', async () => {
         const code = `producer-close-${crypto.randomUUID().slice(0, 10)}`;
         const host = socket(), outsider = socket();
@@ -570,6 +600,8 @@ describe('private side conversations', () => {
             expect((await rpc(host, hostState, 'closeProducer', { producerId: 'screen-producer' }))?.result.closed).toBe(true);
             expect(sfuClient.closeProducer).toHaveBeenCalledWith(hostState.roomId, hostState.peerId, 'screen-producer');
             expect(sent(outsider).some(message => message.method === 'presenterChanged' && message.params.presenting === false)).toBe(true);
+            expect(sent(outsider)).toContainEqual(expect.objectContaining({ method: 'producerClosed', params: { peerId: hostState.peerId, producerId: 'screen-producer', kind: 'video' } }));
+            expect(sent(host).some(message => message.method === 'producerClosed')).toBe(false);
         } finally {
             await handlePeerDisconnect(outsiderState); await handlePeerDisconnect(hostState);
         }

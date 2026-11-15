@@ -79,3 +79,56 @@ describe('media producer lifetime', () => {
         expect(manager.hasProducer('video')).toBe(false);
     });
 });
+
+
+describe('remote producer removal', () => {
+    async function receiver() {
+        const manager = await managerWithTransport(vi.fn());
+        const made: any[] = [];
+        mocks.recvTransport = { id: 'recv', closed: false, on: vi.fn(), close: vi.fn(), consume: vi.fn(async (options: any) => {
+            const events = new Map<string, () => void>();
+            const consumer = { id: options.id, kind: 'video', track: { id: options.id }, close: vi.fn(), on: vi.fn((event, listener) => events.set(event, listener)), events };
+            made.push(consumer); return consumer;
+        }) };
+        await manager.createRecvTransport({ id: 'recv' });
+        mocks.request.mockImplementation(async (method: string, params: any) => method === 'consume'
+            ? { consumerId: `consumer-${params.producerId}`, producerId: params.producerId, kind: 'video', rtpParameters: {}, appData: { source: params.producerId.startsWith('screen') ? 'screen' : 'camera' } }
+            : { resumed: true });
+        return { manager, made };
+    }
+
+    it('removes the stopped screen consumer immediately without removing the camera or a replacement share', async () => {
+        const { manager, made } = await receiver();
+        const onNew = vi.fn(), onRemoved = vi.fn(); manager.setConsumerCallbacks(onNew, onRemoved);
+        await manager.consume('peer', 'camera'); await manager.consume('peer', 'screen-old'); await manager.consume('peer', 'screen-new');
+        manager.closeConsumerByProducer('screen-old');
+        expect(made[1].close).toHaveBeenCalledOnce();
+        expect(made[0].close).not.toHaveBeenCalled(); expect(made[2].close).not.toHaveBeenCalled();
+        expect(manager.getConsumers().map(info => info.producerId)).toEqual(['camera', 'screen-new']);
+        expect(onRemoved).toHaveBeenCalledExactlyOnceWith('consumer-screen-old');
+        made[1].events.get('trackended')!(); manager.closeConsumerByProducer('screen-old');
+        expect(onRemoved).toHaveBeenCalledOnce();
+        await expect(manager.consume('peer', 'screen-old')).rejects.toThrow('Remote producer closed');
+    });
+
+    it('does not attach a screen whose close notification arrives during consume setup', async () => {
+        const { manager, made } = await receiver();
+        const onNew = vi.fn(); manager.setConsumerCallbacks(onNew, vi.fn());
+        let resume!: () => void;
+        const normal = mocks.request.getMockImplementation()!;
+        mocks.request.mockImplementation((method: string, params: any) => method === 'resumeConsumer' ? new Promise<void>(done => { resume = done; }) : normal(method, params));
+        const pending = manager.consume('peer', 'screen');
+        await vi.waitFor(() => expect(resume).toBeTypeOf('function'));
+        manager.closeConsumerByProducer('screen'); resume();
+        await expect(pending).rejects.toThrow('closed');
+        expect(made[0].close).toHaveBeenCalledOnce(); expect(onNew).not.toHaveBeenCalled(); expect(manager.getConsumers()).toEqual([]);
+    });
+
+    it('closes a partially created consumer if server resume fails', async () => {
+        const { manager, made } = await receiver();
+        const normal = mocks.request.getMockImplementation()!;
+        mocks.request.mockImplementation((method: string, params: any) => method === 'resumeConsumer' ? Promise.reject(new Error('Producer no longer exists')) : normal(method, params));
+        await expect(manager.consume('peer', 'screen')).rejects.toThrow('Producer no longer exists');
+        expect(made[0].close).toHaveBeenCalledOnce(); expect(manager.getConsumers()).toEqual([]);
+    });
+});

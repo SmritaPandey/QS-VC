@@ -2,7 +2,7 @@ import { preferencesAllowed } from './storage-consent';
 /**
  * Small interface sounds for meeting controls, synthesised with Web Audio
  * (no audio files, works offline / on the intranet).
- * Browsers only allow audio after a user gesture; every call here comes from a click.
+ * Browsers may block notification audio until the first user interaction.
  * Turn off with localStorage 'qsvc:ui-sounds' = 'off'.
  */
 export type SoundKind = 'tap' | 'toggleOn' | 'toggleOff' | 'success' | 'warning' | 'notice';

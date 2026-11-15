@@ -653,9 +653,18 @@ export async function handleRpcMessage(
                 if (!room || !peer || !producer) throw createError(-32000, 'Producer not found');
                 await sfuClient.closeProducer(roomId, peerId, parsed.data.producerId);
                 peer.producers.delete(parsed.data.producerId);
+                const closedNotification = { peerId, producerId: parsed.data.producerId, kind: producer.kind };
+                if (producer.appData?.type === 'private-audio') {
+                    const conversation = room.privateConversations.get(producer.appData.conversationId as string);
+                    if (conversation && conversationHasPeer(conversation, peerId)) {
+                        const otherPeerId = conversation.initiatorPeerId === peerId ? conversation.targetPeerId : conversation.initiatorPeerId;
+                        roomManager.sendToPeer(roomId, otherPeerId, 'producerClosed', closedNotification);
+                    }
+                } else roomManager.broadcast(roomId, 'producerClosed', closedNotification, peerId);
                 if (producer.appData?.type === 'screen' || producer.appData?.source === 'screen') {
-                    peer.screenSharing = false;
-                    roomManager.broadcast(roomId, 'presenterChanged', { peerId, displayName: peer.displayName, presenting: false });
+                    // A replacement presentation may have started while the old SFU close was pending.
+                    peer.screenSharing = [...peer.producers.values()].some(current => current.appData?.type === 'screen' || current.appData?.source === 'screen');
+                    if (!peer.screenSharing) roomManager.broadcast(roomId, 'presenterChanged', { peerId, displayName: peer.displayName, presenting: false });
                 }
                 return { jsonrpc: '2.0', id: id!, result: { closed: true } };
             }
