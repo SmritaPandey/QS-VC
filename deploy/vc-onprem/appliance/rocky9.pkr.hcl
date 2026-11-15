@@ -42,7 +42,7 @@ source "qemu" "rocky9" {
   headless         = true
   http_content     = { "/ks.cfg" = templatefile("${path.root}/http/ks.cfg.pkrtpl", { build_password = var.build_password }) }
   boot_wait        = var.boot_wait
-  boot_command     = ["e<down><down><end><bs><bs><bs><bs><bs> inst.text inst.ks=http://{{ .HTTPIP }}:{{ .HTTPPort }}/ks.cfg<leftCtrlOn>x<leftCtrlOff>"]
+  boot_command     = ["<up><wait>e<down><down><end> inst.text inst.ks=http://{{ .HTTPIP }}:{{ .HTTPPort }}/ks.cfg<leftCtrlOn>x<leftCtrlOff>"]
   ssh_username     = "qsvcbuild"
   ssh_password     = var.build_password
   ssh_timeout      = var.ssh_timeout

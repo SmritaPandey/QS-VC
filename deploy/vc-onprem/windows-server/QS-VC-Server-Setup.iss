@@ -40,9 +40,11 @@ var
 procedure InitializeWizard;
 begin
   ZipPage := CreateInputFilePage(wpSelectDir, 'QS-VC appliance', 'Select the Hyper-V appliance file',
-    'Choose QS-VC-Server-Appliance-<version>-HyperV.zip (downloaded with this setup).');
+    'Choose the QS-VC Hyper-V appliance ZIP downloaded with this setup.');
   ZipPage.Add('Appliance file:', 'Appliance (*-HyperV.zip)|*-HyperV.zip', '.zip');
-  ZipPage.Values[0] := ExpandConstant('{src}\QS-VC-Server-Appliance-{#AppVersion}-HyperV.zip');
+  ZipPage.Values[0] := ExpandConstant('{src}\QS-VC-Server-Appliance-HyperV.zip');
+  if not FileExists(ZipPage.Values[0]) then
+    ZipPage.Values[0] := ExpandConstant('{src}\QS-VC-Server-Appliance-{#AppVersion}-HyperV.zip');
   OptPage := CreateInputQueryPage(ZipPage.ID, 'Virtual machine', 'Hyper-V settings',
     'The QS-VC Server runs as a Rocky Linux 9 virtual machine on this server.');
   OptPage.Add('External Hyper-V switch on the hub network:', False);

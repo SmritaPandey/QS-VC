@@ -27,6 +27,7 @@ docker run --rm --platform linux/amd64 \
   -v "$here:/src/deploy/vc-onprem/windows-server:ro" \
   -v "$repo/deploy/vc-onprem/installer/EULA.txt:/src/deploy/vc-onprem/installer/EULA.txt:ro" \
   -v "$repo/frontend/desktop/assets/icon.ico:/src/frontend/desktop/assets/icon.ico:ro" \
-  -v "$out:/out" "$image" \
-  bash -c "cd /src/deploy/vc-onprem/windows-server && xvfb-run -a wine 'C:\\InnoSetup\\ISCC.exe' /Qp '/DAppVersion=$version' '/OZ:\\out' QS-VC-Server-Setup.iss"
+  -v "$out:/out" \
+  -w /src/deploy/vc-onprem/windows-server "$image" \
+  timeout 120 wine 'C:\InnoSetup\ISCC.exe' "/DAppVersion=$version" '/OZ:\out' QS-VC-Server-Setup.iss
 ls -la "$out"/QS-VC-Server-Setup-"$version".exe
