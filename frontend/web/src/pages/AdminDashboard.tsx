@@ -1,3 +1,4 @@
+import DownloadLeads from '../components/DownloadLeads';
 import AdminAnalytics from '../components/AdminAnalytics';
 import ThemeSelect from '../components/ThemeSelect';
 import { AUTH_API, clearSession, getToken } from '../lib/session';
@@ -80,7 +81,7 @@ const AUTH_URL = import.meta.env.VITE_AUTH_URL || 'http://localhost:4002';
 const MEETING_URL = import.meta.env.VITE_MEETING_URL || 'http://localhost:4003';
 const RECORDING_URL = import.meta.env.VITE_RECORDING_URL || 'http://localhost:4004';
 
-type TabName = 'overview' | 'meetings' | 'users' | 'recordings' | 'system';
+type TabName = 'overview' | 'meetings' | 'users' | 'recordings' | 'leads' | 'system';
 
 const AdminDashboard: React.FC = () => {
     const navigate = useNavigate();
@@ -219,7 +220,7 @@ const AdminDashboard: React.FC = () => {
             </header>
 
             <nav className="admin-nav">
-                {(['overview', 'meetings', 'users', 'recordings', 'system'] as TabName[]).map(tab => (
+                {(['overview', 'meetings', 'users', 'recordings', 'leads', 'system'] as TabName[]).map(tab => (
                     <button
                         key={tab}
                         className={`admin-nav-btn ${activeTab === tab ? 'active' : ''}`}
@@ -231,13 +232,15 @@ const AdminDashboard: React.FC = () => {
                             {tab === 'users' && 'group'}
                             {tab === 'recordings' && 'mic'}
                             {tab === 'system' && 'settings'}
+                            {tab === 'leads' && 'contact_mail'}
                         </span>
-                        {tab.charAt(0).toUpperCase() + tab.slice(1)}
+                        {tab === 'leads' ? 'Download leads' : tab.charAt(0).toUpperCase() + tab.slice(1)}
                     </button>
                 ))}
             </nav>
 
             <main className="admin-content">
+                {activeTab === 'leads' && <DownloadLeads />}
                 {activeTab === 'users' && <EnterpriseAccessTerms />}
                 {activeTab === 'overview' && <AdminAnalytics onManageAccess={() => setActiveTab('users')} />}
 

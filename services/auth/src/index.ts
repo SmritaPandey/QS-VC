@@ -19,6 +19,7 @@ import dotenv from 'dotenv';
 import pino from 'pino';
 import { createSession, validateSession, requireEnterpriseTerm, endSession, sessionErrorStatus, InvalidSessionError } from './sessions.js';
 import { contactRouter, contactRequestError } from './contact.js';
+import { downloadLeadRequestError } from './download-leads.js';
 import { effectiveRole, isPlatformAdmin, assertPlatformAdminConfig } from './platform-admins.js';
 import { FEATURE_MIN_PLAN, getEntitlements, getPrivateConversationLimitMs } from '../../../shared/entitlements.cjs';
 import { billingRouter, processMandateCancellations, processIntroTransitions } from './billing.js';
@@ -579,6 +580,7 @@ app.get('/api/auth/turn-credentials', turnCredentials(verifyToken));
 
 app.use((_req, res) => { res.status(404).json({ error: 'Route not found' }); });
 app.use(contactRequestError);
+app.use(downloadLeadRequestError);
 app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
     logger.error(err, 'Unhandled error');
     res.status(500).json({ error: 'Internal server error' });

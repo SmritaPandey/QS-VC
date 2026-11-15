@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import DownloadLeadStep from '../components/DownloadLeadStep';
 import SiteNav from '../components/SiteNav';
 import SiteFooter from '../components/SiteFooter';
 import ActionContents from '../components/ActionContents';
@@ -31,6 +32,18 @@ const formatSize = (bytes?: number) => !bytes ? '' : bytes >= 1e9 ? (bytes / 1e9
 
 export default function IntranetPage() {
     const session = useSession();
+    const [pendingDownload, setPendingDownload] = useState<string | null>(null);
+    const downloadTrigger = useRef<HTMLButtonElement | null>(null);
+    function cancelDownloadStep() { setPendingDownload(null); downloadTrigger.current?.focus(); }
+    function continueDownload() {
+        const platform = pendingDownload;
+        cancelDownloadStep();
+        if (!platform) return;
+        if (platform.startsWith('desktop:')) { void download(); return; }
+        const link = document.createElement('a');
+        link.href = `${AUTH_API}/api/auth/enterprise/server-package/${platform}`;
+        link.download = ''; document.body.append(link); link.click(); link.remove();
+    }
     const [serverStatus, setServerStatus] = useState<'checking' | 'ready' | 'unavailable'>('checking');
     const [serverFiles, setServerFiles] = useState<Record<string, ServerFile>>({});
     useEffect(() => {
@@ -76,6 +89,7 @@ export default function IntranetPage() {
     }, [downloadState.phase]);
     useEffect(() => {
         setDownloadState({ phase: 'idle' });
+        setPendingDownload(null);
         return () => {
             downloadRequest.current?.abort();
             downloadRequest.current = null;
@@ -191,12 +205,13 @@ export default function IntranetPage() {
                 {[...serverChoices].sort((a, b) => Number(b.os === visitorOs) - Number(a.os === visitorOs)).map(choice => {
                     const item = serverFiles[choice.id];
                     return <li key={choice.id} className="onprem-server-download">
-                        <h3>{choice.title}{choice.recommended && <span className="enterprise-access-badge"> Recommended</span>}</h3>
+                        <h3>{choice.title}{choice.recommended && <span className="enterprise-access-badge onprem-recommended">Recommended</span>}</h3>
                         <p>{choice.detail}</p>
                         {item?.available ? <>
-                            <a className="qsvc-action" href={AUTH_API + '/api/auth/enterprise/server-package/' + choice.id} download>
+                            <button className="qsvc-action" type="button" aria-expanded={pendingDownload === choice.id} onClick={event => { downloadTrigger.current = event.currentTarget; setPendingDownload(choice.id); }}>
                                 <ActionContents><span className="mi" aria-hidden="true">download</span>Download{item.size ? ' · ' + formatSize(item.size) : ''}</ActionContents>
-                            </a>
+                            </button>
+                            {pendingDownload === choice.id && <DownloadLeadStep key={choice.id} platform={choice.id} onContinue={continueDownload} onCancel={cancelDownloadStep} />}
                             {item.sha256 && <p className="onprem-checksum">SHA-256 <code>{item.sha256}</code></p>}
                         </> : <p role="status">Coming soon</p>}
                     </li>;
@@ -220,7 +235,7 @@ export default function IntranetPage() {
             else { setResult(undefined); setAttempt(value => value + 1); }
         }}><ActionContents>Try again</ActionContents></button></section> : access ? <div className="intranet-layout">
             <section className="service-card"><span className="enterprise-access-badge">{access.onlineDemo ? 'Admin · Online test workspace' : 'Approved QS-Enterprise access'}</span><h2>Open in your browser</h2><p>{access.onlineDemo ? 'This opens the shared QS-VC online app to test the QS-Enterprise experience. It is not an isolated organisation deployment.' : 'Connect to your office network or approved VPN, then sign in to your organisation’s workspace.'}</p><p className="enterprise-address">{access.workspaceUrl}</p><a className="qsvc-action" href={access.workspaceUrl} rel="noreferrer"><ActionContents>Open workspace</ActionContents></a></section>
-            <section className="service-card"><h2>Download QS-VC</h2><p>{access.onlineDemo ? 'Choose your computer and use the same online test workspace.' : 'Choose the app for your computer. The app connects to the organisation workspace above.'}</p><p>On Mac, extract the ZIP and move QS-VC.app to Applications. On Windows, extract the ZIP and run QS-VC.exe from the extracted folder. On Linux x64, extract the ZIP and run qs-vc from the extracted folder. Ask your administrator if you need help with your Linux distribution.</p><label className="intranet-platform-label" htmlFor="intranet-download-platform">Your device</label><select id="intranet-download-platform" value={downloadPlatform} disabled={downloading} onChange={event => setDownloadPlatform(event.target.value as DesktopDownload)}>{downloadChoices.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}</select><button className="qsvc-action intranet-download" type="button" aria-busy={downloading} disabled={!chosenDownloadAvailable || downloading || session.status !== 'authenticated'} onClick={download}><ActionContents><span className="mi" aria-hidden="true">download</span>{downloading ? 'Downloading…' : downloadPlatform === 'linux-x64' ? 'Download Linux ZIP' : downloadPlatform.startsWith('macos-') ? 'Download Mac ZIP' : 'Download Windows ZIP'}</ActionContents></button>{!chosenDownloadAvailable && <p role="status">This app archive is not available yet. Choose another device or contact your administrator.</p>}<p>{access.onlineDemo ? 'For an isolated enterprise workspace, use the address supplied by your organisation.' : 'After installation, use the organisation address above.'} A download does not grant additional meeting permissions.</p><p>Each ZIP includes the getting-started guide, the prerequisites and the on-prem setup guide for IT. <a href="/guides/QS-VC-Prerequisites.pdf" target="_blank" rel="noreferrer">Prerequisites (PDF)</a> · <a href="/guides/QS-VC-Getting-Started.pdf" target="_blank" rel="noreferrer">Getting started (PDF)</a> · <a href="/guides/QS-VC-Intranet-Setup.pdf" target="_blank" rel="noreferrer">On-prem setup (PDF)</a></p></section>
+            <section className="service-card"><h2>Download QS-VC</h2><p>{access.onlineDemo ? 'Choose your computer and use the same online test workspace.' : 'Choose the app for your computer. The app connects to the organisation workspace above.'}</p><p>On Mac, extract the ZIP and move QS-VC.app to Applications. On Windows, extract the ZIP and run QS-VC.exe from the extracted folder. On Linux x64, extract the ZIP and run qs-vc from the extracted folder. Ask your administrator if you need help with your Linux distribution.</p><label className="intranet-platform-label" htmlFor="intranet-download-platform">Your device</label><select id="intranet-download-platform" value={downloadPlatform} disabled={downloading || Boolean(pendingDownload?.startsWith('desktop:'))} onChange={event => setDownloadPlatform(event.target.value as DesktopDownload)}>{downloadChoices.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}</select><button className="qsvc-action intranet-download" type="button" aria-busy={downloading} disabled={!chosenDownloadAvailable || downloading || session.status !== 'authenticated'} onClick={event => { downloadTrigger.current = event.currentTarget; setPendingDownload(`desktop:${downloadPlatform}`); }}><ActionContents><span className="mi" aria-hidden="true">download</span>{downloading ? 'Downloading…' : downloadPlatform === 'linux-x64' ? 'Download Linux ZIP' : downloadPlatform.startsWith('macos-') ? 'Download Mac ZIP' : 'Download Windows ZIP'}</ActionContents></button>{pendingDownload === `desktop:${downloadPlatform}` && <DownloadLeadStep key={pendingDownload} platform={downloadPlatform} onContinue={continueDownload} onCancel={cancelDownloadStep} />}{!chosenDownloadAvailable && <p role="status">This app archive is not available yet. Choose another device or contact your administrator.</p>}<p>{access.onlineDemo ? 'For an isolated enterprise workspace, use the address supplied by your organisation.' : 'After installation, use the organisation address above.'} A download does not grant additional meeting permissions.</p><p>Each ZIP includes the getting-started guide, the prerequisites and the on-prem setup guide for IT. <a href="/guides/QS-VC-Prerequisites.pdf" target="_blank" rel="noreferrer">Prerequisites (PDF)</a> · <a href="/guides/QS-VC-Getting-Started.pdf" target="_blank" rel="noreferrer">Getting started (PDF)</a> · <a href="/guides/QS-VC-Intranet-Setup.pdf" target="_blank" rel="noreferrer">On-prem setup (PDF)</a></p></section>
         </div> : null}
     </main><SiteFooter /><DownloadFeedback state={token && downloadOwner.current === token ? downloadState : { phase: 'idle' }} onDismiss={() => setDownloadState({ phase: 'idle' })} /></div>;
 }

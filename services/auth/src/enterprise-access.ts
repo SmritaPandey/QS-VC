@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Pool } from 'pg';
 import { isPlatformAdmin } from './platform-admins.js';
 import { sessionErrorStatus } from './sessions.js';
+import { registerDownloadLeadRoutes } from './download-leads.js';
 
 // Server-managed explicit user IDs prevent self-registration into an approved tenant
 // from granting download access. Never accept entitlement from browser parameters.
@@ -50,6 +51,7 @@ export function enterpriseRouter(
     notify: typeof sendApprovalEmail = sendApprovalEmail,
 ) {
     const router = Router();
+    if (db) registerDownloadLeadRoutes(router, verify, db);
     const withAdmin = (handle: (req: Request, res: Response, adminId: string) => Promise<unknown>) =>
         async (req: Request, res: Response) => {
             res.setHeader('Cache-Control', 'no-store');
