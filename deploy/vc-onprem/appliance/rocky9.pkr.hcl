@@ -58,8 +58,12 @@ build {
     destination = "/tmp/qsvc-server-setup.run"
   }
   provisioner "file" {
-    source      = "${path.root}/files/"
-    destination = "/tmp/appliance-files"
+    source      = "${path.root}/files/qsvc-firstboot.sh"
+    destination = "/tmp/qsvc-firstboot.sh"
+  }
+  provisioner "file" {
+    source      = "${path.root}/files/qsvc-firstboot.service"
+    destination = "/tmp/qsvc-firstboot.service"
   }
   provisioner "shell" {
     execute_command = "sudo -n bash '{{ .Path }}'"
