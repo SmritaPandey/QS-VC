@@ -8,6 +8,9 @@ import { loadMeetingPolicy, reportMeetingStatus, endHostedMeetingStatus, verifyS
  * Handles all client↔server signaling messages for WebRTC negotiation,
  * waiting room, host controls, RBAC, and media stats.
  */
+import { encryptedQuestionsRpc } from '../encrypted-questions.js';
+import { encryptedPollRpc } from '../encrypted-polls.js';
+import { encryptedBoardRpc } from '../encrypted-board.js';
 import { collaborationRpc } from '../collaboration.js';
 import { sfuClient } from '../sfu-client.js';
 import { roomManager, PeerState, PeerRole, type PrivateConversation, type VerifiedSignalingUser, type RoomState } from '../room-manager.js';
@@ -480,6 +483,25 @@ export async function handleRpcMessage(
                 const result = await bharatVcDial({ ...connectionState, authUser: connectionState.authUser || undefined }, params);
                 return { jsonrpc: '2.0', id: id!, result };
             }
+            case 'getEncryptedQuestions':
+            case 'putEncryptedQuestion':
+            case 'voteEncryptedQuestion':
+                return {jsonrpc:'2.0',id:id!,result:encryptedQuestionsRpc(ws,connectionState.roomId!,connectionState.peerId!,method,params)};
+            case 'getEncryptedBoard':
+            case 'putEncryptedBoard':
+            case 'removeEncryptedBoard':
+            case 'clearEncryptedBoard':
+                return { jsonrpc:'2.0', id:id!, result:encryptedBoardRpc(ws,connectionState.roomId!,connectionState.peerId!,method,params) };
+            case 'getEncryptedPollIndex':
+            case 'getEncryptedPoll':
+            case 'getEncryptedPollResults':
+            case 'getEncryptedBallots':
+            case 'voteEncryptedPoll':
+            case 'closeEncryptedPoll':
+            case 'createEncryptedPoll':
+            case 'publishEncryptedPoll':
+            case 'rewrapEncryptedPoll':
+                return { jsonrpc:'2.0', id:id!, result:encryptedPollRpc(ws,connectionState.roomId!,connectionState.peerId!,method,params) };
             case 'getEncryptedNotes':
             case 'putEncryptedNotes':
             case 'getEncryptedFiles':

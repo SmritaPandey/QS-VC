@@ -6,6 +6,7 @@ import { signaling } from './signaling';
 export interface EncryptedNotesAccess {
     manager: E2EEManager;
     isKeyHolder: () => boolean;
+    moderators?: () => { peerId:string; kemPublicKey:string }[];
     signingKeyFor: (peerId: string) => string | undefined;
 }
 

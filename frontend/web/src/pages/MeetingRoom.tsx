@@ -2077,6 +2077,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const encryptedNotes = useMemo(() => currentEncryptionManager ? {
         manager: currentEncryptionManager,
         isKeyHolder: () => e2eeKeyHolderRef.current === myPeerIdRef.current,
+        moderators: () => [...e2eeBundlesRef.current.values()].filter(bundle => {
+            const role = bundle.peerId === myPeerIdRef.current ? myRoleRef.current : peersRef.current.get(bundle.peerId)?.role;
+            return role === 'host' || role === 'co-host';
+        }).map(bundle => ({peerId:bundle.peerId,kemPublicKey:bundle.kemPublicKey})),
         signingKeyFor: (peerId: string) => e2eeBundlesRef.current.get(peerId)?.signingPublicKey,
     } : undefined, [currentEncryptionManager]);
 
@@ -2181,7 +2185,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             <div className="meeting-content" data-activity-stage={activityOnStage || undefined}>
                 {(!secureActivities || encryptedNotes) && <MeetingCollaboration key={`${meetingCode}:${roomJoinEpoch}:${secureActivities}`} open={activitiesOpen}
                     connected={connected && (!secureActivities || e2eeActive)} role={myRole} myPeerId={myPeerIdRef.current}
-                    onClose={closeActivityPanel} encryptedNotes={secureActivities ? encryptedNotes : undefined} canShareFiles={myRole === 'host' || roomSettings.allowFileShare === true} />}
+                    onClose={closeActivityPanel} encryptedNotes={secureActivities ? encryptedNotes : undefined} canShareFiles={myRole === 'host' || roomSettings.allowFileShare === true} canEditBoard={myRole === 'host' || roomSettings.allowScreenShare === true} />}
                 <div ref={videoAreaRef} className={`video-area ${sidePanelOpen ? 'with-panel' : ''}`}>
                     {incomingChatMessage && !chatOpen && <div className="meeting-chat-flash">
                         <MeetingToast key={incomingChatMessage.id} onDismiss={dismissChatFlash}>

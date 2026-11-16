@@ -27,7 +27,11 @@ Whiteboard limits: 500 strokes, 20,000 points total, 1,000 points per stroke. No
 
 The current key holder reseals the stored notes after rotation so late joiners can open them. Recovery requires a live client with access to the preceding epoch to become or remain key holder. Secure notes have the same room lifetime as regular notes and a 32 KiB UTF-8 limit, within the signaling message size. Downloading notes saves a readable local file.
 
-Encrypted rooms also support up to 10 shared files of 18 KiB each. File names, formats and bytes are sealed and the uploader’s signature is verified after decryption, including after a key holder reseals the file. Whiteboard, sticky notes, polls and Q&A are available in regular rooms. They require separate encrypted protocols to preserve editing permissions and restricted poll results.
+Encrypted rooms also support up to 10 shared files of 18 KiB each. File names, formats and bytes are sealed and the uploader’s signature is verified after decryption, including after a key holder reseals the file. Encrypted rooms now expose Whiteboard/sticky notes, Polls, and Q&A as separate signed ciphertext records. Board author/editor checks, host sharing permissions, optimistic revision checks, bounded pages and original signatures are retained across key-holder resealing. Q&A answers require a host or co-host.
+
+Poll questions and published results use the room key. Ballots use separate recipient encryption for registered moderators. Shared results require explicit moderator publication. Vote replacement invalidates previous publication, and result publication is bound to the ballot revision. Ballots use ephemeral moderator keys: a reconnected sole moderator may lose access to earlier ballots. The UI blocks incomplete totals. Full moderator key recovery and handoff remain incomplete.
+
+Three browser clients exercised the actual encrypted activity RPCs over an isolated loopback WebSocket fixture with registered test identities. Permission denial/grant/revoke, simultaneous sticky additions, private ballots, attendee departure and board rekey passed. This fixture did not run real authentication or audio/video services. Full host/two-attendee media-meeting acceptance remains open.
 
 ## Verification boundary
 

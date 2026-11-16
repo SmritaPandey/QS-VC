@@ -278,6 +278,34 @@ export class E2EEManager {
         return this.data.sealNotes(text, revision, noteVersion, fileId);
     }
 
+    async sealBallot(pollId: string, targetPeerId: string, kemPublicKey: string, choice: number, revision: number) {
+        const context = encoder.encode(JSON.stringify(['QS-VC-POLL-BALLOT:v1', this.meetingCode, pollId, this.peerId, targetPeerId, revision]));
+        const capsule = await this.pqc.encapsulateForPeer(fromBase64(kemPublicKey), context);
+        try {
+            const key = await crypto.subtle.importKey('raw', arrayBuffer(capsule.combinedSecret), 'AES-GCM', false, ['encrypt']);
+            const nonce = crypto.getRandomValues(new Uint8Array(12));
+            const ciphertext = await crypto.subtle.encrypt({ name:'AES-GCM', iv:arrayBuffer(nonce), additionalData:arrayBuffer(context) }, key, arrayBuffer(encoder.encode(JSON.stringify({ choice }))));
+            const value = { pollId, revision, senderPeerId:this.peerId, targetPeerId, capsule:toBase64(capsule.ciphertext), nonce:toBase64(nonce), ciphertext:toBase64(new Uint8Array(ciphertext)), signature:'' };
+            value.signature = toBase64((await this.pqc.sign(encoder.encode(JSON.stringify([new TextDecoder().decode(context), value.capsule, value.nonce, value.ciphertext])))).signature);
+            return value;
+        } finally { capsule.combinedSecret.fill(0); }
+    }
+
+    async openBallot(value: { pollId:string; revision:number; senderPeerId:string; targetPeerId:string; capsule:string; nonce:string; ciphertext:string; signature:string }, signingPublicKey: string): Promise<number> {
+        if (value.targetPeerId !== this.peerId) throw new Error('This ballot belongs to another moderator.');
+        const context = encoder.encode(JSON.stringify(['QS-VC-POLL-BALLOT:v1', this.meetingCode, value.pollId, value.senderPeerId, this.peerId, value.revision]));
+        const body = encoder.encode(JSON.stringify([new TextDecoder().decode(context), value.capsule, value.nonce, value.ciphertext]));
+        if (!await this.pqc.verify(body, signatureRecord(value.signature), fromBase64(signingPublicKey))) throw new Error('Ballot signature is invalid.');
+        const shared = await this.pqc.decapsulate(fromBase64(value.capsule), context);
+        try {
+            const key = await crypto.subtle.importKey('raw', arrayBuffer(shared), 'AES-GCM', false, ['decrypt']);
+            const plaintext = await crypto.subtle.decrypt({name:'AES-GCM',iv:arrayBuffer(fromBase64(value.nonce)),additionalData:arrayBuffer(context)}, key, arrayBuffer(fromBase64(value.ciphertext)));
+            const { choice } = JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(plaintext));
+            if (!Number.isInteger(choice) || choice < 0 || choice > 5) throw new Error('Invalid ballot choice.');
+            return choice;
+        } finally { shared.fill(0); }
+    }
+
     async signFile(fileId: string, payload: string) {
         return toBase64((await this.pqc.sign(encoder.encode(JSON.stringify(['QS-VC-FILE:v1', this.meetingCode, fileId, payload])))).signature);
     }

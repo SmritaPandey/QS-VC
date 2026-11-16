@@ -122,3 +122,23 @@ describe('encrypted room notes', () => {
         } finally { host.destroy(); late.destroy(); }
     });
 });
+
+
+describe('moderator encrypted ballots', () => {
+    it('lets the targeted moderator read a ballot while another attendee cannot, and binds its revision', async () => {
+        const host=new E2EEManager('ballot-room');
+        const voter=new E2EEManager('ballot-room');
+        const attendee=new E2EEManager('ballot-room');
+        try {
+            const hostBundle=await host.initAsHost('host');
+            const voterBundle=await voter.init('voter');
+            await attendee.init('other');
+            const id=crypto.randomUUID();
+            const ballot=await voter.sealBallot(id,'host',hostBundle.kemPublicKey,1,1);
+            expect(await host.openBallot(ballot,voterBundle.signingPublicKey)).toBe(1);
+            await expect(attendee.openBallot(ballot,voterBundle.signingPublicKey)).rejects.toThrow('another moderator');
+            await expect(host.openBallot({...ballot,revision:2},voterBundle.signingPublicKey)).rejects.toThrow('signature');
+            await expect(host.openBallot({...ballot,pollId:crypto.randomUUID()},voterBundle.signingPublicKey)).rejects.toThrow('signature');
+        } finally {host.destroy();voter.destroy();attendee.destroy();}
+    });
+});
