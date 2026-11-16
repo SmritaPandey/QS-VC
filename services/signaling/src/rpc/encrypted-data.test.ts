@@ -21,6 +21,30 @@ describe('ciphertext-only encrypted meeting data protocol', () => {
         for(const method of ['getCollaborationState','getCollaborationFile','collaborationAction']) expect((await rpc(ws,state,method,{type:'notes:set',text:'secret'}))?.error?.code).toBe(-32005);
         expect(ws.send.mock.calls.map(([raw])=>raw).join('')).not.toContain('secret');
     });
+    it('stores and broadcasts only the latest sealed notes, with membership and revision checks', async () => {
+        const {ws,state,room}=await joined();
+        const {type, keyId, createdAt, messageId, ...source}=envelope(room,state);
+        const note={...source,revision:1,noteVersion:1};
+        expect((await rpc(ws,state,'putEncryptedNotes',note))?.error).toBeDefined();
+        room.peers.get(state.peerId)!.e2eeKeyBundle={peerId:state.peerId,kemPublicKey:'kem',signingPublicKey:'sign',signature:'sig'};
+        expect((await rpc(ws,state,'getEncryptedNotes'))?.result).toBeNull();
+        expect((await rpc(ws,state,'putEncryptedNotes',{...note,text:'private plaintext'}))?.error).toBeDefined();
+        expect((await rpc(ws,state,'putEncryptedNotes',{...note,room:'other-room'}))?.error).toBeDefined();
+        expect((await rpc(ws,state,'putEncryptedNotes',note))?.result).toEqual({encrypted:note,signingPublicKey:'sign'});
+        expect((await rpc(ws,state,'putEncryptedNotes',note))?.error).toBeDefined();
+        expect((await rpc(ws,state,'putEncryptedNotes',{...note,revision:2}))?.error).toBeDefined();
+        const changedEpoch={...note,revision:2,epoch:Buffer.alloc(32,5).toString('base64')};
+        room.e2eeKeyHolderPeerId='different-peer';
+        expect((await rpc(ws,state,'putEncryptedNotes',changedEpoch))?.error).toBeDefined();
+        room.e2eeKeyHolderPeerId=state.peerId;
+        expect((await rpc(ws,state,'putEncryptedNotes',changedEpoch))?.result.encrypted).toEqual(changedEpoch);
+        expect((await rpc(ws,state,'getEncryptedNotes'))?.result.encrypted).toEqual(changedEpoch);
+        const updates=ws.send.mock.calls.map(([raw])=>JSON.parse(raw)).filter(value=>value.method==='encryptedNotesUpdated');
+        expect(updates.map(update=>update.params.encrypted)).toEqual([note,changedEpoch]);
+        expect(JSON.stringify(updates)).not.toContain('private plaintext');
+        const other=await joined(false);
+        expect((await rpc(other.ws,other.state,'getEncryptedNotes'))?.error).toBeDefined();
+    });
     it('requires registered sender identity and relays ciphertext without content', async () => {
         const {ws,state,room}=await joined(); const encrypted=envelope(room,state);
         expect((await rpc(ws,state,'chatMessage',{encrypted}))?.error?.code).toBe(-32005);

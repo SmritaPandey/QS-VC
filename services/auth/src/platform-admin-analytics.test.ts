@@ -100,7 +100,7 @@ it('exposes a small protected access check without reading the analytics databas
     const router = platformAdminAnalyticsRouter(async () => ({ email: 'operator@example.test' }), { query });
     const res = makeResponse();
     await route(router, '/access', 'get')({ headers: { authorization: 'Bearer token' } } as unknown as Request, res as unknown as Response, vi.fn());
-    expect(res.json).toHaveBeenCalledWith({ access: 'granted' });
+    expect(res.json).toHaveBeenCalledWith({ access: 'granted', deployment: expect.objectContaining({ mode: 'hosted-online' }) });
     expect(query).not.toHaveBeenCalled();
 
     const denied = makeResponse();
@@ -149,4 +149,34 @@ it('writes a validated ledger entry with the signed-in platform admin identity',
     );
     expect(res.status).toHaveBeenCalledWith(201);
     expect(res.json).toHaveBeenCalledWith({ id: 'new-entry' });
+});
+
+it.each(['private', 'public'])('keeps commercial data and writes unavailable on-prem (%s)', async exposure => {
+    vi.stubEnv('QSVC_DEPLOYMENT', 'onprem');
+    vi.stubEnv('QSVC_ONPREM_EXPOSURE', exposure);
+    vi.stubEnv('QSVC_ADMIN_EMAILS', 'operator@example.test');
+    const query = vi.fn().mockResolvedValue({ rows: [{
+        analytics: { totals: { meetingsCreated: 7 }, quarters: [{ quarter: '2026 Q1', financials: [{ revenue: '10' }] }],
+            financialTotalsByCurrency: [{ revenue: '10' }], recentFinancialEntries: [{ id: 'commercial' }] },
+        directory: { users: [{ email: 'member@example.test', billingProvider: 'razorpay', billingStatus: 'paid',
+            subscriptionEndsAt: '2026-12-01', billingAmount: '10', billingCurrency: 'USD' }] },
+    }] });
+    const router = platformAdminAnalyticsRouter(async () => ({ email: 'operator@example.test' }), { query });
+    const request = { headers: { authorization: 'Bearer token' }, query: {}, body: {} } as unknown as Request;
+    const write = makeResponse();
+    await route(router, '/financial-entries', 'post')(request, write as unknown as Response, vi.fn());
+    expect(write.sendStatus).toHaveBeenCalledWith(404);
+    expect(query).not.toHaveBeenCalled();
+    const analytics = makeResponse();
+    await route(router, '/analytics', 'get')(request, analytics as unknown as Response, vi.fn());
+    expect(analytics.json).toHaveBeenCalledWith({
+        totals: { meetingsCreated: 7 }, quarters: [{ quarter: '2026 Q1', financials: [] }],
+        financialTotalsByCurrency: [], recentFinancialEntries: [],
+    });
+    const users = makeResponse();
+    await route(router, '/users', 'get')(request, users as unknown as Response, vi.fn());
+    expect(users.json).toHaveBeenCalledWith({ users: [ {
+        email: 'member@example.test', billingProvider: null, billingStatus: null,
+        subscriptionEndsAt: null, billingAmount: null, billingCurrency: null,
+    }] });
 });

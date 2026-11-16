@@ -21,7 +21,24 @@ describe('room collaboration',()=>{
   expect(rpc('host','getCollaborationState').stickyNotes[0]).toMatchObject({text:'Updated',color:'blue',version:1});
   expect(rpc('host','collaborationAction',{type:'sticky:remove',id,version:1}).stickyNotes).toEqual([hostNote]);
  });
- it('keeps attachment bytes out of snapshots and rejects unsafe/oversized files',()=>{const {rpc}=setup();const state=rpc('member','collaborationAction',{type:'file:add',name:'notes.txt',mime:'text/plain',data:Buffer.from('Hello').toString('base64')});expect(state.files[0].data).toBeUndefined();expect(rpc('host','getCollaborationFile',{id:state.files[0].id}).data).toBe(Buffer.from('Hello').toString('base64'));expect(()=>rpc('member','collaborationAction',{type:'file:add',name:'fake.png',mime:'image/png',data:Buffer.from('not png').toString('base64')})).toThrow('format');expect(()=>rpc('member','collaborationAction',{type:'file:add',name:'x.txt',mime:'text/plain',data:Buffer.from('<script>alert(1)</script>').toString('base64')})).toThrow('format');expect(()=>rpc('member','collaborationAction',{type:'file:add',name:'big.txt',mime:'text/plain',data:Buffer.alloc(32769,65).toString('base64')})).toThrow();});
+ it('stores only sealed files, restricts removal and rejects cross-room ciphertext', () => {
+  const {rpc,room}=setup();
+  room.settings.e2eeRequired=true;
+  for(const peer of room.peers.values())peer.e2eeKeyBundle={peerId:peer.id,kemPublicKey:'kem',signingPublicKey:peer.id,signature:'sig'};
+  const file={version:1,room:room.id,senderPeerId:'host',fileId:crypto.randomUUID(),revision:1,noteVersion:1,
+   epoch:Buffer.alloc(32,1).toString('base64'),nonce:Buffer.alloc(12,2).toString('base64'),
+   ciphertext:Buffer.alloc(32,3).toString('base64'),signature:Buffer.alloc(4627,4).toString('base64')};
+  expect(()=>rpc('host','putEncryptedFile',{...file,name:'secret.txt'})).toThrow();
+  expect(()=>rpc('host','putEncryptedFile',{...file,room:'different-room'})).toThrow('room');
+  expect(()=>rpc('member','putEncryptedFile',{...file,senderPeerId:'member'})).toThrow('permission');
+  expect(rpc('host','putEncryptedFile',file)).toBe(true);
+  expect(rpc('member','getEncryptedFiles')).toEqual([{encrypted:file,signingPublicKey:'host',authorId:'host',authorName:'host',authorSigningKey:'host'}]);
+  expect(()=>rpc('member','removeEncryptedFile',{id:file.fileId})).toThrow('Host');
+  expect(()=>rpc('member','putEncryptedFile',{...file,senderPeerId:'member',revision:2})).toThrow('revision');
+  rpc('host','removeEncryptedFile',{id:file.fileId});
+  expect(rpc('member','getEncryptedFiles')).toEqual([]);
+ });
+ it('keeps attachment bytes out of snapshots and rejects unsafe/oversized files',()=>{const {rpc,room}=setup();expect(()=>rpc('member','collaborationAction',{type:'file:add',name:'notes.txt',mime:'text/plain',data:'SGVsbG8='})).toThrow('permission');room.settings.allowFileShare=true;const state=rpc('member','collaborationAction',{type:'file:add',name:'notes.txt',mime:'text/plain',data:Buffer.from('Hello').toString('base64')});expect(state.files[0].data).toBeUndefined();expect(rpc('host','getCollaborationFile',{id:state.files[0].id}).data).toBe(Buffer.from('Hello').toString('base64'));expect(()=>rpc('member','collaborationAction',{type:'file:add',name:'fake.png',mime:'image/png',data:Buffer.from('not png').toString('base64')})).toThrow('format');expect(()=>rpc('member','collaborationAction',{type:'file:add',name:'x.txt',mime:'text/plain',data:Buffer.from('<script>alert(1)</script>').toString('base64')})).toThrow('format');expect(()=>rpc('member','collaborationAction',{type:'file:add',name:'big.txt',mime:'text/plain',data:Buffer.alloc(32769,65).toString('base64')})).toThrow();});
  it('deduplicates question votes and separates rooms',()=>{const {rpc}=setup();let state=rpc('member','collaborationAction',{type:'question:ask',text:'When?'});const id=state.questions[0].id;rpc('member','collaborationAction',{type:'question:vote',id});state=rpc('member','collaborationAction',{type:'question:vote',id});expect(state.questions[0].voters).toEqual(['member']);expect(()=>rpc('member','collaborationAction',{type:'question:answer',id,answer:'Now'})).toThrow('Host');expect(setup().rpc('host','getCollaborationState').questions).toEqual([]);});
  it('hides poll results from participants until allowed, and never broadcasts them',()=>{
   const {rpc,b}=setup();

@@ -87,3 +87,38 @@ describe('signed encrypted meeting chat', () => {
     });
 
 });
+
+
+describe('encrypted room notes', () => {
+    it('opens durable ciphertext after rotation, authenticates revisions and reseals it for a late join', async () => {
+        const host = new E2EEManager('secure-notes');
+        const late = new E2EEManager('secure-notes');
+        try {
+            const hostBundle = await host.initAsHost('host');
+            const lateBundle = await late.init('late');
+            const signingPublicKey = hostBundle.signingPublicKey;
+            const text = '私のノート '.repeat(1900);
+            const encrypted = await host.sealNotes(text, 1, 1);
+            expect(JSON.stringify(encrypted)).not.toContain(text);
+            expect(await host.openNotes({ encrypted, signingPublicKey })).toEqual({ text, currentEpoch: true });
+            await expect(host.openNotes({ encrypted: { ...encrypted, revision: 2 }, signingPublicKey })).rejects.toThrow('signature');
+            host.rekey();
+            expect(await host.openNotes({ encrypted, signingPublicKey })).toEqual({ text, currentEpoch: false });
+            await late.acceptMeetingKey(await host.wrapMeetingKeyForPeer('late', lateBundle.kemPublicKey), 'host', signingPublicKey, 'late');
+            await expect(late.openNotes({ encrypted, signingPublicKey })).rejects.toThrow('sync');
+            const resealed = await host.sealNotes(text, 2, 1);
+            expect(await late.openNotes({ encrypted: resealed, signingPublicKey })).toEqual({ text, currentEpoch: true });
+            await expect(host.sealNotes('界'.repeat(19000), 3, 2)).rejects.toThrow('limit');
+            const fileId = crypto.randomUUID();
+            const payload = JSON.stringify({name:'restricted.txt',data:btoa('x'.repeat(18*1024))});
+            const signature = await host.signFile(fileId,payload);
+            const content = JSON.stringify({payload,signature});
+            expect(await late.verifyFile(fileId,payload,signature,signingPublicKey)).toBe(true);
+            expect(await late.verifyFile(fileId,payload+' ',signature,signingPublicKey)).toBe(false);
+            const attachment = await host.sealNotes(content,1,1,fileId);
+            expect(JSON.stringify(attachment)).not.toContain('restricted.txt');
+            expect(await late.openNotes({encrypted:attachment,signingPublicKey})).toMatchObject({text:content});
+            await expect(late.openNotes({encrypted:{...attachment,fileId:crypto.randomUUID()},signingPublicKey})).rejects.toThrow('signature');
+        } finally { host.destroy(); late.destroy(); }
+    });
+});

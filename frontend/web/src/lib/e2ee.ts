@@ -1,4 +1,4 @@
-import { E2EEDataCipher, type EncryptedChatEnvelope } from './e2ee-data';
+import { E2EEDataCipher, type EncryptedChatEnvelope, type EncryptedNotesRecord } from './e2ee-data';
 import { PQCManager, PQC_ALGORITHMS, type PQCSignature } from '../../../../shared/crypto/pqc';
 import { clearPrefixLength, FrameCrypto, KEY_ROTATION_MS } from './e2ee-frame';
 
@@ -271,6 +271,25 @@ export class E2EEManager {
     async decryptChat(envelope: EncryptedChatEnvelope, senderPeerId: string, signingPublicKey: string): Promise<string> {
         if (!this.active || !this.data) throw new Error('Secure chat is waiting for the meeting key.');
         return this.data.decrypt(envelope, senderPeerId, signingPublicKey);
+    }
+
+    sealNotes(text: string, revision: number, noteVersion: number, fileId?: string) {
+        if (!this.active || !this.data) throw new Error('Waiting for the meeting key.');
+        return this.data.sealNotes(text, revision, noteVersion, fileId);
+    }
+
+    async signFile(fileId: string, payload: string) {
+        return toBase64((await this.pqc.sign(encoder.encode(JSON.stringify(['QS-VC-FILE:v1', this.meetingCode, fileId, payload])))).signature);
+    }
+
+    async verifyFile(fileId: string, payload: string, signature: string, authorKey: string) {
+        return this.pqc.verify(encoder.encode(JSON.stringify(['QS-VC-FILE:v1', this.meetingCode, fileId, payload])),
+            signatureRecord(signature), fromBase64(authorKey));
+    }
+
+    openNotes(record: EncryptedNotesRecord) {
+        if (!this.active || !this.data) throw new Error('Waiting for the meeting key.');
+        return this.data.openNotes(record);
     }
 
     isActive(): boolean { return this.active; }

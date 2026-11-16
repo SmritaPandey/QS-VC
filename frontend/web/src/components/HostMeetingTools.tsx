@@ -9,6 +9,7 @@ export interface RoomHostSettings {
     waitingRoomEnabled: boolean;
     muteOnEntry: boolean;
     allowScreenShare: boolean;
+    allowFileShare?: boolean;
     allowChat: boolean;
     allowMicrophone: boolean;
     allowCamera: boolean;
@@ -24,6 +25,7 @@ export function canManagePeer(role: string, ownId: string, peer: Participant): b
 /** Google Meet "Host controls": what everyone else may do, how people get in, and per-person actions. */
 const LET_EVERYONE: Array<[keyof RoomHostSettings, string, string]> = [
     ['allowScreenShare', 'Share their screen', 'screen_share'],
+    ['allowFileShare', 'Share files', 'attach_file'],
     ['allowChat', 'Send chat messages', 'chat'],
     ['allowReactions', 'Send reactions', 'add_reaction'],
     ['allowMicrophone', 'Turn on their microphone', 'mic'],
@@ -90,9 +92,9 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
     if (!isManager) return null;
     const others = participants.filter(peer => peer.peerId !== myPeerId);
     const raisedHands = participants.filter(peer => peer.handRaised).length;
-    const toggle = (key: string, label: string, icon: string, checked: boolean, onChange: (value: boolean) => void, hint?: string) =>
+    const toggle = (key: string, label: string, icon: string, checked: boolean, onChange: (value: boolean) => void, hint?: string, restricted = false) =>
         <label key={key} className="host-switch"><span className="mi" aria-hidden="true">{icon}</span><span className="host-switch-text"><span>{label}</span>{hint && <small>{hint}</small>}</span>
-            <input type="checkbox" role="switch" checked={checked} disabled={busy} onChange={event => { void onChange(event.target.checked); }} /></label>;
+            <input type="checkbox" role="switch" checked={checked} disabled={busy || restricted} onChange={event => { void onChange(event.target.checked); }} /></label>;
 
     return <aside className="side-panel host-meeting-tools" id="meeting-host-tools" aria-label="Host controls" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
         <div className="panel-header"><div><h2>Host controls</h2><p>{role === 'host' ? 'You are the host.' : 'You are a co-host.'} These apply to everyone else.</p></div><button type="button" ref={closeRef} className="panel-close" aria-label="Close host controls" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></div>
@@ -126,7 +128,11 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
 
             <section className="host-tools-settings" aria-labelledby="host-let-title">
                 <h3 id="host-let-title">Let everyone</h3>
-                {LET_EVERYONE.map(([key, label, icon]) => toggle(key, label, icon, settings[key] !== false, value => setSetting(key, value)))}
+                {LET_EVERYONE.map(([key, label, icon]) => {
+                    const hostOnly = (key === 'allowScreenShare' || key === 'allowFileShare') && role !== 'host';
+                    return toggle(key, label, icon, settings[key] === true, value => setSetting(key, value),
+                        hostOnly ? 'Only the host can change this setting.' : undefined, hostOnly);
+                })}
             </section>
 
             <section aria-labelledby="host-people-title">

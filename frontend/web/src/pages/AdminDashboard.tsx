@@ -9,23 +9,10 @@ import EnterpriseAccessTerms from '../components/EnterpriseAccessTerms';
 /**
  * Admin Dashboard — Real-time monitoring, user management, and analytics.
  */
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
+import BrandLogo from '../components/BrandLogo';
+import '../styles/admin-workspace.css';
 import { Link, useNavigate } from 'react-router-dom';
-
-interface DashboardStats {
-    activeMeetings: number;
-    totalParticipants: number;
-    totalUsers: number;
-    recordingsCount: number;
-    sfuHealth: 'healthy' | 'degraded' | 'down';
-    signalingHealth: 'healthy' | 'degraded' | 'down';
-    authHealth: 'healthy' | 'degraded' | 'down';
-    recordingHealth: 'healthy' | 'degraded' | 'down';
-    uptime: string;
-    totalMeetingsToday: number;
-    avgMeetingDuration: string;
-    peakConcurrent: number;
-}
 
 interface UserRecord {
     id: string;
@@ -60,33 +47,45 @@ function formatBillingAmount(amount: string, currency: string) {
     catch { return `${currency} ${value.toFixed(2)}`; }
 }
 
-interface RecordingRecord {
-    id: string;
-    meetingCode: string;
-    host: string;
-    duration: string;
-    size: string;
-    createdAt: string;
-    format: string;
+type TabName = 'overview' | 'meetings' | 'users' | 'recordings' | 'leads' | 'system';
+type DeploymentMode = 'hosted-online' | 'onprem-intranet' | 'onprem-online';
+type AdminDeployment = {
+    mode: DeploymentMode;
+    publicMeetingOrigin: string | null;
+    ssoConfigured: boolean;
+    localAiEnabled: boolean;
+    canIssueLicense: boolean;
+};
+const deploymentLabels: Record<DeploymentMode, string> = {
+    'hosted-online': 'Online website',
+    'onprem-intranet': 'On-prem intranet',
+    'onprem-online': 'On-prem online',
+};
+const tabs: { id: TabName; label: string; icon: string }[] = [
+    { id:'overview', label:'Overview', icon:'dashboard' },
+    { id:'meetings', label:'Live meetings', icon:'videocam' },
+    { id:'users', label:'Accounts', icon:'group' },
+    { id:'recordings', label:'Recordings', icon:'video_library' },
+    { id:'leads', label:'Download leads', icon:'contact_mail' },
+    { id:'system', label:'Deployment settings', icon:'settings' },
+];
+
+function isAdminDeployment(value: AdminDeployment | undefined): value is AdminDeployment {
+    return Boolean(value && Object.prototype.hasOwnProperty.call(deploymentLabels, value.mode) &&
+        typeof value.ssoConfigured === 'boolean' && typeof value.localAiEnabled === 'boolean' &&
+        typeof value.canIssueLicense === 'boolean' &&
+        (value.publicMeetingOrigin === null || typeof value.publicMeetingOrigin === 'string'));
 }
 
-const SIGNALING_URL = import.meta.env.VITE_SIGNALING_URL || 'http://localhost:4001';
-const AUTH_URL = import.meta.env.VITE_AUTH_URL || 'http://localhost:4002';
-const MEETING_URL = import.meta.env.VITE_MEETING_URL || 'http://localhost:4003';
-const RECORDING_URL = import.meta.env.VITE_RECORDING_URL || 'http://localhost:4004';
-
-type TabName = 'overview' | 'meetings' | 'users' | 'recordings' | 'leads' | 'system';
-
-const AdminDashboard: React.FC = () => {
+function AdminDashboard({ deployment }: { deployment: AdminDeployment }) {
     const navigate = useNavigate();
-    const [stats, setStats] = useState<DashboardStats>({
-        activeMeetings: 0, totalParticipants: 0, totalUsers: 0,
-        recordingsCount: 0, sfuHealth: 'healthy', signalingHealth: 'healthy',
-        authHealth: 'healthy', recordingHealth: 'healthy', uptime: '0h',
-        totalMeetingsToday: 0, avgMeetingDuration: '0m', peakConcurrent: 0,
-    });
+    const hosted = deployment.mode === 'hosted-online';
+    const internetOnPrem = deployment.mode === 'onprem-online';
+    const label = deploymentLabels[deployment.mode];
     const [users, setUsers] = useState<UserRecord[]>([]);
-    const [recordings, setRecordings] = useState<RecordingRecord[]>([]);
+    const [totalUsers, setTotalUsers] = useState<number | null>(null);
+    const [recordingCode, setRecordingCode] = useState('');
+    const [publicCode, setPublicCode] = useState('');
     const [activeTab, setActiveTab] = useState<TabName>('overview');
     const [userSearch, setUserSearch] = useState('');
     const [userRoleFilter, setUserRoleFilter] = useState<string>('all');
@@ -96,52 +95,8 @@ const AdminDashboard: React.FC = () => {
     const [usersTotal, setUsersTotal] = useState(0);
     const [planCounts, setPlanCounts] = useState<Record<string, number>>({});
     const [userDirectoryError, setUserDirectoryError] = useState('');
-
-    // ── Fetch dashboard data ──
-    useEffect(() => {
-        const fetchStats = async () => {
-            try {
-                const results = await Promise.allSettled([
-                    fetch(`${SIGNALING_URL}/health`).then(r => r.json()),
-                    fetch(`${AUTH_URL}/health`).then(r => r.json()),
-                    fetch(`${MEETING_URL}/health`).then(r => r.json()),
-                    fetch(`${RECORDING_URL}/health`).then(r => r.json()),
-                ]);
-
-                const [sig, auth, _meet, rec] = results;
-
-                setStats(prev => ({
-                    ...prev,
-                    signalingHealth: sig.status === 'fulfilled' ? 'healthy' : 'down',
-                    authHealth: auth.status === 'fulfilled' ? 'healthy' : 'down',
-                    sfuHealth: sig.status === 'fulfilled' ? 'healthy' : 'down',
-                    recordingHealth: rec.status === 'fulfilled' ? 'healthy' : 'down',
-                    activeMeetings: sig.status === 'fulfilled' ? (sig.value?.rooms || 0) : prev.activeMeetings,
-                }));
-            } catch {
-                // Silently handle
-            }
-        };
-
-        const fetchRecordings = async () => {
-            try {
-                const res = await fetch(`${RECORDING_URL}/api/recordings`, {
-                    headers: { Authorization: `Bearer ${getToken()}` },
-                });
-                if (res.ok) {
-                    const data = await res.json();
-                    setRecordings(data.recordings || []);
-                    setStats(prev => ({ ...prev, recordingsCount: data.recordings?.length || 0 }));
-                }
-            } catch { /* silent */ }
-        };
-
-        fetchStats();
-        fetchRecordings();
-
-        const interval = setInterval(fetchStats, 10000);
-        return () => clearInterval(interval);
-    }, []);
+    const [userDirectoryLoading, setUserDirectoryLoading] = useState(false);
+    const [directoryAttempt, setDirectoryAttempt] = useState(0);
 
     useEffect(() => {
         const timer = window.setTimeout(() => { setUserSearchQuery(userSearch); setUserPage(0); }, 250);
@@ -149,80 +104,66 @@ const AdminDashboard: React.FC = () => {
     }, [userSearch]);
 
     useEffect(() => {
+        if (activeTab !== 'users') return;
         const controller = new AbortController();
+        const token = getToken();
+        setUserDirectoryLoading(true);
+        setUserDirectoryError('');
         const query = new URLSearchParams({
             limit: String(USER_PAGE_SIZE), offset: String(userPage * USER_PAGE_SIZE),
             search: userSearchQuery, role: userRoleFilter,
         });
         if (userPlanFilter !== 'all') query.set('plan', userPlanFilter);
-        fetch(`${AUTH_URL}/api/auth/admin/users?${query}`, {
-            headers: { Authorization: `Bearer ${getToken()}` }, signal: controller.signal,
+        fetch(`${AUTH_API}/api/auth/admin/users?${query}`, {
+            headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
         }).then(async response => {
+            if (response.status === 401) clearSession(token);
             if (!response.ok) throw new Error('The admin account directory is unavailable.');
             return await response.json() as UserDirectory;
         }).then(data => {
+            if (controller.signal.aborted || getToken() !== token) return;
             setUsers(data.users || []);
             setUsersTotal(data.total || 0);
             setPlanCounts(data.planCounts || {});
-            setStats(prev => ({ ...prev, totalUsers: data.totalUsers || 0 }));
+            setTotalUsers(data.totalUsers || 0);
             setUserDirectoryError('');
         }).catch(() => {
             if (controller.signal.aborted) return;
-            setUserDirectoryError('The account directory is unavailable. Try again.');
-        });
+            setUserDirectoryError('The account directory is unavailable.');
+        }).finally(() => { if (!controller.signal.aborted) setUserDirectoryLoading(false); });
         return () => controller.abort();
-    }, [userPage, userPlanFilter, userRoleFilter, userSearchQuery]);
-
-    // ── Health status helper ──
-    const HealthDot: React.FC<{ status: string; label: string }> = ({ status, label }) => (
-        <div className={`health-item health-${status}`}>
-            <span className="health-dot" />
-            <span>{label}</span>
-            <span className="health-label">{status}</span>
-        </div>
-    );
+    }, [activeTab, directoryAttempt, userPage, userPlanFilter, userRoleFilter, userSearchQuery]);
 
     return (
-        <div className="admin-dashboard">
-            <header className="admin-header">
-                <div className="admin-logo">
-                    <span className="logo-mark">QS</span>
-                    <span className="logo-text">Admin Console</span>
-                </div>
-                <div className="admin-header-actions"><ThemeSelect />
-                    <button className="btn-back-to-app" onClick={() => navigate('/schedule')}>
-                        <span className="mi mi-sm">calendar_today</span> Schedule
-                    </button>
-                    <button className="btn-back-to-app" onClick={() => navigate('/app')}>
-                        <span className="mi mi-sm">arrow_back</span> Back to App
-                    </button>
-                </div>
-            </header>
+        <div className="admin-dashboard admin-workspace" data-profile={deployment.mode}>
+            <aside className="admin-workspace-rail">
+                <Link to="/app" className="admin-logo" aria-label="QS-VC meetings"><BrandLogo /></Link>
+                <nav className="admin-nav" aria-label="Admin sections">
+                    {tabs.filter(tab => hosted || tab.id !== 'leads').map(tab => (
+                        <button key={tab.id} type="button" aria-current={activeTab === tab.id ? 'page' : undefined}
+                            className={`admin-nav-btn ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
+                            <span className="mi mi-sm" aria-hidden="true">{tab.icon}</span>{tab.label}
+                        </button>
+                    ))}
+                </nav>
+            </aside>
+            <div className="admin-workspace-body">
+                <header className="admin-header">
+                    <div className="admin-workspace-title">
+                        <h1>{activeTab === 'overview' ? 'Admin overview' : tabs.find(tab => tab.id === activeTab)?.label}</h1>
+                        <span className="admin-deployment-label">{label}</span>
+                    </div>
+                    <div className="admin-header-actions">
+                        <ThemeSelect />
+                        <Link className="btn-back-to-app" to="/schedule">Schedule</Link>
+                        <Link className="btn-back-to-app" to="/app">Meetings workspace</Link>
+                    </div>
+                </header>
 
-            <nav className="admin-nav">
-                {(['overview', 'meetings', 'users', 'recordings', 'leads', 'system'] as TabName[]).map(tab => (
-                    <button
-                        key={tab}
-                        className={`admin-nav-btn ${activeTab === tab ? 'active' : ''}`}
-                        onClick={() => setActiveTab(tab)}
-                    >
-                        <span className="mi mi-sm" style={{ marginRight: '4px' }}>
-                            {tab === 'overview' && 'dashboard'}
-                            {tab === 'meetings' && 'videocam'}
-                            {tab === 'users' && 'group'}
-                            {tab === 'recordings' && 'mic'}
-                            {tab === 'system' && 'settings'}
-                            {tab === 'leads' && 'contact_mail'}
-                        </span>
-                        {tab === 'leads' ? 'Download leads' : tab.charAt(0).toUpperCase() + tab.slice(1)}
-                    </button>
-                ))}
-            </nav>
-
-            <main className="admin-content">
-                {activeTab === 'leads' && <DownloadLeads />}
-                {activeTab === 'users' && <EnterpriseAccessTerms />}
-                {activeTab === 'overview' && <AdminAnalytics onManageAccess={() => setActiveTab('users')} />}
+                <main className="admin-content" id="admin-workspace-content">
+                {hosted && activeTab === 'leads' && <DownloadLeads />}
+                {activeTab === 'users' && <EnterpriseAccessTerms canIssueLicense={hosted && deployment.canIssueLicense} />}
+                {activeTab === 'overview' && <AdminAnalytics hosted={hosted} onManageAccess={() => setActiveTab('users')} />}
 
                 {/* ━━━ MEETINGS TAB ━━━ */}
                 {activeTab === 'meetings' && <AdminMeetingControls />}
@@ -232,7 +173,7 @@ const AdminDashboard: React.FC = () => {
                     <div className="admin-users">
                         <div className="tab-header">
                             <h2>User Management</h2>
-                            <span className="badge">{stats.totalUsers.toLocaleString()} total users</span>
+                            <span className="badge">{totalUsers === null ? 'Account count unavailable' : `${totalUsers.toLocaleString()} total users`}</span>
                         </div>
 
                         <div className="admin-user-plan-summary" aria-label="Users by plan">
@@ -244,14 +185,16 @@ const AdminDashboard: React.FC = () => {
                         <div className="filter-bar">
                             <input
                                 type="text"
-                                placeholder="Search by name, email or mobile..."
+                                aria-label="Search accounts"
+                                placeholder="Search accounts"
                                 value={userSearch}
                                 onChange={e => setUserSearch(e.target.value)}
                                 className="form-input search-input"
                             />
                             <select
                                 value={userRoleFilter}
-                                onChange={e => setUserRoleFilter(e.target.value)}
+                                aria-label="Filter by role"
+                                onChange={e => { setUserRoleFilter(e.target.value); setUserPage(0); }}
                                 className="form-input role-filter"
                             >
                                 <option value="all">All Roles</option>
@@ -270,15 +213,16 @@ const AdminDashboard: React.FC = () => {
                             </select>
                         </div>
 
-                        {userDirectoryError && <p role="alert">{userDirectoryError}</p>}
+                        {userDirectoryError && <p role="alert">{userDirectoryError} <button type="button" onClick={() => setDirectoryAttempt(attempt => attempt + 1)}>Retry</button></p>}
+                        {userDirectoryLoading && <p role="status">Loading accounts…</p>}
 
-                        {users.length === 0 ? (
+                        {!userDirectoryError && !userDirectoryLoading && (users.length === 0 ? (
                             <div className="empty-state">
                                 <div className="empty-icon"><span className="mi" style={{ fontSize: '48px' }}>person</span></div>
                                 <p>{userSearch || userPlanFilter !== 'all' || userRoleFilter !== 'all' ? 'No users match these filters' : 'No users registered yet'}</p>
                             </div>
                         ) : (
-                            <table className="admin-table">
+                            <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Account directory"><table className="admin-table">
                                 <thead>
                                     <tr>
                                         <th>Name</th>
@@ -286,7 +230,7 @@ const AdminDashboard: React.FC = () => {
                                         <th>Mobile</th>
                                         <th>Role</th>
                                         <th>Plan</th>
-                                        <th>Payment</th>
+                                        {hosted && <th>Payment</th>}
                                         <th>Status</th>
                                         <th>Joined</th>
                                         <th>Last Login</th>
@@ -306,7 +250,7 @@ const AdminDashboard: React.FC = () => {
                                                 <span className={`role-badge role-${u.role}`}>{u.role}</span>
                                             </td>
                                             <td><strong>{userPlanLabels[u.plan] || u.plan}</strong><br /><small>{u.planStatus?.replace(/_/g, ' ') || '—'}</small></td>
-                                            <td>{u.billingProvider ? <><span>{{ razorpay: 'Razorpay', paypal: 'PayPal', cashfree: 'Cashfree' }[u.billingProvider]} · {u.billingStatus || 'pending'}</span>{u.billingAmount && u.billingCurrency ? <><br /><small>{formatBillingAmount(u.billingAmount, u.billingCurrency)}</small></> : null}{u.subscriptionEndsAt && <><br /><small>Access through {new Date(u.subscriptionEndsAt).toLocaleDateString()}</small></>}</> : '—'}</td>
+                                            {hosted && <td>{u.billingProvider ? <><span>{{ razorpay: 'Razorpay', paypal: 'PayPal', cashfree: 'Cashfree' }[u.billingProvider]} · {u.billingStatus || 'pending'}</span>{u.billingAmount && u.billingCurrency ? <><br /><small>{formatBillingAmount(u.billingAmount, u.billingCurrency)}</small></> : null}{u.subscriptionEndsAt && <><br /><small>Access through {new Date(u.subscriptionEndsAt).toLocaleDateString()}</small></>}</> : '—'}</td>}
                                             <td>
                                                 <span className={`status-badge status-${u.status}`}>{u.status}</span>
                                             </td>
@@ -316,8 +260,8 @@ const AdminDashboard: React.FC = () => {
                                         </tr>
                                     ))}
                                 </tbody>
-                            </table>
-                        )}
+                            </table></div>
+                        ))}
                         <div className="admin-user-pagination">
                             <span>{usersTotal ? `Showing ${userPage * USER_PAGE_SIZE + 1}–${Math.min((userPage + 1) * USER_PAGE_SIZE, usersTotal)} of ${usersTotal.toLocaleString()}` : '0 matching users'}</span>
                             <div><button type="button" className="btn-sm" disabled={userPage === 0} onClick={() => setUserPage(page => Math.max(0, page - 1))}>Previous</button>
@@ -326,79 +270,59 @@ const AdminDashboard: React.FC = () => {
                     </div>
                 )}
 
-                {/* ━━━ RECORDINGS TAB ━━━ */}
-                {activeTab === 'recordings' && (
-                    <div className="admin-recordings">
-                        <div className="tab-header">
-                            <h2>All Recordings</h2>
-                            <span className="badge">{recordings.length} total</span>
+                {activeTab === 'recordings' && <section className="admin-deployment-panel" aria-labelledby="admin-recordings-title">
+                    <header><h2 id="admin-recordings-title">Find a meeting recording</h2>
+                        <p>Use the meeting code to open the recording library. Playback requires the meeting owner’s access.</p></header>
+                    <form className="admin-workspace-links" onSubmit={event => {
+                        event.preventDefault();
+                        const code = recordingCode.trim();
+                        if (code) navigate(`/recordings/${encodeURIComponent(code)}`);
+                    }}>
+                        <label>Meeting code <input className="form-input" required value={recordingCode} onChange={event => setRecordingCode(event.target.value)} /></label>
+                        <button type="submit" className="btn-sm" disabled={!recordingCode.trim()}>Open recordings</button>
+                    </form>
+                </section>}
+
+                {activeTab === 'system' && <div className="admin-system">
+                    <section className="admin-deployment-panel" aria-labelledby="admin-deployment-title">
+                        <header><h2 id="admin-deployment-title">{label}</h2><p>{hosted
+                            ? 'Manage accounts and commercial activity for the hosted website.'
+                            : internetOnPrem ? 'Manage this self-hosted installation and check its public meeting entry point.'
+                                : 'Manage meetings and accounts on this private installation.'}</p></header>
+                        <dl>
+                            <div><dt>Meeting access</dt><dd>{hosted ? 'Hosted website' : internetOnPrem ? 'Public HTTPS gateway' : 'Private workspace'}</dd></div>
+                            <div><dt>Single sign-on</dt><dd>{deployment.ssoConfigured ? 'Configured' : 'Off'}</dd></div>
+                            {hosted ? <div><dt>License issuance</dt><dd>{deployment.canIssueLicense ? 'Signing configured' : 'Signing unavailable'}</dd></div>
+                                : <div><dt>Local AI gateway</dt><dd>{deployment.localAiEnabled ? 'Enabled' : 'Off'}</dd></div>}
+                            {internetOnPrem && <div><dt>Public meeting origin</dt><dd>{deployment.publicMeetingOrigin || 'HTTPS origin needs configuration'}</dd></div>}
+                        </dl>
+                        <div className="admin-workspace-links">
+                            {internetOnPrem && deployment.publicMeetingOrigin && <a href={deployment.publicMeetingOrigin + '/app'} target="_blank" rel="noopener noreferrer">Open public workspace</a>}
+                            {deployment.mode === 'onprem-intranet' && <Link to="/app">Open private workspace</Link>}
+                            {hosted && <button type="button" onClick={() => setActiveTab('leads')}>Review download leads</button>}
+                            {!hosted && <button type="button" onClick={() => setActiveTab('users')}>Manage access terms</button>}
+                            <button type="button" onClick={() => setActiveTab('meetings')}>Check live meetings</button>
                         </div>
-
-                        {recordings.length === 0 ? (
-                            <div className="empty-state">
-                                <div className="empty-icon"><span className="mi" style={{ fontSize: '48px' }}>mic</span></div>
-                                <p>No recordings available</p>
-                            </div>
-                        ) : (
-                            <table className="admin-table">
-                                <thead>
-                                    <tr>
-                                        <th>Meeting</th>
-                                        <th>Host</th>
-                                        <th>Duration</th>
-                                        <th>Size</th>
-                                        <th>Format</th>
-                                        <th>Date</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {recordings.map(r => (
-                                        <tr key={r.id}>
-                                            <td><code>{r.meetingCode}</code></td>
-                                            <td>{r.host}</td>
-                                            <td>{r.duration}</td>
-                                            <td>{r.size}</td>
-                                            <td>{r.format}</td>
-                                            <td>{new Date(r.createdAt).toLocaleDateString()}</td>
-                                            <td>
-                                                <button
-                                                    className="btn-sm"
-                                                    onClick={() => navigate(`/recordings/${r.id}`)}
-                                                >
-                                                    <span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '4px' }}>play_arrow</span> Play
-                                                </button>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                        )}
+                    </section>
+                    {internetOnPrem && deployment.publicMeetingOrigin && <section className="admin-deployment-panel" aria-labelledby="public-meeting-link">
+                        <header><h2 id="public-meeting-link">Public meeting preview</h2>
+                            <p>Open a meeting code through the configured gateway. On-prem sign-in and meeting admission still apply.</p></header>
+                        <form className="admin-workspace-links" action={deployment.publicMeetingOrigin + '/app'} onSubmit={event => {
+                            event.preventDefault();
+                            const code = publicCode.trim();
+                            if (code) window.open(deployment.publicMeetingOrigin + '/meeting/' + encodeURIComponent(code) + '/preview', '_blank', 'noopener,noreferrer');
+                        }}>
+                            <label>Meeting code <input className="form-input" required value={publicCode} onChange={event => setPublicCode(event.target.value)} /></label>
+                            <button type="submit" disabled={!publicCode.trim()}>Open meeting preview</button>
+                        </form>
+                    </section>}
+                    <div className="system-sections">
+                        <OrganisationBranding />
+                        {deployment.localAiEnabled && <AiUsage />}
                     </div>
-                )}
-
-                {/* ━━━ SYSTEM TAB ━━━ */}
-                {activeTab === 'system' && (
-                    <div className="admin-system">
-                        <h2>Service status</h2>
-
-                        <div className="system-sections">
-                            <OrganisationBranding />
-                            <section className="system-section">
-                                <h3>Availability</h3>
-                                <div className="health-grid">
-                                    <HealthDot status={stats.sfuHealth} label="Meeting audio and video" />
-                                    <HealthDot status={stats.signalingHealth} label="Meeting connection" />
-                                    <HealthDot status={stats.authHealth} label="Sign-in" />
-                                    <HealthDot status={stats.recordingHealth} label="Recordings" />
-                                </div>
-                            </section>
-                            {import.meta.env.VITE_DEPLOYMENT === 'onprem' && <AiUsage />}
-
-                        </div>
-                    </div>
-                )}
-            </main>
+                </div>}
+                </main>
+            </div>
         </div>
     );
 };
@@ -439,6 +363,7 @@ function AiUsage() {
 
 function VerifiedAdminDashboard({ token }: { token: string }) {
     const [access, setAccess] = useState<'checking' | 'allowed' | 'denied' | 'unavailable'>('checking');
+    const [deployment, setDeployment] = useState<AdminDeployment | null>(null);
     const [attempt, setAttempt] = useState(0);
     useEffect(() => {
         const controller = new AbortController();
@@ -446,14 +371,19 @@ function VerifiedAdminDashboard({ token }: { token: string }) {
         let active = true;
         fetch(`${AUTH_API}/api/auth/admin/access`, {
             headers: { Authorization: `Bearer ${token}` }, signal: controller.signal,
-        }).then(response => {
+        }).then(async response => {
             if (!active || getToken() !== token) return;
             if (response.status === 401) clearSession(token);
-            setAccess(response.ok ? 'allowed' : response.status === 403 ? 'denied' : 'unavailable');
+            if (!response.ok) { setAccess(response.status === 403 ? 'denied' : 'unavailable'); return; }
+            const payload = await response.json();
+            if (!active || getToken() !== token) return;
+            if (!isAdminDeployment(payload.deployment)) { setAccess('unavailable'); return; }
+            setDeployment(payload.deployment);
+            setAccess('allowed');
         }).catch(() => { if (active) setAccess('unavailable'); }).finally(() => clearTimeout(timeout));
         return () => { active = false; clearTimeout(timeout); controller.abort(); };
     }, [token, attempt]);
-    if (access === 'allowed') return <AdminDashboard />;
+    if (access === 'allowed' && deployment) return <AdminDashboard deployment={deployment} />;
     const title = access === 'checking'
         ? 'Checking administrator access'
         : access === 'denied'

@@ -35,6 +35,8 @@ function blip(ac: AudioContext, at: number, from: number, to: number, length: nu
     osc.stop(at + length + 0.02);
 }
 
+export function unlockMeetingSounds(): void { audio(); }
+
 export function playSound(kind: SoundKind = 'tap'): void {
     const ac = audio();
     if (!ac) return;

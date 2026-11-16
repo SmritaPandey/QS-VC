@@ -9,7 +9,7 @@ import BrandLogo from './BrandLogo';
 import { clearSession, getToken, refreshSession } from '../lib/session';
 import '../styles/workspace.css';
 import '../styles/meeting-home.css';
-import { useEntitlements } from '../lib/entitlements';
+import { hasFeature, useEntitlements } from '../lib/entitlements';
 import { CrownBadge, TrialChip } from './PlanAccess';
 import useScrollReveal from '../lib/scroll-reveal';
 import HostedMeetings from './HostedMeetings';
@@ -17,6 +17,14 @@ import MeetingSetupDialog, { type MeetingSetup } from './MeetingSetupDialog';
 import PendingInvitations from './PendingInvitations';
 
 const API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
+const ON_PREM = import.meta.env.VITE_DEPLOYMENT === 'onprem';
+const workspaceFeatures = [
+    { feature: 'meeting_scheduling', label: 'Meeting scheduling', icon: 'calendar_today' },
+    { feature: 'cloud_recording', label: 'Cloud recording', icon: 'cloud_upload' },
+    { feature: 'ai_captions', label: 'AI captions', icon: 'closed_caption' },
+    { feature: 'background_effects', label: 'Background effects', icon: 'blur_on' },
+    { feature: 'ai_noise_suppression', label: 'AI noise suppression', icon: 'graphic_eq' },
+];
 type Meeting = { id: string; meetingCode: string; title: string; status: string; scheduledStart?: string; createdAt: string; isHost?: boolean; canCancel?: boolean };
 type View = 'day' | 'hosted' | 'invitations';
 const VIEW_KEY = 'qsvc:workspace-view';
@@ -36,6 +44,9 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
     const freeMember = entitlements.verified && entitlements.plan === 'guest' && !isAdmin;
     const planName = planKey === 'guest' ? 'Free member' : planKey === 'enterprise' ? 'Quantum-Premise' : planKey.charAt(0).toUpperCase() + planKey.slice(1);
     const trialActive = !isAdmin && entitlements.verified && entitlements.status === 'trial_active';
+    const planReady = entitlements.isPlatformAdmin || (entitlements.verified && !entitlements.loading);
+    const canSchedule = planReady && hasFeature(entitlements, 'meeting_scheduling');
+    const canComparePlans = !ON_PREM && planReady && !canSchedule && entitlements.plan !== 'enterprise';
     const planStatus = isAdmin ? 'Administrator' : entitlements.loading ? 'Checking plan…'
         : !entitlements.verified ? 'Plan unavailable'
             : entitlements.status === 'trial_expired' ? `${planName} trial ended`
@@ -118,13 +129,13 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
         if (!/^[a-z0-9-]{3,40}$/i.test(code)) { setJoinError('Enter a QS-VC meeting code or a link from this website.'); return; }
         navigate(`/meeting/${encodeURIComponent(code.toUpperCase())}/preview`);
     };
-    return <div className="workspace-shell meeting-home" ref={root} onKeyDown={event => {
+    return <div className="workspace-shell meeting-home account-workspace" ref={root} onKeyDown={event => {
         if (event.key === 'Escape') root.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(detail => { detail.open = false; detail.querySelector<HTMLElement>('summary')?.focus(); });
     }}>
         <header className="workspace-header">
             <a className="public-skip" href="#main-content">Skip to content</a>
             <Link className="workspace-brand" to="/app" aria-label="QS-VC meetings"><BrandLogo /></Link>
-            <nav className="workspace-navigation" aria-label="Workspace"><Link to="/app" aria-current="page">Meetings</Link><Link to="/schedule">Schedule</Link><Link to="/schedule?type=webinar">Town halls</Link><AdminDashboardLink /></nav>
+            <nav className="workspace-navigation" aria-label="Workspace"><Link to="/app" aria-current="page">Meetings</Link>{canSchedule && <><Link to="/schedule">Schedule</Link><Link to="/schedule?type=webinar">Town halls</Link></>}<AdminDashboardLink /></nav>
             <div className="meeting-home-membership">
                 <div className="meeting-home-plan" role="status">
                     {trialActive ? <TrialChip /> : <>
@@ -133,7 +144,8 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                         {!isAdmin && !entitlements.loading && !entitlements.verified && <button className="meeting-home-plan-retry" type="button" onClick={() => window.dispatchEvent(new Event('qsvc:entitlements-refresh'))}>Retry</button>}
                     </>}
                 </div>
-                <Link className="meeting-home-plan-link" to="/pricing">{freeMember && !entitlements.trialUsed ? 'Choose a trial plan' : 'Manage plan'}</Link>
+                {ON_PREM ? <a className="meeting-home-plan-link" href="#workspace-plan-access">Plan access</a> :
+                    <Link className="meeting-home-plan-link" to="/pricing">{freeMember && !entitlements.trialUsed ? 'Choose a trial plan' : 'Manage plan'}</Link>}
             </div>
             <details className="workspace-account">
                 <summary aria-label="Your account"><span className="workspace-account-initial" aria-hidden="true">{profile?.displayName.trim().charAt(0).toUpperCase() || 'Q'}</span></summary>
@@ -142,6 +154,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
         </header>
         {sessionError && <p role="alert" className="workspace-alert">{sessionError}</p>}
         <main id="main-content" className="workspace-body">
+            <div className="account-workspace-tools">
             <section className="workspace-start" aria-label="Start or join a meeting">
                 <p className="workspace-welcome">{profile ? `Welcome back, ${profile.displayName}.` : 'Welcome to QS-VC.'}</p>
                 <h1>Your next meeting starts here.</h1>
@@ -149,7 +162,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                 <div className="meeting-home-start-actions">
             <details className="workspace-new">
                 <summary className="qsvc-action" aria-busy={creating}><ActionContents><span className="mi" aria-hidden="true">video_call</span>{creating ? 'Creating…' : 'New meeting'}<span className="mi workspace-new-caret" aria-hidden="true">expand_more</span></ActionContents></summary>
-                <div className="workspace-dropdown"><button disabled={creating} onClick={() => newAction(() => setSetupAction('link'))}><span className="mi" aria-hidden="true">link</span>Create a link</button><button disabled={creating} onClick={() => newAction(() => setSetupAction('start'))}><span className="mi" aria-hidden="true">videocam</span>Start now</button><button onClick={() => newAction(() => navigate('/schedule'))}><span className="mi" aria-hidden="true">calendar_today</span>Schedule a meeting</button></div>
+                <div className="workspace-dropdown"><button disabled={creating} onClick={() => newAction(() => setSetupAction('link'))}><span className="mi" aria-hidden="true">link</span>Create a link</button><button disabled={creating} onClick={() => newAction(() => setSetupAction('start'))}><span className="mi" aria-hidden="true">videocam</span>Start now</button>{canSchedule && <button onClick={() => newAction(() => navigate('/schedule'))}><span className="mi" aria-hidden="true">calendar_today</span>Schedule a meeting</button>}</div>
             </details>
                 <div className="workspace-join-section"><p>Have an invitation?</p>
             <form className="workspace-join" onSubmit={joinMeeting}>
@@ -163,6 +176,19 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                 </div>
                 <div className="workspace-preflight"><span className="mi" aria-hidden="true">tune</span><p>Check your camera, microphone and language before joining.</p></div>
             </section>
+            <section className="account-workspace-access" id="workspace-plan-access" aria-labelledby="workspace-plan-title">
+                <h2 id="workspace-plan-title">Plan access</h2>
+                {!planReady ? <p>{entitlements.loading ? 'Checking which features are available…' : 'Feature availability will appear once your plan can be verified.'}</p> :
+                    <dl>{workspaceFeatures.map(({ feature, label, icon }) => {
+                        const included = hasFeature(entitlements, feature);
+                        const minimum = entitlements.featureMinimumPlans[feature];
+                        return <div key={feature}><dt><span className="mi" aria-hidden="true">{icon}</span>{label}</dt>
+                            <dd data-included={Boolean(included)}>{included ? 'Included' : minimum ? `Requires active ${minimum.charAt(0).toUpperCase() + minimum.slice(1)} access` : 'Not included'}</dd></div>;
+                    })}</dl>}
+                {ON_PREM ? <p>Your organisation manages access for this workspace.</p> :
+                    canComparePlans && <Link className="account-workspace-link" to="/pricing">Compare plans<span className="mi" aria-hidden="true">arrow_forward</span></Link>}
+            </section>
+            </div>
             <section className="workspace-main" aria-label="Your meetings">
                 <div className="workspace-agenda-intro"><span className="meeting-home-section-label">Your meetings</span><p>Make time for what’s next.</p></div>
                 <div className="workspace-views" role="tablist" aria-label="Which meetings to show" onKeyDown={event => {

@@ -10,7 +10,7 @@ import { useSession } from '../lib/use-session';
 import { hasFeature, useEntitlements } from '../lib/entitlements';
 import type { NoiseSuppressor } from '../lib/noise-suppression';
 import '../styles/recordings.css';
-import { playSound } from '../lib/sounds';
+import { playSound, unlockMeetingSounds } from '../lib/sounds';
 import { haptic } from '../lib/haptics';
 import { createMeetingComposite, type MeetingComposite } from '../lib/meeting-recorder';
 import VideoGrid, { RemoteAudio, type ViewMode, type TilesPerPage } from '../components/VideoGrid';
@@ -148,6 +148,17 @@ function joinPolicyGuidance(message: string) {
  * Keeps people in the meeting through brief network drops (Wi-Fi switch, laptop sleep, server restart):
  * the meeting session is re-created up to three times before "Connection lost" is shown.
  */
+const PERMISSION_LABELS = {
+    allowScreenShare: 'Screen sharing',
+    allowFileShare: 'File sharing',
+    allowChat: 'Send chat messages',
+    allowMicrophone: 'Microphone',
+    allowCamera: 'Camera',
+    allowReactions: 'Reactions',
+} as const;
+type MeetingPermission = keyof typeof PERMISSION_LABELS;
+const PERMISSION_KEYS = Object.keys(PERMISSION_LABELS) as MeetingPermission[];
+
 export default function MeetingRoom() {
     const { meetingCode } = useParams<{ meetingCode: string }>();
     const [attempt, setAttempt] = useState(0);
@@ -259,6 +270,28 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [privateMicMuted, setPrivateMicMuted] = useState(false);
     const [focusPrivateAudio, setFocusPrivateAudio] = useState(false);
     const [chatOpen, setChatOpen] = useState(false);
+    const [unreadChat, setUnreadChat] = useState(0);
+    const [unreadPermissions, setUnreadPermissions] = useState<MeetingPermission[]>([]);
+    useEffect(() => {
+        const unlock = () => {
+            unlockMeetingSounds();
+            window.removeEventListener('pointerdown', unlock);
+            window.removeEventListener('keydown', unlock);
+        };
+        window.addEventListener('pointerdown', unlock);
+        window.addEventListener('keydown', unlock);
+        return () => {
+            window.removeEventListener('pointerdown', unlock);
+            window.removeEventListener('keydown', unlock);
+        };
+    }, []);
+    useEffect(() => {
+        if (!chatOpen) return;
+        const markRead = () => { if (!document.hidden) setUnreadChat(0); };
+        markRead();
+        document.addEventListener('visibilitychange', markRead);
+        return () => document.removeEventListener('visibilitychange', markRead);
+    }, [chatOpen]);
     const [incomingChatMessage, setIncomingChatMessage] = useState<ChatMessage | null>(null);
     const chatOpenRef = useRef(false);
     chatOpenRef.current = chatOpen;
@@ -277,7 +310,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     const [waitingAdmission, setWaitingAdmission] = useState<WaitingMode | null>(null);
     const waitingStatusRef = useRef<WaitingMode | null>(null);
-    const [roomSettings, setRoomSettings] = useState<RoomHostSettings>({ locked: false, waitingRoomEnabled: true, muteOnEntry: false, allowScreenShare: true, allowChat: true, allowMicrophone: true, allowCamera: true, allowReactions: true });
+    const [roomSettings, setRoomSettings] = useState<RoomHostSettings>({ locked: false, waitingRoomEnabled: true, muteOnEntry: false, allowScreenShare: false, allowFileShare: false, allowChat: true, allowMicrophone: true, allowCamera: true, allowReactions: true });
     const [joinFailure, setJoinFailure] = useState<JoinFailure | null>(null);
     const [restoring, setRestoring] = useState(reconnecting);
     const [knocks, setKnocks] = useState<Array<{ peerId: string; displayName: string }>>([]);
@@ -872,14 +905,23 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         if (recordingRef.current && (!recording || recording.peerId !== myPeerIdRef.current)) void finishRecordingRef.current();
                     }),
                     signaling.on('settingsUpdated', ({ settings }) => {
+                        const grants = PERMISSION_KEYS.filter(key => settings[key] === true && roomSettingsRef.current[key] !== true &&
+                            (key === 'allowScreenShare' || key === 'allowFileShare' ? myRoleRef.current !== 'host' : !isManagerNow()));
+                        if (grants.length) {
+                            setUnreadPermissions(current => [...new Set([...current, ...grants])]);
+                            playSound('notice');
+                            showNotice('The host granted new permissions. Review them under More → Permissions.');
+                        }
                         setRoomSettings(current => ({ ...current, ...settings }));
                         roomSettingsRef.current = { ...roomSettingsRef.current, ...settings };
-                        if (settings.allowScreenShare === false && sharingRef.current) { void stopScreenShare(); showNotice('Screen sharing was disabled by the host.'); }
+                        if (settings.allowScreenShare === false && myRoleRef.current !== 'host' && sharingRef.current) { void stopScreenShareRef.current(); showNotice('Screen sharing was disabled by the host.'); }
                     }),
                     signaling.on('roleChanged', ({ peerId, role }) => {
                         if (peerId === myPeerIdRef.current) {
                             const before = myRoleRef.current;
+                            myRoleRef.current = role;
                             setMyRole(role);
+                            if (before === 'host' && role !== 'host' && !roomSettingsRef.current.allowScreenShare && sharingRef.current) void stopScreenShareRef.current();
                             if (role !== 'host' && role !== 'co-host') { setHostToolsOpen(false); setKnocks([]); notifiedKnocks.current.clear(); }
                             if (role !== before) showNotice(role === 'host' ? 'You are now the host.' : role === 'co-host' ? 'You are now a co-host. You can admit people and manage the meeting.' : 'You are no longer a co-host.');
                         } else patchPeer(peerId, { role });
@@ -965,6 +1007,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                             if (seenChatMessages.current.size > 200) seenChatMessages.current.delete(seenChatMessages.current.values().next().value!);
                             setChatMessages(prev => [...prev, message]);
                             if (msg.peerId !== myPeerIdRef.current) {
+                                if (!chatOpenRef.current || document.hidden) setUnreadChat(count => count + 1);
                                 if (!chatOpenRef.current) setIncomingChatMessage(message);
                                 const now = performance.now();
                                 if (now - lastChatSound.current >= 1500) { lastChatSound.current = now; playSound('notice'); }
@@ -1291,7 +1334,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             retainedSocketJoin.current = result;
             finishPrivateConversationLocally();
             setPrivateAudioTrack(null); setPrivateConversation(null); setPrivateInvite(null);
-            setPeers(new Map()); setChatMessages([]); setIncomingChatMessage(null); setKnocks([]);
+            setPeers(new Map()); setChatMessages([]); setIncomingChatMessage(null); setUnreadChat(0); setUnreadPermissions([]); setKnocks([]);
             notifiedKnocks.current.clear(); setReactions([]); setHandRaised(false);
             handRaisedRef.current = false; setCaptionsOn(false); setShareSpeech(false);
             setScreenSharing(false); setScreenStream(null); setScreenPaused(false);
@@ -1577,7 +1620,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     }, [screenPaused, screenShareReady, showNotice]);
 
     const startScreenShare = useCallback(async (surface?: ScreenShareSurface) => {
-        if (!roomSettingsRef.current.allowScreenShare) { showNotice('Screen sharing is disabled by the host.'); return; }
+        if (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare) { showNotice('Only the host can share until they allow screen sharing.'); return; }
         if (!sessionActive.current || sharingRef.current || busyRef.current.screen) return;
         if (initializingRef.current || !joinedRef.current || !media.canSend) { showNotice('Screen sharing is unavailable. Rejoin the meeting and try again.'); return; }
         busyRef.current.screen = true;
@@ -1596,7 +1639,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 audio: true,
                 ...({ selfBrowserSurface: 'include', systemAudio: 'include', surfaceSwitching: 'include' } as any),
             });
-            if (!sessionActive.current || revision !== sessionRevision.current || !roomSettingsRef.current.allowScreenShare) { display.getTracks().forEach(t => t.stop()); return; }
+            if (!sessionActive.current || revision !== sessionRevision.current || (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare)) { display.getTracks().forEach(t => t.stop()); return; }
             const screenTrack = display.getVideoTracks()[0];
             screenTrack.onended = () => { stopScreenShare(); };
             screenStreamRef.current = display;
@@ -1606,7 +1649,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             setScreenShareReady(false);
             setScreenPaused(false);
             await media.produce(screenTrack, { source: 'screen', type: 'screen' });
-            if (!sessionActive.current || revision !== sessionRevision.current || !sharingRef.current || !roomSettingsRef.current.allowScreenShare || screenTrack.readyState !== 'live') {
+            if (!sessionActive.current || revision !== sessionRevision.current || !sharingRef.current || (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare) || screenTrack.readyState !== 'live') {
                 display.getTracks().forEach(t => t.stop());
                 // Stop can run before produce registers the screen producer.
                 if (sessionActive.current && revision === sessionRevision.current) await media.closeProducerBySource('screen').catch(() => { });
@@ -1629,7 +1672,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const handleScreenShare = useCallback(() => {
         if (roomTransitionBusy.current) { showNotice('Wait for the room change to finish.'); return; }
         if (!canPublishRef.current) { showNotice('Only the webinar organiser can share media.'); return; }
-        if (!sharingRef.current && !roomSettings.allowScreenShare) { showNotice('Screen sharing is disabled by the host.'); return; }
+        if (!sharingRef.current && myRoleRef.current !== 'host' && !roomSettings.allowScreenShare) { showNotice('Only the host can share until they allow screen sharing.'); return; }
         if (sharingRef.current) {
             stopScreenShare();
         } else if (typeof navigator.mediaDevices?.getDisplayMedia !== 'function') {
@@ -2025,10 +2068,18 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         };
     }, [connected, restoring, myRole, peers.size, webinar, screenSharing, captionsOn, effect, effectStatus, notice, cameraNotice]);
 
-    const activityOnStage = activitiesOpen && !e2eeEnabled;
+    const secureActivities = requiredE2eeRef.current;
+    const activityOnStage = activitiesOpen && (!secureActivities || !!e2eeRef.current);
     const sidePanelOpen = chatOpen || participantsOpen || hostToolsOpen || effectsOpen;
     const manager = myRole === 'host' || myRole === 'co-host';
-    const closeActivityPanel = () => { setActivitiesOpen(false); setHostToolsOpen(false); document.querySelector<HTMLButtonElement>('[aria-label="More controls"]')?.focus(); };
+    const closeActivityPanel = () => { setActivitiesOpen(false); setHostToolsOpen(false); document.querySelector<HTMLButtonElement>('[aria-controls="meeting-more-controls"]')?.focus(); };
+    const currentEncryptionManager = e2eeRef.current;
+    const encryptedNotes = useMemo(() => currentEncryptionManager ? {
+        manager: currentEncryptionManager,
+        isKeyHolder: () => e2eeKeyHolderRef.current === myPeerIdRef.current,
+        signingKeyFor: (peerId: string) => e2eeBundlesRef.current.get(peerId)?.signingPublicKey,
+    } : undefined, [currentEncryptionManager]);
+
     if (waitingAdmission) return <WaitingAdmission mode={waitingAdmission} meetingCode={meetingCode || ''} onLeave={handleLeave} />;
     if (joinFailure) return <main className="waiting-admission meeting-join-failure"><div>
         <span className="mi" aria-hidden="true">block</span>
@@ -2128,7 +2179,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             )}
 
             <div className="meeting-content" data-activity-stage={activityOnStage || undefined}>
-                {!e2eeEnabled && <MeetingCollaboration key={`${meetingCode}:${roomJoinEpoch}`} open={activitiesOpen} connected={connected} role={myRole} myPeerId={myPeerIdRef.current} onClose={closeActivityPanel} />}
+                {(!secureActivities || encryptedNotes) && <MeetingCollaboration key={`${meetingCode}:${roomJoinEpoch}:${secureActivities}`} open={activitiesOpen}
+                    connected={connected && (!secureActivities || e2eeActive)} role={myRole} myPeerId={myPeerIdRef.current}
+                    onClose={closeActivityPanel} encryptedNotes={secureActivities ? encryptedNotes : undefined} canShareFiles={myRole === 'host' || roomSettings.allowFileShare === true} />}
                 <div ref={videoAreaRef} className={`video-area ${sidePanelOpen ? 'with-panel' : ''}`}>
                     {incomingChatMessage && !chatOpen && <div className="meeting-chat-flash">
                         <MeetingToast key={incomingChatMessage.id} onDismiss={dismissChatFlash}>
@@ -2166,7 +2219,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         privateConversationStatus={privateConversation ? 'active' : privateInvite?.direction === 'outgoing' ? 'outgoing' : 'idle'}
                         onTransferHost={async peerId => { await signaling.request('transferHost', { targetPeerId: peerId }); }} onStartPrivateConversation={startPrivateConversation} onClose={() => { setParticipantsOpen(false); focusMeetingControl('meeting-participants-panel'); }} />
                 )}
-                {e2eeEnabled && activitiesOpen && <section className="side-panel" id="meeting-activities"><div className="panel-header"><h3>Shared activities</h3><button type="button" className="panel-close" aria-label="Close shared activities" onClick={closeActivityPanel}><span className="mi" aria-hidden="true">close</span></button></div><p style={{ padding: 16 }}>Whiteboards, notes, files, polls and Q&amp;A are unavailable in end-to-end encrypted meetings until encrypted collaboration is supported. You can use encrypted meeting chat.</p></section>}
+                {secureActivities && !encryptedNotes && activitiesOpen && <section className="side-panel" id="meeting-activities">
+                    <div className="panel-header"><h3>Meeting activities</h3><button type="button" className="panel-close" aria-label="Close meeting activities" onClick={closeActivityPanel}><span className="mi" aria-hidden="true">close</span></button></div>
+                    <p role="status">Waiting for the meeting key to open secure notes.</p>
+                </section>}
                 {effectsOpen && <BackgroundEffects effect={effect} onChange={chooseEffect} preview={effectPreview} cameraOn={!videoOff && !!localStream?.getVideoTracks().some(t => t.readyState === 'live')}
                     status={effectStatus} error={effectError} onStartCamera={handleToggleVideo} onClose={() => setEffectsOpen(false)} />}
                 {hostToolsOpen && manager && <HostMeetingTools roomDevicesEnabled={roomDevicesEnabled && !webinar && Boolean(getToken())} role={myRole} myPeerId={myPeerIdRef.current} participants={[{ peerId: myPeerIdRef.current, displayName, role: myRole, audioMuted, videoOff, handRaised }, ...Array.from(peers.values()).map(peer => ({ ...peer, role: peer.role || 'member', videoOff: peer.videoOff ?? !peer.videoTrack }))]} settings={roomSettings} onClose={closeActivityPanel} onEndMeeting={() => setLeaveOpen(true)} />}
@@ -2203,6 +2259,12 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 onReportProblem={() => setReportOpen(true)}
                 audioMuted={audioMuted} videoOff={videoOff} screenSharing={screenSharing}
                 isRecording={isRecording} canRecord={myRole === 'host' && !!getToken()} recordingLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'cloud_recording'))} chatOpen={chatOpen} participantsOpen={participantsOpen}
+                unreadChat={unreadChat}
+                permissions={PERMISSION_KEYS.map(key => ({
+                    key, label: PERMISSION_LABELS[key], unread: unreadPermissions.includes(key),
+                    allowed: (key === 'allowScreenShare' || key === 'allowFileShare' ? myRole === 'host' : manager) || roomSettings[key] === true,
+                }))}
+                onReviewPermission={key => setUnreadPermissions(current => current.filter(permission => permission !== key))}
                 handRaised={handRaised} reactionsOpen={reactionsOpen}
                 onToggleReactions={() => { closePanels(); setReactionsOpen(!reactionsOpen); }}
                 languageOpen={languageOpen} languageLabel={findLanguage(signedIn ? speechLanguage.code : guestCaptionLanguage)?.name} languageCode={(signedIn ? speechLanguage.code : guestCaptionLanguage).split('-')[0].toUpperCase()}

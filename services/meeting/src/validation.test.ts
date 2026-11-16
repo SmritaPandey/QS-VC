@@ -18,7 +18,7 @@ const createMeetingBody = z.object({
         e2eeRequired: z.boolean().default(false),
         recordingAllowed: z.boolean().default(true),
         chatEnabled: z.boolean().default(true),
-        screenShareEnabled: z.boolean().default(true),
+        screenShareEnabled: z.boolean().default(false),
     }).optional(),
 });
 

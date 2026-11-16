@@ -10,7 +10,17 @@ interface Question { id:string; text:string; authorId:string; authorName:string;
 interface FileEntry { id:string; name:string; mime:string; size:number; authorId:string; authorName:string; data:string }
 const stickyColors = ['yellow', 'orange', 'blue', 'purple', 'pink'] as const;
 interface StickyNote { id:string; authorId:string; authorName:string; text:string; color:typeof stickyColors[number]; version:number }
-interface State { revision:number; strokes:Stroke[]; stickyNotes:StickyNote[]; notes:{text:string;version:number}; polls:Poll[]; questions:Question[]; files:FileEntry[]; rates:Map<string,{at:number;count:number}> }
+const b64 = (min:number, max:number) => z.string().min(min).max(max)
+ .regex(/^[A-Za-z0-9+/]+={0,2}$/).refine(value => value.length % 4 === 0);
+const encryptedNotesSchema = z.object({
+ version:z.literal(1), room:z.string(), epoch:b64(44,44), senderPeerId:z.string(),
+ revision:z.number().int().min(1), noteVersion:z.number().int().min(1),
+ nonce:b64(16,16), ciphertext:b64(24,43712), signature:b64(6000,8192),
+}).strict();
+const encryptedFileSchema = encryptedNotesSchema.extend({fileId:z.string().uuid(),noteVersion:z.literal(1)});
+interface SecureNotesRecord { encrypted:z.infer<typeof encryptedNotesSchema>; signingPublicKey:string }
+interface SecureFileRecord { encrypted:z.infer<typeof encryptedFileSchema>; signingPublicKey:string; authorId:string; authorName:string; authorSigningKey:string }
+interface State { secureFiles:Map<string,SecureFileRecord>; secureNotes?:SecureNotesRecord; revision:number; strokes:Stroke[]; stickyNotes:StickyNote[]; notes:{text:string;version:number}; polls:Poll[]; questions:Question[]; files:FileEntry[]; rates:Map<string,{at:number;count:number}> }
 const states = new WeakMap<RoomState,State>();
 const idSchema=z.string().uuid();
 const text=(max:number)=>z.string().trim().min(1).max(max);
@@ -32,7 +42,7 @@ function context(ws:any,roomId:string,peerId:string) {
  const room=roomManager.getRoom(roomId); const peer=room?.peers.get(peerId);
  if(!room||!peer||peer.ws!==ws) fail('Not joined a room');
  let state=states.get(room);
- if(!state){state={revision:0,strokes:[],stickyNotes:[],notes:{text:'',version:0},polls:[],questions:[],files:[],rates:new Map()};states.set(room,state);}
+ if(!state){state={secureFiles:new Map(),revision:0,strokes:[],stickyNotes:[],notes:{text:'',version:0},polls:[],questions:[],files:[],rates:new Map()};states.set(room,state);}
  return {room,peer,state};
 }
 const isManager=(peer?:PeerState)=>peer?.role==='host'||peer?.role==='co-host';
@@ -55,6 +65,48 @@ export function collaborationRpc(ws:any,roomId:string,peerId:string,method:strin
  const now=Date.now();let rate=state.rates.get(peerId);
  if(!rate||now-rate.at>=1000){rate={at:now,count:0};state.rates.set(peerId,rate);}
  if(++rate.count>20)fail('Please slow down');
+ if(method==='getEncryptedNotes'||method==='putEncryptedNotes'){
+  if(!room.settings.e2eeRequired||!peer.e2eeKeyBundle)fail('Encrypted notes require a registered secure room member');
+  if(method==='getEncryptedNotes')return state.secureNotes ?? null;
+  const encrypted=encryptedNotesSchema.parse(params);
+  if(encrypted.room!==room.id||encrypted.senderPeerId!==peerId)fail('Invalid secure notes sender or room');
+  const current=state.secureNotes?.encrypted;
+  if(encrypted.revision!==(current?.revision ?? 0)+1)fail('Shared notes changed. Load the latest copy before saving.');
+  const noteVersion=current?.noteVersion ?? 0;
+  const rewrap=current && encrypted.noteVersion===noteVersion &&
+   room.e2eeKeyHolderPeerId===peerId && current.epoch!==encrypted.epoch;
+  if(!rewrap && encrypted.noteVersion!==noteVersion+1)fail('Invalid secure notes version');
+  state.secureNotes={encrypted,signingPublicKey:peer.e2eeKeyBundle.signingPublicKey};
+  roomManager.broadcast(room.id,'encryptedNotesUpdated',state.secureNotes);
+  return state.secureNotes;
+ }
+ if(method==='getEncryptedFiles'||method==='putEncryptedFile'||method==='removeEncryptedFile'){
+  if(!room.settings.e2eeRequired||!peer.e2eeKeyBundle)fail('Encrypted files require a registered secure room member');
+  if(method==='getEncryptedFiles')return [...state.secureFiles.values()];
+  if(method==='removeEncryptedFile'){
+   const {id}=z.object({id:idSchema}).strict().parse(params);
+   const file=state.secureFiles.get(id);
+   if(!file)fail('File not found');
+   own(peer,file.authorId);
+   state.secureFiles.delete(id);
+  }else{
+   const encrypted=encryptedFileSchema.parse(params);
+   if(encrypted.room!==room.id||encrypted.senderPeerId!==peerId)fail('Invalid secure file sender or room');
+   const current=state.secureFiles.get(encrypted.fileId);
+   if(!current&&peer.role!=='host'&&!room.settings.allowFileShare)fail('Only the host can share files until permission is granted');
+   if(current){
+    if(room.e2eeKeyHolderPeerId!==peerId||encrypted.revision!==current.encrypted.revision+1||
+     encrypted.epoch===current.encrypted.epoch)fail('Invalid secure file revision');
+   }else if(encrypted.revision!==1||state.secureFiles.size>=10)fail('Secure file limit reached or invalid revision');
+   state.secureFiles.set(encrypted.fileId,{
+    encrypted, signingPublicKey:peer.e2eeKeyBundle.signingPublicKey,
+    authorId:current?.authorId ?? peerId, authorName:current?.authorName ?? peer.displayName,
+    authorSigningKey:current?.authorSigningKey ?? peer.e2eeKeyBundle.signingPublicKey,
+   });
+  }
+  roomManager.broadcast(room.id,'encryptedFilesChanged',{},peerId);
+  return true;
+ }
  if(method==='getCollaborationState')return snapshot(state,peer);
  if(method==='getCollaborationFile'){
   const {id}=z.object({id:idSchema}).parse(params); const file=state.files.find(f=>f.id===id);if(!file)fail('File not found');return {...file};
@@ -89,6 +141,7 @@ export function collaborationRpc(ws:any,roomId:string,peerId:string,method:strin
  case 'question:vote':{const q=state.questions.find(q=>q.id===action.id);if(!q)fail('Question not found');if(!q.voters.includes(peerId)){checkVoteCapacity(state);q.voters.push(peerId);}break;}
  case 'question:answer':{host(peer);const q=state.questions.find(q=>q.id===action.id);if(!q)fail('Question not found');q.answer=action.answer;break;}
  case 'file:add':{
+  if(peer.role!=='host'&&!room.settings.allowFileShare)fail('Only the host can share files until permission is granted');
   const extension = { 'image/png': /\.png$/i, 'image/jpeg': /\.jpe?g$/i, 'text/plain': /\.txt$/i, 'application/pdf': /\.pdf$/i }[action.mime];
   if(!extension.test(action.name))fail('Use a file extension matching its format');
   const data=Buffer.from(action.data,'base64');if(!data.length||data.length>32768||data.toString('base64')!==action.data)fail('Files must be 32 KB or smaller');

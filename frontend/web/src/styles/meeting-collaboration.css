@@ -147,3 +147,5 @@
 @media (max-width:420px) {
   .sticky-editor { grid-template-columns:minmax(0, 1fr); }
 }
+
+.meeting-room .meeting-collaboration[hidden], .meeting-collaboration .collaboration-form[hidden] { display:none; }

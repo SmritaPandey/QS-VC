@@ -19,7 +19,7 @@ visit(source);
 const compile = (code: string) => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React } }).outputText;
 const bindActions = new Function('context', compile(`
     const { useCallback, sharingRef, sessionRevision, sessionActive, screenStreamRef, joinedRef,
-        roomSettingsRef, busyRef, initializingRef, media, navigator, signaling, playSound, showNotice,
+        roomSettingsRef, myRoleRef, busyRef, initializingRef, media, navigator, signaling, playSound, showNotice,
         screenPaused, screenShareReady, setScreenStream, setScreenSharing, setScreenPaused, setScreenShareReady } = context;
     ${['stopScreenShare', 'togglePauseScreenShare', 'startScreenShare'].map(name => declarations.get(name)).join('\n')}
     return { startScreenShare, stopScreenShare, togglePauseScreenShare };
@@ -42,7 +42,7 @@ function deferredCapture() {
         useCallback: (callback: unknown) => callback,
         sharingRef: { current: false }, sessionRevision: { current: 1 }, sessionActive: { current: true },
         screenStreamRef: { current: null }, joinedRef: { current: true },
-        roomSettingsRef: { current: { allowScreenShare: true } }, busyRef: { current: {} }, initializingRef: { current: false },
+        myRoleRef: { current: 'member' }, roomSettingsRef: { current: { allowScreenShare: true } }, busyRef: { current: {} }, initializingRef: { current: false },
         screenPaused: false, screenShareReady: false, screenSharing: false,
         setScreenStream: vi.fn(),
         setScreenSharing: (value: boolean) => { context.screenSharing = value; },
@@ -61,6 +61,18 @@ function deferredCapture() {
 }
 
 describe('presenting controls during screen-share startup', () => {
+    it('blocks attendee capture before permission and lets the host present', async () => {
+        const share = deferredCapture();
+        share.context.roomSettingsRef.current.allowScreenShare = false;
+        await share.actions().startScreenShare();
+        expect(share.context.navigator.mediaDevices.getDisplayMedia).not.toHaveBeenCalled();
+        share.context.myRoleRef.current = 'host';
+        const startup = share.actions().startScreenShare();
+        share.finishProduce();
+        await startup;
+        expect(share.context.screenShareReady).toBe(true);
+    });
+
     it('announces stop immediately even while closing the SFU producer is delayed', async () => {
         const share = deferredCapture();
         share.context.sharingRef.current = true;

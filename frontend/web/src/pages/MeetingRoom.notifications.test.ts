@@ -16,7 +16,7 @@ function chatHarness(open = false) {
         alive: () => true, joinResult: { settings: { e2eeRequired: false } }, showNotice: vi.fn(),
         seenChatMessages: { current: new Set<string>() }, myPeerIdRef: { current: 'me' }, chatOpenRef: { current: open },
         setChatMessages: (update: (previous: unknown[]) => unknown[]) => { messages.splice(0, messages.length, ...update(messages)); },
-        setIncomingChatMessage: vi.fn(), lastChatSound: { current: -Infinity }, playSound: vi.fn(), performance: { now: () => now },
+        document: {hidden:false}, setUnreadChat: vi.fn(), setIncomingChatMessage: vi.fn(), lastChatSound: { current: -Infinity }, playSound: vi.fn(), performance: { now: () => now },
     };
     if (!chatCallback) throw new Error('Missing chat event');
     const js = ts.transpileModule(`return (${chatCallback});`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
@@ -29,6 +29,7 @@ it('sounds and flashes remote messages once, coalesces burst sounds, and preserv
     h.receive(first); h.receive(first);
     h.receive({ ...first, id: '2', content: 'One more thing' });
     expect(h.messages).toHaveLength(2);
+    expect(h.context.setUnreadChat).toHaveBeenCalledTimes(2);
     expect(h.context.playSound).toHaveBeenCalledTimes(1);
     expect(h.context.setIncomingChatMessage).toHaveBeenLastCalledWith(expect.objectContaining({ id: '2' }));
     h.advance(1500); h.receive({ ...first, id: '3' });
@@ -42,4 +43,5 @@ it('sounds a remote message with chat open without adding a duplicate flash', ()
     h.receive({ id: '1', peerId: 'other', displayName: 'Sam', content: 'Hello' });
     expect(h.context.playSound).toHaveBeenCalledWith('notice');
     expect(h.context.setIncomingChatMessage).not.toHaveBeenCalled();
+    expect(h.context.setUnreadChat).not.toHaveBeenCalled();
 });

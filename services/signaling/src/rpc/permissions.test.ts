@@ -808,6 +808,14 @@ it('spotlights for everyone, tracks presenters and clears both when people leave
     expect((await rpc(host,hostState,'setSpotlight',{targetPeerId:'nobody'}))?.error?.code).toBe(-32602);
     expect((await rpc(host,hostState,'setSpotlight',{targetPeerId:guestState.peerId}))?.result.spotlightPeerId).toBe(guestState.peerId);
     expect(sent(guest).some(m => m.method === 'spotlightChanged' && m.params.peerId === guestState.peerId)).toBe(true);
+    expect((await rpc(guest,guestState,'muteStateChanged',{kind:'screen',muted:true,presenting:true}))?.error?.code).toBe(-32004);
+    expect((await rpc(host,hostState,'muteStateChanged',{kind:'screen',muted:true,presenting:true}))?.error).toBeUndefined();
+    const attendee = roomManager.getRoom(hostState.roomId)!.peers.get(guestState.peerId)!;
+    const attendeeRole = attendee.role;
+    attendee.role = 'co-host';
+    expect((await rpc(guest,guestState,'updateSettings',{settings:{allowScreenShare:true,allowFileShare:true}}))?.error?.code).toBe(-32005);
+    attendee.role = attendeeRole;
+    expect((await rpc(host,hostState,'updateSettings',{settings:{allowScreenShare:true}}))?.result.updated).toBe(true);
     await rpc(guest,guestState,'muteStateChanged',{kind:'screen',muted:true,presenting:true});
     const room = roomManager.getRoom(hostState.roomId)!;
     expect(room.peers.get(guestState.peerId)?.screenSharing).toBe(true);
@@ -820,6 +828,8 @@ it('spotlights for everyone, tracks presenters and clears both when people leave
     expect(lateJoin?.spotlightPeerId).toBe(guestState.peerId);
     expect(lateJoin?.existingPeers.find((p: any) => p.peerId === guestState.peerId).screenSharing).toBe(true);
     await rpc(host,hostState,'updateSettings',{settings:{allowScreenShare:false}});
+    expect(room.peers.get(guestState.peerId)?.screenSharing).toBe(false);
+    expect(room.peers.get(hostState.peerId)?.screenSharing).toBe(true);
     expect((await rpc(late,lateState,'muteStateChanged',{kind:'screen',muted:true,presenting:true}))?.error?.message).toContain('disabled');
     await handlePeerDisconnect(guestState);
     expect(room.spotlightPeerId).toBeNull();

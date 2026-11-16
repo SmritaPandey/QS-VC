@@ -7,6 +7,7 @@ import type { Pool } from 'pg';
 import { isPlatformAdmin } from './platform-admins.js';
 import { sessionErrorStatus } from './sessions.js';
 import { registerDownloadLeadRoutes } from './download-leads.js';
+import { adminDeployment } from './admin-deployment.js';
 
 // Server-managed explicit user IDs prevent self-registration into an approved tenant
 // from granting download access. Never accept entitlement from browser parameters.
@@ -82,11 +83,13 @@ export function enterpriseRouter(
         return res.json(rows[0]);
     }));
     if (db) router.post('/terms/:userId/onprem-license', withAdmin(async (req, res) => {
+        const deployment = adminDeployment();
+        if (deployment.mode !== 'hosted-online') return res.sendStatus(404);
         const id = z.string().uuid().safeParse(req.params.userId);
         const installation = z.string().uuid().safeParse(req.body?.installationId);
         if (!id.success || !installation.success) return res.sendStatus(400);
         const keyFile = process.env.QSVC_ONPREM_LICENSE_KEY_FILE;
-        if (!keyFile) return res.status(503).json({ error: 'On-prem license signing is not configured.' });
+        if (!deployment.canIssueLicense || !keyFile) return res.status(503).json({ error: 'On-prem license signing is not configured.' });
         const { rows } = await db.query(
             `SELECT t.expires_at FROM enterprise_access_terms t
              JOIN users u ON u.id = t.user_id JOIN tenants o ON o.id = u.tenant_id

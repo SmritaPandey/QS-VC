@@ -227,3 +227,33 @@ it('preserves the staged versioned name on the platform download route', async (
         rmSync(folder, { recursive: true, force: true });
     }
 });
+
+it.each(['private', 'public'])('does not issue central licenses from an on-prem instance (%s)', async exposure => {
+    vi.stubEnv('QSVC_DEPLOYMENT', 'onprem');
+    vi.stubEnv('QSVC_ONPREM_EXPOSURE', exposure);
+    vi.stubEnv('QSVC_ADMIN_EMAILS', 'operator@example.test');
+    vi.stubEnv('QSVC_ONPREM_LICENSE_KEY_FILE', '/nonexistent/key');
+    const query = vi.fn();
+    const router = enterpriseRouter(async () => ({ email: 'operator@example.test' }), { query });
+    const issue = router.stack.find(layer => layer.route?.path === '/terms/:userId/onprem-license')!.route!.stack[0].handle;
+    const res = { sendStatus: vi.fn(), setHeader: vi.fn() };
+    await issue({ headers: { authorization: 'Bearer token' } } as Request, res as unknown as Response, vi.fn());
+    expect(res.sendStatus).toHaveBeenCalledWith(404);
+    expect(query).not.toHaveBeenCalled();
+});
+
+it('reports missing hosted license signing configuration before reading account data', async () => {
+    vi.stubEnv('QSVC_DEPLOYMENT', 'production');
+    vi.stubEnv('QSVC_ADMIN_EMAILS', 'operator@example.test');
+    vi.stubEnv('QSVC_ONPREM_LICENSE_KEY_FILE', '');
+    const query = vi.fn();
+    const router = enterpriseRouter(async () => ({ email: 'operator@example.test' }), { query });
+    const issue = router.stack.find(layer => layer.route?.path === '/terms/:userId/onprem-license')!.route!.stack[0].handle;
+    const res = { setHeader: vi.fn(), status: vi.fn().mockReturnThis(), json: vi.fn() };
+    const id = '2bf0ee90-7c95-4759-ae95-efbd1b4f1111';
+    await issue({
+        headers: { authorization: 'Bearer token' }, params: { userId: id }, body: { installationId: id },
+    } as unknown as Request, res as unknown as Response, vi.fn());
+    expect(res.status).toHaveBeenCalledWith(503);
+    expect(query).not.toHaveBeenCalled();
+});

@@ -21,7 +21,7 @@ describe('meeting feature discoverability', () => {
         const html = controls();
         expect(html).not.toContain('Sign in for extra features');
         expect(html).toContain('Backgrounds and effects. Sign in · Basic.');
-        expect(html).toContain('AI noise suppression. Sign in · Basic.');
+        expect(html).toContain('AI noise reduction. Sign in · Basic.');
         expect(html).toContain('Captions and language settings. Sign in to choose your language.');
         expect(html).toContain('Record meeting. Sign in as host · Pro.');
         expect(html).toContain('Host controls. Host or co-host only.');

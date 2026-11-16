@@ -2,7 +2,7 @@ import { serviceSecret } from '../../../shared/service-secrets.cjs';
 import jwt from 'jsonwebtoken';
 import { z } from 'zod';
 const policySchema = z.object({ hostId: z.string().nullable(), status: z.string(), settings: z.object({
-    maxParticipants: z.number().int().min(1).max(1000).optional(), waitingRoomEnabled: z.boolean().optional(), locked: z.boolean().optional(), password: z.string().nullable().optional(), muteOnEntry: z.boolean().optional(), allowScreenShare: z.boolean().optional(), allowChat: z.boolean().optional(), allowRecording: z.boolean().optional(),
+    maxParticipants: z.number().int().min(1).max(1000).optional(), waitingRoomEnabled: z.boolean().optional(), locked: z.boolean().optional(), password: z.string().nullable().optional(), muteOnEntry: z.boolean().optional(), allowScreenShare: z.boolean().optional(), allowFileShare: z.boolean().optional(), allowChat: z.boolean().optional(), allowRecording: z.boolean().optional(),
     webinar: z.boolean().optional(), meetingKind: z.enum(['conference', 'team', 'town_hall']).optional(), waitingRoom: z.boolean().optional(), chatEnabled: z.boolean().optional(), screenShareEnabled: z.boolean().optional(), recording_allowed: z.boolean().optional(), e2eeRequired: z.boolean().optional(),
 }) });
 export async function loadMeetingPolicy(code: string, allowCancelled = false) {
@@ -14,14 +14,14 @@ export async function loadMeetingPolicy(code: string, allowCancelled = false) {
     const policy = policySchema.parse(await response.json());
     // An ended meeting can be started again by its host (same link, like Google Meet); cancelled ones cannot.
     if (policy.status === 'cancelled' && !allowCancelled) throw new Error('This meeting was cancelled.');
-    const { waitingRoom, chatEnabled, screenShareEnabled, recording_allowed, e2eeRequired, ...settings } = policy.settings;
+    const { waitingRoom, chatEnabled, screenShareEnabled: _legacyScreenShareEnabled, recording_allowed, e2eeRequired, ...settings } = policy.settings;
     return { ...policy, settings: {
         ...settings,
         ...(typeof e2eeRequired === 'boolean' ? { e2eeRequired } : {}),
         meetingKind: settings.meetingKind ?? (settings.webinar ? 'town_hall' : 'conference'),
         waitingRoomEnabled: true,
         allowChat: settings.allowChat ?? chatEnabled ?? true,
-        allowScreenShare: settings.allowScreenShare ?? screenShareEnabled ?? true,
+        allowScreenShare: settings.allowScreenShare ?? false,
         allowRecording: settings.allowRecording ?? recording_allowed ?? true,
     } };
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Router, type Request, type Response } from 'express';
 import type { Pool } from 'pg';
 import { saveDownloadLead, listDownloadLeads, registerDownloadLeadRoutes, downloadLeadRequestError } from './download-leads';
@@ -9,7 +9,23 @@ function response() {
 }
 function database(query = vi.fn().mockResolvedValue({ rows: [{ id: 'saved' }] })) { return { query } as unknown as Pick<Pool, 'query'>; }
 
+afterEach(() => vi.unstubAllEnvs());
+
 describe('download sales leads', () => {
+    it('blocks both lead collection and admin listing on-prem before database calls', async () => {
+        vi.stubEnv('QSVC_DEPLOYMENT', 'onprem');
+        vi.stubEnv('QSVC_ADMIN_EMAILS', 'operator@example.test');
+        const query = vi.fn();
+        const create = response();
+        await saveDownloadLead(database(query))({ body: lead } as Request, create as unknown as Response);
+        expect(create.sendStatus).toHaveBeenCalledWith(404);
+        const list = response();
+        await listDownloadLeads(async () => ({ email: 'operator@example.test' }), database(query))({
+            headers: { authorization: 'Bearer token' }, query: {},
+        } as unknown as Request, list as unknown as Response);
+        expect(list.sendStatus).toHaveBeenCalledWith(404);
+        expect(query).not.toHaveBeenCalled();
+    });
     it('saves only explicit contact permission through a parameterized insert before acknowledging', async () => {
         const query = vi.fn().mockResolvedValue({ rows: [{ id: 'saved' }] }); const res = response();
         await saveDownloadLead(database(query))({ body: lead } as Request, res as unknown as Response);

@@ -195,6 +195,37 @@ it.each(['PAYMENTS_ENABLED', 'PAYMENT_TERMS_CONFIRMED'])('blocks every provider 
     expect(fetch).not.toHaveBeenCalled();
 });
 
+it.each(['private', 'public'])('blocks hosted checkout on on-prem %s installations', async exposure => {
+    enableRazorpay();
+    enableCashfree();
+    enablePayPal();
+    vi.stubEnv('CASHFREE_ENVIRONMENT', 'production');
+    vi.stubEnv('QSVC_DEPLOYMENT', 'onprem');
+    vi.stubEnv('QSVC_ONPREM_EXPOSURE', exposure);
+    const { pool } = makePool();
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    const router = makeRouter(pool);
+    const options = makeResponse();
+    route(router, '/options')(makeRequest(null, {}, { plan: 'Starter' }) as unknown as Request,
+        options as unknown as Response, vi.fn());
+    expect(options.body).toMatchObject({ paymentsEnabled: false, providers: {
+        cashfree: { mode: 'live', enabled: false, trialEnabled: false },
+        razorpay: { mode: 'test', enabled: false, trialEnabled: false },
+        paypal: { enabled: false, trialEnabled: false },
+    } });
+    for (const provider of ['cashfree', 'razorpay', 'paypal']) {
+        for (const trial of [false, true]) {
+            const res = makeResponse();
+            await route(router, '/checkout')(makeRequest({ provider, plan: 'Starter', trial, mandateConsent: true }) as unknown as Request,
+                res as unknown as Response, vi.fn());
+            expect(res.statusCode).toBe(503);
+        }
+    }
+    expect(pool.connect).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+});
+
 it('disables only annual Razorpay checkout when its annual plan is missing', async () => {
     enableRazorpay();
     enableCashfree();

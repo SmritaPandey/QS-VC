@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { Pool } from 'pg';
 import { isPlatformAdmin } from './platform-admins.js';
 import { sessionErrorStatus } from './sessions.js';
+import { adminDeployment } from './admin-deployment.js';
 
 type Database = Pick<Pool, 'query'>;
 const leadBody = z.object({
@@ -17,6 +18,7 @@ const leadBody = z.object({
 export function saveDownloadLead(db: Database) {
     return async (req: Request, res: Response) => {
         res.setHeader('Cache-Control', 'no-store');
+        if (adminDeployment().mode !== 'hosted-online') return res.sendStatus(404);
         const parsed = leadBody.safeParse(req.body);
         if (!parsed.success) return res.status(400).json({ error: 'Enter your name, organisation email and permission for sales to contact you.' });
         const { name, email, platform } = parsed.data;
@@ -44,6 +46,7 @@ export function listDownloadLeads(verify: (token: string) => Promise<Record<stri
             const user = await verify(header.slice(7));
             if (typeof user.email !== 'string' || !isPlatformAdmin(user.email)) return res.sendStatus(403);
         } catch (error) { return res.sendStatus(sessionErrorStatus(error)); }
+        if (adminDeployment().mode !== 'hosted-online') return res.sendStatus(404);
         const cursor = z.string().uuid().optional().safeParse(req.query.cursor);
         if (!cursor.success) return res.status(400).json({ error: 'Invalid page cursor.' });
         try {

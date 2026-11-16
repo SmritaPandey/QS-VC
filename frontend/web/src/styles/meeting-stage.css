@@ -235,8 +235,13 @@
 /* More menu additions */
 .meeting-room .meeting-more-panel { width:300px; max-height:min(560px, calc(100dvh - 160px)); }
 .meeting-more-panel > button { margin-bottom:6px; font-size:15px; }
-.meeting-more-panel > h3 { margin-top:10px; }
-.meeting-more-panel .meeting-view-options { grid-template-columns:1fr 1fr; gap:6px; }
+.meeting-more-panel > h3 { margin:16px 0 8px; }
+.meeting-more-panel button > .mi { flex-shrink:0; }
+.meeting-more-panel button { line-height:1.35; }
+.meeting-noise-options { display:grid; gap:6px; }
+.meeting-noise-options button { font-size:14px; padding:8px 10px; gap:8px; }
+.meeting-more-panel select { min-width:0; max-width:100%; }
+.meeting-more-panel .meeting-view-options { grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; }
 .meeting-more-panel .meeting-view-options button { font-size:14px; padding:8px 10px; gap:8px; }
 .meeting-tiles-option { display:grid; gap:6px; margin-top:12px; font-size:13px; color:#b5c9d4; }
 .meeting-tiles-option select { min-height:40px; padding:6px 10px; border-radius:10px; border:1px solid #385063; background:#1a2a3b; color:#edf5fa; font:inherit; font-size:14px; }

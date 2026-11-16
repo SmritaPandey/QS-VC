@@ -99,7 +99,7 @@ const activityNames: Record<ActivityMetric, string> = {
     accessTermsUpdated: 'Access terms last updated',
 };
 
-export default function AdminAnalytics({ onManageAccess }: { onManageAccess?: () => void }) {
+export default function AdminAnalytics({ onManageAccess, hosted = true }: { onManageAccess?: () => void; hosted?: boolean }) {
     const [quarters, setQuarters] = useState(4);
     const [activityMetric, setActivityMetric] = useState<ActivityMetric>('meetingsCreated');
     const [attempt, setAttempt] = useState(0);
@@ -178,8 +178,8 @@ export default function AdminAnalytics({ onManageAccess }: { onManageAccess?: ()
 
     return <section className="admin-analytics" aria-labelledby="admin-analytics-title">
         <header className="admin-analytics-header">
-            <div><p className="admin-analytics-kicker">Platform admin overview</p><h1 id="admin-analytics-title">Global activity and finances</h1>
-                <p>Platform admins see the same totals. Calendar quarters use UTC.</p></div>
+            <div><h2 id="admin-analytics-title">{hosted ? 'Activity and finances' : 'Installation activity'}</h2>
+                <p>Calendar quarters use UTC.</p></div>
             <div className="admin-analytics-controls">
                 <label>Reporting period <select value={quarters} onChange={event => setQuarters(Number(event.target.value))}>
                     <option value={4}>Last 4 quarters</option><option value={8}>Last 8 quarters</option><option value={12}>Last 12 quarters</option>
@@ -190,7 +190,7 @@ export default function AdminAnalytics({ onManageAccess }: { onManageAccess?: ()
         {error ? <p role="alert">{error} <button type="button" onClick={() => setAttempt(value => value + 1)}>Retry</button></p>
             : !data ? <p role="status">Loading shared platform analytics…</p> : <>
                 <p className="admin-analytics-updated" role="status">Updated {new Date(data.generatedAt).toLocaleString()}</p>
-                <dl className="admin-analytics-counters" aria-label="Global activity totals">
+                <dl className="admin-analytics-counters" aria-label="Activity totals">
                     <div><dt>Active organisations</dt><dd><Counter value={data.totals.activeOrganisations} /></dd></div>
                     <div><dt>Active user accounts</dt><dd><Counter value={data.totals.activeUsers} /></dd></div>
                     <div><dt>Meetings created</dt><dd><Counter value={data.totals.meetingsCreated} /></dd></div>
@@ -231,7 +231,7 @@ export default function AdminAnalytics({ onManageAccess }: { onManageAccess?: ()
                             <span>{item.plan}</span><strong>{format(item.organisations)}</strong><small>{format(item.activeOrganisations)} active</small>
                         </li>)}</ul> : <p>No plans are assigned.</p>}
                         <p>Quantum-Premise access: {format(data.totals.activeEnterpriseAccessSeats)} active of {format(data.totals.enterpriseAccessSeats)} dated user seats.</p>
-                        <div className="admin-analytics-links"><Link to="/pricing">View plan catalogue</Link>
+                        <div className="admin-analytics-links">{hosted && <Link to="/pricing">View plan catalogue</Link>}
                             {onManageAccess && <button type="button" onClick={onManageAccess}>Manage access terms</button>}</div>
                     </section>
                     <section aria-labelledby="admin-installer-title"><h2 id="admin-installer-title">Completed installer transfers</h2>
@@ -241,7 +241,7 @@ export default function AdminAnalytics({ onManageAccess }: { onManageAccess?: ()
                         <ul className="admin-analytics-platform-list">{data.desktopActivationsByPlatform.map(item => <li key={`${item.platform}-${item.architecture}`}><span>{platformNames[item.platform] || item.platform} · {platformNames[item.architecture] || item.architecture}</span><strong>{format(item.count)}</strong></li>)}</ul>
                     </section>
                 </div>
-                <section className="admin-analytics-finance" aria-labelledby="admin-finance-title">
+                {hosted && <section className="admin-analytics-finance" aria-labelledby="admin-finance-title">
                     <header><div><h2 id="admin-finance-title">Admin-recorded financial ledger</h2>
                         <p>Entries are shared among platform admins. Totals are not connected to or reconciled with a payment provider or accounting system. Net is revenue minus expenses; currencies are never combined.</p></div></header>
                     {data.financialTotalsByCurrency.length ? <div className="admin-analytics-finance-totals">{data.financialTotalsByCurrency.map(item => <section key={item.currency}>
@@ -271,7 +271,7 @@ export default function AdminAnalytics({ onManageAccess }: { onManageAccess?: ()
                             </li>)}</ul> : <p>No entries have been recorded.</p>}
                         </section>
                     </div>
-                </section>
+                </section>}
             </>}
     </section>;
 }

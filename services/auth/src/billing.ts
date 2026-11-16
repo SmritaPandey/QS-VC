@@ -1,3 +1,4 @@
+import { adminDeployment } from './admin-deployment.js';
 import express, { type Request, type Response } from 'express';
 import type { Pool, PoolClient } from 'pg';
 import type { JwtPayload } from 'jsonwebtoken';
@@ -193,7 +194,7 @@ function billingCycles(provider: Provider, billing: BillingPeriod) {
     return billing === 'annual' ? 12 : provider === 'paypal' ? 0 : MAX_BILLING_CYCLES;
 }
 
-function paymentsEnabled() { return process.env.PAYMENTS_ENABLED === 'true' && process.env.PAYMENT_TERMS_CONFIRMED === 'true'; }
+function paymentsEnabled() { return adminDeployment().mode === 'hosted-online' && process.env.PAYMENTS_ENABLED === 'true' && process.env.PAYMENT_TERMS_CONFIRMED === 'true'; }
 function providerMode(provider: Provider): 'live' | 'test' | 'unknown' {
     if (provider === 'razorpay') {
         const keyId = process.env.RAZORPAY_KEY_ID || '';

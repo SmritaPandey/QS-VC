@@ -1,22 +1,26 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type PointerEvent } from 'react';
 import { signaling } from '../lib/signaling';
 import { boardPoint, EMPTY_COLLABORATION, newerCollaboration, pollCounts, sharedFileError, SHARED_FILE_TYPES, POLL_RESULT_LABELS, type BoardPoint, type CollaborationState, type PollResults } from '../lib/collaboration-state';
+import { MAX_SECURE_NOTES_BYTES, type EncryptedNotesRecord } from '../lib/e2ee-data';
+import { readEncryptedNotes, saveEncryptedNotes, type EncryptedNotesAccess } from '../lib/encrypted-notes';
+import EncryptedMeetingFiles from './EncryptedMeetingFiles';
 import WhiteboardStickyNotes from './WhiteboardStickyNotes';
 import '../styles/meeting-collaboration.css';
 
-interface Props { open: boolean; connected: boolean; role: string; myPeerId: string; onClose: () => void }
+interface Props { open: boolean; connected: boolean; role: string; myPeerId: string; onClose: () => void; encryptedNotes?: EncryptedNotesAccess; canShareFiles?: boolean }
 const TABS = [['board', 'draw', 'Whiteboard'], ['polls', 'poll', 'Polls'], ['questions', 'help', 'Q&A'], ['notes', 'description', 'Notes'], ['files', 'attach_file', 'Files']] as const;
 type Tab = typeof TABS[number][0];
 const PALETTE = ['#102a43', '#006d77', '#c9364f', '#5141be'];
 const FILE_ICONS: Record<string, string> = { 'image/png': 'image', 'image/jpeg': 'image', 'application/pdf': 'picture_as_pdf', 'text/plain': 'description' };
 const fileSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : `${Math.ceil(bytes / 1024)} KB`;
 
-export default function MeetingCollaboration({ open, connected, role, myPeerId, onClose }: Props) {
+export default function MeetingCollaboration({ open, connected, role, myPeerId, onClose, encryptedNotes, canShareFiles = true }: Props) {
     const [snapshot, setSnapshot] = useState<CollaborationState>(EMPTY_COLLABORATION);
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
-    const [tab, setTab] = useState<Tab>('board');
+    const [tab, setTab] = useState<Tab>(encryptedNotes ? 'notes' : 'board');
+    const tabs = encryptedNotes ? TABS.filter(([key]) => key === 'notes' || key === 'files') : TABS;
     const [boardTool, setBoardTool] = useState<'notes' | 'draw'>('notes');
     const [color, setColor] = useState(PALETTE[0]);
     const [width, setWidth] = useState(3);
@@ -43,18 +47,34 @@ export default function MeetingCollaboration({ open, connected, role, myPeerId, 
     const manager = role === 'host' || role === 'co-host';
     const receive = useCallback((next: CollaborationState) => { if (active.current) setSnapshot(current => newerCollaboration(current, next)); }, []);
     const refresh = useCallback(async () => {
-        try { receive(await signaling.request('getCollaborationState')); }
-        catch { if (active.current) setError('Could not load activities. Try again.'); }
-        finally { if (active.current) setLoading(false); }
-    }, [receive]);
+        try {
+            const next = encryptedNotes
+                ? await readEncryptedNotes(encryptedNotes, await signaling.request('getEncryptedNotes'))
+                : await signaling.request('getCollaborationState');
+            receive(next);
+            if (encryptedNotes && active.current) setError(error => error.startsWith('Secure notes could not sync.') ? '' : error);
+        } catch {
+            if (active.current) setError(encryptedNotes ? 'Secure notes could not sync. Refresh when the meeting key is ready.' : 'Could not load activities. Try again.');
+        } finally { if (active.current) setLoading(false); }
+    }, [encryptedNotes, receive]);
     useEffect(() => {
         active.current = true;
         if (!connected) return () => { active.current = false; };
         setLoading(true);
-        const remove = signaling.on('collaborationUpdated', receive);
+        let subscribed = true;
+        const remove = encryptedNotes
+            ? signaling.on('encryptedNotesUpdated', (record: EncryptedNotesRecord) => {
+                void readEncryptedNotes(encryptedNotes, record).then(next => {
+                    if (!subscribed) return;
+                    receive(next);
+                    setError(error => error.startsWith('Secure notes could not sync.') ? '' : error);
+                }, () => { if (subscribed) setError('Secure notes could not sync. Refresh when the meeting key is ready.'); });
+            })
+            : signaling.on('collaborationUpdated', receive);
+        const removeKey = encryptedNotes?.manager.onKeyChange(() => { void refresh(); });
         void refresh();
-        return () => { active.current = false; remove(); };
-    }, [connected, receive, refresh]);
+        return () => { subscribed = false; active.current = false; remove(); removeKey?.(); };
+    }, [connected, encryptedNotes, receive, refresh]);
     useEffect(() => { if (open) closeRef.current?.focus(); }, [open]);
     useEffect(() => {
         if (!notesDirty) { setNotes(snapshot.notes.text); setNotesVersion(snapshot.notes.version); }
@@ -63,11 +83,20 @@ export default function MeetingCollaboration({ open, connected, role, myPeerId, 
         if (pending.current || !connected) return null;
         pending.current = true; setBusy(true); setError('');
         try {
-            const next: CollaborationState = await signaling.request('collaborationAction', action);
+            let next: CollaborationState;
+            if (encryptedNotes) {
+                if (action.type !== 'notes:update' || typeof action.text !== 'string' || action.version !== snapshot.notes.version) return null;
+                next = await saveEncryptedNotes(encryptedNotes, action.text, snapshot);
+            } else {
+                next = await signaling.request('collaborationAction', action);
+            }
             receive(next);
             return next;
         } catch {
-            if (active.current) { setError('That change could not be saved. Try again.'); void refresh(); }
+            if (active.current) {
+                setError('That change could not be saved. Try again.');
+                void refresh();
+            }
             return null;
         } finally { pending.current = false; if (active.current) setBusy(false); }
     };
@@ -93,11 +122,15 @@ export default function MeetingCollaboration({ open, connected, role, myPeerId, 
         if (points.length) void act({ type: 'stroke:add', points: points.length === 1 ? [points[0], points[0]] : points, color, width });
     };
     const saveNotes = async () => {
+        if (encryptedNotes && new TextEncoder().encode(notes).length > MAX_SECURE_NOTES_BYTES) {
+            setError('Secure notes can contain up to 32 KB of text. Shorten your draft before saving.');
+            return;
+        }
         const next = await act({ type: 'notes:update', text: notes, version: notesVersion });
         if (next && active.current) { setNotes(next.notes.text); setNotesVersion(next.notes.version); setNotesDirty(false); }
     };
     const upload = async (file?: File) => {
-        if (!file || pending.current) return;
+        if (!file || pending.current || !canShareFiles) return;
         const validation = sharedFileError(file.size, file.type);
         if (validation) { setError(validation); return; }
         setUploading(file.name);
@@ -130,19 +163,19 @@ export default function MeetingCollaboration({ open, connected, role, myPeerId, 
     };
     const notesConflict = notesDirty && snapshot.notes.version !== notesVersion;
     const myLastStroke = [...snapshot.strokes].reverse().find(stroke => stroke.authorId === myPeerId);
-    if (!open) return null;
-    return <section className="meeting-collaboration" id="meeting-activities" aria-label="Meeting activities" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
-        <header className="collaboration-header"><div><h2>Meeting activities</h2><p>Shared in this room.</p></div><button ref={closeRef} type="button" className="collaboration-close" aria-label="Return to call layout" title="Return to call layout" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></header>
+    if (!open && !encryptedNotes) return null;
+    return <section hidden={!open} className="meeting-collaboration" id="meeting-activities" aria-label="Meeting activities" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
+        <header className="collaboration-header"><div><h2>Meeting activities</h2><p>{encryptedNotes ? 'Notes and files are end-to-end encrypted. Whiteboard, polls and Q&A are unavailable in this meeting.' : 'Shared in this room.'}</p></div><button ref={closeRef} type="button" className="collaboration-close" aria-label="Return to call layout" title="Return to call layout" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></header>
         <nav ref={tabsRef} className="collaboration-tabs" aria-label="Activities" role="tablist" onKeyDown={event => {
-            const index = TABS.findIndex(([key]) => key === tab);
+            const index = tabs.findIndex(([key]) => key === tab);
             const step = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-            const next = event.key === 'Home' ? 0 : event.key === 'End' ? TABS.length - 1 : step ? (index + step + TABS.length) % TABS.length : -1;
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : step ? (index + step + tabs.length) % tabs.length : -1;
             if (next === -1) return;
             event.preventDefault();
-            changeTab(TABS[next][0]);
+            changeTab(tabs[next][0]);
             event.currentTarget.querySelectorAll('button')[next]?.focus();
         }}>
-            {TABS.map(([key, icon, label]) => <button type="button" role="tab" key={key} id={`activity-tab-${key}`}
+            {tabs.map(([key, icon, label]) => <button type="button" role="tab" key={key} id={`activity-tab-${key}`}
                 aria-controls="activity-workspace" aria-selected={tab === key} tabIndex={tab === key ? 0 : -1} onClick={() => changeTab(key)}>
                 <span className="mi" aria-hidden="true">{icon}</span>{label}
             </button>)}
@@ -162,9 +195,10 @@ export default function MeetingCollaboration({ open, connected, role, myPeerId, 
             {tab === 'board' && boardTool === 'draw' && <><div className="collaboration-board-tools"><div role="group" aria-label="Pen colour">{PALETTE.map(value => <button key={value} type="button" aria-label={`Pen ${value}`} aria-pressed={color === value} onClick={() => setColor(value)} style={{ color: value }}><span aria-hidden="true">●</span></button>)}</div><label>Pen width<select value={width} onChange={event => setWidth(Number(event.target.value))}><option value={3}>Fine</option><option value={6}>Medium</option><option value={10}>Broad</option></select></label><button type="button" disabled={!myLastStroke} onClick={() => { if (myLastStroke) void act({ type: 'stroke:undo', id: myLastStroke.id }); }}>Undo mine</button>{manager && <button type="button" disabled={!snapshot.strokes.length} onClick={() => { if (window.confirm('Clear the shared whiteboard for everyone?')) void act({ type: 'board:clear' }); }}>Clear board</button>}</div><p className="collaboration-hint">Draw with a pointer or touch. Use shared notes for keyboard contributions.</p><svg className="collaboration-board" viewBox="0 0 1000 650" role="img" aria-label={`Shared whiteboard, ${snapshot.strokes.length} strokes`} onPointerDown={beginStroke} onPointerMove={moveStroke} onPointerUp={finishStroke} onPointerCancel={cancelStroke} onLostPointerCapture={cancelStroke}>{snapshot.strokes.map(stroke => <polyline key={stroke.id} points={stroke.points.map(point => `${point.x * 1000},${point.y * 650}`).join(' ')} fill="none" stroke={stroke.color} strokeWidth={stroke.width} strokeLinecap="round" strokeLinejoin="round" />)}<polyline points={drawing.map(point => `${point.x * 1000},${point.y * 650}`).join(' ')} fill="none" stroke={color} strokeWidth={width} strokeLinecap="round" strokeLinejoin="round" /></svg></>}
             {tab === 'polls' && <>{manager && <form className="collaboration-form" onSubmit={async (event: FormEvent) => { event.preventDefault(); const options = pollOptions.split('\n').map(value => value.trim()).filter(Boolean); if (options.length < 2 || options.length > 6 || options.some(value => value.length > 100)) { setError('Add 2 to 6 options, each up to 100 characters.'); return; } if (await act({ type: 'poll:create', question: pollQuestion.trim(), options, results: pollResults })) { setPollQuestion(''); setPollOptions(''); } }}><h3>Create a poll</h3><label>Question<input value={pollQuestion} onChange={event => setPollQuestion(event.target.value)} maxLength={300} required /></label><label>Options, one per line<textarea value={pollOptions} onChange={event => setPollOptions(event.target.value)} maxLength={606} rows={3} required /></label><label>Who can see results<select value={pollResults} onChange={event => setPollResults(event.target.value as PollResults)}>{(Object.keys(POLL_RESULT_LABELS) as PollResults[]).map(key => <option key={key} value={key}>{POLL_RESULT_LABELS[key]}</option>)}</select></label><button type="submit">Launch poll</button></form>}{!snapshot.polls.length && <p>No polls yet. Hosts can start one.</p>}{snapshot.polls.map(poll => { const counts = pollCounts(poll); return <section className="collaboration-card" key={poll.id}><h3>{poll.question}</h3><p>{poll.closed ? 'Poll closed' : 'Choose one answer'} · {poll.total ?? Object.keys(poll.votes).length} {(poll.total ?? Object.keys(poll.votes).length) === 1 ? 'vote' : 'votes'}</p>{(manager || poll.resultsHidden) && poll.results && poll.results !== 'live' && <p className="collaboration-poll-visibility"><span className="mi" aria-hidden="true">visibility_off</span>{poll.resultsHidden ? (poll.results === 'afterClose' ? 'Results appear when the host closes the poll.' : 'Only hosts can see the results.') : `Results visible to: ${POLL_RESULT_LABELS[poll.results]}`}</p>}<fieldset disabled={poll.closed}><legend className="collaboration-sr">{poll.question}</legend>{poll.options.map((option, index) => <label className="collaboration-poll-choice" key={index}><input type="radio" name={`poll-${poll.id}`} checked={poll.votes[myPeerId] === index} onChange={() => { void act({ type: 'poll:vote', id: poll.id, option: index }); }} /><span>{option}</span>{!poll.resultsHidden && <span>{counts[index]} {counts[index] === 1 ? 'vote' : 'votes'}</span>}</label>)}</fieldset>{manager && !poll.closed && <button type="button" onClick={() => { void act({ type: 'poll:close', id: poll.id }); }}>Close poll</button>}</section>; })}</>}
             {tab === 'questions' && <><form className="collaboration-form" onSubmit={async event => { event.preventDefault(); if (await act({ type: 'question:ask', text: question.trim() })) setQuestion(''); }}><label>Your question<textarea value={question} onChange={event => setQuestion(event.target.value)} maxLength={1000} rows={2} required /></label><button type="submit">Ask question</button></form>{!snapshot.questions.length && <p>No questions yet.</p>}{snapshot.questions.map(item => <section className="collaboration-card" key={item.id}><p className="collaboration-author">{item.authorName}</p><h3>{item.text}</h3><button type="button" aria-pressed={item.voters.includes(myPeerId)} onClick={() => { void act({ type: 'question:vote', id: item.id }); }}>Helpful · {item.voters.length}</button>{item.answer && <p className="collaboration-answer">Host answer: {item.answer}</p>}{manager && <form className="collaboration-form" onSubmit={async event => { event.preventDefault(); if (await act({ type: 'question:answer', id: item.id, answer: answers[item.id]?.trim() })) setAnswers(current => ({ ...current, [item.id]: '' })); }}><label>Answer<textarea value={answers[item.id] || ''} onChange={event => setAnswers(current => ({ ...current, [item.id]: event.target.value }))} maxLength={2000} rows={2} required /></label><button type="submit">{item.answer ? 'Update answer' : 'Answer question'}</button></form>}</section>)}</>}
-            {tab === 'notes' && <div className="collaboration-form"><label>Shared notes<textarea disabled={busy || loading} value={notes} onChange={event => { setNotes(event.target.value); setNotesDirty(true); }} rows={12} maxLength={20000} /></label><p className="collaboration-hint">{notesDirty ? 'Your draft has unsaved changes.' : 'Shared notes are up to date.'} Notes are shared when you save and last for this meeting. Download a copy before leaving.</p>{notesConflict && <div className="collaboration-conflict" role="status"><p>Shared notes changed. Your draft is safe above. Copy any changes you need before replacing it.</p><label>Latest shared version<textarea readOnly value={snapshot.notes.text} rows={5} /></label><button type="button" onClick={() => { setNotes(snapshot.notes.text); setNotesVersion(snapshot.notes.version); setNotesDirty(false); }}>Replace my draft with latest</button></div>}<button type="button" disabled={!connected || busy || loading || !notesDirty || notesConflict} onClick={() => { void saveNotes(); }}>Save shared notes</button><button type="button" disabled={!notes.length} onClick={exportNotes}>Download my notes</button></div>}
-            {tab === 'files' && <>
-                <div className="collaboration-dropzone" data-dragging={dragging || undefined} data-busy={uploading ? true : undefined}
+            {tab === 'notes' && <div className="collaboration-form"><label>Shared notes<textarea disabled={busy || loading} value={notes} onChange={event => { setNotes(event.target.value); setNotesDirty(true); }} rows={12} maxLength={20000} /></label><p className="collaboration-hint">{notesDirty ? 'Your draft has unsaved changes.' : 'Notes are shared when you save.'} Notes last for this meeting. Download a copy before leaving.</p>{notesConflict && <div className="collaboration-conflict" role="status"><p>Shared notes changed. Your draft is safe above. Copy any changes you need before replacing it.</p><label>Latest shared version<textarea readOnly value={snapshot.notes.text} rows={5} /></label><button type="button" onClick={() => { setNotes(snapshot.notes.text); setNotesVersion(snapshot.notes.version); setNotesDirty(false); }}>Replace my draft with latest</button></div>}<button type="button" disabled={!connected || busy || loading || !notesDirty || notesConflict} onClick={() => { void saveNotes(); }}>Save shared notes</button><button type="button" disabled={!notes.length} onClick={exportNotes}>Download my notes</button></div>}
+            {tab === 'files' && !encryptedNotes && <>
+                {!canShareFiles && <p className="collaboration-hint">The host can allow you to share files.</p>}
+                {canShareFiles && <div className="collaboration-dropzone" data-dragging={dragging || undefined} data-busy={uploading ? true : undefined}
                     onClick={event => { if (!uploading && event.target === event.currentTarget) fileInput.current?.click(); }}
                     onDragOver={event => { event.preventDefault(); if (!dragging) setDragging(true); }}
                     onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
@@ -173,7 +207,7 @@ export default function MeetingCollaboration({ open, connected, role, myPeerId, 
                     <p className="collaboration-dropzone-title">{uploading ? <>Sharing <strong>{uploading}</strong>…</> : <>Drop a file here, or <button type="button" className="collaboration-link" onClick={() => fileInput.current?.click()}>browse</button></>}</p>
                     <p className="collaboration-dropzone-meta">PNG, JPEG, PDF or text · up to 32 KB</p>
                     <input ref={fileInput} className="collaboration-sr" type="file" aria-label="Choose a file to share" accept={SHARED_FILE_TYPES.join(',')} onChange={event => { void upload(event.target.files?.[0]); event.target.value = ''; }} />
-                </div>
+                </div>}
                 <div className="collaboration-files-head"><h3>Shared files{snapshot.files.length ? ` (${snapshot.files.length})` : ''}</h3><span><span className="mi" aria-hidden="true">schedule</span>Available until the meeting ends</span></div>
                 {!snapshot.files.length ? <div className="collaboration-empty"><span className="mi" aria-hidden="true">folder_open</span><p>No files shared yet</p><p className="collaboration-hint">Files you share appear here for everyone in the meeting.</p></div> :
                 <ul className="collaboration-files">{snapshot.files.map(file => <li key={file.id}>
@@ -184,6 +218,7 @@ export default function MeetingCollaboration({ open, connected, role, myPeerId, 
                 </li>)}</ul>}
             </>}
             </fieldset>
+            {encryptedNotes && <EncryptedMeetingFiles access={encryptedNotes} visible={tab === 'files'} connected={connected} peerId={myPeerId} manager={manager} canShareFiles={canShareFiles} />}
         </div>
     </section>;
 }

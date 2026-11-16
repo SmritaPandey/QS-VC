@@ -21,6 +21,14 @@ Poll/Q&A voting uses participant connection IDs, not durable account identity; r
 
 Whiteboard limits: 500 strokes, 20,000 points total, 1,000 points per stroke. Notes: 20,000 characters. Polls: 20 per room, 2–6 choices. Questions: 100 per room. Combined votes: 1,000. Collaboration RPCs have a per-participant rate limit.
 
+## End-to-end encrypted rooms
+
+**More → Activities → Notes** supports encrypted shared notes. The signaling process keeps the latest signed ciphertext and broadcasts it when notes change. Only meeting clients with the room key can read the text. Notes use a separate derived key from media and chat, and an edit to an older note version does not overwrite a newer save.
+
+The current key holder reseals the stored notes after rotation so late joiners can open them. Recovery requires a live client with access to the preceding epoch to become or remain key holder. Secure notes have the same room lifetime as regular notes and a 32 KiB UTF-8 limit, within the signaling message size. Downloading notes saves a readable local file.
+
+Encrypted rooms also support up to 10 shared files of 18 KiB each. File names, formats and bytes are sealed and the uploader’s signature is verified after decryption, including after a key holder reseals the file. Whiteboard, sticky notes, polls and Q&A are available in regular rooms. They require separate encrypted protocols to preserve editing permissions and restricted poll results.
+
 ## Verification boundary
 
 Automated source/service tests and builds are recorded in task handoffs. Actual two-device media, waiting-room admission, simultaneous drawing, mobile panel fit and accessibility require browser/device verification. The optional post-quantum encrypted-media path was connected after this note; it still lacks independent cryptographic review, authenticated peer identity, FIPS 140 validation and physical two-device verification. Recording, breakout rooms, large-file storage, automatic transcripts, and AI meeting summaries still require separate implementation evidence.

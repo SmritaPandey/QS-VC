@@ -13,7 +13,7 @@ class AccessRequestError extends Error {}
 
 const endpoint = `${AUTH_API}/api/auth/enterprise/terms`;
 
-export default function EnterpriseAccessTerms() {
+export default function EnterpriseAccessTerms({ canIssueLicense = true }: { canIssueLicense?: boolean }) {
     const [customer, setCustomer] = useState<Customer | null>(null);
     const [busy, setBusy] = useState(false);
     const [message, setMessage] = useState('');
@@ -123,7 +123,7 @@ export default function EnterpriseAccessTerms() {
                 <input id="enterprise-expires-at" name="expiresAt" type="datetime-local" required /></div>
             <button type="submit" disabled={busy}>Save access term</button>
         </form>}
-        {customer?.expires_at && Date.parse(customer.expires_at) > Date.now() && <form onSubmit={issueLicense}>
+        {canIssueLicense && customer?.expires_at && Date.parse(customer.expires_at) > Date.now() && <form onSubmit={issueLicense}>
             <label htmlFor="onprem-installation-id">On-prem installation ID</label>{' '}
             <input id="onprem-installation-id" name="installationId" required maxLength={36} />{' '}
             <button type="submit" disabled={busy}>Download signed license</button>

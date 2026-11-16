@@ -26,6 +26,9 @@ interface Props {
     onExplainAccess?: (message: string) => void;
     featureMinimumPlans?: Readonly<Record<string, string>>;
     chatOpen: boolean;
+    unreadChat?: number;
+    permissions?: { key: string; label: string; allowed: boolean; unread: boolean }[];
+    onReviewPermission?: (key: string) => void;
     participantsOpen: boolean;
     handRaised: boolean;
     reactionsOpen?: boolean;
@@ -84,12 +87,13 @@ interface ToggleProps {
     controls?: string;
     /** tiny text badge on the icon, e.g. language code "HI" */
     badge?: string;
+    unread?: string;
 }
 
 const VIEWS = [['auto', 'auto_awesome_mosaic', 'Auto'], ['tiled', 'grid_view', 'Tiled'], ['spotlight', 'crop_landscape', 'Spotlight'], ['sidebar', 'view_sidebar', 'Sidebar']] as const;
 const TILE_OPTIONS: TilesPerPage[] = ['auto', 4, 9, 16, 25, 49];
 
-function ToggleControl({ on, label, title, iconOn, iconOff, stateClass = '', locked = false, onToggle, controls, badge }: ToggleProps) {
+function ToggleControl({ on, label, title, iconOn, iconOff, stateClass = '', locked = false, onToggle, controls, badge, unread }: ToggleProps) {
     return (
         <button
             type="button"
@@ -102,6 +106,7 @@ function ToggleControl({ on, label, title, iconOn, iconOff, stateClass = '', loc
             onClick={() => { haptic(locked ? 'tap' : on ? 'toggleOff' : 'toggleOn'); onToggle(); }}
         >
             <span className="ctrl-icon mi" aria-hidden="true">{on ? iconOn : iconOff}</span>
+            {unread && <span className="meeting-unread-badge" aria-hidden="true">{unread}</span>}
             {badge && <span className="ctrl-badge" aria-hidden="true">{badge}</span>}
             <span className="ctrl-label">{label}</span>
             {locked && <span className="mi ctrl-plan-lock" aria-hidden="true">lock</span>}
@@ -128,7 +133,7 @@ export default function ControlBar({
     onChangeNoiseMode, onRequirePlanFeature, onSignInForExtras, onExplainAccess, featureMinimumPlans = {},
     activitiesOpen = false, hostToolsOpen = false, onToggleActivities, onToggleHostTools,
     audioMuted, videoOff, screenSharing,
-    chatOpen, participantsOpen, handRaised, reactionsOpen = false, languageOpen = false, languageLabel, languageCode,
+    chatOpen, unreadChat = 0, permissions = [], onReviewPermission, participantsOpen, handRaised, reactionsOpen = false, languageOpen = false, languageLabel, languageCode,
     onToggleAudio, onToggleVideo, onToggleScreen, onOpenInvite,
     onToggleChat, onToggleParticipants, onRaiseHand, onToggleReactions, onToggleLanguage,
     captionsOn = false, onToggleCaptions, pictureInPicture = false, onTogglePictureInPicture, fullscreen = false, onToggleFullscreen, effectsOn = false, onOpenEffects, onReportProblem, onOpenBreakouts, onOpenQuality, onOpenMultiCamera, onRecordLocally,
@@ -145,6 +150,10 @@ export default function ControlBar({
     const languageRequirement = !signedIn ? 'Sign in to choose your language' : undefined;
     const recordingRequirement = isRecording ? undefined : !signedIn ? `Sign in as host · ${minimumPlan('cloud_recording', 'pro')}` : !canRecord ? `Host only · ${minimumPlan('cloud_recording', 'pro')}` : recordingLocked ? `${minimumPlan('cloud_recording', 'pro')} plan` : undefined;
     const resolvePlanAccess = (feature: string) => { if (!signedIn) onSignInForExtras?.(); else onRequirePlanFeature?.(feature); };
+    const chatCount = unreadChat > 99 ? '99+' : String(unreadChat);
+    const permissionCount = permissions.filter(permission => permission.unread).length;
+    const chatTitle = unreadChat ? `Chat, ${unreadChat} unread` : 'Chat';
+    const moreTitle = permissionCount ? `More controls, ${permissionCount} new ${permissionCount === 1 ? 'permission' : 'permissions'}` : 'More controls';
     const [moreOpen, setMoreOpen] = useState(false);
     const moreRef = useRef<HTMLDivElement>(null);
     const moreButtonRef = useRef<HTMLButtonElement>(null);
@@ -203,17 +212,32 @@ export default function ControlBar({
                 )}
                 <ToggleControl on={participantsOpen} label="People" title="Participants"
                     iconOn="group" iconOff="group" controls="meeting-participants-panel" stateClass={`control-extra-inline ${participantsOpen ? 'active' : ''}`} onToggle={onToggleParticipants} />
-                <ToggleControl on={chatOpen} label="Chat" title="Chat"
+                <ToggleControl on={chatOpen} label="Chat" title={chatTitle} unread={unreadChat ? chatCount : undefined}
                     iconOn="chat" iconOff="chat" stateClass={`control-chat ${chatOpen ? 'active' : ''}`} onToggle={onToggleChat} controls="meeting-chat-panel" />
             </div>
 
             <div className="controls-right">
                 {assistant}
                 <div className="controls-more" ref={moreRef}>
-                    <button ref={moreButtonRef} type="button" className={`ctrl-btn ${moreOpen ? 'active' : ''}`} aria-label="More controls" aria-expanded={moreOpen} aria-controls="meeting-more-controls" data-tip="More controls" onClick={() => { haptic('tap'); setMoreOpen(open => !open); }}>
+                    <button ref={moreButtonRef} type="button" className={`ctrl-btn ${moreOpen ? 'active' : ''}`} aria-label={moreTitle} aria-expanded={moreOpen} aria-controls="meeting-more-controls" data-tip="More controls" onClick={() => { haptic('tap'); setMoreOpen(open => !open); }}>
                         <span className="ctrl-icon mi" aria-hidden="true">more_horiz</span>
+                        {permissionCount > 0 && <span className="meeting-unread-badge" aria-hidden="true">{permissionCount}</span>}
+                        {!permissionCount && unreadChat > 0 && <span className="meeting-unread-badge meeting-overflow-chat-badge" aria-hidden="true">{chatCount}</span>}
                     </button>
                     {moreOpen && <div id="meeting-more-controls" className="meeting-more-panel" role="group" aria-label="Extra meeting controls">
+                        {permissions.length > 0 && <details className="meeting-permission-settings" open={permissionCount > 0 || undefined}>
+                            <summary><span className="mi" aria-hidden="true">settings</span>Permissions
+                                {permissionCount > 0 && <span className="meeting-menu-count">{permissionCount} new</span>}
+                            </summary>
+                            <ul>{permissions.map(permission => <li key={permission.key} data-unread={permission.unread || undefined}>
+                                <span>{permission.label}<small>{permission.allowed ? 'Allowed' : 'Restricted'}</small></span>
+                                {permission.unread && <button type="button" aria-label={`Mark ${permission.label} as reviewed`}
+                                    onClick={event => {
+                                        event.currentTarget.closest('details')?.querySelector('summary')?.focus();
+                                        onReviewPermission?.(permission.key);
+                                    }}>Mark reviewed</button>}
+                            </li>)}</ul>
+                        </details>}
                         <div className="meeting-more-mobile-actions">
                             {onToggleCaptions && <RestrictedFeatureButton label={captionsOn ? 'Turn off captions' : 'Turn on captions'} icon="closed_caption" active={captionsOn}
                                 requirement={captionsLocked ? `${minimumPlan('ai_captions', 'starter')} plan` : undefined}
@@ -222,7 +246,7 @@ export default function ControlBar({
                             {onOpenInvite && <button type="button" onClick={() => { closeMore(); onOpenInvite(); }}><span className="mi" aria-hidden="true">person_add</span>Invite people</button>}
                             {onToggleReactions && <button type="button" aria-expanded={reactionsOpen} aria-controls="reaction-picker" onClick={() => { closeMore(); onToggleReactions(); }}><span className="mi" aria-hidden="true">add_reaction</span>Reactions</button>}
                             <button type="button" aria-expanded={participantsOpen} aria-controls="meeting-participants-panel" onClick={() => { closeMore(); onToggleParticipants(); }}><span className="mi" aria-hidden="true">group</span>Participants</button>
-                            <button type="button" className="control-chat-overflow" aria-expanded={chatOpen} aria-controls="meeting-chat-panel" onClick={() => { closeMore(); onToggleChat(); }}><span className="mi" aria-hidden="true">chat</span>Chat</button>
+                            <button type="button" className="control-chat-overflow" aria-label={chatTitle} aria-expanded={chatOpen} aria-controls="meeting-chat-panel" onClick={() => { closeMore(); onToggleChat(); }}><span className="mi" aria-hidden="true">chat</span>Chat{unreadChat > 0 && <span className="meeting-menu-count" aria-hidden="true">{chatCount}</span>}</button>
                             <button type="button" aria-pressed={handRaised} onClick={() => { closeMore(); onRaiseHand(); }}><span className="mi" aria-hidden="true">front_hand</span>{handRaised ? 'Lower hand' : 'Raise hand'}</button>
                         </div>
                         {!signedIn && onSignInForExtras && <RestrictedFeatureButton label="Meeting assistant" icon="support_agent" requirement="Sign in"
@@ -240,20 +264,20 @@ export default function ControlBar({
                         {(onToggleLanguage || onSignInForExtras) && <RestrictedFeatureButton label="Captions and language settings" icon="translate" active={languageOpen} requirement={languageRequirement}
                             onActivate={() => { closeMore(); onToggleLanguage?.(); }} onResolve={() => { closeMore(); resolvePlanAccess('ai_captions'); }} />}
                         {onOpenBreakouts && <button type="button" onClick={() => { closeMore(); onOpenBreakouts(); }}><span className="mi" aria-hidden="true">workspaces</span>Breakout rooms</button>}
-                        {onOpenQuality && <button type="button" onClick={() => { closeMore(); onOpenQuality(); }}><span className="mi" aria-hidden="true">monitoring</span>Connection quality and reports</button>}
+                        {onOpenQuality && <button type="button" onClick={() => { closeMore(); onOpenQuality(); }}><span className="mi" aria-hidden="true">monitoring</span>Connection quality</button>}
                         {onOpenMultiCamera && <button type="button" onClick={() => { closeMore(); onOpenMultiCamera(); }}><span className="mi" aria-hidden="true">video_camera_front</span>Additional cameras</button>}
                         {onRecordLocally && canRecord && <button type="button" onClick={() => { closeMore(); onRecordLocally(); }}><span className="mi" aria-hidden="true">save</span>{isRecording ? 'Stop recording' : 'Record on this device'}</button>}
                         {onReportProblem && <button type="button" onClick={() => { closeMore(); onReportProblem(); }}><span className="mi" aria-hidden="true">feedback</span>Report a problem</button>}
-                        <h3>Microphone noise</h3>
-                        <div className="meeting-view-options" role="group" aria-label="Microphone noise suppression">
-                            <button type="button" aria-pressed={noiseMode === 'standard'} onClick={() => onChangeNoiseMode?.('standard')}><span className="mi" aria-hidden="true">graphic_eq</span>Noise suppression</button>
-                            <RestrictedFeatureButton label="AI noise suppression" icon="auto_awesome" active={noiseMode === 'ai'} requirement={noiseRequirement}
-                                onActivate={() => onChangeNoiseMode?.(noiseMode === 'ai' ? 'standard' : 'ai')} onResolve={() => { closeMore(); resolvePlanAccess('ai_noise_suppression'); }} />
+                        <h3>Noise reduction</h3>
+                        <div className="meeting-noise-options" role="group" aria-label="Microphone noise reduction">
+                            <button type="button" aria-pressed={noiseMode === 'standard'} onClick={() => onChangeNoiseMode?.('standard')}><span className="mi" aria-hidden="true">graphic_eq</span>Standard</button>
+                            <RestrictedFeatureButton label="AI noise reduction" icon="auto_awesome" active={noiseMode === 'ai'} requirement={noiseRequirement}
+                                onActivate={() => onChangeNoiseMode?.('ai')} onResolve={() => { closeMore(); resolvePlanAccess('ai_noise_suppression'); }} />
                             <button type="button" aria-pressed={noiseMode === 'off'} onClick={() => onChangeNoiseMode?.('off')}><span className="mi" aria-hidden="true">volume_off</span>Off</button>
                         </div>
                         <h3>Audio output</h3>
                         {audioOutputSupported ? <>
-                            <label className="meeting-audio-output"><span>Play meeting audio on</span>
+                            <label className="meeting-audio-output"><span>Speaker or headphones</span>
                                 <select value={audioOutputId} onChange={event => onAudioOutputChange?.(event.target.value)}>
                                     <option value="">System default</option>
                                     {audioOutputDevices.filter(device => device.deviceId && device.deviceId !== 'default').map(device =>
@@ -261,7 +285,7 @@ export default function ControlBar({
                                 </select>
                             </label>
                             {onChooseAudioOutput && <button type="button" onClick={onChooseAudioOutput}><span className="mi" aria-hidden="true">speaker</span>Choose audio device</button>}
-                        </> : <p className="meeting-more-hint">This browser uses your phone’s audio route. Change speaker or headphones from your device’s audio controls.</p>}
+                        </> : <p className="meeting-more-hint">Use your device’s audio controls to switch speakers or headphones.</p>}
                         <h3>Layout</h3>
                         <div className="meeting-view-options" role="group" aria-label="Meeting layout">
                             {VIEWS.map(([view, icon, label]) => <button type="button" key={view} aria-pressed={viewMode === view} onClick={() => onChangeView(view)}><span className="mi" aria-hidden="true">{icon}</span>{label}</button>)}

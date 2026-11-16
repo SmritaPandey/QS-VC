@@ -84,7 +84,8 @@ export interface RoomSettings {
     locked: boolean;               // no new joins
     password: string | null;       // meeting password
     muteOnEntry: boolean;          // mute mic on join
-    allowScreenShare: boolean;     // allow screen sharing
+    allowScreenShare: boolean;     // allow non-host screen sharing
+    allowFileShare: boolean;
     allowChat: boolean;            // allow chat
     allowRecording: boolean;       // allow recording
     // Host management (Google Meet style): what participants (not hosts/co-hosts) may do.
@@ -143,7 +144,8 @@ const DEFAULT_SETTINGS: RoomSettings = {
     locked: false,
     password: null,
     muteOnEntry: false,
-    allowScreenShare: true,
+    allowScreenShare: false,
+    allowFileShare: false,
     allowChat: true,
     allowRecording: true,
     allowMicrophone: true,

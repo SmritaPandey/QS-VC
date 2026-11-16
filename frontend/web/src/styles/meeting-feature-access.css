@@ -1,3 +1,54 @@
-.meeting-feature-label { display: grid; gap: 2px; min-width: 0; text-align: left; overflow-wrap: anywhere; }
+.meeting-feature-label { display: grid; gap: 2px; min-width: 0; text-align: left; overflow-wrap: normal; }
 .meeting-feature-requirement { color: #c2cfd8; font-size: 13px; line-height: 1.4; font-weight: 400; }
 .meeting-more-panel button.is-feature-locked .meeting-feature-label { color: #d9e4ec; }
+
+.meeting-unread-badge,
+.meeting-menu-count {
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-width:19px;
+    min-height:19px;
+    padding:0 5px;
+    border-radius:999px;
+    color:#13231f;
+    background:#a6f2e4;
+    font-size:12px;
+    font-weight:600;
+    white-space:nowrap;
+}
+.meeting-unread-badge { position:absolute; top:-5px; right:-5px; box-shadow:0 0 0 2px #0f1c28; }
+.meeting-menu-count { margin-inline-start:auto; }
+.meeting-overflow-chat-badge { display:none; }
+@media (max-width:359px) { .meeting-overflow-chat-badge { display:inline-flex; } }
+.meeting-permission-settings { margin-bottom:10px; }
+.meeting-permission-settings summary {
+    display:flex;
+    align-items:center;
+    gap:8px;
+    min-height:44px;
+    padding:8px 12px;
+    border-radius:10px;
+    background:#1a2a3b;
+    color:#edf5fa;
+    cursor:pointer;
+    list-style:none;
+}
+.meeting-permission-settings summary::-webkit-details-marker { display:none; }
+.meeting-permission-settings summary::after { content:'⌄'; margin-inline-start:auto; }
+.meeting-permission-settings[open] summary::after { content:'⌃'; }
+.meeting-permission-settings ul { list-style:none; display:grid; gap:4px; padding:0; margin:8px 0 0; }
+.meeting-permission-settings li {
+    display:flex;
+    flex-wrap:wrap;
+    align-items:center;
+    justify-content:space-between;
+    gap:6px;
+    padding:8px 10px;
+    color:#d9e4ec;
+    border:1px solid transparent;
+    border-radius:9px;
+}
+.meeting-permission-settings li[data-unread] { background:#143d38; border-color:#518d80; }
+.meeting-permission-settings li small { display:block; color:#b5c9d4; }
+.meeting-permission-settings li button { width:auto; font-size:13px; }

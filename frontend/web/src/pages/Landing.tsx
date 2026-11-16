@@ -10,7 +10,8 @@ import { shareMeetingInvite } from '../lib/meeting-sharing';
 import { QRCodeSVG } from 'qrcode.react';
 import LoadingMark from '../components/LoadingMark';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+import '../styles/account-workspace.css';
 
 const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
 const MEETINGS_ENDPOINT = meetingsEndpoint(MEETING_API);
@@ -171,7 +172,7 @@ export default function Landing() {
     const handleJoin = () => {
         const code = joinCode.trim().toUpperCase();
         if (!code) return;
-        navigate(`/meeting/${code}/preview`);
+        navigate(`/meeting/${encodeURIComponent(code)}/preview`);
     };
 
     const handleExpired = useCallback(() => { setSessionError('Your session expired. Sign in to see your meetings.'); }, []);
@@ -186,7 +187,7 @@ export default function Landing() {
     };
 
     return (
-        <div className={`public-site ${signedIn ? 'workspace-page' : 'public-launcher landing-page'}`}>
+        <div className={`public-site ${signedIn ? 'workspace-page' : 'public-launcher landing-page guest-workspace'}`}>
             <div className="landing-bg-gradient" />
 
             {signedIn ? <SignedInWorkspace creating={creating} signingOut={signingOut} sessionError={sessionError} onCreate={handleCreate} onSignOut={handleSignOut} onExpired={handleExpired} /> : <>
@@ -196,17 +197,27 @@ export default function Landing() {
                 {sessionError && <p role="alert">{sessionError}</p>}
                 {session.status === 'unavailable' && <p role="status">Account unavailable. <button type="button" onClick={() => void refreshSession()}>Try again</button></p>}
                 <div className="landing-hero">
-
-                    <h1>Make room for the conversation.</h1>
-                    <p className="landing-subtitle">
-                        Create a meeting, invite your participants or join with a code.
-                    </p>
+                    <h1>Guest meetings</h1>
+                    <p className="landing-subtitle">Join with a meeting code or create an instant meeting. Sign in to see your plan and scheduled meetings.</p>
                 </div>
 
                 <div className="landing-actions">
                     <div className="action-card">
-                        <h2>Start a meeting</h2>
-                        <p>Create a link, then check your camera and microphone.</p>
+                        <h2>Join a meeting</h2>
+                        <p>Enter the code from your invitation.</p>
+                        <label className="field-label" htmlFor="join-meeting-code">Meeting code</label>
+                        <form className="join-input-group" onSubmit={event => { event.preventDefault(); handleJoin(); }}>
+                            <input type="text" id="join-meeting-code" placeholder="QS-XXXX-XXXX-XXXX"
+                                value={joinCode} onChange={event => setJoinCode(event.target.value)} className="input-meeting-code" />
+                            <button type="submit" className="btn-primary qsvc-action" disabled={!joinCode.trim()}>
+                                <ActionContents>Join</ActionContents>
+                            </button>
+                        </form>
+                    </div>
+
+                    <div className="action-card">
+                        <h2>Start an instant meeting</h2>
+                        <p>Create a link to share with participants.</p>
                         <button
                             className="btn-primary qsvc-action"
                             ref={createButtonRef}
@@ -221,43 +232,10 @@ export default function Landing() {
                                     Create meeting
                                 </>
                             )}</ActionContents></button>
-                        <button
-                            className="btn-outline qsvc-action qsvc-action--secondary"
-                            onClick={() => navigate('/schedule')}
-                            style={{ marginTop: '10px', width: '100%' }}
-                        ><ActionContents>
-                            <span className="mi mi-sm" aria-hidden="true">calendar_today</span>
-                            Schedule a meeting</ActionContents></button>
-                    </div>
-
-                    <div className="action-divider">
-                        <span>OR</span>
-                    </div>
-
-                    <div className="action-card">
-                        <h2>Have an invitation?</h2>
-                        <p>Enter a meeting code to join</p>
-                        <label className="field-label" htmlFor="join-meeting-code">Meeting code</label>
-                        <div className="join-input-group">
-                            <input
-                                type="text"
-                                id="join-meeting-code" aria-label="Meeting code" placeholder="QS-XXXX-XXXX-XXXX"
-                                value={joinCode}
-                                onChange={(e) => setJoinCode(e.target.value)}
-                                onKeyDown={(e) => e.key === 'Enter' && handleJoin()}
-                                className="input-meeting-code"
-                            />
-                            <button
-                                className="btn-primary qsvc-action"
-                                onClick={handleJoin}
-                                disabled={!joinCode.trim()}
-                                style={{ padding: '12px 24px' }}
-                            ><ActionContents>Join</ActionContents></button>
-                        </div>
+                        <Link className="guest-schedule-link" to="/schedule">Sign in to schedule<span className="mi" aria-hidden="true">arrow_forward</span></Link>
                     </div>
                 </div>
 
-                <div className="landing-features"><span className="feature-chip"><span className="mi mi-sm" aria-hidden="true">videocam</span> Video meetings</span><span className="feature-chip"><span className="mi mi-sm" aria-hidden="true">screen_share</span> Screen sharing</span><span className="feature-chip"><span className="mi mi-sm" aria-hidden="true">chat</span> In-meeting conversation</span></div>
             </main>
 
             </>}

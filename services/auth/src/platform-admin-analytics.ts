@@ -3,6 +3,7 @@ import type { Pool } from 'pg';
 import { z } from 'zod';
 import { isPlatformAdmin } from './platform-admins.js';
 import { sessionErrorStatus } from './sessions.js';
+import { adminDeployment } from './admin-deployment.js';
 
 const currencies = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'CAD', 'AUD'] as const;
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/).refine(value => {
@@ -45,14 +46,21 @@ export function platformAdminAnalyticsRouter(verify: VerifyToken, db: Database) 
             }
         };
 
-    router.get('/access', withPlatformAdmin(async (_req, res) => res.json({ access: 'granted' })));
+    router.get('/access', withPlatformAdmin(async (_req, res) => res.json({ access: 'granted', deployment: adminDeployment() })));
 
     router.get('/analytics', withPlatformAdmin(async (req, res) => {
         const quarters = z.string().regex(/^(?:[1-9]|1[0-2])$/).safeParse(req.query.quarters ?? '4');
         if (!quarters.success) return res.status(400).json({ error: 'Choose 1 to 12 calendar quarters.' });
         try {
             const result = await db.query('SELECT public.qsvc_platform_admin_analytics($1) AS analytics', [Number(quarters.data)]);
-            return res.json(result.rows[0]?.analytics ?? {});
+            const analytics = result.rows[0]?.analytics ?? {};
+            if (adminDeployment().mode === 'hosted-online') return res.json(analytics);
+            return res.json({
+                ...analytics,
+                financialTotalsByCurrency: [],
+                recentFinancialEntries: [],
+                quarters: (analytics.quarters ?? []).map((quarter: Record<string, unknown>) => ({ ...quarter, financials: [] })),
+            });
         } catch {
             return res.status(503).json({ error: 'Platform analytics are temporarily unavailable.' });
         }
@@ -67,13 +75,26 @@ export function platformAdminAnalyticsRouter(verify: VerifyToken, db: Database) 
                 'SELECT public.qsvc_platform_admin_user_directory($1, $2, $3, $4, $5) AS directory',
                 [limit, offset, search, plan ?? null, role === 'all' ? null : role],
             );
-            return res.json(result.rows[0]?.directory ?? { totalUsers: 0, total: 0, planCounts: {}, users: [] });
+            const directory = result.rows[0]?.directory ?? { totalUsers: 0, total: 0, planCounts: {}, users: [] };
+            if (adminDeployment().mode === 'hosted-online') return res.json(directory);
+            return res.json({
+                ...directory,
+                users: directory.users.map((user: Record<string, unknown>) => ({
+                    ...user,
+                    billingProvider: null,
+                    billingStatus: null,
+                    subscriptionEndsAt: null,
+                    billingAmount: null,
+                    billingCurrency: null,
+                })),
+            });
         } catch {
             return res.status(503).json({ error: 'The account directory is temporarily unavailable.' });
         }
     }));
 
     router.post('/financial-entries', withPlatformAdmin(async (req, res, admin) => {
+        if (adminDeployment().mode !== 'hosted-online') return res.sendStatus(404);
         const entry = entryBody.safeParse(req.body);
         if (!entry.success) return res.status(400).json({ error: 'Check the financial entry fields and try again.' });
         if (typeof admin.sub !== 'string' || !z.string().uuid().safeParse(admin.sub).success) {

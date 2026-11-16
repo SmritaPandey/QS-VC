@@ -178,6 +178,10 @@ function getLanIPs() {
 
 async function main() {
     require('dotenv').config({ path: path.join(ROOT, '.env') });
+    process.env.QSVC_DEPLOYMENT = 'onprem';
+    process.env.QSVC_ONPREM_EXPOSURE = 'private';
+    process.env.QSVC_PUBLIC_MEETING_ORIGIN = '';
+    process.env.VITE_DEPLOYMENT = 'onprem';
     // MCU_ENABLED is retained as an alias for existing intranet .env files.
     // Both switches activate the real SFU-mounted Poly/FreeSWITCH bridge;
     // the memory-only services/mcu control stub is never used for media.
@@ -260,7 +264,7 @@ async function main() {
         const vitePackage = require.resolve('vite/package.json', { paths: [webDir] });
         const vitePath = path.join(path.dirname(vitePackage), 'bin', 'vite.js');
         const viteProc = startService('Vite', process.execPath, [vitePath, '--host', '0.0.0.0'], webDir, {
-            VITE_DEPLOYMENT_MODE: 'intranet',
+            VITE_DEPLOYMENT: 'onprem',
         });
         procs.push(viteProc);
     }

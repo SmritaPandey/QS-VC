@@ -39,9 +39,26 @@ function canManagePeer(roomId: string, actorId: string, targetId: string): boole
     return !!actor && !!target && actorId !== targetId && target.role !== 'host' &&
         (actor.role === 'host' || (actor.role === 'co-host' && target.role !== 'co-host'));
 }
-/** Hosts and co-hosts are never limited by the participant permissions below. */
+/** Hosts and co-hosts bypass participant mic and camera restrictions. */
 function isManager(peer?: PeerState): boolean {
     return peer?.role === 'host' || peer?.role === 'co-host';
+}
+async function stopRestrictedScreenShare(roomId: string, peer: PeerState) {
+    const isScreen = (producer: { appData: any }) => producer.appData?.type === 'screen' || producer.appData?.source === 'screen';
+    const screens = [...peer.producers.values()].filter(isScreen);
+    if (!peer.screenSharing && !screens.length) return;
+    roomManager.sendToPeer(roomId, peer.id, 'stopPresenting', { by: 'The host' });
+    await Promise.all(screens.map(async producer => {
+        try {
+            await sfuClient.closeProducer(roomId, peer.id, producer.id);
+            if (peer.producers.delete(producer.id)) roomManager.broadcast(roomId, 'producerClosed', { peerId: peer.id, producerId: producer.id, kind: producer.kind });
+        } catch (error) {
+            await sfuClient.setProducerPaused(roomId, peer.id, producer.id, true).catch(() => logger.warn(error, 'Could not stop a restricted presentation'));
+        }
+    }));
+    if ([...peer.producers.values()].some(producer => !screens.includes(producer) && isScreen(producer))) return;
+    peer.screenSharing = false;
+    roomManager.broadcast(roomId, 'presenterChanged', { peerId: peer.id, displayName: peer.displayName, presenting: false });
 }
 /** Webinars: only the organiser, hosts/co-hosts and people invited on stage may send media or captions. */
 function canPublishInRoom(roomId: string, peerId: string, authSub?: string): boolean {
@@ -179,7 +196,7 @@ const roomSettingsSchema = z.object({
     maxParticipants: z.number().int().min(1).max(1000).optional(),
     waitingRoomEnabled: z.boolean().optional(), locked: z.boolean().optional(),
     password: z.string().max(50).nullable().optional(), muteOnEntry: z.boolean().optional(),
-    allowScreenShare: z.boolean().optional(), allowChat: z.boolean().optional(),
+    allowScreenShare: z.boolean().optional(), allowFileShare: z.boolean().optional(), allowChat: z.boolean().optional(),
     allowRecording: z.boolean().optional(),
     allowMicrophone: z.boolean().optional(), allowCamera: z.boolean().optional(),
     allowReactions: z.boolean().optional(),
@@ -463,6 +480,12 @@ export async function handleRpcMessage(
                 const result = await bharatVcDial({ ...connectionState, authUser: connectionState.authUser || undefined }, params);
                 return { jsonrpc: '2.0', id: id!, result };
             }
+            case 'getEncryptedNotes':
+            case 'putEncryptedNotes':
+            case 'getEncryptedFiles':
+            case 'putEncryptedFile':
+            case 'removeEncryptedFile':
+                return { jsonrpc: '2.0', id: id!, result: collaborationRpc(ws, connectionState.roomId!, connectionState.peerId!, method, params) };
             case 'getCollaborationState':
             case 'getCollaborationFile':
             case 'collaborationAction':
@@ -717,8 +740,8 @@ export async function handleRpcMessage(
                 // Host management: participants need permission to share, talk or show video.
                 const producerPeer = policyRoom.peers.get(peerId);
                 const screen = appData?.type === 'screen' || appData?.source === 'screen';
+                if (screen && producerPeer?.role !== 'host' && !policyRoom.settings.allowScreenShare) throw createError(-32004, 'Screen sharing is disabled by host');
                 if (!isManager(producerPeer) && !isPrivateSideAudio) {
-                    if (screen && !policyRoom.settings.allowScreenShare) throw createError(-32004, 'Screen sharing is disabled by host');
                     if (!screen && kind === 'audio' && !policyRoom.settings.allowMicrophone) throw createError(-32004, PERMISSION_MESSAGES.audio);
                     if (!screen && kind === 'video' && !policyRoom.settings.allowCamera) throw createError(-32004, PERMISSION_MESSAGES.video);
                 }
@@ -755,6 +778,11 @@ export async function handleRpcMessage(
                     throw createError(-32004, 'The meeting media session changed.');
                 }
 
+
+                if (screen && producerPeer?.role !== 'host' && !policyRoom.settings.allowScreenShare) {
+                    await sfuClient.closeProducer(roomId, peerId, result.producerId).catch(() => {});
+                    throw createError(-32004, 'Screen sharing is disabled by host');
+                }
 
                 // The session can expire or be ended while the SFU request is in flight.
                 if (isPrivateSideAudio && policyRoom.privateConversations.get(privateConversationId!) !== privateConversation) {
@@ -1127,7 +1155,7 @@ export async function handleRpcMessage(
                 if (kind === 'screen' && peer) {
                     // Clients report presenting explicitly; older clients send muted=true while sharing.
                     const presenting = typeof params?.presenting === 'boolean' ? params.presenting : muted === true;
-                    if (presenting && !isManager(peer) && room && !room.settings.allowScreenShare) throw createError(-32004, 'Screen sharing is disabled by host');
+                    if (presenting && peer.role !== 'host' && room && !room.settings.allowScreenShare) throw createError(-32004, 'Screen sharing is disabled by host');
                     peer.screenSharing = presenting;
                     roomManager.broadcast(roomId, 'presenterChanged', { peerId, displayName, presenting });
                 }
@@ -1409,7 +1437,9 @@ export async function handleRpcMessage(
                 if (!room || room.hostPeerId !== peerId || room.peers.get(peerId!)?.role !== 'host') throw createError(-32005, 'Only the current host can transfer host controls.');
                 const target = room.peers.get(parsed.data.targetPeerId);
                 if (!target || target.id === peerId || !target.userId || target.isGuest) throw createError(-32602, 'Choose a signed-in participant in this meeting.');
+                const formerHost = room.peers.get(peerId!);
                 roomManager.transferHost(roomId!, peerId!, target.id);
+                if (formerHost && !room.settings.allowScreenShare) await stopRestrictedScreenShare(roomId!, formerHost);
                 return { jsonrpc: '2.0', id: id!, result: { newHostId: target.id } };
             }
 
@@ -1443,9 +1473,16 @@ export async function handleRpcMessage(
                 if (parsedSettings.data.waitingRoomEnabled === false) {
                     throw createError(-32005, 'Host approval is required for every attendee.');
                 }
-                roomManager.updateSettings(roomId, parsedSettings.data);
-                // Turning a permission off applies right away to everyone who is not a host or co-host.
                 const settingsRoom = roomManager.getRoom(roomId);
+                if ((parsedSettings.data.allowScreenShare !== undefined || parsedSettings.data.allowFileShare !== undefined) &&
+                    settingsRoom?.peers.get(peerId)?.role !== 'host') {
+                    throw createError(-32005, 'Only the host can change sharing permissions.');
+                }
+                roomManager.updateSettings(roomId, parsedSettings.data);
+                if (settingsRoom && parsedSettings.data.allowScreenShare === false) {
+                    await Promise.all([...settingsRoom.peers.values()].filter(peer => peer.role !== 'host').map(peer => stopRestrictedScreenShare(roomId, peer)));
+                }
+                // Turning a permission off applies right away to everyone who is not a host or co-host.
                 for (const [key, kind] of [['allowMicrophone', 'audio'], ['allowCamera', 'video']] as const) {
                     if (parsedSettings.data[key] !== false || !settingsRoom) continue;
                     for (const p of settingsRoom.peers.values()) {
