@@ -5,6 +5,22 @@ function setup(){const room=roomManager.getOrCreateRoom(`collab-${crypto.randomU
 describe('room collaboration',()=>{
  it('enforces active membership, host actions and late-join state',()=>{const {room,rpc}=setup();expect(()=>collaborationRpc({},room.id,'member','getCollaborationState',{})).toThrow('Not joined');expect(()=>rpc('member','collaborationAction',{type:'poll:create',question:'Ready?',options:['Yes','No']})).toThrow('Host');let state=rpc('host','collaborationAction',{type:'poll:create',question:'Ready?',options:['Yes','No']});const id=state.polls[0].id;rpc('member','collaborationAction',{type:'poll:vote',id,option:0});state=rpc('member','collaborationAction',{type:'poll:vote',id,option:1});expect(Object.values(state.polls[0].votes)).toEqual([1]);expect(rpc('host','getCollaborationState').revision).toBe(3);rpc('host','collaborationAction',{type:'poll:close',id});expect(()=>rpc('member','collaborationAction',{type:'poll:vote',id,option:0})).toThrow('unavailable');});
  it('prevents lost notes and unauthorised stroke deletion',()=>{const {rpc}=setup();rpc('member','collaborationAction',{type:'notes:update',text:'Agreed',version:0});expect(()=>rpc('host','collaborationAction',{type:'notes:update',text:'Stale',version:0})).toThrow('Notes changed');const state=rpc('host','collaborationAction',{type:'stroke:add',points:[{x:0,y:0},{x:1,y:1}],color:'#006d77',width:3});expect(()=>rpc('member','collaborationAction',{type:'stroke:undo',id:state.strokes[0].id})).toThrow('Host');expect(()=>rpc('member','collaborationAction',{type:'stroke:add',points:[{x:2,y:0},{x:0,y:1}],color:'#006d77',width:3})).toThrow();});
+ it('shares colored sticky notes within the room and protects concurrent edits', () => {
+  const {rpc,a}=setup();
+  const action={type:'sticky:add',text:'  Test an idea  ',color:'yellow'};
+  expect(()=>rpc('member','collaborationAction',{...action,color:'unknown'})).toThrow();
+  const {id}=rpc('member','collaborationAction',action).stickyNotes[0];
+  const note={id,authorId:'member',authorName:'member',text:'Test an idea',color:'yellow',version:0};
+  expect(rpc('host','getCollaborationState').stickyNotes).toEqual([note]);
+  expect(JSON.parse(a.send.mock.lastCall![0]).params.stickyNotes).toEqual([note]);
+  expect(setup().rpc('host','getCollaborationState').stickyNotes).toEqual([]);
+  const hostNote=rpc('host','collaborationAction',action).stickyNotes[1];
+  expect(()=>rpc('member','collaborationAction',{type:'sticky:remove',id:hostNote.id,version:0})).toThrow('Host');
+  rpc('member','collaborationAction',{type:'sticky:update',id,version:0,text:'Updated',color:'blue'});
+  expect(()=>rpc('host','collaborationAction',{type:'sticky:remove',id,version:0})).toThrow('changed');
+  expect(rpc('host','getCollaborationState').stickyNotes[0]).toMatchObject({text:'Updated',color:'blue',version:1});
+  expect(rpc('host','collaborationAction',{type:'sticky:remove',id,version:1}).stickyNotes).toEqual([hostNote]);
+ });
  it('keeps attachment bytes out of snapshots and rejects unsafe/oversized files',()=>{const {rpc}=setup();const state=rpc('member','collaborationAction',{type:'file:add',name:'notes.txt',mime:'text/plain',data:Buffer.from('Hello').toString('base64')});expect(state.files[0].data).toBeUndefined();expect(rpc('host','getCollaborationFile',{id:state.files[0].id}).data).toBe(Buffer.from('Hello').toString('base64'));expect(()=>rpc('member','collaborationAction',{type:'file:add',name:'fake.png',mime:'image/png',data:Buffer.from('not png').toString('base64')})).toThrow('format');expect(()=>rpc('member','collaborationAction',{type:'file:add',name:'x.txt',mime:'text/plain',data:Buffer.from('<script>alert(1)</script>').toString('base64')})).toThrow('format');expect(()=>rpc('member','collaborationAction',{type:'file:add',name:'big.txt',mime:'text/plain',data:Buffer.alloc(32769,65).toString('base64')})).toThrow();});
  it('deduplicates question votes and separates rooms',()=>{const {rpc}=setup();let state=rpc('member','collaborationAction',{type:'question:ask',text:'When?'});const id=state.questions[0].id;rpc('member','collaborationAction',{type:'question:vote',id});state=rpc('member','collaborationAction',{type:'question:vote',id});expect(state.questions[0].voters).toEqual(['member']);expect(()=>rpc('member','collaborationAction',{type:'question:answer',id,answer:'Now'})).toThrow('Host');expect(setup().rpc('host','getCollaborationState').questions).toEqual([]);});
  it('hides poll results from participants until allowed, and never broadcasts them',()=>{

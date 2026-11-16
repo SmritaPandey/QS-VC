@@ -47,6 +47,11 @@ describe('meeting feature discoverability', () => {
         expect(html).not.toContain('Captions and language settings. Starter plan.');
         expect(html).toContain('Captions and language settings');
     });
+    it('names the compact leave control and exposes the captions plan in compact More', () => {
+        const html = controls({ signedIn: true, captionsLocked: true });
+        expect(html).toContain('aria-label="Leave meeting"');
+        expect(html).toContain('Turn on captions. Starter plan.');
+    });
     it('routes locked feature activation to access resolution without invoking the feature', () => {
         const activate = vi.fn(); const resolve = vi.fn();
         const button = RestrictedFeatureButton({ label: 'Backgrounds and effects', icon: 'background_replace', requirement: 'Sign in · Basic', onActivate: activate, onResolve: resolve });

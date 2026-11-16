@@ -92,8 +92,10 @@ async function main() {
     if (viteInUse) {
         log('Vite', 'Already running on port 5173');
     } else {
-        const vitePath = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
-        viteProc = startService('Vite', process.execPath, [vitePath, '--host', '0.0.0.0'], path.join(ROOT, 'frontend', 'web'));
+        const webDir = path.join(ROOT, 'frontend', 'web');
+        const vitePackage = require.resolve('vite/package.json', { paths: [webDir] });
+        const vitePath = path.join(path.dirname(vitePackage), 'bin', 'vite.js');
+        viteProc = startService('Vite', process.execPath, [vitePath, '--host', '0.0.0.0'], webDir);
     }
 
     console.log('');

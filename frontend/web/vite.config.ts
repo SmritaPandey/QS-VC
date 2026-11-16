@@ -1,10 +1,16 @@
-import { defineConfig } from 'vite';
+import { defineConfig, version } from 'vite';
 import react from '@vitejs/plugin-react';
 
 export default defineConfig({
     plugins: [react()],
+    // Keep optimized browser modules separate from other Vite versions in the monorepo.
+    cacheDir: `node_modules/.vite-web-${version}`,
+    resolve: {
+        dedupe: ['react', 'react-dom'],
+    },
     server: {
         port: 5173,
+        strictPort: true,
         host: '0.0.0.0',
         allowedHosts: true,
         proxy: {

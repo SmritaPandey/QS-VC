@@ -161,7 +161,7 @@ export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self
     };
 
     return (
-        <div className="side-panel participants-panel">
+        <div id="meeting-participants-panel" className="side-panel participants-panel">
             <div className="panel-header">
                 <h3>{webinar ? 'People' : 'Participants'} ({all.length})</h3>
                 <button className="panel-close" aria-label="Close participants" onClick={onClose}>

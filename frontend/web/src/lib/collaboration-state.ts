@@ -5,7 +5,10 @@ export interface MeetingPoll { id: string; question: string; options: string[]; 
 export const POLL_RESULT_LABELS: Record<PollResults, string> = { live: 'Everyone, as votes come in', afterClose: 'Everyone, after the poll closes', hosts: 'Only hosts and co-hosts' };
 export interface MeetingQuestion { id: string; text: string; authorId: string; authorName: string; voters: string[]; answer?: string }
 export interface MeetingFile { id: string; name: string; mime: string; size: number; authorId: string; authorName: string }
-export interface CollaborationState { revision: number; strokes: BoardStroke[]; notes: { text: string; version: number }; polls: MeetingPoll[]; questions: MeetingQuestion[]; files: MeetingFile[] }
+export const STICKY_COLORS = ['yellow', 'orange', 'blue', 'purple', 'pink'] as const;
+export type StickyColor = typeof STICKY_COLORS[number];
+export interface BoardStickyNote { id: string; authorId: string; authorName: string; text: string; color: StickyColor; version: number }
+export interface CollaborationState { revision: number; strokes: BoardStroke[]; stickyNotes?: BoardStickyNote[]; notes: { text: string; version: number }; polls: MeetingPoll[]; questions: MeetingQuestion[]; files: MeetingFile[] }
 export const EMPTY_COLLABORATION: CollaborationState = { revision: -1, strokes: [], notes: { text: '', version: 0 }, polls: [], questions: [], files: [] };
 export const MAX_SHARED_FILE_BYTES = 32 * 1024;
 export const SHARED_FILE_TYPES = ['image/png', 'image/jpeg', 'text/plain', 'application/pdf'];

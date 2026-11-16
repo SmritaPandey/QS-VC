@@ -1,4 +1,24 @@
-.meeting-room .meeting-collaboration { position:relative; display:flex; flex-direction:column; width:min(720px,65vw); min-width:0; height:100%; flex-shrink:0; border:1px solid #385063; border-radius:18px; background:#162331; color:#edf5fa; overflow:hidden; }
+/* Activities take the stage and the existing video area becomes the preview rail. */
+.meeting-room .meeting-content[data-activity-stage] {
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) clamp(152px, 20vw, 256px);
+}
+.meeting-content[data-activity-stage] > .video-area .caption-overlay { bottom:8px; }
+@media (max-width:767px) and (orientation:portrait) {
+  .meeting-room .meeting-content[data-activity-stage] {
+    grid-template-columns:minmax(0, 1fr);
+    grid-template-rows:minmax(0, 1fr) clamp(84px, 15dvh, 124px);
+  }
+}
+@media (max-height:520px) and (orientation:landscape) {
+  .meeting-room .meeting-content[data-activity-stage] {
+    grid-template-columns:minmax(0, 1fr) clamp(104px, 20vw, 156px);
+    padding-bottom:6px;
+  }
+  .meeting-content[data-activity-stage] .collaboration-header { padding-block:4px; }
+  .meeting-content[data-activity-stage] .collaboration-tabs { padding-block:4px; }
+}
+.meeting-room .meeting-collaboration { display:flex; flex-direction:column; min-width:0; min-height:0; border:1px solid #385063; border-radius:18px; background:#162331; color:#edf5fa; overflow:hidden; }
 .collaboration-header { display:flex; justify-content:space-between; align-items:center; gap:16px; padding:16px; border-bottom:1px solid #385063; }
 .collaboration-header h2 { margin:0; font-size:20px; font-weight:500; }
 .collaboration-header p { margin:4px 0 0; font-size:13px; color:#b5ced6; }
@@ -7,7 +27,7 @@
 .meeting-collaboration :focus-visible { outline:3px solid #75ecd7; outline-offset:3px; }
 .collaboration-tabs { display:flex; gap:8px; padding:12px 16px; overflow-x:auto; flex-shrink:0; border-bottom:1px solid #385063; }
 .collaboration-tabs button { display:flex; align-items:center; justify-content:center; gap:6px; white-space:nowrap; }
-.collaboration-tabs button[aria-pressed=true] { border-color:#75ecd7; background:#16473f; color:#a6f2e4; }
+.collaboration-tabs button[aria-selected=true] { border-color:#75ecd7; background:#16473f; color:#a6f2e4; }
 .collaboration-tabs .mi { font-size:20px; }
 .collaboration-content { min-height:0; flex:1; overflow:auto; padding:16px; overscroll-behavior:contain; }
 .collaboration-workspace { min-width:0; border:0; padding:0; margin:0; }
@@ -22,7 +42,7 @@
 .collaboration-board-tools label { display:flex; align-items:center; gap:8px; font-size:13px; }
 .collaboration-board-tools [aria-pressed=true] { outline:2px solid #75ecd7; outline-offset:1px; }
 .collaboration-board-tools>div button { background:#fff; font-size:24px; padding:0; width:44px; }
-.collaboration-board { display:block; width:100%; aspect-ratio:1000/650; border-radius:10px; background:#fff; touch-action:none; user-select:none; }
+.collaboration-board { display:block; width:min(100%, 1000px); margin-inline:auto; aspect-ratio:1000/650; border-radius:10px; background:#fff; touch-action:none; user-select:none; }
 .collaboration-hint { margin:8px 0 12px; color:#b5ced6; }
 .collaboration-card { padding:16px; border:1px solid #385063; border-radius:12px; margin-bottom:16px; }
 .collaboration-card>fieldset { min-width:0; padding:0; border:0; margin:0 0 12px; }
@@ -39,23 +59,21 @@
 .collaboration-files li>div { display:grid; gap:4px; flex:1; min-width:100px; overflow-wrap:anywhere; }
 .collaboration-files small { color:#b5ced6; }
 .collaboration-sr { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
-@media(max-width:1000px) { .meeting-room .meeting-collaboration { position:absolute; z-index:36; inset:80px 12px calc(104px + env(safe-area-inset-bottom)); width:auto; height:auto; } }
-@media(max-width:767px) { .meeting-room:has(.meeting-collaboration) .controls-left { display:none; } .meeting-collaboration p,.collaboration-form label { font-size:16px; } }
+@media(max-width:767px) { .meeting-collaboration p,.collaboration-form label { font-size:16px; } }
 @media(max-width:420px) { .collaboration-header,.collaboration-content { padding:12px; } .collaboration-tabs { padding:12px; } .collaboration-tabs button { padding:8px; } }
-@media(max-height:480px) and (max-width:1000px) { .meeting-room .meeting-collaboration { top:8px; bottom:calc(84px + env(safe-area-inset-bottom)); } }
 @media(prefers-reduced-motion:reduce) { .meeting-collaboration * { scroll-behavior:auto; animation:none; transition:none; } }
 
 /* ── Activities panel polish (2026-11-04) ─────────────────────────────── */
 .collaboration-header { padding:16px 16px 14px 20px; }
 .collaboration-header h2 { font-size:18px; }
-.meeting-collaboration .collaboration-close { width:40px; min-height:40px; height:40px; padding:0; display:grid; place-items:center; border-radius:50%; border-color:transparent; background:transparent; }
+.meeting-collaboration .collaboration-close { flex:none; width:44px; min-height:44px; height:44px; padding:0; display:grid; place-items:center; border-radius:50%; border-color:transparent; background:transparent; }
 .meeting-collaboration .collaboration-close:hover { background:#233746; }
 /* Tabs: one quiet segmented row instead of five heavy boxes */
 .collaboration-tabs { gap:4px; padding:10px 16px; scrollbar-width:none; }
 .collaboration-tabs::-webkit-scrollbar { display:none; }
-.meeting-collaboration .collaboration-tabs button { min-height:38px; padding:6px 14px; border:1px solid transparent; border-radius:999px; background:transparent; color:#b5ced6; font-size:14px; font-weight:500; transition:background 150ms ease,color 150ms ease; }
+.meeting-collaboration .collaboration-tabs button { min-height:44px; padding:6px 14px; border:1px solid transparent; border-radius:999px; background:transparent; color:#b5ced6; font-size:14px; font-weight:500; transition:background 150ms ease,color 150ms ease; }
 .meeting-collaboration .collaboration-tabs button:hover { background:#1e3040; color:#edf5fa; }
-.meeting-collaboration .collaboration-tabs button[aria-pressed=true] { background:#16473f; border-color:#43d9c255; color:#a6f2e4; }
+.meeting-collaboration .collaboration-tabs button[aria-selected=true] { background:#16473f; border-color:#43d9c255; color:#a6f2e4; }
 .collaboration-tabs .mi { font-size:18px; }
 .collaboration-content { padding:20px; }
 /* Files: drop zone */
@@ -89,3 +107,43 @@
 @media(prefers-reduced-motion:reduce) { .collaboration-dropzone[data-busy] .collaboration-dropzone-icon { animation:none; } }
 .collaboration-dropzone:not([data-busy]) { cursor:pointer; } .collaboration-dropzone:not([data-busy]):hover { border-color:#6b8a9c; }
 .collaboration-poll-visibility { display:flex; align-items:center; gap:6px; margin:-4px 0 10px; color:#91aab8; font-size:13px !important; } .collaboration-poll-visibility .mi { font-size:16px; }
+
+.whiteboard-modes { display:flex; gap:6px; margin-bottom:12px; }
+.whiteboard-modes button,
+.sticky-board-header button { display:inline-flex; align-items:center; justify-content:center; gap:6px; }
+.whiteboard-modes button[aria-pressed=true],
+.sticky-board-header button,
+.sticky-editor-actions button[type=submit] { background:#16473f; border-color:#538b7d; color:#d4fff6; }
+.whiteboard-modes .mi, .sticky-board-header .mi { font-size:19px; }
+
+.sticky-board {
+  padding:clamp(12px, 2vw, 24px);
+  min-height:240px;
+  border-radius:12px;
+  color:#18232d;
+  background:#f7f8fa;
+}
+.sticky-board-header { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:12px; }
+.meeting-collaboration .sticky-board-header h3 { margin:0; font-size:20px; }
+.sticky-board .sticky-empty { margin:0; color:#445360; }
+.sticky-editor { display:grid; grid-template-columns:minmax(0, 1fr) auto; gap:10px; padding:12px; margin-bottom:16px; border-radius:10px; background:#e7edf1; }
+.sticky-editor label { display:grid; align-content:start; gap:6px; font-size:14px; }
+.meeting-collaboration .sticky-editor :is(textarea,select) { background:#fff; color:#18232d; border-color:#718291; }
+.sticky-editor > p, .sticky-editor-actions { grid-column:1 / -1; margin:0; }
+.sticky-editor-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.sticky-group + .sticky-group { margin-top:18px; }
+.sticky-group h4 { margin:0 0 8px; font-size:15px; font-weight:600; overflow-wrap:anywhere; }
+.sticky-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(min(100%, 136px), 1fr)); list-style:none; padding:0; margin:0; gap:8px; }
+.sticky-card { display:flex; flex-direction:column; justify-content:space-between; min-width:0; min-height:128px; padding:10px; border-radius:8px; background:#ffe478; }
+.sticky-card[data-color=orange] { background:#ffca90; }
+.sticky-card[data-color=blue] { background:#a8ddf6; }
+.sticky-card[data-color=purple] { background:#d4c5ff; }
+.sticky-card[data-color=pink] { background:#ffc4e2; }
+.sticky-card p { margin:0; white-space:pre-wrap; }
+.sticky-card-actions { display:flex; justify-content:flex-end; gap:4px; }
+.meeting-collaboration .sticky-card-actions button { width:44px; padding:0; color:#18232d; background:transparent; border-color:transparent; }
+.meeting-collaboration .sticky-card-actions button:hover { background:#18232d14; }
+.meeting-collaboration .sticky-board :focus-visible { outline-color:#155a55; }
+@media (max-width:420px) {
+  .sticky-editor { grid-template-columns:minmax(0, 1fr); }
+}

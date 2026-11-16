@@ -4581,57 +4581,6 @@ label {
   .meeting-room .controls-left, .meeting-room .controls-center, .meeting-room .controls-right { gap: 8px; }
 }
 
-/* Toggle feedback: a switch flashes over the icon on click, slides to the new state, then fades. */
-.ctrl-toggle .ctrl-icon { transition: opacity 120ms ease, transform 160ms ease; }
-.ctrl-toggle.is-flashing .ctrl-icon { opacity: 0; transform: scale(.8); }
-.ctrl-switch-flash {
-  position: absolute;
-  top: 9px;
-  left: 50%;
-  width: 34px;
-  height: 20px;
-  margin-left: -17px;
-  border-radius: 20px;
-  background: #101b27;
-  box-shadow: inset 2px 2px 4px rgba(0,0,0,.7), inset -1px -1px 2px rgba(255,255,255,.06);
-  pointer-events: none;
-  animation: ctrlSwitchFlash 900ms ease forwards;
-}
-.ctrl-switch-flash i {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 14px;
-  height: 14px;
-  border-radius: 50%;
-  background: linear-gradient(145deg, #d9e6ef, #9fb3c2);
-  box-shadow: 1px 1px 3px rgba(0,0,0,.5);
-}
-.ctrl-switch-flash.to-on i { animation: ctrlKnobOn 900ms cubic-bezier(.3,1.4,.5,1) forwards; }
-.ctrl-switch-flash.to-off i { animation: ctrlKnobOff 900ms cubic-bezier(.3,1.4,.5,1) forwards; }
-.ctrl-switch-flash.to-on { animation-name: ctrlSwitchFlash, ctrlTrackOn; }
-.ctrl-toggle.tone-danger .ctrl-switch-flash.to-off { animation-name: ctrlSwitchFlash, ctrlTrackDanger; }
-@keyframes ctrlSwitchFlash {
-  0%   { opacity: 0; transform: scale(.7); }
-  14%  { opacity: 1; transform: scale(1); }
-  72%  { opacity: 1; transform: scale(1); }
-  100% { opacity: 0; transform: scale(.85); }
-}
-@keyframes ctrlKnobOn {
-  0%, 18% { transform: translateX(0); }
-  48%, 100% { transform: translateX(14px); background: #43d9c2; }
-}
-@keyframes ctrlKnobOff {
-  0%, 18% { transform: translateX(14px); }
-  48%, 100% { transform: translateX(0); }
-}
-@keyframes ctrlTrackOn { 0%, 30% { background: #101b27; } 50%, 100% { background: #0f3a37; } }
-@keyframes ctrlTrackDanger { 0%, 30% { background: #101b27; } 50%, 100% { background: #3d1621; } }
-@media (prefers-reduced-motion: reduce), (prefers-reduced-data: reduce), (update: slow) {
-  .ctrl-switch-flash { display: none; }
-  .ctrl-toggle.is-flashing .ctrl-icon { opacity: 1; transform: none; }
-}
-
 /* Meeting controls, refined: compact icon buttons, quiet neumorphism, labels as tooltips. */
 .meeting-room {
   --neu-shadow: 3px 3px 8px rgba(3,8,15,.5), -2px -2px 6px rgba(255,255,255,.035);
@@ -4640,6 +4589,7 @@ label {
 }
 .meeting-room .control-bar { padding: 12px 20px max(12px, env(safe-area-inset-bottom)); gap: 12px; }
 .meeting-room .controls-left, .meeting-room .controls-center, .meeting-room .controls-right { gap: 10px; }
+.meeting-room .controls-center { overflow: visible; }
 .meeting-room .ctrl-btn,
 .meeting-room .ctrl-toggle {
   position: relative;
@@ -4705,41 +4655,11 @@ label {
   background: #0f2a2a;
   color: #75ecd7;
 }
-/* switch flash sized for the compact button, centred over the icon */
-.meeting-room .ctrl-switch-flash { top: 50%; width: 30px; height: 18px; margin: -9px 0 0 -15px; }
-.meeting-room .ctrl-switch-flash i { width: 12px; height: 12px; }
-@keyframes ctrlKnobOn { 0%, 18% { transform: translateX(0); } 48%, 100% { transform: translateX(12px); background: #43d9c2; } }
-@keyframes ctrlKnobOff { 0%, 18% { transform: translateX(12px); } 48%, 100% { transform: translateX(0); } }
-.meeting-room .ctrl-toggle.is-flashing .ctrl-badge { opacity: 0; }
 /* reaction tray, slimmer */
 .meeting-room .reaction-picker { padding: 6px; gap: 6px; }
 .meeting-room .reaction-picker .reaction-pick-btn { width: 40px; height: 40px; font-size: 22px; }
-@media (max-width: 767px) {
-  .meeting-room .control-bar {
-    position: relative;
-    width: 100%;
-    max-width: none;
-    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
-    gap: 4px;
-    border-radius: 0;
-  }
-  .meeting-room .controls-left, .meeting-room .controls-center, .meeting-room .controls-right { gap: 4px; }
-  .meeting-room .controls-center {
-    flex: 1;
-    min-width: 0;
-    overflow-x: auto;
-    scrollbar-width: none;
-  }
-  .meeting-room .controls-center::-webkit-scrollbar { display: none; }
-  .meeting-room .ctrl-btn, .meeting-room .ctrl-toggle { width: 40px; min-width: 40px; height: 40px; min-height: 40px; flex-shrink: 0; }
-  .meeting-room .ctrl-btn.leave-btn { width: 46px; min-width: 46px; }
-  .meeting-room .ctrl-btn[data-tip]::after { display: none; }
-  .meeting-room .meeting-content { padding-bottom: 8px; }
-}
-
 /* Extra controls keep layout choices together without unmounting participant audio. */
 .video-grid[data-view='focus'] > .video-tile:not(:first-child) { display: none; }
-.control-extra-inline { display: contents; }
 .controls-more { position: relative; }
 .meeting-more-panel {
   position: absolute;
@@ -4775,9 +4695,7 @@ label {
 .meeting-more-panel button[aria-pressed='true'] { color: #75ecd7; border-color: #438e86; background: #0f3a37; }
 .meeting-more-mobile-actions { display: none; }
 @media (max-width: 767px) {
-  .meeting-room .control-extra-inline { display: none; }
   .meeting-room .controls-more { position: static; }
-  .meeting-more-mobile-actions { display: grid; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid #385063; }
   .meeting-room .ai-fab { right: auto; left: 16px; }
   .meeting-room .language-picker { z-index: 45; }
 }
@@ -4804,8 +4722,6 @@ label {
 .status-icon.is-off { color: #ff8fa3; }
 .status-icon.is-hand { color: #f0ce79; }
 @media (max-width: 767px) { .meeting-notice { top: 68px; } }
-
-@media (prefers-reduced-motion: reduce) { .meeting-room .controls-left { transition: none; } }
 
 /* Views change only visual placement; participant audio stays connected. */
 .video-grid[data-view='sidebar'] {

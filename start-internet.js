@@ -198,8 +198,10 @@ async function main() {
         log('Vite', `Already running on port ${WEB_PORT}`);
     } else {
         log('Vite', 'Starting Vite dev server...');
-        const vitePath = path.join(ROOT, 'node_modules', 'vite', 'bin', 'vite.js');
-        const viteProc = startService('Vite', process.execPath, [vitePath, '--host', '0.0.0.0'], path.join(ROOT, 'frontend', 'web'));
+        const webDir = path.join(ROOT, 'frontend', 'web');
+        const vitePackage = require.resolve('vite/package.json', { paths: [webDir] });
+        const vitePath = path.join(path.dirname(vitePackage), 'bin', 'vite.js');
+        const viteProc = startService('Vite', process.execPath, [vitePath, '--host', '0.0.0.0'], webDir);
         procs.push(viteProc);
     }
 

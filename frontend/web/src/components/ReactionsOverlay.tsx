@@ -44,7 +44,6 @@ export default function ReactionsOverlay({ reactions, pickerOpen, onSendReaction
         const onKey = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
                 onClosePicker();
-                document.querySelector<HTMLButtonElement>('[aria-controls="reaction-picker"]')?.focus();
                 return;
             }
             if (!picker || !picker.contains(document.activeElement)) return;

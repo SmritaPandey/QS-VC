@@ -312,7 +312,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [connected, setConnected] = useState(false);
     const [pageVisible, setPageVisible] = useState(!document.hidden);
     const [mutedSpeechNotice, setMutedSpeechNotice] = useState(false);
-    const [mutedSpeechPulse, setMutedSpeechPulse] = useState(0);
     const mutedSpeechTimer = useRef<number>();
     const [duration, setDuration] = useState(0);
     const [handRaised, setHandRaised] = useState(false);
@@ -1456,7 +1455,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         const stop = watchMutedSpeech(track, () => {
             if (!sessionActive.current || !audioMutedRef.current || document.hidden) return;
             setMutedSpeechNotice(true);
-            setMutedSpeechPulse(pulse => pulse + 1);
             window.clearTimeout(mutedSpeechTimer.current);
             mutedSpeechTimer.current = window.setTimeout(() => setMutedSpeechNotice(false), 5000);
         });
@@ -1634,6 +1632,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         if (!sharingRef.current && !roomSettings.allowScreenShare) { showNotice('Screen sharing is disabled by the host.'); return; }
         if (sharingRef.current) {
             stopScreenShare();
+        } else if (typeof navigator.mediaDevices?.getDisplayMedia !== 'function') {
+            showNotice('Screen sharing isn’t available in this browser.');
         } else {
             setShareScreenModalOpen(true);
         }
@@ -1746,11 +1746,19 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [displayName, showNotice]);
     const expireReaction = useCallback((id: string) => setReactions((prev) => prev.filter((r) => r.id !== id)), []);
-    const closeReactions = useCallback(() => setReactionsOpen(false), []);
+    const focusMeetingControl = useCallback((panelId: string) => {
+        const controls = roomRef.current?.querySelectorAll<HTMLButtonElement>(`[aria-controls="${panelId}"]`);
+        const visibleTrigger = controls && Array.from(controls).find(button => button.getClientRects().length && !button.closest('.meeting-more-panel'));
+        (visibleTrigger || roomRef.current?.querySelector<HTMLButtonElement>('[aria-controls="meeting-more-controls"]'))?.focus();
+    }, []);
+    const closeReactions = useCallback(() => {
+        setReactionsOpen(false);
+        focusMeetingControl('reaction-picker');
+    }, [focusMeetingControl]);
     const closeLanguage = useCallback(() => {
         setLanguageOpen(false);
-        document.querySelector<HTMLButtonElement>('[aria-controls="meeting-language-settings"]')?.focus();
-    }, []);
+        focusMeetingControl('meeting-language-settings');
+    }, [focusMeetingControl]);
     const chooseLanguage = useCallback((code: string) => {
         setMeetingLanguage(code);
         setSpeechLanguage({ code, source: 'saved' });
@@ -1797,8 +1805,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     }, [roomSettings.allowChat, myRole, e2eeEnabled, connected, showNotice]);
     const closeChat = useCallback(() => {
         setChatOpen(false);
-        document.querySelector<HTMLButtonElement>('[aria-controls="meeting-chat-panel"]')?.focus();
-    }, []);
+        focusMeetingControl('meeting-chat-panel');
+    }, [focusMeetingControl]);
 
     const formatDuration = (s: number) => {
         const h = Math.floor(s / 3600);
@@ -1929,6 +1937,17 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     const effectPreview = useMemo(() => processedTrack ? new MediaStream([processedTrack]) : localStream, [processedTrack, localStream]);
 
+    const closePanels = useCallback(() => {
+        setChatOpen(false);
+        setParticipantsOpen(false);
+        setActivitiesOpen(false);
+        setHostToolsOpen(false);
+        setEffectsOpen(false);
+        setBreakoutsOpen(false);
+        setLanguageOpen(false);
+        setReactionsOpen(false);
+        setInformationOpen(false);
+    }, []);
     // ── Captions (CC button) ──
     const toggleCaptions = useCallback(() => {
         if (captionsOn) { setCaptionsOn(false); setShareSpeech(false); stopSpeechRecognition.current(); return; }
@@ -1941,14 +1960,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         const supported = SpeechToTextEngine.isSupported() || ServerSpeechEngine.isSupported();
         if (!canPublishRef.current) { showNotice('Captions are on. You’ll see what the speakers say.'); return; }
         if (supported && hasCaptionConsent() && !ServerSpeechEngine.isSupported()) { setShareSpeech(true); showNotice('Captions are on, including your own speech.'); }
-        else if (supported) { setLanguageOpen(true); setReactionsOpen(false); showNotice('Captions are on. To let others read what you say, turn on “Share my speech as captions”.'); }
+        else if (supported) { closePanels(); setLanguageOpen(true); showNotice('Captions are on. To let others read what you say, turn on “Share my speech as captions”.'); }
         else showNotice('Captions are on. This browser can’t caption your own speech, but you’ll see what others say.');
-    }, [captionsOn, showNotice, signedIn, guestCaptionLanguage, e2eeActive]);
-    const closePanels = useCallback(() => {
-        setChatOpen(false); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); setBreakoutsOpen(false);
-    }, []);
+    }, [captionsOn, showNotice, signedIn, guestCaptionLanguage, e2eeActive, closePanels]);
     const openInformation = useCallback(() => {
-        closePanels(); setLanguageOpen(false); setReactionsOpen(false); setInformationOpen(true);
+        closePanels(); setInformationOpen(true);
     }, [closePanels]);
 
     useEffect(() => {
@@ -2009,7 +2025,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         };
     }, [connected, restoring, myRole, peers.size, webinar, screenSharing, captionsOn, effect, effectStatus, notice, cameraNotice]);
 
-    const sidePanelOpen = chatOpen || participantsOpen || activitiesOpen || hostToolsOpen || effectsOpen;
+    const activityOnStage = activitiesOpen && !e2eeEnabled;
+    const sidePanelOpen = chatOpen || participantsOpen || hostToolsOpen || effectsOpen;
     const manager = myRole === 'host' || myRole === 'co-host';
     const closeActivityPanel = () => { setActivitiesOpen(false); setHostToolsOpen(false); document.querySelector<HTMLButtonElement>('[aria-label="More controls"]')?.focus(); };
     if (waitingAdmission) return <WaitingAdmission mode={waitingAdmission} meetingCode={meetingCode || ''} onLeave={handleLeave} />;
@@ -2079,7 +2096,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 {knocks.length === 1 ? <>
                     <button type="button" className="btn-text" onClick={() => answerKnock(knocks[0].peerId, false)}>Deny</button>
                     <button type="button" className="btn-outline" onClick={() => answerKnock(knocks[0].peerId, true)}>Admit</button>
-                </> : <button type="button" className="btn-outline" onClick={() => { setHostToolsOpen(true); setActivitiesOpen(false); setChatOpen(false); setParticipantsOpen(false); }}>View all</button>}
+                </> : <button type="button" className="btn-outline" onClick={() => { closePanels(); setHostToolsOpen(true); }}>View all</button>}
             </div>}
             {(cameraNotice || notice) && <MeetingToast key={`${cameraNotice || notice}:${noticeRevision}`} onDismiss={dismissNotice}>
                 <span>{notice || cameraNotice}</span>
@@ -2110,13 +2127,13 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 </div>
             )}
 
-            <div className="meeting-content">
+            <div className="meeting-content" data-activity-stage={activityOnStage || undefined}>
+                {!e2eeEnabled && <MeetingCollaboration key={`${meetingCode}:${roomJoinEpoch}`} open={activitiesOpen} connected={connected} role={myRole} myPeerId={myPeerIdRef.current} onClose={closeActivityPanel} />}
                 <div ref={videoAreaRef} className={`video-area ${sidePanelOpen ? 'with-panel' : ''}`}>
                     {incomingChatMessage && !chatOpen && <div className="meeting-chat-flash">
                         <MeetingToast key={incomingChatMessage.id} onDismiss={dismissChatFlash}>
                             <button type="button" className="meeting-chat-flash-open" onClick={() => {
-                                dismissChatFlash(); setChatOpen(true); setParticipantsOpen(false);
-                                setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false);
+                                dismissChatFlash(); closePanels(); setChatOpen(true);
                             }} aria-label={`Open chat from ${incomingChatMessage.displayName}: ${incomingChatMessage.content.slice(0, 160)}`}>
                                 <span className="meeting-chat-flash-sender">{incomingChatMessage.displayName}</span>
                                 <span className="meeting-chat-flash-text">{incomingChatMessage.content}</span>
@@ -2124,7 +2141,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         </MeetingToast>
                     </div>}
                     <VideoGrid localStream={displayedLocalStream} localCameraTracks={Object.fromEntries(additionalCameras.map(camera => [camera.source, camera.track]))} siteLocation={state.siteLocation} userId={session.profile?.id} localScreenTrack={screenStream?.getVideoTracks()[0]} myPeerId={myPeerIdRef.current} myRole={myRole} myOnStage={myOnStage} peers={peers} displayName={displayName} videoOff={videoOff} audioMuted={audioMuted} handRaised={handRaised} sharing={screenSharing}
-                        viewMode={viewMode} tilesPerPage={tilesPerPage} webinar={webinar} speaking={speaking} activeSpeaker={activeSpeaker} spotlightId={spotlightId} pinnedId={pinnedId}
+                        viewMode={activityOnStage ? 'tiled' : viewMode} tilesPerPage={activityOnStage ? 4 : tilesPerPage} webinar={webinar} speaking={speaking} activeSpeaker={activeSpeaker} spotlightId={spotlightId} pinnedId={pinnedId}
                         canManage={manager} onPin={setPinnedId} onSpotlight={setSpotlightFor} onToggleStage={setStageFor} />
                     <RemoteAudio peers={peers} volume={privateConversation ? focusPrivateAudio ? 0 : 0.24 : translatedSpeaking ? 0.2 : 1} outputDeviceId={audioOutputId} onOutputError={reportAudioOutputError} />
                     {privateAudioTrack && <PrivateAudioPlayback track={privateAudioTrack} outputDeviceId={audioOutputId} onOutputError={reportAudioOutputError} />}
@@ -2147,9 +2164,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         canStartPrivateConversation={signedIn && manager && connected && (isPlatformAdmin || !entitlements.loading)} privateConversationLimitLabel={privateConversationLimitLabel}
                         privateConversationPeerId={privateConversation?.otherPeerId || privateInvite?.otherPeerId || null}
                         privateConversationStatus={privateConversation ? 'active' : privateInvite?.direction === 'outgoing' ? 'outgoing' : 'idle'}
-                        onTransferHost={async peerId => { await signaling.request('transferHost', { targetPeerId: peerId }); }} onStartPrivateConversation={startPrivateConversation} onClose={() => setParticipantsOpen(false)} />
+                        onTransferHost={async peerId => { await signaling.request('transferHost', { targetPeerId: peerId }); }} onStartPrivateConversation={startPrivateConversation} onClose={() => { setParticipantsOpen(false); focusMeetingControl('meeting-participants-panel'); }} />
                 )}
-                {e2eeEnabled ? activitiesOpen && <section className="side-panel"><div className="panel-header"><h3>Shared activities</h3><button type="button" className="panel-close" aria-label="Close shared activities" onClick={closeActivityPanel}><span className="mi" aria-hidden="true">close</span></button></div><p style={{ padding: 16 }}>Whiteboards, notes, files, polls and Q&amp;A are unavailable in end-to-end encrypted meetings until encrypted collaboration is supported. You can use encrypted meeting chat.</p></section> : <MeetingCollaboration key={`${meetingCode}:${roomJoinEpoch}`} open={activitiesOpen} connected={connected} role={myRole} myPeerId={myPeerIdRef.current} onClose={closeActivityPanel} />}
+                {e2eeEnabled && activitiesOpen && <section className="side-panel" id="meeting-activities"><div className="panel-header"><h3>Shared activities</h3><button type="button" className="panel-close" aria-label="Close shared activities" onClick={closeActivityPanel}><span className="mi" aria-hidden="true">close</span></button></div><p style={{ padding: 16 }}>Whiteboards, notes, files, polls and Q&amp;A are unavailable in end-to-end encrypted meetings until encrypted collaboration is supported. You can use encrypted meeting chat.</p></section>}
                 {effectsOpen && <BackgroundEffects effect={effect} onChange={chooseEffect} preview={effectPreview} cameraOn={!videoOff && !!localStream?.getVideoTracks().some(t => t.readyState === 'live')}
                     status={effectStatus} error={effectError} onStartCamera={handleToggleVideo} onClose={() => setEffectsOpen(false)} />}
                 {hostToolsOpen && manager && <HostMeetingTools roomDevicesEnabled={roomDevicesEnabled && !webinar && Boolean(getToken())} role={myRole} myPeerId={myPeerIdRef.current} participants={[{ peerId: myPeerIdRef.current, displayName, role: myRole, audioMuted, videoOff, handRaised }, ...Array.from(peers.values()).map(peer => ({ ...peer, role: peer.role || 'member', videoOff: peer.videoOff ?? !peer.videoTrack }))]} settings={roomSettings} onClose={closeActivityPanel} onEndMeeting={() => setLeaveOpen(true)} />}
@@ -2165,7 +2182,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 onOpenQuality={() => { closePanels(); setQualityOpen(true); }} onOpenMultiCamera={() => { closePanels(); setMultiCameraOpen(true); }} onRecordLocally={() => { void handleToggleRecording('local'); }}
                 featureMinimumPlans={entitlements.featureMinimumPlans} onExplainAccess={showNotice}
                 pictureInPicture={pictureInPictureOpen} onTogglePictureInPicture={() => { void pictureInPictureRef.current?.toggle(); }}
-                assistant={signedIn ? <AIChatBot onOpen={() => { setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen || informationOpen} /> : undefined}
+                assistant={signedIn ? <AIChatBot onOpen={closePanels} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen || informationOpen || languageOpen || reactionsOpen || effectsOpen || breakoutsOpen} /> : undefined}
                 signedIn={signedIn}
                 captionsLocked={signedIn && !isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_captions'))}
                 effectsLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'background_effects'))}
@@ -2175,25 +2192,25 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 onRequirePlanFeature={requestPlanFeature}
                 onSignInForExtras={() => window.dispatchEvent(new CustomEvent('qsvc:upgrade-required', { detail: { requiredPlan: 'starter', returnTo: `${location.pathname}${location.search}${location.hash}` } }))}
                 activitiesOpen={activitiesOpen} hostToolsOpen={hostToolsOpen}
-                onToggleActivities={() => { setActivitiesOpen(value => !value); setHostToolsOpen(false); setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); setEffectsOpen(false); }}
-                onToggleHostTools={manager ? () => { setHostToolsOpen(value => !value); setActivitiesOpen(false); setChatOpen(false); setParticipantsOpen(false); setLanguageOpen(false); setReactionsOpen(false); } : undefined}
-                viewMode={viewMode} onChangeView={changeView} tilesPerPage={tilesPerPage} onChangeTilesPerPage={changeTiles} activitySignal={mutedSpeechPulse} keepSideVisible={mutedSpeechNotice}
+                onToggleActivities={() => { closePanels(); setActivitiesOpen(!activitiesOpen); }}
+                onToggleHostTools={manager ? () => { closePanels(); setHostToolsOpen(!hostToolsOpen); } : undefined}
+                viewMode={viewMode} onChangeView={changeView} tilesPerPage={tilesPerPage} onChangeTilesPerPage={changeTiles}
                 audioOutputId={audioOutputId} audioOutputDevices={audioOutputDevices} audioOutputSupported={audioOutputSupported}
                 onAudioOutputChange={setAudioOutputId} onChooseAudioOutput={audioOutputPickerSupported ? chooseAudioOutput : undefined}
                 captionsOn={captionsOn} onToggleCaptions={toggleCaptions}
                 fullscreen={isFullscreen} onToggleFullscreen={toggleFullscreen}
-                effectsOn={effect.kind !== 'none'} onOpenEffects={() => { closePanels(); setEffectsOpen(true); setLanguageOpen(false); setReactionsOpen(false); }}
+                effectsOn={effect.kind !== 'none'} onOpenEffects={() => { closePanels(); setEffectsOpen(true); }}
                 onReportProblem={() => setReportOpen(true)}
                 audioMuted={audioMuted} videoOff={videoOff} screenSharing={screenSharing}
                 isRecording={isRecording} canRecord={myRole === 'host' && !!getToken()} recordingLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'cloud_recording'))} chatOpen={chatOpen} participantsOpen={participantsOpen}
                 handRaised={handRaised} reactionsOpen={reactionsOpen}
-                onToggleReactions={() => { setReactionsOpen((open) => !open); setLanguageOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); }}
+                onToggleReactions={() => { closePanels(); setReactionsOpen(!reactionsOpen); }}
                 languageOpen={languageOpen} languageLabel={findLanguage(signedIn ? speechLanguage.code : guestCaptionLanguage)?.name} languageCode={(signedIn ? speechLanguage.code : guestCaptionLanguage).split('-')[0].toUpperCase()}
-                onToggleLanguage={signedIn ? () => { setLanguageOpen((open) => !open); setReactionsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); } : undefined}
+                onToggleLanguage={signedIn ? () => { closePanels(); setLanguageOpen(!languageOpen); } : undefined}
                 onToggleAudio={handleToggleAudio} onToggleVideo={handleToggleVideo}
                 onToggleScreen={handleScreenShare} onOpenInvite={() => setInviteModalOpen(true)} onToggleRecording={handleToggleRecording}
-                onToggleChat={() => { if (!roomSettings.allowChat && !manager) { showNotice('Chat is disabled by the host.'); return; } setIncomingChatMessage(null); setChatOpen(!chatOpen); setParticipantsOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); }}
-                onToggleParticipants={() => { setParticipantsOpen(!participantsOpen); setChatOpen(false); setActivitiesOpen(false); setHostToolsOpen(false); setEffectsOpen(false); }}
+                onToggleChat={() => { if (!roomSettings.allowChat && !manager) { showNotice('Chat is disabled by the host.'); return; } setIncomingChatMessage(null); closePanels(); setChatOpen(!chatOpen); }}
+                onToggleParticipants={() => { closePanels(); setParticipantsOpen(!participantsOpen); }}
                 onRaiseHand={handleRaiseHand} onLeave={requestLeave}
             />
             <MeetingInformation open={informationOpen} meetingCode={meetingCode || ''} joinUrl={`${window.location.origin}${meetingPreviewPath}`} meetingTitle={meetingTitle} onClose={() => setInformationOpen(false)} />

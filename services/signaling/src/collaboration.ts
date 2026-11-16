@@ -8,13 +8,18 @@ type PollResults = 'live'|'afterClose'|'hosts';
 interface Poll { id:string; question:string; options:string[]; votes:Record<string,number>; closed:boolean; results:PollResults; anonymous:boolean }
 interface Question { id:string; text:string; authorId:string; authorName:string; voters:string[]; answer:string }
 interface FileEntry { id:string; name:string; mime:string; size:number; authorId:string; authorName:string; data:string }
-interface State { revision:number; strokes:Stroke[]; notes:{text:string;version:number}; polls:Poll[]; questions:Question[]; files:FileEntry[]; rates:Map<string,{at:number;count:number}> }
+const stickyColors = ['yellow', 'orange', 'blue', 'purple', 'pink'] as const;
+interface StickyNote { id:string; authorId:string; authorName:string; text:string; color:typeof stickyColors[number]; version:number }
+interface State { revision:number; strokes:Stroke[]; stickyNotes:StickyNote[]; notes:{text:string;version:number}; polls:Poll[]; questions:Question[]; files:FileEntry[]; rates:Map<string,{at:number;count:number}> }
 const states = new WeakMap<RoomState,State>();
 const idSchema=z.string().uuid();
 const text=(max:number)=>z.string().trim().min(1).max(max);
 const schemas = z.discriminatedUnion('type',[
  z.object({type:z.literal('stroke:add'),points:z.array(z.object({x:z.number().min(0).max(1),y:z.number().min(0).max(1)})).min(2).max(1000),color:z.string().regex(/^#[0-9a-fA-F]{6}$/),width:z.number().min(1).max(12)}),
  z.object({type:z.literal('stroke:undo'),id:idSchema}),z.object({type:z.literal('board:clear')}),
+ z.object({type:z.literal('sticky:add'),text:text(240),color:z.enum(stickyColors)}),
+ z.object({type:z.literal('sticky:update'),id:idSchema,text:text(240),color:z.enum(stickyColors),version:z.number().int().nonnegative()}),
+ z.object({type:z.literal('sticky:remove'),id:idSchema,version:z.number().int().nonnegative()}),
  z.object({type:z.literal('notes:update'),text:z.string().max(20000),version:z.number().int().nonnegative()}),
  z.object({type:z.literal('poll:create'),question:text(300),options:z.array(text(120)).min(2).max(6),results:z.enum(['live','afterClose','hosts']).default('live')}),
  z.object({type:z.literal('poll:vote'),id:idSchema,option:z.number().int().nonnegative()}),z.object({type:z.literal('poll:close'),id:idSchema}),
@@ -27,7 +32,7 @@ function context(ws:any,roomId:string,peerId:string) {
  const room=roomManager.getRoom(roomId); const peer=room?.peers.get(peerId);
  if(!room||!peer||peer.ws!==ws) fail('Not joined a room');
  let state=states.get(room);
- if(!state){state={revision:0,strokes:[],notes:{text:'',version:0},polls:[],questions:[],files:[],rates:new Map()};states.set(room,state);}
+ if(!state){state={revision:0,strokes:[],stickyNotes:[],notes:{text:'',version:0},polls:[],questions:[],files:[],rates:new Map()};states.set(room,state);}
  return {room,peer,state};
 }
 const isManager=(peer?:PeerState)=>peer?.role==='host'||peer?.role==='co-host';
@@ -39,7 +44,7 @@ function pollFor(poll:Poll,viewer?:PeerState){
  const own=viewer&&viewer.id in poll.votes?{[viewer.id]:poll.votes[viewer.id]}:{};
  return {...poll,votes:own,total,resultsHidden:true};
 }
-function snapshot(state:State,viewer?:PeerState){return {revision:state.revision,strokes:state.strokes,notes:state.notes,polls:state.polls.map(poll=>pollFor(poll,viewer)),questions:state.questions,files:state.files.map(({data,...file})=>file)};}
+function snapshot(state:State,viewer?:PeerState){return {revision:state.revision,strokes:state.strokes,stickyNotes:state.stickyNotes,notes:state.notes,polls:state.polls.map(poll=>pollFor(poll,viewer)),questions:state.questions,files:state.files.map(({data,...file})=>file)};}
 function checkVoteCapacity(state:State){if(state.polls.reduce((n,p)=>n+Object.keys(p.votes).length,0)+state.questions.reduce((n,q)=>n+q.voters.length,0)>=1000)fail('Room vote limit reached');}
 function host(peer:PeerState){if(peer.role!=='host'&&peer.role!=='co-host') fail('Host permission required');}
 function own(peer:PeerState,authorId:string){if(peer.id!==authorId)host(peer);}
@@ -61,6 +66,21 @@ export function collaborationRpc(ws:any,roomId:string,peerId:string,method:strin
   state.strokes.push({id:randomUUID(),authorId:peerId,points:action.points,color:action.color,width:action.width});break;
  case 'stroke:undo':{const stroke=state.strokes.find(s=>s.id===action.id);if(!stroke)fail('Stroke not found');own(peer,stroke.authorId);state.strokes=state.strokes.filter(s=>s.id!==action.id);break;}
  case 'board:clear':host(peer);state.strokes=[];break;
+ case 'sticky:add':
+  if(state.stickyNotes.length>=60)fail('Sticky note limit reached');
+  state.stickyNotes.push({id:randomUUID(),authorId:peerId,authorName:peer.displayName,text:action.text,color:action.color,version:0});
+  break;
+ case 'sticky:update':
+ case 'sticky:remove':{
+  const index=state.stickyNotes.findIndex(note=>note.id===action.id);
+  const note=state.stickyNotes[index];
+  if(!note)fail('Sticky note not found');
+  own(peer,note.authorId);
+  if(note.version!==action.version)fail('Sticky note changed. Refresh before saving.');
+  if(action.type==='sticky:remove')state.stickyNotes.splice(index,1);
+  else state.stickyNotes[index]={...note,text:action.text,color:action.color,version:note.version+1};
+  break;
+ }
  case 'notes:update':if(action.version!==state.notes.version)fail('Notes changed. Refresh before saving.');state.notes={text:action.text,version:state.notes.version+1};break;
  case 'poll:create':host(peer);if(state.polls.length>=20)fail('Poll limit reached');if(new Set(action.options).size!==action.options.length)fail('Use distinct poll options');state.polls.push({id:randomUUID(),question:action.question,options:action.options,votes:{},closed:false,results:action.results,anonymous:true});break;
  case 'poll:vote':{const poll=state.polls.find(p=>p.id===action.id);if(!poll||poll.closed||action.option>=poll.options.length)fail('Poll is unavailable');if(!(peerId in poll.votes))checkVoteCapacity(state);poll.votes[peerId]=action.option;break;}
