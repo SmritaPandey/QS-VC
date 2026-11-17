@@ -139,7 +139,7 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
 
             <section aria-labelledby="host-people-title">
                 <div className="host-tools-row"><h3 id="host-people-title">In the meeting (<AnimatedNumber value={participants.length} />)</h3></div>
-                {role === 'host' && <p className="host-cohost-count">Co-hosts: <AnimatedNumber value={coHostCount} /> of 5</p>}
+                {role === 'host' && <p className="host-cohost-count" aria-label={`Co-hosts: ${coHostCount} of 5`}><span aria-hidden="true">Co-hosts: <AnimatedNumber value={coHostCount} /> of 5</span></p>}
                 {coHostLimitReached && <p id="host-cohost-limit" className="host-cohost-limit" role="status">All five co-host seats are in use. Remove a co-host before promoting another participant.</p>}
                 <div className="host-tools-bulk">
                     <button type="button" disabled={busy || others.length === 0} onClick={() => { void run('muteAll', { kind: 'audio' }); }}><span className="mi mi-sm" aria-hidden="true">mic_off</span>Mute all</button>

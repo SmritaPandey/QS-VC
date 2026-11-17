@@ -1251,7 +1251,7 @@ it('does not attempt or report cancellation when provider credentials are missin
         makeRequest({ subscriptionId: cashfreeSubscriptionId }) as unknown as Request, res as unknown as Response, vi.fn(),
     );
     expect(res.statusCode).toBe(503);
-    expect(res.body.code).toBe('CANCELLATION_NOT_CONFIGURED');
+    expect(res.body).toMatchObject({ code: 'CANCELLATION_NOT_CONFIGURED' });
     expect(provider).not.toHaveBeenCalled();
     expect(queries.some(query => query.sql.includes("SET status = 'cancelled'"))).toBe(false);
 });

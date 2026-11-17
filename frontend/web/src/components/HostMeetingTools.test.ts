@@ -40,7 +40,7 @@ describe('host tools boundaries', () => {
    settings:{locked:false,waitingRoomEnabled:true,muteOnEntry:false,allowScreenShare:true,allowChat:true,allowMicrophone:true,allowCamera:true,allowReactions:true},
    onClose:()=>{},
   }));
-  expect(html).toContain('Co-hosts: 5 of 5');
+  expect(html).toContain('aria-label="Co-hosts: 5 of 5"');
   expect(html).toContain('All five co-host seats are in use');
   expect(html).toContain('Make co-host</button>');
   expect(html).toMatch(/disabled="" aria-describedby="host-cohost-limit" title="The meeting can have no more than five co-hosts\."/);
