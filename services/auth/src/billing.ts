@@ -397,7 +397,7 @@ async function inTenant<T>(pool: Pool, tenantId: string, action: (client: PoolCl
 
 async function readJson(response: globalThis.Response): Promise<Record<string, any>> {
     const body = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error('Payment provider request failed');
+    if (!response.ok) throw new Error(`Payment provider request failed (HTTP ${response.status})`);
     return body as Record<string, any>;
 }
 
@@ -1387,6 +1387,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
         if (!user) return;
         const parsed = cancelSchema.safeParse(req.body);
         if (!parsed.success) return res.status(400).json({ error: 'Invalid subscription.' });
+        let phase: 'database' | 'provider' = 'database';
         try {
             const existing = await inTenant(pool, user.tenantId, async client => {
                 const result = await client.query(
@@ -1404,6 +1405,13 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
             }
             if (!existing?.provider_subscription_id) return res.status(404).json({ error: 'Subscription was not found.' });
             if (['cancelled', 'expired', 'failed'].includes(existing.status)) return res.json({ cancelled: true, currentPeriodEnd: existing.current_period_end });
+            const credentialsPresent = existing.provider === 'razorpay'
+                ? Boolean(process.env.RAZORPAY_KEY_ID && process.env.RAZORPAY_KEY_SECRET)
+                : existing.provider === 'paypal'
+                    ? Boolean(process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET)
+                    : existing.provider === 'cashfree' && Boolean(process.env.CASHFREE_CLIENT_ID && process.env.CASHFREE_CLIENT_SECRET);
+            if (!credentialsPresent) return res.status(503).json({ error: 'Subscription cancellation is not configured. Contact support to cancel your renewal.', code: 'CANCELLATION_NOT_CONFIGURED' });
+            phase = 'provider';
             if (existing.provider === 'razorpay') {
                 await razorpayRequest(`/subscriptions/${encodeURIComponent(existing.provider_subscription_id)}/cancel`, 'POST', { cancel_at_cycle_end: existing.status === 'active' && !existing.uncharged_trial });
             } else if (existing.provider === 'paypal') {
@@ -1414,6 +1422,7 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
                     action: 'CANCEL',
                 }, crypto.randomUUID());
             }
+            phase = 'database';
             const updated = await inTenant(pool, user.tenantId, client => client.query(
                 `UPDATE public.payment_subscriptions SET status = 'cancelled', updated_at = NOW()
                  WHERE id = $1 AND tenant_id = $2 AND user_id = $3
@@ -1422,7 +1431,9 @@ export function billingRouter(pool: Pool, verifyToken: (token: string) => Promis
             res.json({ cancelled: true, currentPeriodEnd: updated.rows[0]?.currentPeriodEnd || null });
         } catch (error) {
             logger.warn({ userId: user.sub, error: error instanceof Error ? error.message : 'cancel error' }, 'Payment cancellation failed');
-            res.status(502).json({ error: 'We could not cancel this subscription. Please try again.' });
+            res.status(phase === 'provider' ? 502 : 503).json({ error: phase === 'provider'
+                ? 'The payment provider could not confirm cancellation. Please try again or contact support.'
+                : 'We could not save your cancellation status. Check your subscription before retrying.', code: phase === 'provider' ? 'CANCELLATION_PROVIDER_UNAVAILABLE' : 'CANCELLATION_STORAGE_UNAVAILABLE' });
         }
     });
 

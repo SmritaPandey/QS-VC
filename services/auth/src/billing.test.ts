@@ -1231,3 +1231,27 @@ it.each(['timely-delayed', 'late', 'unknown-time'])('uses signed provider author
     expect(queries.some(query => query.sql.includes('INSERT INTO public.payment_mandate_cancellations'))).toBe(scenario === 'late');
     expect(queries.some(query => query.sql.includes('UPDATE public.users SET subscription_plan'))).toBe(false);
 });
+
+it('does not attempt or report cancellation when provider credentials are missing', async () => {
+    const { pool, client, queries } = makePool();
+    client.query.mockImplementation(async (sql: string, values: unknown[] = []) => {
+        queries.push({ sql, values });
+        if (sql.includes('AS uncharged_trial')) return { rows: [{
+            id: cashfreeSubscriptionId, provider: 'cashfree', provider_subscription_id: 'selected-subscription',
+            billing_mode: 'subscription', status: 'active', current_period_end: null,
+        }], rowCount: 1 };
+        return { rows: [], rowCount: 1 };
+    });
+    vi.stubEnv('CASHFREE_CLIENT_ID', '');
+    vi.stubEnv('CASHFREE_CLIENT_SECRET', '');
+    const provider = vi.fn();
+    vi.stubGlobal('fetch', provider);
+    const res = makeResponse();
+    await route(makeRouter(pool), '/cancel')(
+        makeRequest({ subscriptionId: cashfreeSubscriptionId }) as unknown as Request, res as unknown as Response, vi.fn(),
+    );
+    expect(res.statusCode).toBe(503);
+    expect(res.body.code).toBe('CANCELLATION_NOT_CONFIGURED');
+    expect(provider).not.toHaveBeenCalled();
+    expect(queries.some(query => query.sql.includes("SET status = 'cancelled'"))).toBe(false);
+});

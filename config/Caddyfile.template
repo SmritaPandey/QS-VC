@@ -48,7 +48,8 @@
     }
 
     # Meeting Service API
-    handle /api/meetings/* {
+    @meetings path /api/meetings /api/meetings/* /api/notifications /api/notifications/*
+    handle @meetings {
         reverse_proxy meeting:4003
     }
 

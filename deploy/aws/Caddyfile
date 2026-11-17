@@ -18,7 +18,7 @@
     handle /api/auth/* {
         reverse_proxy 127.0.0.1:4002
     }
-    @meetings path /api/meetings /api/meetings/* /api/users/* /api/admin/*
+    @meetings path /api/notifications /api/notifications/* /api/meetings /api/meetings/* /api/users/* /api/admin/*
     handle @meetings {
         reverse_proxy 127.0.0.1:4003
     }

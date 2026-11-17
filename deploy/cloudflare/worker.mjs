@@ -1,4 +1,4 @@
-const publicApi = /^\/api\/(auth|meetings|recordings|sfu|users|admin)(\/|$)/;
+const publicApi = /^\/api\/(auth|meetings|notifications|recordings|sfu|users|admin)(\/|$)/;
 
 // Browser security headers for the website (OWASP A05 / ISO 27001 A.8.26). CSP is enforced for every HTML asset and API error response.
 const SECURITY_HEADERS = {

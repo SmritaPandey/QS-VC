@@ -15,6 +15,7 @@ export default defineConfig({
         allowedHosts: true,
         proxy: {
             '/api/auth': { target: 'http://localhost:4002', changeOrigin: true },
+            '/api/notifications': { target: 'http://localhost:4003', changeOrigin: true },
             '/api/meetings': { target: 'http://localhost:4003', changeOrigin: true },
             '/api/live-streams': { target: 'http://localhost:4004', changeOrigin: true, ws: true },
             '/api/recordings': { target: 'http://localhost:4004', changeOrigin: true },

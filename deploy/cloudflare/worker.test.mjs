@@ -69,3 +69,19 @@ test('website responses carry browser security headers', async () => {
 test('missing origin authentication cannot proxy requests', async () => {
     assert.equal((await worker.fetch(new Request('https://site.test/api/auth/me'), { BACKEND_ORIGIN: 'https://backend.test' })).status, 503);
 });
+
+test('notification reads and read receipts reach the backend with authentication', async () => {
+    const originalFetch = globalThis.fetch;
+    const seen = [];
+    globalThis.fetch = async request => { seen.push(request); return Response.json({ ok: true }); };
+    try {
+        const env = { BACKEND_ORIGIN: 'https://backend.test', ORIGIN_AUTH_SECRET: 'synthetic-origin-secret-for-tests-only' };
+        for (const [path, method] of [['/api/notifications', 'GET'], ['/api/notifications/test-id/read', 'PATCH']]) {
+            const response = await worker.fetch(new Request(`https://site.test${path}`, { method, headers: { Authorization: 'Bearer test' } }), env);
+            assert.equal(response.status, 200);
+            assert.equal(seen.at(-1).url, `https://backend.test${path}`);
+            assert.equal(seen.at(-1).method, method);
+            assert.equal(seen.at(-1).headers.get('Authorization'), 'Bearer test');
+        }
+    } finally { globalThis.fetch = originalFetch; }
+});

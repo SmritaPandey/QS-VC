@@ -633,7 +633,15 @@ export default function PaymentPage() {
                 body: JSON.stringify({ subscriptionId: paymentStatus.id }),
             });
             const result = await responseJson(response);
-            if (!response.ok) throw new Error();
+            if (!response.ok) {
+                const messages: Record<string, string> = {
+                    CANCELLATION_NOT_CONFIGURED: 'Cancellation is unavailable. Contact support to cancel your renewal.',
+                    CANCELLATION_PROVIDER_UNAVAILABLE: 'The payment provider could not confirm cancellation. Check your subscription before trying again.',
+                    CANCELLATION_STORAGE_UNAVAILABLE: 'We could not save your cancellation status. Check your subscription before trying again.',
+                };
+                setError(messages[typeof result?.code === 'string' ? result.code : ''] || 'We couldn’t confirm your cancellation. Check your subscription before trying again.');
+                return;
+            }
             await refreshPaymentStatus().catch(() => undefined);
             const currentPeriodEnd = typeof result?.currentPeriodEnd === 'string' ? result.currentPeriodEnd : '';
             setMessage(paymentStatus.status === 'pending' ? 'Pending checkout cancelled.' : currentPeriodEnd
