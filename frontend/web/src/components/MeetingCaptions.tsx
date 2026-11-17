@@ -1,3 +1,4 @@
+import SelectionInput from './SelectionInput';
 import { playbackFailure, type SpeechDiagnostic } from '../lib/translated-speech-status';
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { signaling } from '../lib/signaling';
@@ -262,37 +263,37 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
             <div className="caption-settings-head"><h2 id="caption-settings-title">Captions & language</h2><button type="button" className="neu-icon-btn" aria-label="Close language settings" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></div>
             <label htmlFor="meeting-speaking-language">I speak</label>
             <select id="meeting-speaking-language" value={speakingLanguage} onChange={event => onSpeakingLanguageChange(event.target.value)}>{speakOptions.map(lang => <option value={lang.code} key={lang.code}>{lang.label}</option>)}</select>
-            {serverAsr && capabilities.asr?.autoDetect !== false && <label className="caption-toggle"><input type="checkbox" checked={autoDetect} onChange={event => setAutoDetect(event.target.checked)} />Detect my language automatically (for mixed-language speech)</label>}
+            {serverAsr && capabilities.asr?.autoDetect !== false && <label className="caption-toggle"><SelectionInput type="checkbox" checked={autoDetect} onChange={event => setAutoDetect(event.target.checked)} />Detect my language automatically (for mixed-language speech)</label>}
             {!serverAsr && <button type="button" className="btn-text" onClick={onUseDetectedLanguage}>Use browser or region suggestion</button>}
             <p>{serverAsr
                 ? 'The configured transcription processor receives a copy of your microphone audio. The meeting service can read shared captions and translation text.'
                 : 'Browser speech recognition may send audio to your browser’s provider. It uses the browser’s microphone, which may differ from your selected meeting device. Only enable it if you agree.'} Captions are shared with this meeting{transcriptSaving ? ' and the host is saving a transcript.' : ' and aren’t saved by QS-VC.'}</p>
             {serverAsr && <>
                 <p>{e2eeActive ? 'Meeting audio, video and screen sharing remain end-to-end encrypted. Transcription separately shares your microphone audio with the processor.' : 'Transcription shares your microphone audio with the configured processor.'} Turning this permission off stops further audio sharing and discards pending results. Previously shared captions remain visible.</p>
-                <label className="caption-toggle"><input type="checkbox" checked={allowServerTranscription} disabled={!connected} onChange={event => {
+                <label className="caption-toggle"><SelectionInput type="checkbox" checked={allowServerTranscription} disabled={!connected} onChange={event => {
                     stopRecognition.current();
                     onShareSpeechChange(false);
                     setAllowServerTranscription(event.target.checked);
                     setStatus('');
                 }} />Allow the transcription processor to receive my microphone audio for this connection</label>
             </>}
-            <label className="caption-toggle"><input type="checkbox" checked={shareSpeech} disabled={!connected || !recognitionSupported || (serverAsr && !allowServerTranscription)} onChange={event => { if (!event.target.checked) stopRecognition.current(); setShareSpeech(event.target.checked); setStatus(''); }} />Share my speech as captions</label>
-            {capabilities.processing === 'google-cloud' && capabilities.configured && <label className="caption-toggle"><input type="checkbox" checked={allowGoogleTranslation} onChange={event => setAllowGoogleTranslation(event.target.checked)} />Allow Google Cloud to translate my shared caption text</label>}
+            <label className="caption-toggle"><SelectionInput type="checkbox" checked={shareSpeech} disabled={!connected || !recognitionSupported || (serverAsr && !allowServerTranscription)} onChange={event => { if (!event.target.checked) stopRecognition.current(); setShareSpeech(event.target.checked); setStatus(''); }} />Share my speech as captions</label>
+            {capabilities.processing === 'google-cloud' && capabilities.configured && <label className="caption-toggle"><SelectionInput type="checkbox" checked={allowGoogleTranslation} onChange={event => setAllowGoogleTranslation(event.target.checked)} />Allow Google Cloud to translate my shared caption text</label>}
             <p className="caption-settings-note">{!recognitionSupported ? 'Speech recognition is unavailable in this browser. You can still receive captions.' : audioMuted && shareSpeech ? 'Recognition is paused while your microphone is muted.' : translatedSpeaking && shareSpeech ? 'Recognition is paused while translated audio plays.' : serverAsr ? `Speaking: ${asrLanguage === 'auto' ? 'detected automatically' : name(asrLanguage, asrLanguage)}.` : `Speaking: ${name(speakingLanguage, speakingLanguage)}. Recognition support depends on your browser.`}</p>
-            <label className="caption-toggle"><input type="checkbox" checked={showCaptions} onChange={event => setShowCaptions(event.target.checked)} />Show meeting captions</label>
+            <label className="caption-toggle"><SelectionInput type="checkbox" checked={showCaptions} onChange={event => setShowCaptions(event.target.checked)} />Show meeting captions</label>
             <label htmlFor="caption-output-language">Caption language</label>
             <select id="caption-output-language" value={captionLanguage} onChange={event => { setCaptionLanguage(event.target.value); setCaptions([]); }}><option value="original">Original language</option>{outputs.map(lang => <option value={lang.code} key={lang.code}>{name(lang.code, lang.name)}</option>)}</select>
             <p className="caption-settings-note">Your caption language choice applies only to what you see.</p>
             <label htmlFor="heard-output-language">Hear translated audio in</label>
             <select id="heard-output-language" value={hearLanguage} onChange={event => { setVoiceEnabled(false); setHearLanguage(event.target.value); }}><option value="">Choose a language</option>{outputs.map(lang => <option value={lang.code} key={lang.code} disabled={!hasVoice(lang.code)}>{name(lang.code, lang.name)}{hasVoice(lang.code) ? '' : ' · no device voice'}</option>)}</select>
-            <label className="caption-toggle"><input type="checkbox" checked={voiceEnabled} disabled={!connected || !hearLanguage || !hasVoice(hearLanguage)} onChange={event => { setVoiceEnabled(event.target.checked); setStatus(''); }} />Listen to translated speech</label>
+            <label className="caption-toggle"><SelectionInput type="checkbox" checked={voiceEnabled} disabled={!connected || !hearLanguage || !hasVoice(hearLanguage)} onChange={event => { setVoiceEnabled(event.target.checked); setStatus(''); }} />Listen to translated speech</label>
             <p className="caption-settings-note">Device voices use the browser’s default audio output and may use a remote service. Original audio lowers only while translated speech plays.</p>
             {voiceEnabled && voiceDiagnostic && <div role="status" className="caption-settings-status" data-speech-gate={voiceDiagnostic.gate}>
                 {voiceDiagnostic.message} Original meeting audio stays on.
             </div>}
             <h3 className="caption-settings-subhead">Transcript</h3>
             {!serverUpToDate && <p className="caption-settings-note" role="status">Transcript saving is unavailable in this meeting.</p>}
-            {serverUpToDate && isHost && <label className="caption-toggle"><input type="checkbox" checked={transcriptSaving} disabled={!connected} onChange={event => toggleTranscript(event.target.checked)} />Save transcript of this meeting (everyone is told)</label>}
+            {serverUpToDate && isHost && <label className="caption-toggle"><SelectionInput type="checkbox" checked={transcriptSaving} disabled={!connected} onChange={event => toggleTranscript(event.target.checked)} />Save transcript of this meeting (everyone is told)</label>}
             {serverUpToDate && !isHost && <p className="caption-settings-note">{transcriptSaving ? 'The host is saving a transcript of shared captions.' : 'The host can save a transcript of shared captions.'}</p>}
             {transcriptSaving && <div className="caption-actions">
                 <button type="button" className="btn-outline" onClick={() => download('txt')}>Download .txt</button>

@@ -1,3 +1,4 @@
+import SelectionInput from '../components/SelectionInput';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import CheckoutProgress, { calibrateCheckoutClock, type CheckoutClock, type CheckoutPhase } from '../components/CheckoutProgress';
@@ -196,7 +197,7 @@ export function PaymentProviderChoices({ selected, available, providers, loading
                 ? item === 'razorpay' && mode === 'test' ? 'Test mode · Unavailable' : 'Unavailable'
                 : mode === 'test' ? 'Test mode' : mode === 'live' ? 'Live' : 'Available';
             return <label key={item} className={`payment-gateway${selectedReady ? ' is-selected' : ''}${unavailable ? ' is-unavailable' : ''}`}>
-                <input type="radio" name="gateway" value={item} checked={selectedReady} disabled={!ready}
+                <SelectionInput type="radio" name="gateway" value={item} checked={selectedReady} disabled={!ready}
                     aria-describedby={`payment-provider-status-${item}`} onChange={() => onSelect(item)} />
                 <span className="payment-gateway-copy">
                     <span className="payment-gateway-heading"><strong>{gatewayName(item)}</strong><span id={`payment-provider-status-${item}`} className={`payment-mode-badge${ready && mode === 'test' ? ' payment-mode-badge--test' : ''}`}>{status}</span></span>
@@ -756,7 +757,7 @@ export default function PaymentPage() {
                     {error && <div className="payment-status payment-status--error" role="alert"><span className="mi" aria-hidden="true">error</span><p>{error}</p></div>}
                     {isAuthReady && checkoutGateways.length > 0 && !isCurrentPlan && !blockPlanChange && !isProviderReturn && (!showTrialFlow || isTrialCheckout) && <>
                         <label className="payment-consent">
-                            <input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} />
+                            <SelectionInput type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} />
                             <span>{promotion
                                 ? `I authorize ${gatewayName(gateway)} to charge ${displayedMonthlyTotal} per month for the first ${promotion.cycles} paid month${promotion.cycles === 1 ? '' : 's'}${isTrialCheckout ? ' after my free trial' : ''}, then ${formatMoney(promotion.regularTotalAmount, providerPrice.currency)} per month, including ${options.taxPercent}% GST. ${isTrialCheckout ? 'No plan fee is charged during the trial. ' : ''}${renewalTermCopy}`
                                 : isTrialCheckout

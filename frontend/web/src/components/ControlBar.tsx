@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { haptic } from '../lib/haptics';
+import AnimatedNumber from './AnimatedNumber';
 import type { TilesPerPage, ViewMode } from './VideoGrid';
 import '../styles/meeting-feature-access.css';
 
@@ -221,13 +222,13 @@ export default function ControlBar({
                 <div className="controls-more" ref={moreRef}>
                     <button ref={moreButtonRef} type="button" className={`ctrl-btn ${moreOpen ? 'active' : ''}`} aria-label={moreTitle} aria-expanded={moreOpen} aria-controls="meeting-more-controls" data-tip="More controls" onClick={() => { haptic('tap'); setMoreOpen(open => !open); }}>
                         <span className="ctrl-icon mi" aria-hidden="true">more_horiz</span>
-                        {permissionCount > 0 && <span className="meeting-unread-badge" aria-hidden="true">{permissionCount}</span>}
-                        {!permissionCount && unreadChat > 0 && <span className="meeting-unread-badge meeting-overflow-chat-badge" aria-hidden="true">{chatCount}</span>}
+                        {permissionCount > 0 && <span className="meeting-unread-badge" aria-hidden="true"><AnimatedNumber value={permissionCount} /></span>}
+                        {!permissionCount && unreadChat > 0 && <span className="meeting-unread-badge meeting-overflow-chat-badge" aria-hidden="true"><AnimatedNumber value={Math.min(unreadChat, 99)} />{unreadChat > 99 ? '+' : ''}</span>}
                     </button>
                     {moreOpen && <div id="meeting-more-controls" className="meeting-more-panel" role="group" aria-label="Extra meeting controls">
                         {permissions.length > 0 && <details className="meeting-permission-settings" open={permissionCount > 0 || undefined}>
                             <summary><span className="mi" aria-hidden="true">settings</span>Permissions
-                                {permissionCount > 0 && <span className="meeting-menu-count">{permissionCount} new</span>}
+                                {permissionCount > 0 && <span className="meeting-menu-count"><AnimatedNumber value={permissionCount} /> new</span>}
                             </summary>
                             <ul>{permissions.map(permission => <li key={permission.key} data-unread={permission.unread || undefined}>
                                 <span>{permission.label}<small>{permission.allowed ? 'Allowed' : 'Restricted'}</small></span>
@@ -246,7 +247,7 @@ export default function ControlBar({
                             {onOpenInvite && <button type="button" onClick={() => { closeMore(); onOpenInvite(); }}><span className="mi" aria-hidden="true">person_add</span>Invite people</button>}
                             {onToggleReactions && <button type="button" aria-expanded={reactionsOpen} aria-controls="reaction-picker" onClick={() => { closeMore(); onToggleReactions(); }}><span className="mi" aria-hidden="true">add_reaction</span>Reactions</button>}
                             <button type="button" aria-expanded={participantsOpen} aria-controls="meeting-participants-panel" onClick={() => { closeMore(); onToggleParticipants(); }}><span className="mi" aria-hidden="true">group</span>Participants</button>
-                            <button type="button" className="control-chat-overflow" aria-label={chatTitle} aria-expanded={chatOpen} aria-controls="meeting-chat-panel" onClick={() => { closeMore(); onToggleChat(); }}><span className="mi" aria-hidden="true">chat</span>Chat{unreadChat > 0 && <span className="meeting-menu-count" aria-hidden="true">{chatCount}</span>}</button>
+                            <button type="button" className="control-chat-overflow" aria-label={chatTitle} aria-expanded={chatOpen} aria-controls="meeting-chat-panel" onClick={() => { closeMore(); onToggleChat(); }}><span className="mi" aria-hidden="true">chat</span>Chat{unreadChat > 0 && <span className="meeting-menu-count" aria-hidden="true"><AnimatedNumber value={Math.min(unreadChat, 99)} />{unreadChat > 99 ? '+' : ''}</span>}</button>
                             <button type="button" aria-pressed={handRaised} onClick={() => { closeMore(); onRaiseHand(); }}><span className="mi" aria-hidden="true">front_hand</span>{handRaised ? 'Lower hand' : 'Raise hand'}</button>
                         </div>
                         {!signedIn && onSignInForExtras && <RestrictedFeatureButton label="Meeting assistant" icon="support_agent" requirement="Sign in"

@@ -1,3 +1,4 @@
+import SelectionInput from './SelectionInput';
 import { useRef, useState } from 'react';
 import '../styles/bharat-vc.css';
 import { signaling } from '../lib/signaling';
@@ -24,7 +25,7 @@ export default function BharatVcConnection() {
                 <label>Conference ID<input required inputMode="numeric" pattern="[0-9]{6,16}" value={conferenceId} onChange={event => setId(event.target.value)} /></label>
                 <label>SIP gateway<select value={gateway} onChange={event => setGateway(event.target.value)}><option>sip.bharatvc.nic.in</option><option>bhvc.nic.in</option></select></label>
                 <label>SIP PIN<input required type="password" autoComplete="off" inputMode="numeric" pattern="[0-9]{4,16}" value={pin} onChange={event => setPin(event.target.value)} /></label>
-                <label><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} />I have informed participants and authorise sharing this meeting with Bharat VC.</label>
+                <label><SelectionInput type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} />I have informed participants and authorise sharing this meeting with Bharat VC.</label>
                 <button type="submit" disabled={!consent}>{busy ? 'Connecting…' : 'Connect conference'}</button>
             </fieldset>
         </form>

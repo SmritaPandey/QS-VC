@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { signaling } from '../lib/signaling';
 import type { EncryptedNotesAccess } from '../lib/encrypted-notes';
 import type { EncryptedNotesRecord } from '../lib/e2ee-data';
+import AnimatedNumber from './AnimatedNumber';
 
 interface QuestionRecord extends EncryptedNotesRecord {
     kind: 'question' | 'answer'; authorId: string; authorName: string; authorSigningKey: string; voters: string[];
@@ -123,7 +124,7 @@ export default function EncryptedQuestions({ access, connected, peerId, manager,
             const answer = records.find(item => item.kind === 'answer' && item.encrypted.fileId === id);
             return <section className="collaboration-card" key={id}>
                 <p className="collaboration-author">{record.authorName}</p><h3>{record.text}</h3>
-                <button type="button" aria-pressed={record.voters.includes(peerId)} disabled={!connected || busy || record.voters.includes(peerId)} onClick={() => { void vote(id); }}>Helpful · {record.voters.length}</button>
+                <button type="button" aria-pressed={record.voters.includes(peerId)} disabled={!connected || busy || record.voters.includes(peerId)} onClick={() => { void vote(id); }}>Helpful · <AnimatedNumber value={record.voters.length} /></button>
                 {answer && <p className="collaboration-answer">Host answer · {answer.authorName}: {answer.text}</p>}
                 {manager && <form className="collaboration-form" onSubmit={event => { event.preventDefault(); void submit('answer', answers[id] ?? '', id); }}>
                     <label>Answer<textarea rows={2} maxLength={2000} required value={answers[id] ?? ''} onChange={event => { const value = event.currentTarget.value; setAnswers(current => ({ ...current, [id]: value })); }} /></label>

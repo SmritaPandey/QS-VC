@@ -1,3 +1,4 @@
+import SelectionInput from './SelectionInput';
 import { useEffect, useRef, useState } from 'react';
 
 const API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
@@ -63,7 +64,7 @@ export default function ReportProblem({ meetingCode, displayName, diagnostics, o
                 </div>
                 <label className="report-field" htmlFor="report-description">Describe what happened</label>
                 <textarea id="report-description" rows={4} maxLength={2000} value={description} placeholder="For example: others can’t hear me after I switched to my headset." onChange={event => { setDescription(event.target.value); setError(''); }} />
-                <label className="report-check"><input type="checkbox" checked={includeDetails} onChange={event => setIncludeDetails(event.target.checked)} /><span>Include technical details<small>Browser, device names, connection quality and the meeting code. No audio, video or chat.</small></span></label>
+                <label className="report-check"><SelectionInput type="checkbox" checked={includeDetails} onChange={event => setIncludeDetails(event.target.checked)} /><span>Include technical details<small>Browser, device names, connection quality and the meeting code. No audio, video or chat.</small></span></label>
                 {error && <p className="report-error" role="alert">{error}</p>}
                 <div className="meeting-dialog-actions">
                     {state === 'failed' && <button type="button" className="btn-text" onClick={download}>Download report</button>}

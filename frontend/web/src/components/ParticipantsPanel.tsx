@@ -1,6 +1,7 @@
 import { useRef, useState, type CSSProperties } from 'react';
 import { isOnStage } from '../lib/meeting-layout';
 import { signaling } from '../lib/signaling';
+import AnimatedNumber from './AnimatedNumber';
 
 interface PeerData {
     peerId: string;
@@ -163,7 +164,7 @@ export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self
     return (
         <div id="meeting-participants-panel" className="side-panel participants-panel">
             <div className="panel-header">
-                <h3>{webinar ? 'People' : 'Participants'} ({all.length})</h3>
+                <h3>{webinar ? 'People' : 'Participants'} (<AnimatedNumber value={all.length} />)</h3>
                 <button className="panel-close" aria-label="Close participants" onClick={onClose}>
                     <span className="mi mi-sm">close</span>
                 </button>
@@ -183,7 +184,7 @@ export default function ParticipantsPanel({ peers, displayName, myPeerId = 'self
             <p className="sr-only" role="status">{transferringPeerId ? 'Transferring host controls. Please wait.' : ''}</p>
             <div className="participants-list">
                 {groups.map(([title, rows]) => <section key={title} aria-label={title}>
-                    {webinar && <h4 className="participants-group">{title} · {rows.length}</h4>}
+                    {webinar && <h4 className="participants-group">{title} · <AnimatedNumber value={rows.length} /></h4>}
                     {rows.length ? rows.map(row) : webinar && <p className="participants-empty">{title === 'Audience' ? 'No one in the audience yet.' : 'No one on stage.'}</p>}
                 </section>)}
             </div>

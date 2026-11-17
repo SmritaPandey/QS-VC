@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { AUTH_API, clearSession, getToken } from '../lib/session';
+import AnimatedNumber from './AnimatedNumber';
 import '../styles/admin-analytics.css';
 
 type Quarter = {
@@ -59,7 +60,6 @@ const statusNames: Record<string, string> = {
     waiting: 'Waiting', scheduled: 'Scheduled', active: 'Marked active', ended: 'Ended',
     cancelled: 'Cancelled', completed: 'Completed',
 };
-const format = (value: number) => value.toLocaleString();
 const currencyOptions = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'CAD', 'AUD'];
 
 function money(value: string, currency: string) {
@@ -69,26 +69,6 @@ function money(value: string, currency: string) {
     } catch {
         return `${currency} ${Number.isFinite(numeric) ? numeric.toLocaleString(undefined, { maximumFractionDigits: 2 }) : value}`;
     }
-}
-
-function Counter({ value }: { value: number }) {
-    const [display, setDisplay] = useState(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches ? value : 0);
-    useEffect(() => {
-        const preference = window.matchMedia('(prefers-reduced-motion: reduce)');
-        if (preference.matches || !value) { setDisplay(value); return; }
-        let frame: number;
-        const start = performance.now();
-        const tick = (now: number) => {
-            const progress = Math.min((now - start) / 500, 1);
-            setDisplay(Math.round(value * (1 - (1 - progress) ** 3)));
-            if (progress < 1) frame = requestAnimationFrame(tick);
-        };
-        const stop = () => { cancelAnimationFrame(frame); setDisplay(value); };
-        frame = requestAnimationFrame(tick);
-        preference.addEventListener('change', stop);
-        return () => { cancelAnimationFrame(frame); preference.removeEventListener('change', stop); };
-    }, [value]);
-    return <><span className="admin-analytics-sr">{format(value)}</span><span aria-hidden="true">{format(display)}</span></>;
 }
 
 type ActivityMetric = 'meetingsCreated' | 'installerDownloads' | 'desktopAppActivations' | 'accessTermsUpdated';
@@ -190,36 +170,43 @@ export default function AdminAnalytics({ onManageAccess, hosted = true }: { onMa
         {error ? <p role="alert">{error} <button type="button" onClick={() => setAttempt(value => value + 1)}>Retry</button></p>
             : !data ? <p role="status">Loading shared platform analytics…</p> : <>
                 <p className="admin-analytics-updated" role="status">Updated {new Date(data.generatedAt).toLocaleString()}</p>
-                <dl className="admin-analytics-counters" aria-label="Activity totals">
-                    <div><dt>Active organisations</dt><dd><Counter value={data.totals.activeOrganisations} /></dd></div>
-                    <div><dt>Active user accounts</dt><dd><Counter value={data.totals.activeUsers} /></dd></div>
-                    <div><dt>Meetings created</dt><dd><Counter value={data.totals.meetingsCreated} /></dd></div>
-                    <div><dt>Active Quantum-Premise access seats</dt><dd><Counter value={data.totals.activeEnterpriseAccessSeats} /></dd></div>
-                    <div><dt>Desktop app activations</dt><dd><Counter value={data.totals.desktopAppActivations} /></dd></div>
-                </dl>
-                <div className="admin-analytics-panels">
-                    <section aria-labelledby="admin-activity-title"><div className="admin-analytics-section-head"><h2 id="admin-activity-title">Activity by quarter</h2>
-                        <label>Count <select value={activityMetric} onChange={event => setActivityMetric(event.target.value as ActivityMetric)}>
-                            {Object.entries(activityNames).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
-                        </select></label></div>
+                <div className="admin-analytics-overview">
+                    <article className="admin-analytics-featured-total">
+                        <span>Active organisations</span>
+                        <AnimatedNumber className="admin-analytics-featured-value" value={data.totals.activeOrganisations} />
+                        <p>Organisations currently marked active</p>
+                    </article>
+                    <dl className="admin-analytics-counters" aria-label="Other activity totals">
+                        <div><dt>Active user accounts</dt><dd><AnimatedNumber value={data.totals.activeUsers} /></dd></div>
+                        <div><dt>Meetings created</dt><dd><AnimatedNumber value={data.totals.meetingsCreated} /></dd></div>
+                        <div><dt>Active Quantum-Premise access seats</dt><dd><AnimatedNumber value={data.totals.activeEnterpriseAccessSeats} /></dd></div>
+                        <div><dt>Desktop app activations</dt><dd><AnimatedNumber value={data.totals.desktopAppActivations} /></dd></div>
+                    </dl>
+                    <section className="admin-analytics-trend" aria-labelledby="admin-activity-title">
+                        <div className="admin-analytics-section-head"><h2 id="admin-activity-title">Activity by quarter</h2>
+                            <label>Count <select value={activityMetric} onChange={event => setActivityMetric(event.target.value as ActivityMetric)}>
+                                {Object.entries(activityNames).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
+                            </select></label></div>
                         <p>Counts follow UTC calendar quarters.</p>
                         <ul className="admin-analytics-bars">{data.quarters.map(item => <li key={item.quarter}>
-                            <div className="admin-analytics-bar-row"><span>{item.quarter}</span><span className="admin-analytics-track" aria-hidden="true"><i style={{ width: `${item[activityMetric] / max * 100}%` }} /></span><strong>{format(item[activityMetric])}</strong></div>
+                            <div className="admin-analytics-bar-row"><span>{item.quarter}</span><span className="admin-analytics-track" aria-hidden="true"><i style={{ width: `${item[activityMetric] / max * 100}%` }} /></span><strong><AnimatedNumber value={item[activityMetric]} /></strong></div>
                         </li>)}</ul>
                     </section>
+                </div>
+                <div className="admin-analytics-panels admin-analytics-panels--single">
                     <section aria-labelledby="admin-status-title"><h2 id="admin-status-title">Meeting record status</h2>
                         <p>Meeting status totals for the selected reporting period.</p>
                         {statusTotal > 0 ? <div className="admin-analytics-breakdown">
                             <div className="admin-analytics-donut" aria-hidden="true" style={{ background: `conic-gradient(${segments?.join(',')})` }} />
                             <ul>{data.meetingStatuses.map((item, index) => <li key={item.status}>
                                 <span className="admin-analytics-dot" aria-hidden="true" style={{ backgroundColor: colors[index % colors.length] }} />
-                                <span>{Object.prototype.hasOwnProperty.call(statusNames, item.status) ? statusNames[item.status] : item.status}</span><strong>{format(item.count)}</strong>
+                                <span>{Object.prototype.hasOwnProperty.call(statusNames, item.status) ? statusNames[item.status] : item.status}</span><strong><AnimatedNumber value={item.count} /></strong>
                             </li>)}</ul>
                         </div> : <p>No meeting records yet.</p>}
                         <dl className="admin-analytics-mini-totals">
-                            <div><dt>Scheduled records</dt><dd>{format(data.totals.scheduledMeetings)}</dd></div>
-                            <div><dt>Recurring records</dt><dd>{format(data.totals.recurringMeetingRecords)}</dd></div>
-                            <div><dt>Webinar records</dt><dd>{format(data.totals.webinars)}</dd></div>
+                            <div><dt>Scheduled records</dt><dd><AnimatedNumber value={data.totals.scheduledMeetings} /></dd></div>
+                            <div><dt>Recurring records</dt><dd><AnimatedNumber value={data.totals.recurringMeetingRecords} /></dd></div>
+                            <div><dt>Webinar records</dt><dd><AnimatedNumber value={data.totals.webinars} /></dd></div>
                         </dl>
                     </section>
                 </div>
@@ -228,17 +215,17 @@ export default function AdminAnalytics({ onManageAccess, hosted = true }: { onMa
                         <p>Plan assignment is not proof of a paid subscription.</p>
                         {data.plans.length ? <ul className="admin-analytics-plan-list">{data.plans.map((item, index) => <li key={item.plan}>
                             <span className="admin-analytics-dot" aria-hidden="true" style={{ backgroundColor: colors[index % colors.length] }} />
-                            <span>{item.plan}</span><strong>{format(item.organisations)}</strong><small>{format(item.activeOrganisations)} active</small>
+                            <span>{item.plan}</span><strong><AnimatedNumber value={item.organisations} /></strong><small><AnimatedNumber value={item.activeOrganisations} /> active</small>
                         </li>)}</ul> : <p>No plans are assigned.</p>}
-                        <p>Quantum-Premise access: {format(data.totals.activeEnterpriseAccessSeats)} active of {format(data.totals.enterpriseAccessSeats)} dated user seats.</p>
+                        <p>Quantum-Premise access: <AnimatedNumber value={data.totals.activeEnterpriseAccessSeats} /> active of <AnimatedNumber value={data.totals.enterpriseAccessSeats} /> dated user seats.</p>
                         <div className="admin-analytics-links">{hosted && <Link to="/pricing">View plan catalogue</Link>}
                             {onManageAccess && <button type="button" onClick={onManageAccess}>Manage access terms</button>}</div>
                     </section>
                     <section aria-labelledby="admin-installer-title"><h2 id="admin-installer-title">Completed installer transfers</h2>
                         <p>A completed response does not confirm that a file was saved or installed.</p>
-                        <ul className="admin-analytics-platform-list">{Object.entries(platformNames).filter(([key]) => key in data.installerDownloadsByPlatform).map(([key, name]) => <li key={key}><span>{name}</span><strong>{format(data.installerDownloadsByPlatform[key] || 0)}</strong></li>)}</ul>
+                        <ul className="admin-analytics-platform-list">{Object.entries(platformNames).filter(([key]) => key in data.installerDownloadsByPlatform).map(([key, name]) => <li key={key}><span>{name}</span><strong><AnimatedNumber value={data.installerDownloadsByPlatform[key] || 0} /></strong></li>)}</ul>
                         <h3>Desktop app activations</h3><p>One first sign-in report per local app profile and workspace. Clearing app data or reinstalling may count again; no account or device ID is stored in the activation record.</p>
-                        <ul className="admin-analytics-platform-list">{data.desktopActivationsByPlatform.map(item => <li key={`${item.platform}-${item.architecture}`}><span>{platformNames[item.platform] || item.platform} · {platformNames[item.architecture] || item.architecture}</span><strong>{format(item.count)}</strong></li>)}</ul>
+                        <ul className="admin-analytics-platform-list">{data.desktopActivationsByPlatform.map(item => <li key={`${item.platform}-${item.architecture}`}><span>{platformNames[item.platform] || item.platform} · {platformNames[item.architecture] || item.architecture}</span><strong><AnimatedNumber value={item.count} /></strong></li>)}</ul>
                     </section>
                 </div>
                 {hosted && <section className="admin-analytics-finance" aria-labelledby="admin-finance-title">

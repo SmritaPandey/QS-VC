@@ -1,3 +1,4 @@
+import SelectionInput from '../components/SelectionInput';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate } from 'react-router-dom';
 import PersonalSignInButtons from '../components/PersonalSignInButtons';
@@ -121,7 +122,7 @@ export default function OrganisationSso() {
                             <button className="qsvc-action qsvc-action--secondary" disabled={busy}>Test connection</button>
                         </form>
                         <p>{connection.tested ? 'Connection tested successfully.' : 'A successful test is required before enforcing SSO.'}</p>
-                        <label className="organisation-sso-toggle"><input type="checkbox" checked={connection.enforced} disabled={busy || !connection.tested}
+                        <label className="organisation-sso-toggle"><SelectionInput type="checkbox" checked={connection.enforced} disabled={busy || !connection.tested}
                             onChange={event => void save(`connections/${connection.id}/enforcement`, 'PATCH', { enforced: event.target.checked })} />
                             Require SSO for this domain
                         </label>

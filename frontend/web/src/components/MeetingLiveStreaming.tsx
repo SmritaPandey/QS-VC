@@ -1,3 +1,4 @@
+import SelectionInput from './SelectionInput';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getToken } from '../lib/session';
 import type { MeetingComposite } from '../lib/meeting-recorder';
@@ -122,7 +123,7 @@ export default function MeetingLiveStreaming({ open = true, meetingCode, isHost,
         <p>Send this meeting’s visible video tiles and audio to your administrator’s configured YouTube or Facebook destination. This is a separate decoded-media output.</p>
         {e2eeRequired ? <p role="status">Broadcasting is blocked while this meeting requires end-to-end encryption.</p> : !checked ? <p role="status">Checking broadcast configuration…</p> : !configured ? <p role="status">The server needs FFmpeg and an administrator-configured broadcast destination.</p> : <>
             <label htmlFor="meeting-live-provider">Destination<select id="meeting-live-provider" value={provider} disabled={running} onChange={event => { setProvider(event.target.value as Provider); setConsent(false); }}>{providers.map(value => <option key={value} value={value}>{value === 'youtube' ? 'YouTube' : 'Facebook'}</option>)}</select></label>
-            <label className="meeting-live-consent"><input type="checkbox" checked={consent} disabled={running} onChange={event => setConsent(event.target.checked)} />I have informed participants and authorize sending meeting audio and video to this external provider.</label>
+            <label className="meeting-live-consent"><SelectionInput type="checkbox" checked={consent} disabled={running} onChange={event => setConsent(event.target.checked)} />I have informed participants and authorize sending meeting audio and video to this external provider.</label>
             <button type="button" disabled={!connected || !consent || running} onClick={() => { void start(); }}>Start broadcast output</button>
         </>}
         {running && <button type="button" className="meeting-live-stop" onClick={() => { stop(); onNotice('Broadcast output stopped. Check the provider dashboard to confirm its public status.'); }}>Stop broadcast output</button>}

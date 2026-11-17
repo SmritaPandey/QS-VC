@@ -1,3 +1,4 @@
+import SelectionInput from './SelectionInput';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 export type MeetingKind = 'conference' | 'team' | 'town_hall';
@@ -61,7 +62,7 @@ export default function MeetingSetupDialog({ action, creating, onClose, onCreate
             <fieldset className="meeting-setup-kinds">
                 <legend>Meeting type</legend>
                 {kinds.map(kind => <label key={kind.value} className="meeting-setup-kind" data-selected={meetingKind === kind.value}>
-                    <input type="radio" name="meeting-kind" value={kind.value} checked={meetingKind === kind.value} onChange={() => setMeetingKind(kind.value)} />
+                    <SelectionInput type="radio" name="meeting-kind" value={kind.value} checked={meetingKind === kind.value} onChange={() => setMeetingKind(kind.value)} />
                     <span className="meeting-setup-kind-copy"><span>{kind.label}</span><small>{kind.detail}</small></span>
                 </label>)}
             </fieldset>

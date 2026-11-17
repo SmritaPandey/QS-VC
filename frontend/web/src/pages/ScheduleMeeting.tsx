@@ -1,3 +1,4 @@
+import SelectionInput from '../components/SelectionInput';
 import CancelScheduledMeeting from '../components/CancelScheduledMeeting';
 import { downloadICS, openGoogleCalendar, openOutlookCalendar, type CalendarEvent } from '../lib/calendar-integration';
 import { useSession } from '../lib/use-session';
@@ -310,7 +311,7 @@ const ScheduleMeeting: React.FC = () => {
                                 ['team', 'Team meeting', 'A working session for your team.'],
                                 ['town_hall', 'Town hall', 'A presentation-style room with a stage.'],
                             ] as const).map(([kind, label, detail]) => <label key={kind} className="schedule-kind-option" data-selected={form.meetingKind === kind}>
-                                <input type="radio" name="schedule-meeting-kind" value={kind} checked={form.meetingKind === kind} onChange={() => updateField('meetingKind', kind)} />
+                                <SelectionInput type="radio" name="schedule-meeting-kind" value={kind} checked={form.meetingKind === kind} onChange={() => updateField('meetingKind', kind)} />
                                 <span><strong>{label}</strong><small>{detail}</small></span>
                             </label>)}
                         </fieldset>
@@ -384,11 +385,11 @@ const ScheduleMeeting: React.FC = () => {
                         </div>
                         <div className="settings-grid">
                             <label className="toggle-label">
-                                <input type="checkbox" checked={form.enableWaitingRoom} disabled aria-describedby="schedule-waiting-room-note" />
+                                <SelectionInput type="checkbox" checked={form.enableWaitingRoom} disabled aria-describedby="schedule-waiting-room-note" />
                                 <span className="toggle-text">Waiting room required</span>
                             </label>
                             <label className="toggle-label">
-                                <input
+                                <SelectionInput
                                     type="checkbox"
                                     checked={form.enableE2EE}
                                     onChange={e => updateField('enableE2EE', e.target.checked)}
@@ -396,7 +397,7 @@ const ScheduleMeeting: React.FC = () => {
                                 <span className="toggle-text">Post-quantum end-to-end encryption (ML-KEM-1024 / ML-DSA-87)</span>
                             </label>
                             <label className="toggle-label">
-                                <input
+                                <SelectionInput
                                     type="checkbox"
                                     checked={false}
                                     disabled

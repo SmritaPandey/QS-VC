@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { clearSession, getToken } from '../lib/session';
 import ActionContents from './ActionContents';
+import AnimatedNumber from './AnimatedNumber';
 
 const API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
 
@@ -115,9 +116,9 @@ export default function HostedMeetings({ onExpired }: { onExpired: () => void })
     return <div className="workspace-hosted">
         <section className="workspace-personal-overview" aria-label="Your meeting activity">
             <dl>
-                <div><dt>Links created</dt><dd>{summary?.links.toLocaleString() ?? '—'}</dd></div>
-                <div><dt>Meetings scheduled</dt><dd>{summary?.scheduled.toLocaleString() ?? '—'}</dd></div>
-                <div><dt>Meetings marked active</dt><dd>{summary?.active.toLocaleString() ?? '—'}</dd></div>
+                <div><dt>Links created</dt><dd>{summary ? <AnimatedNumber value={summary.links} /> : '—'}</dd></div>
+                <div><dt>Meetings scheduled</dt><dd>{summary ? <AnimatedNumber value={summary.scheduled} /> : '—'}</dd></div>
+                <div><dt>Meetings marked active</dt><dd>{summary ? <AnimatedNumber value={summary.active} /> : '—'}</dd></div>
             </dl>
             {summaryUnavailable && <p role="status">Activity totals are unavailable. Your meeting list is still available.</p>}
             <label>Show <select value={filter} onChange={event => setFilter(event.target.value as typeof filter)}>

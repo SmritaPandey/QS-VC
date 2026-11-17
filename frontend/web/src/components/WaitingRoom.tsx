@@ -1,3 +1,5 @@
+import AnimatedNumber from './AnimatedNumber';
+
 export interface WaitingPeer { peerId: string; displayName: string; requestedAt?: string; invited?: boolean; reviewed?: boolean; isGuest?: boolean; }
 interface Props {
     waitingPeers: WaitingPeer[];
@@ -11,7 +13,7 @@ interface Props {
 export default function WaitingRoom({ waitingPeers, onAdmit, onKeepWaiting, onReject, onAdmitAll, isHost, busy = false }: Props) {
     if (!isHost) return null;
     return <section className="host-waiting" aria-labelledby="host-waiting-title" aria-live="polite">
-        <div className="host-tools-row"><h3 id="host-waiting-title">Waiting to join ({waitingPeers.length})</h3>{waitingPeers.length > 1 && <button type="button" disabled={busy} onClick={onAdmitAll}>Admit all</button>}</div>
+        <div className="host-tools-row"><h3 id="host-waiting-title">Waiting to join (<AnimatedNumber value={waitingPeers.length} />)</h3>{waitingPeers.length > 1 && <button type="button" disabled={busy} onClick={onAdmitAll}>Admit all</button>}</div>
         {waitingPeers.length === 0 ? <p>No one is waiting.</p> : <ul>{waitingPeers.map(peer => <li key={peer.peerId}>
             <div className="host-waiting-person">
                 <span>{peer.displayName}</span>

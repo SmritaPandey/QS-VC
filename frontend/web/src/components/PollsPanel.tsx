@@ -1,3 +1,5 @@
+import SelectionInput from './SelectionInput';
+import AnimatedNumber from './AnimatedNumber';
 /**
  * Polls + Q&A Panel for interactive meetings.
  *
@@ -149,7 +151,7 @@ const PollsPanel: React.FC<PollsPanelProps> = ({
                                     marginLeft: '4px', padding: '1px 6px', borderRadius: '10px',
                                     background: '#eab308', color: '#000', fontSize: '10px',
                                 }}>
-                                    {questions.filter(q => !q.isAnswered).length}
+                                    <AnimatedNumber value={questions.filter(q => !q.isAnswered).length} />
                                 </span>
                             )}
                         </button>
@@ -212,7 +214,7 @@ const PollsPanel: React.FC<PollsPanelProps> = ({
                                     + Add option
                                 </button>
                                 <label style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#aaa', fontSize: '12px' }}>
-                                    <input type="checkbox" checked={isAnonymous} onChange={e => setIsAnonymous(e.target.checked)} />
+                                    <SelectionInput type="checkbox" checked={isAnonymous} onChange={e => setIsAnonymous(e.target.checked)} />
                                     Anonymous voting
                                 </label>
                                 <div style={{ display: 'flex', gap: '6px' }}>
@@ -280,7 +282,7 @@ const PollsPanel: React.FC<PollsPanelProps> = ({
                                 })}
 
                                 <div style={{ fontSize: '10px', color: 'rgba(255,255,255,0.3)', marginTop: '4px', display: 'flex', justifyContent: 'space-between' }}>
-                                    <span>{poll.totalVotes} votes</span>
+                                    <span><AnimatedNumber value={poll.totalVotes} /> votes</span>
                                     {isHost && poll.isActive && (
                                         <button onClick={() => onClosePoll(poll.id)} style={{
                                             background: 'transparent', border: 'none', color: '#ef4444',
@@ -341,7 +343,7 @@ const PollsPanel: React.FC<PollsPanelProps> = ({
                                     minWidth: '36px',
                                 }}>
                                     <span style={{ fontSize: '14px' }}>▲</span>
-                                    <span style={{ fontSize: '12px', fontWeight: 700 }}>{q.upvotes}</span>
+                                    <span style={{ fontSize: '12px', fontWeight: 700 }}><AnimatedNumber value={q.upvotes} /></span>
                                 </button>
 
                                 <div style={{ flex: 1 }}>

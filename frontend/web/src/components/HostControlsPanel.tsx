@@ -1,3 +1,4 @@
+import SelectionInput from './SelectionInput';
 import React, { useState } from 'react';
 
 interface RoomSettings {
@@ -99,23 +100,23 @@ const HostControlsPanel: React.FC<Props> = ({
                 <div className="host-controls-settings">
                     <label className="setting-toggle">
                         <span><span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '6px' }}>meeting_room</span>Waiting Room</span>
-                        <input type="checkbox" checked={settings.waitingRoomEnabled} onChange={(e) => onUpdateSettings({ waitingRoomEnabled: e.target.checked })} />
+                        <SelectionInput type="checkbox" checked={settings.waitingRoomEnabled} onChange={(e) => onUpdateSettings({ waitingRoomEnabled: e.target.checked })} />
                     </label>
                     <label className="setting-toggle">
                         <span><span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '6px' }}>mic_off</span>Mute on Entry</span>
-                        <input type="checkbox" checked={settings.muteOnEntry} onChange={(e) => onUpdateSettings({ muteOnEntry: e.target.checked })} />
+                        <SelectionInput type="checkbox" checked={settings.muteOnEntry} onChange={(e) => onUpdateSettings({ muteOnEntry: e.target.checked })} />
                     </label>
                     <label className="setting-toggle">
                         <span><span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '6px' }}>screen_share</span>Allow Screen Share</span>
-                        <input type="checkbox" checked={settings.allowScreenShare} onChange={(e) => onUpdateSettings({ allowScreenShare: e.target.checked })} />
+                        <SelectionInput type="checkbox" checked={settings.allowScreenShare} onChange={(e) => onUpdateSettings({ allowScreenShare: e.target.checked })} />
                     </label>
                     <label className="setting-toggle">
                         <span><span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '6px' }}>chat</span>Allow Chat</span>
-                        <input type="checkbox" checked={settings.allowChat} onChange={(e) => onUpdateSettings({ allowChat: e.target.checked })} />
+                        <SelectionInput type="checkbox" checked={settings.allowChat} onChange={(e) => onUpdateSettings({ allowChat: e.target.checked })} />
                     </label>
                     <label className="setting-toggle">
                         <span><span className="mi mi-sm" style={{ verticalAlign: 'middle', marginRight: '6px' }}>fiber_manual_record</span>Allow Recording</span>
-                        <input type="checkbox" checked={settings.allowRecording} onChange={(e) => onUpdateSettings({ allowRecording: e.target.checked })} />
+                        <SelectionInput type="checkbox" checked={settings.allowRecording} onChange={(e) => onUpdateSettings({ allowRecording: e.target.checked })} />
                     </label>
                     <div className="setting-divider" />
                     {!confirmEnd ? (

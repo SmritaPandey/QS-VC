@@ -1,8 +1,10 @@
+import SelectionInput from './SelectionInput';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { signaling } from '../lib/signaling';
 import type { EncryptedNotesAccess } from '../lib/encrypted-notes';
 import type { EncryptedNotesRecord } from '../lib/e2ee-data';
 import { POLL_RESULT_LABELS, type PollResults } from '../lib/collaboration-state';
+import AnimatedNumber from './AnimatedNumber';
 interface PollRecord extends EncryptedNotesRecord {
     authorId: string;
     authorSigningKey: string;
@@ -220,10 +222,10 @@ export default function EncryptedPolls({ access, peerId, manager, connected, vis
         </form>}
         {!polls.length && !error && <p>No encrypted polls yet.</p>}
         {polls.map(poll => <section className="collaboration-card" key={poll.id}>
-            <h3>{poll.definition.question}</h3><p>{poll.closed ? 'Closed' : 'Open'} · {poll.total} votes</p>
+            <h3>{poll.definition.question}</h3><p>{poll.closed ? 'Closed' : 'Open'} · <AnimatedNumber value={poll.total} /> votes</p>
             <fieldset disabled={busy || !connected || poll.closed}><legend className="collaboration-sr">{poll.definition.question}</legend>
                 {poll.definition.options.map((option, index) => <label className="collaboration-poll-choice" key={index}>
-                    <input type="radio" name={poll.id} checked={choices[poll.id] === index} onChange={() => {
+                    <SelectionInput type="radio" name={poll.id} checked={choices[poll.id] === index} onChange={() => {
                     void run(async () => {
                         const recipients = access.moderators?.() ?? [];
                         if (!recipients.length)
@@ -232,13 +234,13 @@ export default function EncryptedPolls({ access, peerId, manager, connected, vis
                         await signaling.request('voteEncryptedPoll', { id: poll.id, copies });
                         setChoices(current => ({ ...current, [poll.id]: index }));
                     });
-                }}/><span>{option}</span>{poll.counts && !poll.incomplete && <span>{poll.counts[index]}</span>}
+                }}/><span>{option}</span>{poll.counts && !poll.incomplete && <span><AnimatedNumber value={poll.counts[index]} /></span>}
                 </label>)}
             </fieldset>
             {poll.incomplete && <p role="status">Some earlier ballots are unavailable to this moderator. Totals cannot be published.</p>}
             {!manager && poll.results === 'hosts' && <p>Only moderators can see results.</p>}
             {!manager && poll.results === 'afterClose' && !poll.closed && <p>Results appear after closing and publication.</p>}
-            {!manager && poll.counts && poll.counted !== poll.total && <p>Published totals cover {poll.counted} votes. Waiting for updated results.</p>}
+            {!manager && poll.counts && poll.counted !== poll.total && <p>Published totals cover <AnimatedNumber value={poll.counted} /> votes. Waiting for updated results.</p>}
             {manager && !poll.closed && <button type="button" disabled={busy || !connected} onClick={() => { void run(async () => { await signaling.request('closeEncryptedPoll', { id: poll.id }); }); }}>Close poll</button>}
             {manager && poll.results !== 'hosts' && (poll.results === 'live' || poll.closed) && <button type="button" disabled={busy || !connected || poll.incomplete} onClick={() => {
                     void run(async () => {

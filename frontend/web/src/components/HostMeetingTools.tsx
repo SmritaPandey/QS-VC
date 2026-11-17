@@ -1,7 +1,9 @@
+import SelectionInput from './SelectionInput';
 import { useEffect, useRef, useState } from 'react';
 import { signaling } from '../lib/signaling';
 import BharatVcConnection from './BharatVcConnection';
 import WaitingRoom, { type WaitingPeer } from './WaitingRoom';
+import AnimatedNumber from './AnimatedNumber';
 import '../styles/host-meeting-tools.css';
 
 export interface RoomHostSettings {
@@ -94,7 +96,7 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
     const raisedHands = participants.filter(peer => peer.handRaised).length;
     const toggle = (key: string, label: string, icon: string, checked: boolean, onChange: (value: boolean) => void, hint?: string, restricted = false) =>
         <label key={key} className="host-switch"><span className="mi" aria-hidden="true">{icon}</span><span className="host-switch-text"><span>{label}</span>{hint && <small>{hint}</small>}</span>
-            <input type="checkbox" role="switch" checked={checked} disabled={busy || restricted} onChange={event => { void onChange(event.target.checked); }} /></label>;
+            <SelectionInput type="checkbox" role="switch" checked={checked} disabled={busy || restricted} onChange={event => { void onChange(event.target.checked); }} /></label>;
 
     return <aside className="side-panel host-meeting-tools" id="meeting-host-tools" aria-label="Host controls" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
         <div className="panel-header"><div><h2>Host controls</h2><p>{role === 'host' ? 'You are the host.' : 'You are a co-host.'} These apply to everyone else.</p></div><button type="button" ref={closeRef} className="panel-close" aria-label="Close host controls" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></div>
@@ -136,8 +138,8 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
             </section>
 
             <section aria-labelledby="host-people-title">
-                <div className="host-tools-row"><h3 id="host-people-title">In the meeting ({participants.length})</h3></div>
-                {role === 'host' && <p className="host-cohost-count">Co-hosts: {coHostCount} of 5</p>}
+                <div className="host-tools-row"><h3 id="host-people-title">In the meeting (<AnimatedNumber value={participants.length} />)</h3></div>
+                {role === 'host' && <p className="host-cohost-count">Co-hosts: <AnimatedNumber value={coHostCount} /> of 5</p>}
                 {coHostLimitReached && <p id="host-cohost-limit" className="host-cohost-limit" role="status">All five co-host seats are in use. Remove a co-host before promoting another participant.</p>}
                 <div className="host-tools-bulk">
                     <button type="button" disabled={busy || others.length === 0} onClick={() => { void run('muteAll', { kind: 'audio' }); }}><span className="mi mi-sm" aria-hidden="true">mic_off</span>Mute all</button>

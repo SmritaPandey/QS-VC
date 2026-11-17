@@ -2,6 +2,7 @@ import OrganisationBranding from '../components/OrganisationBranding';
 import AdminMeetingControls from '../components/AdminMeetingControls';
 import DownloadLeads from '../components/DownloadLeads';
 import AdminAnalytics from '../components/AdminAnalytics';
+import AnimatedNumber from '../components/AnimatedNumber';
 import ThemeSelect from '../components/ThemeSelect';
 import { AUTH_API, clearSession, getToken } from '../lib/session';
 import { useSession } from '../lib/use-session';
@@ -137,12 +138,13 @@ function AdminDashboard({ deployment }: { deployment: AdminDeployment }) {
     return (
         <div className="admin-dashboard admin-workspace" data-profile={deployment.mode}>
             <aside className="admin-workspace-rail">
-                <Link to="/app" className="admin-logo" aria-label="QS-VC meetings"><BrandLogo /></Link>
+            <Link to="/app" className="admin-logo" aria-label="QS-VC meetings"><BrandLogo /></Link>
                 <nav className="admin-nav" aria-label="Admin sections">
                     {tabs.filter(tab => hosted || tab.id !== 'leads').map(tab => (
                         <button key={tab.id} type="button" aria-current={activeTab === tab.id ? 'page' : undefined}
+                            aria-label={tab.label} title={tab.label}
                             className={`admin-nav-btn ${activeTab === tab.id ? 'active' : ''}`} onClick={() => setActiveTab(tab.id)}>
-                            <span className="mi mi-sm" aria-hidden="true">{tab.icon}</span>{tab.label}
+                            <span className="mi mi-sm" aria-hidden="true">{tab.icon}</span><span className="admin-nav-label">{tab.label}</span>
                         </button>
                     ))}
                 </nav>
@@ -173,12 +175,12 @@ function AdminDashboard({ deployment }: { deployment: AdminDeployment }) {
                     <div className="admin-users">
                         <div className="tab-header">
                             <h2>User Management</h2>
-                            <span className="badge">{totalUsers === null ? 'Account count unavailable' : `${totalUsers.toLocaleString()} total users`}</span>
+                            <span className="badge">{totalUsers === null ? 'Account count unavailable' : <><AnimatedNumber value={totalUsers} /> total users</>}</span>
                         </div>
 
                         <div className="admin-user-plan-summary" aria-label="Users by plan">
                             {Object.entries(userPlanLabels).map(([key, label]) => <article key={key}>
-                                <span>{label}</span><strong>{(planCounts[key] || 0).toLocaleString()}</strong>
+                                <span>{label}</span><strong><AnimatedNumber value={planCounts[key] || 0} /></strong>
                             </article>)}
                         </div>
 
@@ -256,14 +258,14 @@ function AdminDashboard({ deployment }: { deployment: AdminDeployment }) {
                                             </td>
                                             <td>{new Date(u.createdAt).toLocaleDateString()}</td>
                                             <td>{u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : '—'}</td>
-                                            <td>{u.meetingCount}</td>
+                                            <td>{u.meetingCount.toLocaleString()}</td>
                                         </tr>
                                     ))}
                                 </tbody>
                             </table></div>
                         ))}
                         <div className="admin-user-pagination">
-                            <span>{usersTotal ? `Showing ${userPage * USER_PAGE_SIZE + 1}–${Math.min((userPage + 1) * USER_PAGE_SIZE, usersTotal)} of ${usersTotal.toLocaleString()}` : '0 matching users'}</span>
+                            <span>{usersTotal ? <>Showing <AnimatedNumber value={userPage * USER_PAGE_SIZE + 1} />–<AnimatedNumber value={Math.min((userPage + 1) * USER_PAGE_SIZE, usersTotal)} /> of <AnimatedNumber value={usersTotal} /></> : <><AnimatedNumber value={0} /> matching users</>}</span>
                             <div><button type="button" className="btn-sm" disabled={userPage === 0} onClick={() => setUserPage(page => Math.max(0, page - 1))}>Previous</button>
                                 <button type="button" className="btn-sm" disabled={(userPage + 1) * USER_PAGE_SIZE >= usersTotal} onClick={() => setUserPage(page => page + 1)}>Next</button></div>
                         </div>
@@ -304,6 +306,13 @@ function AdminDashboard({ deployment }: { deployment: AdminDeployment }) {
                             <button type="button" onClick={() => setActiveTab('meetings')}>Check live meetings</button>
                         </div>
                     </section>
+                    <aside className="admin-deployment-panel admin-profile-guidance" aria-labelledby="admin-profile-guidance-title">
+                        <header><h2 id="admin-profile-guidance-title">Changing this deployment</h2>
+                            <p>The current profile comes from the installed server configuration. It cannot be switched safely from this dashboard.</p></header>
+                        {hosted ? <p>The hosted website is operated as a separate service. To move this organisation to an on-premises edition, provision an on-prem installation and migrate its data with the platform operator.</p>
+                            : <><p>To make an on-prem installation public, the platform operator must configure public HTTPS, DNS, certificates, proxy and firewall rules, then set <code>QSVC_ONPREM_EXPOSURE=public</code> and a valid <code>QSVC_PUBLIC_MEETING_ORIGIN</code> before restarting the services. Leave the exposure private for intranet use.</p>
+                                <p>The offline intranet profile is available only through the signed offline Enterprise package. It stays private and must be changed through an approved package/configuration update.</p></>}
+                    </aside>
                     {internetOnPrem && deployment.publicMeetingOrigin && <section className="admin-deployment-panel" aria-labelledby="public-meeting-link">
                         <header><h2 id="public-meeting-link">Public meeting preview</h2>
                             <p>Open a meeting code through the configured gateway. On-prem sign-in and meeting admission still apply.</p></header>

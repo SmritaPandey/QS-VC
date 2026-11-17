@@ -15,6 +15,7 @@ import useScrollReveal from '../lib/scroll-reveal';
 import HostedMeetings from './HostedMeetings';
 import MeetingSetupDialog, { type MeetingSetup } from './MeetingSetupDialog';
 import PendingInvitations from './PendingInvitations';
+import AnimatedNumber from './AnimatedNumber';
 
 const API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
 const ON_PREM = import.meta.env.VITE_DEPLOYMENT === 'onprem';
@@ -206,7 +207,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                     <button type="button" role="tab" id="tab-hosted" aria-selected={view === 'hosted'} tabIndex={view === 'hosted' ? 0 : -1} aria-controls="workspace-view-panel" onClick={() => setView('hosted')}><span className="mi mi-sm" aria-hidden="true">shield_person</span>I host</button>
                     <button type="button" role="tab" id="tab-invitations" aria-selected={view === 'invitations'} tabIndex={view === 'invitations' ? 0 : -1} aria-controls="workspace-view-panel" onClick={() => setView('invitations')}>
                         <span className="mi mi-sm" aria-hidden="true">mail</span>Invitations
-                        {pendingInviteCount > 0 && <span className="workspace-badge">{pendingInviteCount}</span>}
+                        {pendingInviteCount > 0 && <span className="workspace-badge"><AnimatedNumber value={pendingInviteCount} /></span>}
                     </button>
                 </div>
                 {view === 'invitations' ? (

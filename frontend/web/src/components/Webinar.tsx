@@ -13,6 +13,7 @@
  * - Practice session before going live
  */
 import React, { useState } from 'react';
+import AnimatedNumber from './AnimatedNumber';
 
 interface Panelist {
     id: string;
@@ -105,9 +106,9 @@ const Webinar: React.FC<WebinarProps> = ({
                     color: 'rgba(255,255,255,0.6)', fontSize: '12px',
                 }}>
                     <span>👥</span>
-                    <span>{attendeeCount} attendees</span>
+                    <span><AnimatedNumber value={attendeeCount} /> attendees</span>
                     <span>•</span>
-                    <span>{panelists.length} panelists</span>
+                    <span><AnimatedNumber value={panelists.length} /> panelists</span>
                 </div>
 
                 {isHost && (

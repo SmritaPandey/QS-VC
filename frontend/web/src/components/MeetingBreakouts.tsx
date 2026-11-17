@@ -1,3 +1,4 @@
+import SelectionInput from './SelectionInput';
 import { useEffect, useRef, useState } from 'react';
 import { signaling } from '../lib/signaling';
 import '../styles/meeting-breakouts.css';
@@ -59,7 +60,7 @@ export default function MeetingBreakouts({ connected, isHost, currentRoomId, tra
             {snapshot && !snapshot.rooms.length && <p>{isHost ? 'Create a room to get started.' : 'The host has not assigned you a breakout room.'}</p>}
             {snapshot?.rooms.map(room => <article key={room.roomId} className="meeting-breakout-room">
                 <h4>{room.name}</h4><p>{room.open ? 'Open' : 'Closed'}{currentRoomId === room.roomId ? ' · You are here' : ''}</p>
-                {isHost && <fieldset disabled={disabled || roomsOpen}><legend>Assign participants to {room.name}</legend>{participants.map(peer => <label key={peer.peerId}><input type="checkbox" checked={room.assignedPeerIds?.includes(peer.peerId) || false} onChange={event => void run('assignBreakoutParticipants', { breakoutRoomId: room.roomId, peerIds: event.target.checked ? [...(room.assignedPeerIds || []), peer.peerId] : (room.assignedPeerIds || []).filter(id => id !== peer.peerId) })} />{peer.displayName}</label>)}</fieldset>}
+                {isHost && <fieldset disabled={disabled || roomsOpen}><legend>Assign participants to {room.name}</legend>{participants.map(peer => <label key={peer.peerId}><SelectionInput type="checkbox" checked={room.assignedPeerIds?.includes(peer.peerId) || false} onChange={event => void run('assignBreakoutParticipants', { breakoutRoomId: room.roomId, peerIds: event.target.checked ? [...(room.assignedPeerIds || []), peer.peerId] : (room.assignedPeerIds || []).filter(id => id !== peer.peerId) })} />{peer.displayName}</label>)}</fieldset>}
                 {currentRoomId !== room.roomId && <button type="button" disabled={disabled || !room.open} onClick={() => void join(room.roomId)}>Join {room.name}</button>}
             </article>)}
         </div>
