@@ -132,3 +132,75 @@
 .home-collaboration-grid h3 { margin:16px 0 12px; font-size:22px; }
 .home-collaboration-grid p { margin:0; }
 @media(max-width:760px) { .home-collaboration-grid { grid-template-columns:1fr; gap:16px; } }
+
+/* Camera dots remain the same particles throughout the native scroll handoff. */
+.cipher-hero { position:relative; min-height:170svh; background:var(--bg-primary); }
+.cipher-hero-sticky { position:sticky; top:0; min-height:100svh; display:flex; flex-direction:column; align-items:center; justify-content:center; overflow:hidden; padding:32px 24px; isolation:isolate; }
+.dot-globe { position:relative; width:min(560px,72vw); aspect-ratio:500/340; flex:none; }
+.dot-globe canvas,.dot-globe img { position:absolute; inset:0; width:100%; height:100%; }
+.dot-globe img { opacity:1; }
+.dot-globe[data-canvas-ready=true] img { visibility:hidden; }
+.cipher-hero-copy { position:relative; text-align:center; width:100%; }
+.public-home .cipher-hero h1 { font-size:clamp(34px,4.5vw,64px); max-width:20ch; margin:0 auto 16px; line-height:1.1; letter-spacing:-.03em; color:var(--text-primary); }
+.public-home .cipher-hero-copy>p { margin:0 auto 12px; font-size:clamp(20px,2.3vw,28px); color:var(--text-primary); }
+.public-home .cipher-hero-copy>.cipher-purpose { font-size:16px; max-width:55ch; color:var(--text-secondary); }
+.cipher-actions { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:16px 24px; margin-top:24px; }
+.cipher-create { display:inline-flex; align-items:center; justify-content:center; gap:8px; min-height:48px; color:var(--text-secondary); font-size:16px; }
+.cipher-create>span:first-child { color:var(--accent-primary); text-decoration:underline; text-underline-offset:5px; }
+.cipher-create:hover>span:first-child { text-decoration-thickness:2px; }
+.cipher-scroll { display:inline-flex; align-items:center; gap:12px; min-height:44px; margin-top:24px; font-size:13px; color:var(--text-secondary); }
+.terminal-rain { position:absolute; inset:0; z-index:-1; display:flex; justify-content:space-around; overflow:hidden; opacity:.075; pointer-events:none; mask-image:linear-gradient(#000,transparent 90%); }
+.terminal-rain span { writing-mode:vertical-rl; font:14px/2 monospace; white-space:nowrap; color:var(--accent-primary); animation:terminal-fall 24s linear infinite; }
+@keyframes terminal-fall { from { transform:translateY(-65%); } to { transform:translateY(0); } }
+#home-entry { scroll-margin-top:24px; }
+.public-home .home-message h2 { font-size:clamp(32px,4vw,52px); }
+@media(max-width:600px) { .cipher-hero-sticky { padding:24px 20px; } .dot-globe { width:min(440px,100%); } .cipher-actions { flex-direction:column; gap:8px; } .cipher-hero-copy.public-container { padding-inline:0; } .terminal-rain span:nth-child(even) { display:none; } }
+@media(max-height:650px) and (min-width:700px) { .cipher-hero-sticky { display:grid; grid-template-columns:1fr 1fr; gap:24px; } .dot-globe { width:100%; } .cipher-hero-copy.public-container { padding:0; } .public-home .cipher-hero h1 { font-size:36px; } }
+@media(prefers-reduced-motion:reduce) { .cipher-hero { min-height:0; } .cipher-hero-sticky { position:relative; } .terminal-rain span { animation:none; } }
+.cipher-hero[data-save-data=true] { min-height:0; }
+.cipher-hero[data-save-data=true] .cipher-hero-sticky { position:relative; }
+.cipher-hero[data-save-data=true] .terminal-rain span { animation:none; }
+.home-entry-band { background:var(--bg-secondary); border-block:1px solid var(--border-tone,#d7e2e6); }
+.home-entry-band .home-overview-layout { padding-block:48px; }
+.public-home .home-entry-band h2 { font-size:clamp(28px,3vw,40px); }
+.dot-globe-static-end { display:none; width:100%; height:100%; color:var(--accent-primary); }
+@media(prefers-reduced-motion:reduce) { .dot-globe { display:grid; grid-template-columns:1fr 1fr; align-items:center; aspect-ratio:2.5; } .dot-globe canvas { width:50%; } .dot-globe-static-end { display:block; grid-column:2; } }
+.cipher-hero[data-save-data=true] .dot-globe { display:grid; grid-template-columns:1fr 1fr; align-items:center; aspect-ratio:2.5; }
+.cipher-hero[data-save-data=true] .dot-globe canvas { width:50%; }
+.cipher-hero[data-save-data=true] .dot-globe-static-end { display:block; grid-column:2; }
+.dot-globe-original { position:absolute; inset:0; opacity:var(--globe-reveal,0); pointer-events:none; }
+.dot-globe-original .home-hero-ambient { position:absolute; inset:0; }
+.dot-globe-original .home-hero-ambient-media { width:100%; height:100%; object-fit:contain; }
+.dot-globe canvas { opacity:calc(1 - var(--globe-reveal,0)); }
+.dot-globe img.dot-globe-static-end { position:static; visibility:visible; }
+@media(prefers-reduced-motion:reduce) { .dot-globe-original { display:none; } }
+.cipher-hero[data-save-data=true] .dot-globe-original { display:none; }
+/* The original globe lives at its original lower-left product-copy destination. */
+.home-entry-band { position:relative; isolation:isolate; overflow:hidden; }
+.public-home .home-entry-band>.home-hero-ambient { position:absolute; inset:0; width:100%; transform:none; z-index:0; opacity:1; background:transparent; pointer-events:none; mix-blend-mode:multiply; }
+.public-home .home-entry-band>.home-hero-ambient .home-hero-ambient-media { position:absolute; inset:0 auto auto -300px; width:1200px; max-width:none; height:675px; min-height:0; object-fit:contain; object-position:center; opacity:1; filter:none; mask-image:radial-gradient(ellipse 48% 46% at 70% 48%,#000 65%,transparent 100%); }
+.home-entry-band>.home-overview-layout { position:relative; z-index:1; }
+.dot-globe { transform:translate(calc(var(--morph-progress,0) * -12vw),calc(var(--morph-progress,0) * 15vh)) scale(calc(1 - var(--morph-progress,0) * .22)); transform-origin:center; }
+:root[data-theme=dark] .public-home .home-entry-band>.home-hero-ambient { mix-blend-mode:screen; opacity:.95; }
+@media(max-width:900px) { .public-home .home-entry-band>.home-hero-ambient .home-hero-ambient-media { inset:20px auto auto -260px; width:900px; height:506px; } }
+@media(prefers-reduced-motion:reduce) { .dot-globe { transform:none; } .dot-globe-static-end { display:none!important; } }
+.cipher-hero[data-save-data=true] .dot-globe { transform:none; }
+.cipher-hero[data-save-data=true] .dot-globe-static-end { display:none; }
+@media(prefers-reduced-motion:reduce) { .dot-globe { display:block; aspect-ratio:500/340; } .dot-globe canvas { width:100%; } }
+.cipher-hero[data-save-data=true] .dot-globe { display:block; aspect-ratio:500/340; }
+.cipher-hero[data-save-data=true] .dot-globe canvas { width:100%; }
+
+/* Reserve the true heading geometry while cipher glyphs resolve over it. */
+.hero-cipher { display:inline-grid; }
+.hero-cipher-measure,.hero-cipher-display { grid-area:1 / 1; }
+.hero-cipher-measure { visibility:hidden; }
+.hero-cipher-display { overflow-wrap:normal; }
+/* The light-source globe needs a dark matte before screen blending. */
+:root[data-theme=dark] .public-home .home-entry-band>.home-hero-ambient .home-hero-ambient-media {
+ filter:invert(1) hue-rotate(180deg) saturate(1.4) brightness(.7);
+ opacity:.35;
+}
+:root[data-theme=dark] .public-home .home-entry-band>.home-hero-ambient {
+ opacity:1;
+ mix-blend-mode:screen;
+}

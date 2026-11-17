@@ -1,19 +1,13 @@
-:root { --qsvc-brand-gradient:linear-gradient(110deg,#233c86 0%,#5141be 25%,#006d77 50%,#5141be 75%,#233c86 100%); }
-
-@supports (background-clip:text) {
- :is(.public-site,.workspace-shell,.schedule-page) :is(h1,h2,h3,h4) {
-  background-image:var(--qsvc-brand-gradient);
-  background-size:200% 100%;
-  background-clip:text;
-  -webkit-background-clip:text;
-  -webkit-text-fill-color:transparent;
-  animation:qsvc-heading-flow 6s linear infinite;
- }
+:root { --qsvc-brand-gradient:linear-gradient(110deg,#233c86,#006d77); }
+:is(.public-site,.workspace-shell,.schedule-page) :is(h1,h2,h3,h4) { background:none; -webkit-text-fill-color:currentColor; }
+/* Text stays semantic and visible; the reveal changes paint, never layout. */
+.app-theme :is(h1,h2,h3,h4,h5,h6) { animation:qsvc-ghost-reveal 850ms cubic-bezier(.16,1,.3,1) both; }
+@keyframes qsvc-ghost-reveal {
+ from { opacity:.4; filter:blur(3px); clip-path:inset(0 65% 0 0); }
+ to { opacity:1; filter:none; clip-path:inset(0); }
 }
-@keyframes qsvc-heading-flow { to { background-position:200% 50%; } }
-@media(prefers-reduced-motion:reduce) {
- :is(.public-site,.workspace-shell,.schedule-page) :is(h1,h2,h3,h4) { animation:none; }
-}
-@media(forced-colors:active) {
- :is(.public-site,.workspace-shell,.schedule-page) :is(h1,h2,h3,h4) { background:none; -webkit-text-fill-color:currentColor; animation:none; }
+.app-theme :is(h1,h2,h3,h4,h5,h6).public-scroll-arrived { animation:qsvc-ghost-reveal 650ms cubic-bezier(.16,1,.3,1) both; }
+.app-theme :is(h1,h2,h3,h4,h5,h6):focus-within { animation:none; }
+@media(prefers-reduced-motion:reduce), (forced-colors:active) {
+ .app-theme :is(h1,h2,h3,h4,h5,h6),.app-theme :is(h1,h2,h3,h4,h5,h6).public-scroll-arrived { animation:none; filter:none; clip-path:none; }
 }

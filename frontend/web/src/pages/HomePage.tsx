@@ -5,7 +5,9 @@ import StoryScroll from '../components/StoryScroll';
 import MeetingScene from '../components/MeetingScene';
 import Portrait from '../components/Portrait';
 import SiteFooter from '../components/SiteFooter';
+import DotGlobe from '../components/DotGlobe';
 import HeroAmbient from '../components/HeroAmbient';
+import CipherText from '../components/CipherText';
 import SiteNav from '../components/SiteNav';
 import '../styles/homepage.css';
 
@@ -57,10 +59,23 @@ export default function HomePage() {
     return <div className="public-site public-home">
         <SiteNav />
         <main id="main-content">
-            <div className="public-hero-wrap home-overview"><HeroAmbient />
+            <section className="cipher-hero" aria-labelledby="cipher-title">
+                <div className="cipher-hero-sticky">
+                    <div className="terminal-rain" aria-hidden="true">{Array.from({ length: 14 }, (_, i) => <span key={i} style={{ animationDelay: `${-i * 1.7}s`, animationDuration: `${18 + i % 5 * 3}s` }}>{'01 / CONNECT / QS-VC / 10 / '.repeat(7)}</span>)}</div>
+                    <DotGlobe />
+                    <div className="cipher-hero-copy public-container">
+                        <h1 id="cipher-title"><CipherText text="One room across language" /></h1>
+                        <p>Meet QS-VC. Speak your language. Share your ideas.</p>
+                        <p className="cipher-purpose">Video meetings, shared ideas and language choices. Meet QS-VC.</p>
+                        <div className="cipher-actions"><Link className="qsvc-action" to="/login"><ActionContents>Get Started</ActionContents></Link><Link className="qsvc-action qsvc-action--secondary" to="/app"><ActionContents>Open meeting app</ActionContents></Link></div>
+                        <a className="cipher-scroll" href="#home-entry">Scroll to explore <span className="mi" aria-hidden="true">south</span></a>
+                    </div>
+                </div>
+            </section>
+            <div className="home-entry-band" id="home-entry"><HeroAmbient />
                 <section className="home-overview-layout public-container" aria-labelledby="public-home-title">
                     <div className="home-message">
-                        <h1 id="public-home-title">One room.<br /><span>Your language.</span></h1>
+                        <h2 id="public-home-title">Secure way to Connect Anywhere</h2>
                         <p className="public-lead">Meet QS-VC. Speak your language. Share your ideas.</p>
                         <Link className="qsvc-action" to="/app"><ActionContents>Open meeting app</ActionContents></Link>
                         <form className="public-join" onSubmit={join}>

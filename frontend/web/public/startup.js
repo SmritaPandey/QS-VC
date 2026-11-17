@@ -2,8 +2,7 @@ document.documentElement.classList.add('qsvc-boot');
     var qsvcBootStarted = performance.now();
     window.addEventListener('qsvc:ready', function () {
       clearTimeout(window.qsvcBootTimeout);
-      var remaining = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-        ? 0 : Math.max(0, 3000 - (performance.now() - qsvcBootStarted));
+      var remaining = 0;
       setTimeout(function () {
         document.documentElement.classList.remove('qsvc-boot');
         document.getElementById('qsvc-startup')?.remove();

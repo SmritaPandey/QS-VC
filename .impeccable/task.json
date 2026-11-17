@@ -1,0 +1,86 @@
+{
+  "id": "qsvc-homepage-dot-globe-2026-11-17",
+  "tier": "redesign",
+  "mode": "persuade",
+  "route": "/",
+  "direction_status": "pending",
+  "latest_user_delta": "Replace the existing homepage hero with a new dotted-camera landing hero. As the visitor scrolls naturally, the same dots continuously and reversibly morph into a globe. Preserve all homepage sections below the hero.",
+  "must_keep": [
+    "Current sections below the homepage hero, including the caption demonstration, StoryScroll, collaboration, options, security, FAQ, and footer",
+    "Meeting-code join route and disabled-empty-code behavior",
+    "Open meeting app and guest route",
+    "QS-VC navy/teal identity, IBM Plex typography, themes, and truthful feature qualifications",
+    "Existing startup readiness, no-script, timeout, and recovery behavior"
+  ],
+  "acceptance_traits": [
+    "Main hero reads One room across language; closing headline replaces Your next conversation starts here with Secure way to Connect Anywhere.",
+    "Camera mark is constructed from responsive dots and reacts to pointer hover without requiring hover to understand it.",
+    "Scroll position continuously maps camera-dot geometry into a globe; scrolling upward reverses the morph without trapping or hijacking page scroll.",
+    "Faded typographic terminal-rain background stays behind readable copy and turns static under reduced motion.",
+    "Hero copy receives a semantic, accessible cipher reveal; public-site headings receive a restrained ghost/type reveal.",
+    "The startup loader and shared brand mark use the same transparent dotted camera identity while preserving truthful status and recovery.",
+    "Visitors can find \u2018Sign in to get started\u2019 and a prominent \u2018New here? Create account.\u2019 action.",
+    "Existing app, invite join, account, theme, and lower-page flows remain functional and responsive."
+  ],
+  "reference": {
+    "source": "/var/folders/2d/qjgt05yd2hg8mqrxd0mdntvh0000gn/T/codex-clipboard-527ebf5e-b007-421b-aa79-45ac34701407.png",
+    "observed": "Pale dotted field, large camera silhouette, supporting line, and downward scroll cue.",
+    "inference": "The supplied static image does not show a dotted logo or globe morph; those are explicit additions in the user\u2019s prose."
+  },
+  "implementation_scope": [
+    "frontend/web/src/pages/HomePage.tsx",
+    "frontend/web/src/components/SiteNav.tsx",
+    "frontend/web/src/components/BrandLogo.tsx",
+    "frontend/web/src/pages/Login.tsx",
+    "frontend/web/src/styles/homepage.css",
+    "frontend/web/src/styles/headings.css",
+    "frontend/web/src/lib/scroll-reveal.ts",
+    "frontend/web/public/qsvc-brand-mark.svg",
+    "frontend/web/index.html",
+    "frontend/web/public/startup.js",
+    ".impeccable/design.json",
+    "DESIGN.md"
+  ],
+  "coverage": {
+    "viewports_css_px": [
+      320,
+      360,
+      390,
+      768,
+      1024,
+      1440,
+      "844x390 landscape"
+    ],
+    "themes": [
+      "light",
+      "dark"
+    ],
+    "motion": [
+      "default",
+      "reduced motion",
+      "scroll forward and reverse",
+      "pointer hover",
+      "keyboard focus",
+      "touch"
+    ],
+    "states": [
+      "anonymous navigation",
+      "empty/filled meeting code",
+      "login/create-account destinations",
+      "startup ready",
+      "startup slow recovery",
+      "no JavaScript"
+    ]
+  },
+  "evidence_status": {
+    "source_review": "in progress",
+    "build": "pending",
+    "rendered_viewports_and_themes": "untested",
+    "deployed_behavior": "not in scope"
+  },
+  "approved_copy": {
+    "hero": "One room across language",
+    "closing": "Secure way to Connect Anywhere",
+    "basis": "Latest user correction: secure line replaces Your next conversation starts here in closing, not main hero."
+  }
+}

@@ -42,6 +42,34 @@ function OnPremAccess({ children }: { children: ReactNode }) {
 
 export default function App() {
     useEffect(() => {
+        const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+        const seen = new WeakSet<Element>();
+        const played = new WeakSet<Element>();
+        const observer = new IntersectionObserver(entries => {
+            for (const entry of entries) {
+                if (!entry.isIntersecting || document.documentElement.classList.contains('qsvc-boot')) continue;
+                const node = entry.target as HTMLElement;
+                if (played.has(node)) { observer.unobserve(node); continue; }
+                if (reduced.matches) continue;
+                played.add(node);
+                node.animate([
+                    { opacity: .35, filter: 'blur(5px)', clipPath: 'inset(0 85% 0 0)' },
+                    { opacity: 1, filter: 'blur(0)', clipPath: 'inset(0)' }
+                ], { duration: 1100, easing: 'cubic-bezier(.16,1,.3,1)' });
+                observer.unobserve(node);
+            }
+        }, { threshold: .15 });
+        const scan = () => document.querySelectorAll('.app-theme h1,.app-theme h2,.app-theme h3,.app-theme h4,.app-theme h5,.app-theme h6').forEach(node => {
+            if (!seen.has(node)) { seen.add(node); observer.observe(node); }
+        });
+        const mutations = new MutationObserver(scan);
+        mutations.observe(document.getElementById('root')!, { childList: true, subtree: true });
+        const boot = new MutationObserver(() => { scan(); document.querySelectorAll('.app-theme h1,.app-theme h2').forEach(node => { observer.unobserve(node); observer.observe(node); }); });
+        boot.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+        scan();
+        return () => { observer.disconnect(); mutations.disconnect(); boot.disconnect(); };
+    }, []);
+    useEffect(() => {
         if (import.meta.env.VITE_DEPLOYMENT !== 'onprem') return;
         const controller = new AbortController();
         const check = async () => {

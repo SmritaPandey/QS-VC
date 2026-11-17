@@ -17,7 +17,7 @@
     #qsvc-startup { position: fixed; inset: 0; z-index: 2000; display: grid; place-items: center; background: var(--boot-bg); color: var(--boot-ink); font: 16px/1.6 Arial, sans-serif; }
     #qsvc-startup .boot-content { width: min(280px, calc(100% - 48px)); text-align: center; }
     .boot-mark { display: flex; gap: 12px; align-items: center; justify-content: center; min-height: 56px; margin-bottom: 12px; }
-    .boot-symbol { width: 48px; height: 48px; flex-shrink: 0; overflow: visible; }
+    .boot-symbol { animation:boot-cipher 1.4s steps(4,end) infinite; width: 72px; height: 56px; flex-shrink: 0; overflow: visible; }
     .boot-ring { stroke-dasharray: 160; stroke-dashoffset: 0; animation: boot-ring-trace 3s ease-in-out infinite; }
     .boot-play, .boot-tail { animation: boot-symbol-arrive 650ms ease-out 250ms both; }
     .boot-wordmark { font-size: 28px; font-weight: 600; letter-spacing: -.04em; line-height: 1.2; color: #102A43; background: linear-gradient(110deg,#233c86,#006d77); background-clip: text; -webkit-background-clip: text; -webkit-text-fill-color: transparent; animation: boot-wordmark-arrive 800ms cubic-bezier(.165,.84,.44,1) 300ms both; }
@@ -32,18 +32,19 @@
     #qsvc-startup a, #qsvc-startup button { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 8px 16px; border: 1px solid currentColor; border-radius: 4px 14px; color: inherit; background: transparent; font: inherit; margin: 16px 8px 0 0; cursor: pointer; }
     #qsvc-startup [hidden] { display: none; }
     #qsvc-startup a:focus-visible, #qsvc-startup button:focus-visible { outline: 2px solid #006D77; outline-offset: 3px; }
+    @keyframes boot-cipher { 0%,100% { opacity:1; } 50% { opacity:.35; } }
     @keyframes boot-ring-trace { 0%,100% { stroke-dashoffset: 0; opacity: 1; } 50% { stroke-dashoffset: 28; opacity: .7; } }
     @keyframes boot-line-change { 0% { opacity: 0; transform: translateY(5px); } 4%,28% { opacity: 1; transform: translateY(0); } 33%,100% { opacity: 0; transform: translateY(-5px); } }
     @keyframes boot-symbol-arrive { from { opacity: 0; } to { opacity: 1; } }
     @keyframes boot-wordmark-arrive { from { opacity: 0; transform: translateX(16px); clip-path: inset(0 100% 0 0); } to { opacity: 1; transform: translateX(0); clip-path: inset(0); } }
-    @media (prefers-reduced-motion: reduce) { .boot-ring, .boot-play, .boot-tail, .boot-wordmark, .boot-lines>span { animation: none; } .boot-lines>span:first-child { opacity: 1; } .boot-lines>span:not(:first-child) { display: none; } }
+    @media (prefers-reduced-motion: reduce) { .boot-symbol, .boot-ring, .boot-play, .boot-tail, .boot-wordmark, .boot-lines>span { animation: none; } .boot-lines>span:first-child { opacity: 1; } .boot-lines>span:not(:first-child) { display: none; } }
     @media (forced-colors: active) { .boot-wordmark { background: none; -webkit-text-fill-color: currentColor; } }
   </style>
   <script src="/startup.js"></script>
 </head>
 
 <body>
-  <div id="qsvc-startup"><div class="boot-content"><div class="boot-mark" aria-hidden="true"><svg class="boot-symbol" viewBox="0 0 64 64" focusable="false"><defs><linearGradient id="boot-ring-gradient" x1="12" y1="5" x2="52" y2="60" gradientUnits="userSpaceOnUse"><stop stop-color="#5141BE"/><stop offset="1" stop-color="#6323AA"/></linearGradient><linearGradient id="boot-play-gradient" x1="22" y1="32" x2="44" y2="32" gradientUnits="userSpaceOnUse"><stop stop-color="#20528A"/><stop offset=".55" stop-color="#079C9A"/><stop offset="1" stop-color="#20528A"/></linearGradient></defs><path class="boot-ring" d="M47 50 A25 25 0 1 1 53 43" fill="none" stroke="url(#boot-ring-gradient)" stroke-width="6"/><path class="boot-play" d="M23 21 Q22 20 22 23 L22 42 Q22 44 24 43 L44 34 Q47 32.5 44 31 Z" fill="url(#boot-play-gradient)"/><path class="boot-tail" d="M44 47 Q42 45 41 48 L49 61 Q50 63 52 61 L61 55 Q63 54 60 52 L46 46 Z" fill="url(#boot-ring-gradient)" stroke="#F5F8FA" stroke-width="1.5"/></svg><span class="boot-wordmark">QS-VC</span></div><div class="boot-lines" data-boot-lines aria-hidden="true"><span>Opening QS-VC…</span><span>Your next conversation starts here.</span><span>A little more connection.</span></div><p class="boot-sr-only" role="status" data-boot-status>Opening QS-VC…</p><div data-boot-recovery hidden><a href="">Reload page</a><button data-boot-continue>Continue</button></div></div></div>
+  <div id="qsvc-startup"><div class="boot-content"><div class="boot-mark" aria-hidden="true"><img class="boot-symbol" src="/qsvc-brand-mark.svg" alt="" /><span class="boot-wordmark">QS-VC</span></div><div class="boot-lines" data-boot-lines aria-hidden="true"><span>0101 / QS-VC / 1010</span><span>Your next conversation starts here.</span><span>A little more connection.</span></div><p class="boot-sr-only" role="status" data-boot-status>Opening QS-VC…</p><div data-boot-recovery hidden><a href="">Reload page</a><button data-boot-continue>Continue</button></div></div></div>
   <noscript><style>html.qsvc-boot #root { visibility: visible; } #qsvc-startup { display: none; }</style><p>QS-VC needs JavaScript to open meetings. Enable it and reload this page.</p></noscript>
   <div id="root"></div>
   <script type="module" src="/src/main.tsx"></script>

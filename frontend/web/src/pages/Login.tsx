@@ -69,7 +69,7 @@ export default function Login() {
         <SiteNav accountAction={import.meta.env.VITE_DEPLOYMENT !== 'onprem' ? <Link className="btn-secondary qsvc-action qsvc-action--secondary" to="/app"><ActionContents>Continue as guest</ActionContents></Link> : undefined} />
         <main id="main-content" className="public-container public-auth-layout">
             <div className="public-auth-copy">
-                <h1>Sign in to QS-VC</h1>
+                <h1>Get Started</h1>
                 <p>Sign in to your account, or join a meeting as a guest.</p>
                 <p>Check your camera and microphone before entering the meeting.</p>
                 {import.meta.env.VITE_DEPLOYMENT !== 'onprem' && <Link className="public-text-link qsvc-action qsvc-action--secondary" to="/app"><ActionContents>Continue as guest</ActionContents></Link>}
@@ -87,7 +87,7 @@ export default function Login() {
                     <ActionContents>{busy === 'password' ? 'Signing in…' : 'Sign in'}</ActionContents>
                 </button>
                 <PersonalSignInButtons disabled={!!busy} onOrganisationSignIn={() => void startSSO()} />
-                <p>Need an account? <Link to={`/signup${location.search}`}>Sign up</Link></p>
+                <p className="auth-create-highlight">New here? <Link to={`/signup${location.search}`}>Create account.</Link></p>
             </form>
         </main>
         <SiteFooter />
