@@ -1,4 +1,4 @@
-import { readSessionMeetings, scheduledStarts, SCHEDULE_WINDOW_MESSAGE, SCHEDULE_WINDOW_MS, type SessionMeeting, writeSessionMeetings } from '../lib/session-schedule';
+import { readSessionMeetings, rememberGuestHost, scheduledStarts, SCHEDULE_WINDOW_MESSAGE, SCHEDULE_WINDOW_MS, type SessionMeeting, writeSessionMeetings } from '../lib/session-schedule';
 import SelectionInput from '../components/SelectionInput';
 import { useSession } from '../lib/use-session';
 import ThemeSelect from '../components/ThemeSelect';
@@ -16,6 +16,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 
 const MEETING_API = import.meta.env.VITE_API_URL || import.meta.env.VITE_MEETING_URL || '';
 const MEETINGS_ENDPOINT_BASE = MEETING_API.replace(/\/+$/, '');
+const ON_PREM = import.meta.env.VITE_DEPLOYMENT === 'onprem';
 const MEETINGS_ENDPOINT = MEETINGS_ENDPOINT_BASE.endsWith('/api/meetings') ? MEETINGS_ENDPOINT_BASE : `${MEETINGS_ENDPOINT_BASE}/api/meetings`;
 
 type MeetingDuration = 15 | 30 | 45 | 60 | 90 | 120;
@@ -27,7 +28,7 @@ interface ScheduleFormData {
     duration: MeetingDuration;
     enableWaitingRoom: boolean;
     meetingKind: MeetingKind;
-    repeat: 'none' | 'daily';
+    repeat: 'none' | 'daily' | 'weekly';
     repeatCount: number;
     enableE2EE: boolean;
     maxParticipants: number;
@@ -59,14 +60,18 @@ const ScheduleMeeting: React.FC = () => {
     const [notice, setNotice] = useState('');
     const session = useSession();
     const userId = session.status === 'authenticated' ? session.profile?.id : undefined;
+    const guest = !ON_PREM && session.status === 'anonymous';
+    const storageId = userId ?? (guest ? 'guest' : undefined);
+    const limitedDates = guest || ON_PREM;
+    const allowedKind = guest && schedulingKind === 'town_hall' ? 'conference' : schedulingKind;
     useEffect(() => {
         setMeetings([]);
         setError('');
         setNotice('');
-        if (!userId) return;
-        try { setMeetings(readSessionMeetings(userId)); }
+        if (!storageId) return;
+        try { setMeetings(readSessionMeetings(storageId)); }
         catch { setError('Your browser session schedule could not be opened.'); }
-    }, [userId]);
+    }, [storageId]);
 
     const now = new Date();
     const tomorrow = new Date(now);
@@ -78,7 +83,7 @@ const ScheduleMeeting: React.FC = () => {
         time: '10:00',
         duration: 60,
         enableWaitingRoom: true,
-        meetingKind: schedulingKind,
+        meetingKind: allowedKind,
         repeat: 'none',
         repeatCount: 2,
         enableE2EE: true,
@@ -88,32 +93,38 @@ const ScheduleMeeting: React.FC = () => {
     const updateField = <K extends keyof ScheduleFormData>(key: K, value: ScheduleFormData[K]) => {
         setForm(prev => ({ ...prev, [key]: value }));
     };
-    useEffect(() => { setForm(previous => ({ ...previous, meetingKind: schedulingKind })); }, [schedulingKind]);
+    useEffect(() => {
+        setForm(previous => ({ ...previous, meetingKind: allowedKind,
+            repeat: limitedDates && previous.repeat === 'weekly' ? 'none' : previous.repeat,
+            repeatCount: limitedDates ? Math.min(previous.repeatCount, 3) : previous.repeatCount,
+        }));
+    }, [allowedKind, limitedDates]);
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
         const token = getToken();
-        if (submitting || !token || !userId) return;
+        if (submitting || !storageId || (!guest && !token)) return;
         setError('');
         setNotice('');
         setSubmitting(true);
 
         const title = form.title.trim() || 'Scheduled Meeting';
         const start = new Date(`${form.date}T${form.time}`).getTime();
-        const count = form.repeat === 'daily' ? form.repeatCount : 1;
+        const count = form.repeat === 'none' ? 1 : form.repeatCount;
         try {
-            scheduledStarts(start, count);
+            if (limitedDates) scheduledStarts(start, count);
+            else if (!Number.isFinite(start) || start <= Date.now()) throw new Error('Choose a future start time.');
             const res = await fetch(`${MEETINGS_ENDPOINT}/schedule`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
                 body: JSON.stringify({
                     type: 'scheduled',
                     scheduledStart: new Date(start).toISOString(),
                     scheduledEnd: new Date(start + form.duration * 60_000).toISOString(),
-                    recurrence: count > 1 ? { frequency: 'daily', count } : undefined,
+                    recurrence: form.repeat === 'none' ? undefined : { frequency: form.repeat, count },
                     settings: {
                         maxParticipants: form.maxParticipants,
-                        meetingKind: form.meetingKind,
+                        meetingKind: guest && form.meetingKind === 'conference' ? undefined : form.meetingKind,
                         e2eeRequired: form.enableE2EE,
                     },
                 }),
@@ -123,12 +134,18 @@ const ScheduleMeeting: React.FC = () => {
             const data = await res.json();
             if (getToken() !== token) return;
             if (!res.ok) throw new Error(data.error || 'Could not schedule the meeting. Try again.');
-            const added = data.occurrences.map((item: { meetingCode: string; scheduledStart: string; inviteToken: string }): SessionMeeting => ({
-                id: item.meetingCode, title, start: item.scheduledStart, duration: form.duration, meetingKind: form.meetingKind,
-                previewPath: `/meeting/${encodeURIComponent(item.meetingCode)}/preview?invite=${encodeURIComponent(item.inviteToken)}`,
-            }));
-            const next = [...readSessionMeetings(userId), ...added].sort((a, b) => a.start.localeCompare(b.start));
-            writeSessionMeetings(userId, next);
+            const added = data.occurrences.map((item: { meetingCode: string; scheduledStart: string; inviteToken: string; guestHostToken?: string }): SessionMeeting => {
+                if (guest) {
+                    if (!item.guestHostToken) throw new Error('Could not save guest host access.');
+                    rememberGuestHost(item.meetingCode, item.guestHostToken);
+                }
+                return {
+                    id: item.meetingCode, title, start: item.scheduledStart, duration: form.duration, meetingKind: form.meetingKind,
+                    previewPath: `/meeting/${encodeURIComponent(item.meetingCode)}/preview?invite=${encodeURIComponent(item.inviteToken)}`,
+                };
+            });
+            const next = [...readSessionMeetings(storageId), ...added].sort((a, b) => a.start.localeCompare(b.start));
+            writeSessionMeetings(storageId, next);
             setMeetings(next);
             setNotice(added.length === 1 ? 'Meeting scheduled in this tab.' : `${added.length} meetings scheduled in this tab.`);
         } catch (error) {
@@ -139,10 +156,10 @@ const ScheduleMeeting: React.FC = () => {
     };
 
     const removeMeeting = (id: string) => {
-        if (!userId) return;
+        if (!storageId) return;
         try {
-            const next = readSessionMeetings(userId).filter(meeting => meeting.id !== id);
-            writeSessionMeetings(userId, next);
+            const next = readSessionMeetings(storageId).filter(meeting => meeting.id !== id);
+            writeSessionMeetings(storageId, next);
             setMeetings(next);
             setNotice('Removed from this tab. Any previously shared link can still be opened until it expires.');
         } catch { setError('Could not remove this meeting from the browser session.'); }
@@ -156,9 +173,9 @@ const ScheduleMeeting: React.FC = () => {
     };
 
     // ━━━ SIGN-IN PROMPT (guests) ━━━
-    if (!userId && session.status !== 'anonymous') return <div className="schedule-page"><div className="schedule-container"><section className="schedule-signin" role="status"><ThemeSelect /><h1>{session.status === 'checking' ? 'Checking account…' : 'Account unavailable'}</h1>{session.status === 'unavailable' && <button type="button" onClick={() => void refreshSession()}>Try again</button>}<Link to="/app">Open meeting app</Link></section></div></div>;
+    if (!storageId && session.status !== 'anonymous') return <div className="schedule-page"><div className="schedule-container"><section className="schedule-signin" role="status"><ThemeSelect /><h1>{session.status === 'checking' ? 'Checking account…' : 'Account unavailable'}</h1>{session.status === 'unavailable' && <button type="button" onClick={() => void refreshSession()}>Try again</button>}<Link to="/app">Open meeting app</Link></section></div></div>;
 
-    if (!userId) {
+    if (!storageId) {
         const next = encodeURIComponent(pathname + search);
         return (
             <div className="schedule-page">
@@ -184,8 +201,8 @@ const ScheduleMeeting: React.FC = () => {
             <div className="schedule-container">
                 <header className="schedule-header"><ThemeSelect />
                     <button className="btn-back qsvc-action qsvc-action--secondary" onClick={() => navigate('/app')}><ActionContents><span className="mi" aria-hidden="true">arrow_back</span> Back to meetings</ActionContents></button>
-                    <h1>{schedulingTownHall ? 'Schedule a town hall.' : 'Schedule a meeting.'}</h1>
-                    <p>Schedule within the next 72 hours. Your schedule stays in this browser tab and clears when the session ends.</p>
+                    <h1>{schedulingTownHall && !guest ? 'Schedule a town hall.' : 'Schedule a meeting.'}</h1>
+                    <p>{limitedDates ? 'Schedule within the next 72 hours.' : 'Schedule up to seven meetings in a rolling week across devices.'} Your schedule stays in this browser tab and clears when the session ends.</p>
                     {meetings.length > 0 && <a href="#session-schedule-title">View meetings scheduled in this tab</a>}
                 </header>
 
@@ -208,10 +225,10 @@ const ScheduleMeeting: React.FC = () => {
                         <fieldset className="schedule-kind-options">
                             <legend>Meeting type</legend>
                             {([
-                                ['conference', 'Conferencing', 'A standard room for a conversation or collaboration.'],
+                                ['conference', guest ? 'Instant meeting' : 'Conferencing', 'A standard room for a conversation or collaboration.'],
                                 ['team', 'Team meeting', 'A working session for your team.'],
                                 ['town_hall', 'Town hall', 'A presentation-style room with a stage.'],
-                            ] as const).map(([kind, label, detail]) => <label key={kind} className="schedule-kind-option" data-selected={form.meetingKind === kind}>
+                            ] as const).filter(([kind]) => !guest || kind !== 'town_hall').map(([kind, label, detail]) => <label key={kind} className="schedule-kind-option" data-selected={form.meetingKind === kind}>
                                 <SelectionInput type="radio" name="schedule-meeting-kind" value={kind} checked={form.meetingKind === kind} onChange={() => updateField('meetingKind', kind)} />
                                 <span><strong>{label}</strong><small>{detail}</small></span>
                             </label>)}
@@ -221,7 +238,7 @@ const ScheduleMeeting: React.FC = () => {
                     {/* ── Date & Time ── */}
                     <section className="form-section">
                         <h2>When</h2>
-                        <p>{SCHEDULE_WINDOW_MESSAGE}</p>
+                        <p>{limitedDates ? SCHEDULE_WINDOW_MESSAGE : 'Choose a future start. Each repeat counts toward your weekly limit.'}</p>
                         <div className="form-row">
                             <div className="form-group">
                                 <label htmlFor="date">Date</label>
@@ -232,7 +249,7 @@ const ScheduleMeeting: React.FC = () => {
                                     onChange={e => updateField('date', e.target.value)}
                                     className="form-input"
                                     min={localDate(now)}
-                                    max={localDate(new Date(now.getTime() + SCHEDULE_WINDOW_MS))}
+                                    max={limitedDates ? localDate(new Date(now.getTime() + SCHEDULE_WINDOW_MS)) : undefined}
                                     required
                                 />
                             </div>
@@ -278,10 +295,11 @@ const ScheduleMeeting: React.FC = () => {
                             <select id="meeting-repeat" className="form-input" value={form.repeat} onChange={event => updateField('repeat', event.target.value as ScheduleFormData['repeat'])}>
                                 <option value="none">Does not repeat</option>
                                 <option value="daily">Daily</option>
+                                {!limitedDates && <option value="weekly">Weekly</option>}
                             </select>
                             {form.repeat !== 'none' && <>
                                 <label htmlFor="meeting-repeat-count">Number of meetings</label>
-                                <input id="meeting-repeat-count" className="form-input" type="number" required min={2} max={3} value={form.repeatCount} onChange={event => updateField('repeatCount', event.target.valueAsNumber)} />
+                                <input id="meeting-repeat-count" className="form-input" type="number" required min={2} max={limitedDates ? 3 : 7} value={form.repeatCount} onChange={event => updateField('repeatCount', event.target.valueAsNumber)} />
                                 <p>Occurrences repeat at the same UTC time.</p>
                             </>}
                         </div>
@@ -352,7 +370,7 @@ const ScheduleMeeting: React.FC = () => {
                         const expired = Date.now() >= Date.parse(meeting.start) + 86_400_000;
                         return <article className="preview-card" key={meeting.id}>
                             <h3>{meeting.title}</h3>
-                            <p><time dateTime={meeting.start}>{new Date(meeting.start).toLocaleString()}</time> · {meeting.duration} minutes · {meeting.meetingKind === 'town_hall' ? 'Town hall' : meeting.meetingKind === 'team' ? 'Team meeting' : 'Conferencing'}</p>
+                            <p><time dateTime={meeting.start}>{new Date(meeting.start).toLocaleString()}</time> · {meeting.duration} minutes · {meeting.meetingKind === 'town_hall' ? 'Town hall' : meeting.meetingKind === 'team' ? 'Team meeting' : guest ? 'Instant meeting' : 'Conferencing'}</p>
                             <div className="success-actions">
                                 {expired ? <span>Invitation expired</span> : <>
                                     <Link to={meeting.previewPath} className="public-primary qsvc-action"><ActionContents>Open meeting</ActionContents></Link>

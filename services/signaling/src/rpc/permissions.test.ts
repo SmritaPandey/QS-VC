@@ -1070,3 +1070,40 @@ it('requires a valid private schedule invitation and grants host controls only t
     await handlePeerDisconnect(adminInvitee);
     await handlePeerDisconnect(hostState);
 });
+
+it('separates a guest host credential from the public invitation and preserves host controls on rejoin', async () => {
+    const meetingCode = 'QS-S-112233445566778899AABBCC';
+    const inviteToken = meetingInvitation.createSessionMeetingInvite(meetingCode, {
+        hostId: `guest:${meetingCode}`, expiresAt: Date.now() + 60_000, meetingKind: 'team', e2eeRequired: false, maxParticipants: 2,
+    });
+    const guestHostToken = meetingInvitation.createGuestHostToken(meetingCode);
+    const host = socket(), guest = socket(), back = socket();
+    const hostState: any = {}, guestState: any = {}, backState: any = {};
+    const join = (ws: any, state: any, hostToken?: string) => rpc(ws, state, 'joinRoom', { meetingCode, displayName: 'Guest', inviteToken, guestHostToken: hostToken });
+    expect((await join(guest, guestState, 'A'.repeat(43)))?.result.status).toBe('waitingForHost');
+    expect((await join(host, hostState, guestHostToken))?.result).toMatchObject({ role: 'host', userId: null });
+    await tick();
+    expect((await rpc(guest, guestState, 'admitPeer', { targetPeerId: guestState.peerId }))?.error).toBeDefined();
+    expect((await rpc(host, hostState, 'admitPeer', { targetPeerId: guestState.peerId }))?.result.admitted).toBe(true);
+    expect((await join(back, backState, guestHostToken))?.result.role).toBe('host');
+    expect(host.close).toHaveBeenCalledWith(4002, expect.any(String));
+    expect(roomManager.getRoom(backState.roomId)?.peers.size).toBe(2);
+    await handlePeerDisconnect(hostState);
+    await handlePeerDisconnect(guestState);
+    await handlePeerDisconnect(backState);
+});
+
+it('does not allow guest-hosted invitations in the intranet deployment', async () => {
+    const meetingCode = 'QS-S-2233445566778899AABBCCDD';
+    const inviteToken = meetingInvitation.createSessionMeetingInvite(meetingCode, {
+        hostId: `guest:${meetingCode}`, expiresAt: Date.now() + 60_000, meetingKind: 'team', e2eeRequired: false, maxParticipants: 2,
+    });
+    vi.stubEnv('QSVC_DEPLOYMENT', 'onprem');
+    try {
+        const result = await rpc(socket(), { authUser: { sub: 'member' } }, 'joinRoom', {
+            meetingCode, displayName: 'Member', inviteToken, guestHostToken: meetingInvitation.createGuestHostToken(meetingCode),
+        });
+        expect(result?.error?.message).toContain('unavailable in this workspace');
+        expect(roomManager.getRoomByCode(meetingCode)).toBeUndefined();
+    } finally { vi.unstubAllEnvs(); }
+});

@@ -7,6 +7,7 @@ export interface MeetingSetup { title: string; meetingKind: MeetingKind; startNo
 interface Props {
     action: 'link' | 'start';
     creating: boolean;
+    guest?: boolean;
     onClose: () => void;
     onCreate: (setup: MeetingSetup) => void | Promise<void>;
 }
@@ -20,7 +21,7 @@ const kinds: Array<{ value: SetupKind; label: string; detail: string }> = [
     { value: 'town_hall', label: 'Town hall / webinar', detail: 'A presentation-style room with a stage.' },
 ];
 
-export default function MeetingSetupDialog({ action, creating, onClose, onCreate }: Props) {
+export default function MeetingSetupDialog({ action, creating, guest = false, onClose, onCreate }: Props) {
     const dialogRef = useRef<HTMLDialogElement>(null);
     const [title, setTitle] = useState('');
     const [meetingKind, setMeetingKind] = useState<SetupKind>(action === 'start' ? 'instant' : 'conference');
@@ -61,13 +62,13 @@ export default function MeetingSetupDialog({ action, creating, onClose, onCreate
 
             <fieldset className="meeting-setup-kinds">
                 <legend>Meeting type</legend>
-                {kinds.map(kind => <label key={kind.value} className="meeting-setup-kind" data-selected={meetingKind === kind.value}>
+                {kinds.filter(kind => !guest || kind.value === 'instant' || kind.value === 'team').map(kind => <label key={kind.value} className="meeting-setup-kind" data-selected={meetingKind === kind.value}>
                     <SelectionInput type="radio" name="meeting-kind" value={kind.value} checked={meetingKind === kind.value} onChange={() => setMeetingKind(kind.value)} />
                     <span className="meeting-setup-kind-copy"><span>{kind.label}</span><small>{kind.detail}</small></span>
                 </label>)}
             </fieldset>
 
-            <p className="meeting-setup-waiting"><span className="mi" aria-hidden="true">hourglass_top</span><span>Attendees wait in the meeting’s waiting room until you or a co-host admits them.</span></p>
+            <p className="meeting-setup-waiting"><span className="mi" aria-hidden="true">hourglass_top</span><span>Guests wait until you or a co-host admits them.</span></p>
             {error && <p className="meeting-setup-error" role="alert">{error}</p>}
             <div className="meeting-setup-actions">
                 <button type="button" className="meeting-setup-secondary" disabled={creating} onClick={onClose}>Cancel</button>

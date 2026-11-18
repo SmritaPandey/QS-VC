@@ -1,3 +1,4 @@
+import { getGuestHostToken } from '../lib/session-schedule';
 import { nextNetworkProfile } from '../lib/network-policy';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
@@ -937,6 +938,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     meetingCode, displayName,
                     inviteToken: initialInviteToken || undefined,
                     guestToken: initialGuestToken || undefined,
+                    guestHostToken: getGuestHostToken(meetingCode),
                     supportsE2EE: encodedTransformsSupported(),
                 });
                 if (joinResult.status === 'waiting' || joinResult.status === 'waitingForHost' || joinResult.status === 'keptWaiting') {

@@ -3,6 +3,7 @@ import { webinarsRouter } from './webinars.js';
 import { registerSessionReportRoutes } from './session-reports.js';
 import { roomDialHandler } from './room-dial.js';
 import { serviceSecret } from '../../../shared/service-secrets.cjs';
+import { reserveScheduleQuota, WEEKLY_SCHEDULE_LIMIT } from './schedule-quota.js';
 import { scheduleOccurrences, withinSchedulingWindow } from './schedule-occurrences.js';
 import { meetingAuth, requireFeature, type AuthPayload } from './auth.js';
 import jwt from 'jsonwebtoken';
@@ -189,9 +190,35 @@ app.get('/ready', async (_req, res) => {
     }
 });
 
+const guestHostingEnabled = process.env.QSVC_DEPLOYMENT !== 'onprem' && process.env.QSVC_ENTERPRISE_TERMS_REQUIRED !== 'yes';
+
+function issueSessionMeeting(start: number, user: AuthPayload | undefined, settings: z.infer<typeof createMeetingBody>['settings']) {
+    const meetingCode = `QS-S-${crypto.randomBytes(12).toString('hex').toUpperCase()}`;
+    const inviteToken = meetingInvitation.createSessionMeetingInvite(meetingCode, {
+        hostId: user?.sub ?? `guest:${meetingCode}`,
+        expiresAt: start + 86_400_000,
+        meetingKind: settings?.meetingKind ?? (settings?.webinar ? 'town_hall' : 'conference'),
+        e2eeRequired: settings?.e2eeRequired ?? true,
+        maxParticipants: settings?.maxParticipants ?? 100,
+    });
+    return { meetingCode, inviteToken, guestHostToken: user ? undefined : meetingInvitation.createGuestHostToken(meetingCode) };
+}
+
+function allowedGuestKind(settings: z.infer<typeof createMeetingBody>['settings']): boolean {
+    return !settings?.webinar && (!settings?.meetingKind || settings.meetingKind === 'team');
+}
+
 // Quick meeting creation (no auth required — for demo/guest access)
-app.post('/api/meetings/create', async (_req, res) => {
+app.post('/api/meetings/create', guestHostingEnabled ? validateBody(createMeetingBody) : (_req, _res, next) => next(), async (req, res) => {
     try {
+        if (guestHostingEnabled) {
+            const { settings } = req.body as z.infer<typeof createMeetingBody>;
+            if (!allowedGuestKind(settings)) return res.status(403).json({ error: 'Guests can only create instant and team meetings.' });
+            const issued = issueSessionMeeting(Date.now(), undefined, settings);
+            const base = (process.env.WEB_URL || 'https://qs-vc.vercel.app').replace(/\/$/, '');
+            res.setHeader('Cache-Control', 'no-store');
+            return res.json({ ...issued, joinUrl: `${base}/meeting/${issued.meetingCode}/preview?invite=${encodeURIComponent(issued.inviteToken)}` });
+        }
         let meetingCode: string;
         const WEB_URL = (process.env.WEB_URL || 'https://qs-vc.vercel.app').replace(/\/$/, '');
 
@@ -252,30 +279,37 @@ app.post('/api/meetings', authMiddleware, validateBody(createMeetingBody), async
     }
 });
 
-// Issue private schedule invitations without creating any stored meeting rows.
-app.post('/api/meetings/schedule', authMiddleware, validateBody(createMeetingBody), async (req, res) => {
-    const user = (req as any).user as AuthPayload;
+// Issue invitations without storing schedules. Public signed-in quota tracks issuance only.
+app.post('/api/meetings/schedule', (req, res, next) => {
+    if (guestHostingEnabled && !req.headers.authorization) return next();
+    return authMiddleware(req, res, next);
+}, validateBody(createMeetingBody), async (req, res) => {
+    const user = (req as any).user as AuthPayload | undefined;
     const { scheduledStart, scheduledEnd, settings, recurrence }: z.infer<typeof createMeetingBody> = req.body;
+    if (!user && !allowedGuestKind(settings)) {
+        return res.status(403).json({ error: 'Guests can only schedule instant and team meetings.' });
+    }
     const times = scheduledStart && scheduleOccurrences(scheduledStart, scheduledEnd, recurrence);
-    if (!times || !withinSchedulingWindow(times)) {
-        return res.status(400).json({ error: 'Choose start times within the next 72 hours and an end after the start.' });
+    const now = Date.now();
+    if (!times || !times.every(time => Date.parse(time.scheduledStart) > now)) {
+        return res.status(400).json({ error: 'Choose a future start and an end after the start.' });
+    }
+    if ((!user || !guestHostingEnabled) && !withinSchedulingWindow(times, now)) {
+        return res.status(400).json({ error: 'Choose start times within the next 72 hours.' });
+    }
+    if (guestHostingEnabled && user && times.length > WEEKLY_SCHEDULE_LIMIT) {
+        return res.status(429).json({ error: 'You can schedule up to seven meetings in a rolling week.' });
     }
     try {
-        const occurrences = times.map(time => {
-            const meetingCode = `QS-S-${crypto.randomBytes(12).toString('hex').toUpperCase()}`;
-            const inviteToken = meetingInvitation.createSessionMeetingInvite(meetingCode, {
-                hostId: user.sub,
-                expiresAt: Date.parse(time.scheduledStart) + 86_400_000,
-                meetingKind: settings?.meetingKind ?? (settings?.webinar ? 'town_hall' : 'conference'),
-                e2eeRequired: settings?.e2eeRequired ?? true,
-                maxParticipants: settings?.maxParticipants ?? 100,
-            });
-            return { ...time, meetingCode, inviteToken };
-        });
+        const occurrences = times.map(time => ({ ...time, ...issueSessionMeeting(Date.parse(time.scheduledStart), user, settings) }));
+        if (guestHostingEnabled && user && !await reserveScheduleQuota(pool, user, times.length)) {
+            return res.status(429).json({ error: 'You can schedule up to seven meetings in a rolling week. Repeated meetings count individually.' });
+        }
         res.setHeader('Cache-Control', 'no-store');
         return res.status(201).json({ occurrences });
-    } catch {
-        return res.status(500).json({ error: 'Could not create invitations. Try again.' });
+    } catch (error) {
+        logger.warn({ error }, 'Could not issue meeting invitations');
+        return res.status(503).json({ error: 'Could not create invitations. Try again.' });
     }
 });
 

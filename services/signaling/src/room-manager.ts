@@ -15,6 +15,7 @@ export interface PeerState {
     /** Optional participant-entered site label; never inferred from location services. */
     siteLocation?: string;
     userId?: string;
+    guestHost?: boolean;
     /** Platform admin (server-verified): joins any meeting with host controls. */
     platformAdmin?: boolean;
     isGuest?: boolean;
@@ -260,7 +261,7 @@ export class RoomManager {
             throw new Error('Room is full');
         }
 
-        if (room.settings.locked && !peer.platformAdmin && !(room.ownerUserId && room.ownerUserId === peer.userId)) {
+        if (room.settings.locked && !peer.guestHost && !peer.platformAdmin && !(room.ownerUserId && room.ownerUserId === peer.userId)) {
             throw new Error('Room is locked');
         }
 
@@ -274,7 +275,7 @@ export class RoomManager {
         // Roles on join are server-owned. Only the host can promote an existing member.
         peer.role = 'member';
         // First peer becomes host
-        if (room.hostPeerId === peer.id || (!room.ownerUserId && !room.hostPeerId) || (!!room.ownerUserId && room.ownerUserId === peer.userId && ![...room.peers.values()].some(p => p.userId === peer.userId && p.role === 'host'))) {
+        if (peer.guestHost || room.hostPeerId === peer.id || (!room.ownerUserId && !room.hostPeerId) || (!!room.ownerUserId && room.ownerUserId === peer.userId && ![...room.peers.values()].some(p => p.userId === peer.userId && p.role === 'host'))) {
             peer.role = 'host';
             room.hostPeerId = peer.id;
         }
@@ -295,7 +296,7 @@ export class RoomManager {
             }
         }
         // The owner is back: a co-host who covered while they were away returns to co-host.
-        if (peer.role === 'host' && room.ownerUserId && room.ownerUserId === peer.userId) {
+        if (peer.role === 'host' && (peer.guestHost || (room.ownerUserId && room.ownerUserId === peer.userId))) {
             for (const other of room.peers.values()) {
                 if (other.role === 'host' && other.id !== peer.id) {
                     const coHostCount = [...room.peers.values()].filter(p => p.role === 'co-host').length;

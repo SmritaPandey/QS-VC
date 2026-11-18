@@ -30,3 +30,12 @@ export function readSessionMeetings(userId: string): SessionMeeting[] {
 export function writeSessionMeetings(userId: string, meetings: SessionMeeting[]) {
     sessionStorage.setItem(`qsvc:schedule:${userId}`, JSON.stringify(meetings));
 }
+
+export function rememberGuestHost(meetingCode: string, token: string) {
+    sessionStorage.setItem(`qsvc:guest-host:${meetingCode.toUpperCase()}`, token);
+}
+
+export function getGuestHostToken(meetingCode: string): string | undefined {
+    try { return sessionStorage.getItem(`qsvc:guest-host:${meetingCode.toUpperCase()}`) || undefined; }
+    catch { return undefined; }
+}

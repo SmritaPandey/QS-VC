@@ -24,7 +24,7 @@ import { asrParticipants, asrCapabilities, pushAsrAudio, startAsr, stopAsr, stop
 import { generateMinutes, minutesConfigured } from '../minutes.js';
 import { saveTranscript } from '../transcript-store.js';
 
-const { createMeetingInviteToken, verifyMeetingInviteToken, isSessionMeetingCode, verifySessionMeetingInvite } = meetingInvitation;
+const { createMeetingInviteToken, verifyMeetingInviteToken, isSessionMeetingCode, verifySessionMeetingInvite, verifyGuestHostToken } = meetingInvitation;
 const endingRooms = new WeakSet<object>();
 const roomTeardowns = new WeakMap<object, Promise<void>>();
 const dashboardControls = new WeakMap<object, { sub: string; tenantId: string; action: 'end' | 'cancel'; promise: Promise<void> }>();
@@ -251,6 +251,7 @@ const joinRoomSchema = z.object({
     siteLocation: z.string().trim().max(120).optional(),
     inviteToken: z.string().max(512).optional(),
     guestToken: z.string().max(128).optional(),
+    guestHostToken: z.string().max(43).optional(),
     rtpCapabilities: z.record(z.string(), z.unknown()).optional(),
     password: z.string().max(50).optional(),
     role: z.enum(['host', 'co-host', 'participant']).optional(),
@@ -634,7 +635,7 @@ export async function handleRpcMessage(
                         error: { code: -32602, message: 'Invalid params: ' + joinParams.error.issues.map(i => i.message).join(', ') },
                     };
                 }
-                const { meetingCode: requestedCode, displayName: rawName, rtpCapabilities, password, inviteToken, guestToken } = joinParams.data;
+                const { meetingCode: requestedCode, displayName: rawName, rtpCapabilities, password, inviteToken, guestToken, guestHostToken } = joinParams.data;
                 const sessionMeeting = isSessionMeetingCode(requestedCode);
                 const meetingCode = sessionMeeting ? requestedCode.toUpperCase() : requestedCode;
                 if (connectionState.expectedMeetingCode && connectionState.expectedMeetingCode !== meetingCode.trim().toUpperCase()) {
@@ -655,6 +656,11 @@ export async function handleRpcMessage(
                 if (sessionMeeting && !sharedSchedule) {
                     throw createError(-32005, 'This meeting invitation is missing or expired. Ask the organiser for a valid link.');
                 }
+                const guestHosted = sharedSchedule?.hostId === `guest:${meetingCode}`;
+                if (guestHosted && (process.env.QSVC_DEPLOYMENT === 'onprem' || process.env.QSVC_ENTERPRISE_TERMS_REQUIRED === 'yes')) {
+                    throw createError(-32005, 'Guest hosting is unavailable in this workspace.');
+                }
+                const guestHost = guestHosted && verifyGuestHostToken(meetingCode, guestHostToken);
                 const policy = sharedSchedule ? {
                     hostId: sharedSchedule.hostId,
                     status: 'waiting',
@@ -695,7 +701,7 @@ export async function handleRpcMessage(
                 const directEntry = canEnterWithoutApproval(room, connectionState.authUser, isGuestUser);
                 // Platform admins (role from the server-signed session) can enter and run any meeting.
                 const isPlatformAdmin = !sessionMeeting && connectionState.authUser?.role === 'admin';
-                const isOwner = (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub) || isPlatformAdmin;
+                const isOwner = guestHost || (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub) || isPlatformAdmin;
                 // Google Meet rule: nobody gets in before the host starts the meeting. They wait, and
                 // are let in (or asked to knock) automatically when the host arrives.
                 if (policy?.status === 'ended' && !room.hostStarted && !isOwner) {
@@ -731,7 +737,7 @@ export async function handleRpcMessage(
 
                 // Check max participants
                 if (!isPlatformAdmin && room.peers.size >= room.settings.maxParticipants &&
-                    ![...room.peers.values()].some(peer => peer.userId && peer.userId === connectionState.authUser?.sub)) {
+                    ![...room.peers.values()].some(peer => (guestHost && peer.guestHost) || (peer.userId && !peer.guestHost && peer.userId === connectionState.authUser?.sub))) {
                     return {
                         jsonrpc: '2.0', id: id!,
                         error: { code: -32003, message: 'Meeting is full' },
@@ -783,7 +789,7 @@ export async function handleRpcMessage(
                         (room.ownerUserId && !room.hostStarted))) {
                         throw createError(-32005, 'Meeting access changed. Try joining again.');
                     }
-                }, verifiedAccess?.role as any);
+                }, verifiedAccess?.role as any, false, guestHost);
                 const me = room.peers.get(peerId);
                 if (me?.role === 'host' && joined?.result) joined.result.inviteToken = sessionMeeting ? inviteToken : createMeetingInviteToken(meetingCode);
                 if (me?.role === 'host') {
@@ -1923,7 +1929,8 @@ async function joinPeerToRoom(
     rpcId: number | string | null,
     beforeRegister?: () => void,
     initialRole?: PeerRole,
-    requireMedia = false
+    requireMedia = false,
+    guestHost = false
 ): Promise<RpcResponse | null> {
     const room = roomManager.getRoom(roomId);
     if (!room) throw createError(-32000, 'Room not found');
@@ -1964,6 +1971,7 @@ async function joinPeerToRoom(
         initialRole,
         isGuest: Boolean(connectionState?.isGuest || initialRole === 'guest'),
         userId: connectionState.authUser?.sub,
+        guestHost,
         platformAdmin: connectionState.authUser?.role === 'admin' && !isSessionMeetingCode(room.meetingCode),
         audioMuted: false,
         videoOff: false,
@@ -1975,11 +1983,11 @@ async function joinPeerToRoom(
         if (ws.readyState !== 1) throw createError(-32000, 'Connection closed during join');
         if (roomIsEnding(room) || (roomEpochs.get(room) || 0) !== epoch) throw createError(-32004, 'This meeting has ended');
         beforeRegister?.();
-        if (!room.parentRoomId && !connectionState.mainRoomId && peerState.userId && !peerState.isGuest) {
-            const sameAccount = (peer: PeerState) => peer.userId === peerState.userId && !peer.isGuest;
+        if (!room.parentRoomId && !connectionState.mainRoomId && (guestHost || (peerState.userId && !peerState.isGuest))) {
+            const sameAccount = (peer: PeerState) => guestHost ? !!peer.guestHost : peer.userId === peerState.userId && !peer.isGuest && !peer.guestHost;
             const previous = [...room.peers.values()].find(sameAccount) || [...room.breakoutParticipants?.values() || []].find(sameAccount);
             if (previous) {
-                if (room.settings.locked && !peerState.platformAdmin && room.ownerUserId !== peerState.userId) {
+                if (room.settings.locked && !guestHost && !peerState.platformAdmin && room.ownerUserId !== peerState.userId) {
                     throw createError(-32002, 'Meeting is locked');
                 }
                 const inMainRoom = room.peers.has(previous.id);
@@ -2070,7 +2078,7 @@ async function joinPeerToRoom(
         polyBridgeEnabled: process.env.POLY_BRIDGE_ENABLED === 'true',
         hostPresent: !!room.hostPeerId,
         breakout: room.parentRoomId ? { mainRoomId: room.parentRoomId, mainMeetingCode: roomManager.getRoom(room.parentRoomId)?.meetingCode, roomId: room.id, name: roomManager.getRoom(room.parentRoomId)?.breakoutRooms?.get(room.id)?.name } : null,
-        isOwner: !!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub,
+        isOwner: guestHost || (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub),
     };
 
     if (rpcId !== null) {

@@ -4,7 +4,8 @@ import SiteNav from '../components/SiteNav';
 import SignedInWorkspace from '../components/SignedInWorkspace';
 import SiteFooter from '../components/SiteFooter';
 import { clearSession, getToken, signOut, refreshSession } from '../lib/session';
-import type { MeetingSetup } from '../components/MeetingSetupDialog';
+import MeetingSetupDialog, { type MeetingSetup } from '../components/MeetingSetupDialog';
+import { rememberGuestHost } from '../lib/session-schedule';
 import { authenticatedMeetingRequest, meetingsEndpoint } from '../lib/meeting-creation';
 import { shareMeetingInvite } from '../lib/meeting-sharing';
 import { QRCodeSVG } from 'qrcode.react';
@@ -22,6 +23,7 @@ export default function Landing() {
     const [signingOut, setSigningOut] = useState(false);
     const [joinCode, setJoinCode] = useState('');
     const [creating, setCreating] = useState(false);
+    const [guestSetupOpen, setGuestSetupOpen] = useState(false);
     const [shareLink, setShareLink] = useState('');
     const [shareMeetingCode, setShareMeetingCode] = useState('');
     const [copyError, setCopyError] = useState('');
@@ -79,6 +81,23 @@ export default function Landing() {
             if (setup.startNow) { navigate(previewPath); return; }
             setShareMeetingCode(code);
             setShareLink(`${window.location.origin}${previewPath}`);
+        } finally {
+            setCreating(false);
+        }
+    };
+
+    const startGuestMeeting = async (setup: MeetingSetup) => {
+        setCreating(true);
+        try {
+            const response = await fetch(`${MEETINGS_ENDPOINT}/create`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: setup.title, settings: { meetingKind: setup.meetingKind === 'conference' ? undefined : setup.meetingKind } }),
+            });
+            if (!response.ok) throw new Error('Could not start a guest meeting.');
+            const { meetingCode, inviteToken, guestHostToken } = await response.json();
+            if (!meetingCode || !inviteToken || !guestHostToken) throw new Error('The guest meeting could not be opened.');
+            rememberGuestHost(meetingCode, guestHostToken);
+            navigate(`/meeting/${encodeURIComponent(meetingCode)}/preview?invite=${encodeURIComponent(inviteToken)}`);
         } finally {
             setCreating(false);
         }
@@ -154,7 +173,7 @@ export default function Landing() {
                 {session.status === 'unavailable' && <p role="status">Account unavailable. <button type="button" onClick={() => void refreshSession()}>Try again</button></p>}
                 <div className="landing-hero">
                     <h1>Guest meetings</h1>
-                    <p className="landing-subtitle">Join with a meeting code. Sign in to start a meeting or see your scheduled meetings.</p>
+                    <p className="landing-subtitle">Join a meeting, or host an instant or team meeting as a guest.</p>
                 </div>
 
                 <div className="landing-actions">
@@ -172,13 +191,13 @@ export default function Landing() {
                     </div>
 
                     <div className="action-card">
-                        <h2>Start an instant meeting</h2>
-                        <p>Sign in to start a meeting and admit guests.</p>
-                        <Link className="btn-primary qsvc-action" to="/login?next=%2Fapp"><ActionContents>
+                        <h2>Host a meeting</h2>
+                        <p>Start an instant or team meeting, or schedule one up to three days ahead.</p>
+                        <button type="button" className="btn-primary qsvc-action" onClick={() => setGuestSetupOpen(true)}><ActionContents>
                             <span className="mi mi-sm" aria-hidden="true">videocam</span>
-                            Sign in to start
-                        </ActionContents></Link>
-                        <Link className="guest-schedule-link" to="/schedule">Sign in to schedule<span className="mi" aria-hidden="true">arrow_forward</span></Link>
+                            Start a meeting
+                        </ActionContents></button>
+                        <Link className="guest-schedule-link" to="/schedule">Schedule a meeting<span className="mi" aria-hidden="true">arrow_forward</span></Link>
                     </div>
                 </div>
 
@@ -231,6 +250,8 @@ export default function Landing() {
                 </div>
             )}
             {!signedIn && <SiteFooter />}
+            {!signedIn && guestSetupOpen && <MeetingSetupDialog action="start" guest creating={creating}
+                onCreate={startGuestMeeting} onClose={() => setGuestSetupOpen(false)} />}
         </div>
     );
 }

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { readSessionMeetings, scheduledStarts, SCHEDULE_WINDOW_MS, writeSessionMeetings, type SessionMeeting } from './session-schedule';
+import { getGuestHostToken, rememberGuestHost, readSessionMeetings, scheduledStarts, SCHEDULE_WINDOW_MS, writeSessionMeetings, type SessionMeeting } from './session-schedule';
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -21,4 +21,13 @@ it('keeps the current tab’s schedule separate by signed-in account', () => {
     expect(readSessionMeetings('two')).toEqual([]);
     writeSessionMeetings('one', []);
     expect(readSessionMeetings('one')).toEqual([]);
+});
+
+it('keeps guest host access out of the shareable invitation and scopes it to the meeting code', () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('sessionStorage', { getItem: storage.get.bind(storage), setItem: storage.set.bind(storage) });
+    rememberGuestHost('qs-s-one', 'host-credential');
+    expect(getGuestHostToken('QS-S-ONE')).toBe('host-credential');
+    expect(getGuestHostToken('QS-S-TWO')).toBeUndefined();
+    expect(readSessionMeetings('guest')).toEqual([]);
 });

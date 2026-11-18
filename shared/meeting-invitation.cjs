@@ -51,4 +51,15 @@ function verifySessionMeetingInvite(meetingCode, token, now = Date.now(), secret
     }
 }
 
-module.exports = { createMeetingInviteToken, verifyMeetingInviteToken, isSessionMeetingCode, createSessionMeetingInvite, verifySessionMeetingInvite };
+function createGuestHostToken(meetingCode) {
+    return createHmac('sha256', invitationSecret())
+        .update(`qsvc:guest-host:${meetingCode.toUpperCase()}`)
+        .digest('base64url');
+}
+
+function verifyGuestHostToken(meetingCode, token) {
+    if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(token)) return false;
+    return timingSafeEqual(Buffer.from(token), Buffer.from(createGuestHostToken(meetingCode)));
+}
+
+module.exports = { createMeetingInviteToken, verifyMeetingInviteToken, isSessionMeetingCode, createSessionMeetingInvite, verifySessionMeetingInvite, createGuestHostToken, verifyGuestHostToken };

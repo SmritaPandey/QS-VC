@@ -13,9 +13,18 @@ describe('MeetingSetupDialog', () => {
         expect(html).toContain('Team meeting');
         expect(html).toContain('Town hall / webinar');
         expect(html.match(/type="radio"/g)).toHaveLength(4);
-        expect(html).toContain('Attendees wait in the meeting’s waiting room');
+        expect(html).toContain('Guests wait until you or a co-host admits them');
         expect(html).toContain('Create invitation link');
         expect(html).not.toContain('Start meeting</button>');
+    });
+
+    it('offers guests only instant and team meetings', () => {
+        const html = renderToStaticMarkup(createElement(MeetingSetupDialog, {
+            action: 'start', guest: true, creating: false, onClose: () => {}, onCreate: () => {},
+        }));
+        expect(html).toContain('Instant meeting');
+        expect(html).toContain('Team meeting');
+        expect(html.match(/type="radio"/g)).toHaveLength(2);
     });
 
     it('uses the start action when the host chose Start now', () => {
