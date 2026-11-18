@@ -2,3 +2,6 @@
 c0af3804e9d606375f8626c962b64165d3c07802:deploy/keycloak/compose.yml:generic-api-key:26
 # Documentation comment naming a public ML-KEM algorithm.
 261f46b9b6a1d1dc085c2533314b34d9b56af492:shared/crypto/pqc.ts:generic-api-key:6
+
+# Verified false positive: empty TURN_PASSWORD quote matched across the next template line.
+c5f0c85912ea619ddf1380a072fccf9c4b4ef6e2:deploy/vc-onprem/native-linux/answers.example.env:generic-api-key:22
