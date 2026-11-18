@@ -3,6 +3,7 @@ const { trialState } = require('./state.cjs');
 
 const contact = 'https://qsvcmeet.com/contact?interest=Enterprise&topic=deployment';
 const { readFileSync } = require('node:fs');
+const { join } = require('node:path');
 createServer((req, res) => {
     const state = trialState();
     res.setHeader('Cache-Control', 'no-store');
@@ -13,7 +14,7 @@ createServer((req, res) => {
     const expired = state === 'expired';
     let installationId = '';
     try {
-        const value = readFileSync('/trial/installation-id', 'utf8').trim();
+        const value = readFileSync(join(process.env.QSVC_TRIAL_DIR || '/trial', 'installation-id'), 'utf8').trim();
         if (/^[0-9a-f-]{36}$/.test(value)) installationId = value;
     } catch { /* Older installs can be assigned an ID by rerunning setup. */ }
     const title = expired ? 'This QS-VC installation needs activation' : 'This workspace is unavailable';
@@ -34,4 +35,4 @@ createServer((req, res) => {
         + '<a href="' + contact.replace('&', '&amp;') + '">Contact us</a>'
         + (expired && installationId ? '<p>Include this installation ID in your request: <code>' + installationId + '</code></p>' : '')
         + '</main></html>');
-}).listen(4010, '0.0.0.0');
+}).listen(4010, process.env.HOST || '0.0.0.0');

@@ -221,9 +221,9 @@
 <p>For Windows Server 2019, 2022 or 2025 with the Hyper-V role. The setup program creates the QS-VC virtual machine for you.</p>
 <ol class="steps">
   <li>Check Hyper-V has an <b>External</b> virtual switch on the network your branches reach: Hyper-V Manager → <b>Virtual Switch Manager</b>. Note its exact name (for example <i>Hub LAN</i>). If there is none, create one: <b>New virtual network switch → External</b> → choose the network card → OK.</li>
-  <li>Download <b>both</b> the <i>Windows Server setup (.exe)</i> and the <i>Hyper-V appliance (.zip)</i> into the same folder.</li>
+  <li>Download <b>QS-VC-Server-Setup-&lt;version&gt;.exe</b>. It includes the matching server appliance and checksum; no separate appliance download is needed.</li>
   <li>Right-click <b>QS-VC-Server-Setup.exe</b> → <b>Run as administrator</b>. If Windows says "Windows protected your PC", click <b>More info → Run anyway</b>.</li>
-  <li>Accept the licence → choose the <b>-HyperV.zip</b> file → type the <b>switch name</b> from step 1 → keep the suggested memory (16 GB) and CPUs (8) → <b>Install</b>. Creating the virtual machine takes several minutes.</li>
+  <li>Accept the licence → type the <b>switch name</b> from step 1 → keep the suggested memory (16 GB) and CPUs (8) → <b>Install</b>. Creating the virtual machine takes several minutes.</li>
   <li>Open Hyper-V Manager, right-click <b>QS-VC Server</b> → <b>Connect</b>. Continue with <b>Part 5, section B</b> (first-start menu).</li>
 </ol>
 </section>
@@ -329,7 +329,7 @@ Use this with Intune, SCCM or a login script.</div>
   <tr><td>"only … GB free" (disk)</td><td>Free up or add disk space (30 GB minimum, 100 GB recommended).</td></tr>
   <tr><td>"port 80/443/3478 is already in use"</td><td>Another program (often a web server) is using it. Ask IT to stop it, or use a server dedicated to QS-VC.</td></tr>
   <tr><td>"Clock is not NTP-synchronised"</td><td>Set the correct time and a time server; wrong time breaks sign-in.</td></tr>
-  <tr><td>"Podman is not installed and your package repository could not provide it"</td><td>The server needs Docker or Podman. On Rocky/RHEL ask IT to run <code>sudo dnf install podman</code>; on Ubuntu <code>sudo apt install podman</code>. Then run the installer again.</td></tr>
+  <tr><td>"Podman is not installed and your package repository could not provide it"</td><td>New Linux server installations use Podman; Docker is not required. On Rocky/RHEL ask IT to run <code>sudo dnf install podman</code>; on Ubuntu <code>sudo apt install podman</code>. Then run the installer again.</td></tr>
   <tr><td>"invalid server name" / "invalid IPv4 address"</td><td>Check spelling: a name like <code>vc.yourorg.gov.in</code> (no https://) and an address like <code>10.20.1.50</code>.</td></tr>
   <tr><td>"the certificate is not issued for …"</td><td>Your organisation's certificate is for a different name. Get a matching one, or choose "internal".</td></tr>
   <tr><td>"… is not healthy"</td><td>Run the installer again (safe). If it repeats, send a support bundle (<code>sudo qsvc support-bundle</code>) to QS-VC.</td></tr>

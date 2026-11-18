@@ -40,6 +40,8 @@ async function sfuFetch(path: string, options: RequestInit = {}, timeoutMs = MED
 }
 
 export const sfuClient = {
+    restartIce: (roomId: string, transportId: string, peerId: string) => sfuFetch(`/api/rooms/${encodeURIComponent(roomId)}/transports/${encodeURIComponent(transportId)}/restart-ice`, { method: 'POST', body: JSON.stringify({ peerId }) }),
+    setConsumerQuality: (roomId: string, consumerId: string, peerId: string, quality: string) => sfuFetch(`/api/rooms/${encodeURIComponent(roomId)}/consumers/${encodeURIComponent(consumerId)}/quality`, { method: 'POST', body: JSON.stringify({ peerId, quality }) }),
     disconnectBharatVc: (roomId: string) => sfuFetch(`/api/poly/rooms/${encodeURIComponent(roomId)}/bharatvc/disconnect`, { method: 'POST' }),
     connectBharatVc: (roomId: string, invitation: { conferenceId: string; gateway: string; pin: string; consent: true }) =>
         sfuFetch(`/api/poly/rooms/${encodeURIComponent(roomId)}/bharatvc`, { method: 'POST', body: JSON.stringify(invitation) }, 15000),

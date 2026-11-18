@@ -8,7 +8,7 @@ on:
     inputs:
       version:        { description: 'Release version (e.g. 1.0.0)', required: true }
       build_desktop:  { description: 'Build branch app installers (Windows/macOS/Linux)', type: boolean, default: true }
-      build_windows_server: { description: 'Build Windows Server setup EXE', type: boolean, default: true }
+      build_windows_server: { description: 'Build complete Windows Server bundle (requires signed installer and ISO inputs)', type: boolean, default: true }
       build_appliance: { description: 'Build Rocky 9 appliance (needs the inputs below)', type: boolean, default: false }
       run_url:        { description: 'Private time-limited URL of the signed qsvc-server-setup-<version>.run', required: false }
       run_sha256:     { description: 'SHA-256 of that .run', required: false }
@@ -24,8 +24,17 @@ jobs:
       - name: Validate release inputs
         env:
           RELEASE_VERSION: ${{ inputs.version }}
+          BUILD_SERVER: ${{ inputs.build_windows_server }}
+          BUILD_APPLIANCE: ${{ inputs.build_appliance }}
+          RUN_URL: ${{ inputs.run_url }}
+          RUN_SHA256: ${{ inputs.run_sha256 }}
+          ISO_SHA256: ${{ inputs.rocky_iso_sha256 }}
         run: |
           [[ "$RELEASE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo 'Use a release version such as 1.1.0'; exit 1; }
+          if [[ "$BUILD_SERVER" == true || "$BUILD_APPLIANCE" == true ]]; then
+            [[ "$RUN_URL" == https://* && "$RUN_SHA256" =~ ^[0-9a-f]{64}$ && "$ISO_SHA256" =~ ^[0-9a-f]{64}$ ]] \
+              || { echo 'Server bundles require run_url (HTTPS), run_sha256 and rocky_iso_sha256. For desktop-only builds, disable both server and appliance builds.'; exit 1; }
+          fi
 
   desktop:
     needs: validate
@@ -72,12 +81,25 @@ jobs:
           retention-days: 14
 
   windows-server:
-    needs: validate
+    needs: [validate, appliance]
     if: inputs.build_windows_server
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with: { persist-credentials: false }
+      - uses: actions/download-artifact@v4
+        with:
+          name: qsvc-hyperv-${{ inputs.version }}
+          path: deploy/vc-onprem/windows-server/payload
+      - name: Verify appliance payload
+        shell: pwsh
+        env: { RELEASE_VERSION: '${{ inputs.version }}' }
+        working-directory: deploy/vc-onprem/windows-server/payload
+        run: |
+          $zip = "QS-VC-Server-Appliance-$env:RELEASE_VERSION-HyperV.zip"
+          if (-not (Test-Path $zip) -or -not (Test-Path "$zip.sha256")) { throw 'Matching Hyper-V appliance and checksum are required.' }
+          $expected = ((Get-Content "$zip.sha256" -Raw).Trim() -split '\s+')[0]
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected.ToLowerInvariant()) { throw 'Hyper-V appliance checksum mismatch.' }
       - name: Inno Setup
         shell: pwsh
         run: |
@@ -90,7 +112,7 @@ jobs:
           if (Select-String -Quiet -SimpleMatch 'DRAFT-EULA-PLACEHOLDER' ../installer/EULA.txt) {
             throw 'Provide the approved EULA before building the Windows Server installer.'
           }
-          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:RELEASE_VERSION" /Ooutput QS-VC-Server-Setup.iss
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DAppVersion=$env:RELEASE_VERSION" "/DApplianceDir=$PWD\payload" /Ooutput QS-VC-Server-Setup.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
@@ -101,7 +123,7 @@ jobs:
 
   appliance:
     needs: validate
-    if: inputs.build_appliance
+    if: inputs.build_appliance || inputs.build_windows_server
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:
@@ -146,3 +168,12 @@ jobs:
           path: appliance/
           if-no-files-found: error
           retention-days: 7
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qsvc-hyperv-${{ inputs.version }}
+          path: |
+            appliance/*-HyperV.zip
+            appliance/*-HyperV.zip.sha256
+          if-no-files-found: error
+          retention-days: 14

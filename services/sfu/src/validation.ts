@@ -56,3 +56,5 @@ export const cascadeHeartbeatBody = z.object({
     participantCount: z.number().int().min(0),
 });
 
+
+export const consumerQualityBody = z.object({ peerId: peerIdSchema, quality: z.enum(['high', 'low', 'paused']) });

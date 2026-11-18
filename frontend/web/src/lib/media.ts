@@ -34,6 +34,69 @@ export class MediaManager {
     private closedRemoteProducers = new Set<string>();
     private e2ee: E2EEManager | null = null;
 
+    private networkProfile: 'good' | 'poor' | 'audio-only' = 'poor';
+    private userPaused = new Set<string>();
+    private appliedQuality = new Map<string, string>();
+    private qualityUpdates = new Map<string, Promise<void>>();
+    private consumerQuality = new Map<string, 'high' | 'low' | 'paused'>();
+    private recoveryCallback: ((state: 'recovering' | 'recovered' | 'failed') => void) | null = null;
+    private recoveryTimers = new Set<ReturnType<typeof setTimeout>>();
+    setRecoveryCallback(callback: ((state: 'recovering' | 'recovered' | 'failed') => void) | null | undefined): void { this.recoveryCallback = callback || null; }
+
+    private watchRecovery(transport: msTypes.Transport): void {
+        const revision = this.revision;
+        let attempts = 0, running = false;
+        const restart = async () => {
+            if (running || transport.closed || revision !== this.revision || transport.connectionState === 'connected') return;
+            if (attempts >= 3) { this.recoveryCallback?.('failed'); return; }
+            running = true; attempts++; this.recoveryCallback?.('recovering');
+            try {
+                const result = await signaling.request('restartIce', { transportId: transport.id });
+                if (revision === this.revision && !transport.closed) await transport.restartIce({ iceParameters: result.iceParameters });
+            } catch { /* The next bounded transport-local attempt can recover a transient network failure. */ }
+            finally { running = false; }
+            if (revision === this.revision && !transport.closed && String(transport.connectionState) !== 'connected') schedule(2500 * attempts);
+        };
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        const schedule = (delay: number) => {
+            if (timer) return;
+            timer = setTimeout(() => { this.recoveryTimers.delete(timer!); timer = undefined; void restart(); }, delay);
+            this.recoveryTimers.add(timer);
+        };
+        transport.on('connectionstatechange', state => {
+            if (state === 'connected') { attempts = 0; if (timer) { clearTimeout(timer); this.recoveryTimers.delete(timer); timer = undefined; } this.recoveryCallback?.('recovered'); }
+            else if (state === 'failed' || state === 'disconnected') schedule(state === 'failed' ? 0 : 3000);
+        });
+    }
+
+    async setNetworkProfile(profile: 'good' | 'poor' | 'audio-only'): Promise<void> {
+        this.networkProfile = profile;
+        await Promise.allSettled([...this.producers.values()].filter(p => p.kind === 'video' && !p.closed).map(async producer => {
+            if (profile === 'audio-only' || this.userPaused.has(producer.id)) producer.pause();
+            else { if (producer.paused) producer.resume(); await producer.setMaxSpatialLayer(profile === 'poor' ? 0 : 2); }
+        }));
+        await Promise.allSettled([...this.consumers.values()].filter(c => c.kind === 'video').map(c => this.applyConsumerQuality(c)));
+    }
+
+    async setConsumerVideoQuality(peerId: string, quality: 'high' | 'low' | 'paused'): Promise<void> {
+        this.consumerQuality.set(peerId, quality);
+        await Promise.allSettled([...this.consumers.values()].filter(c => c.peerId === peerId && c.kind === 'video').map(c => this.applyConsumerQuality(c)));
+    }
+
+    private async applyConsumerQuality(info: ConsumerInfo): Promise<void> {
+        const desired = this.consumerQuality.get(info.peerId) || 'high';
+        const quality = this.networkProfile === 'audio-only' ? 'paused' : this.networkProfile === 'poor' && desired === 'high' ? 'low' : desired;
+        const previous = this.qualityUpdates.get(info.id);
+        if (previous) { await previous; if (this.consumers.has(info.id)) return this.applyConsumerQuality(info); return; }
+        if (this.appliedQuality.get(info.id) === quality || info.consumer.closed) return;
+        const revision = this.revision;
+        const update = signaling.request('setConsumerQuality', { consumerId: info.id, quality }).then(() => {
+            if (revision === this.revision && this.consumers.has(info.id)) this.appliedQuality.set(info.id, quality);
+        });
+        this.qualityUpdates.set(info.id, update);
+        try { await update; } finally { if (this.qualityUpdates.get(info.id) === update) this.qualityUpdates.delete(info.id); }
+    }
+
     private onNewConsumer: ((info: ConsumerInfo) => void) | null = null;
     private onConsumerRemoved: ((consumerId: string) => void) | null = null;
 
@@ -112,6 +175,7 @@ export class MediaManager {
             }
         });
 
+        this.watchRecovery(this.sendTransport);
         console.log('[Media] Send transport created:', transportParams.id);
     }
 
@@ -144,6 +208,7 @@ export class MediaManager {
             }
         });
 
+        this.watchRecovery(this.recvTransport);
         console.log('[Media] Recv transport created:', transportParams.id);
     }
 
@@ -204,6 +269,10 @@ export class MediaManager {
 
         if (revision !== this.revision || transport.closed) { producer.close(); throw new Error('Media session closed'); }
         this.producers.set(producer.id, producer);
+        if (producer.kind === 'video') {
+            if (this.networkProfile === 'audio-only') producer.pause();
+            else if (producer.setMaxSpatialLayer) await producer.setMaxSpatialLayer(this.networkProfile === 'poor' ? 0 : 2).catch(() => undefined);
+        }
         console.log(`[Media] Producing ${track.kind} [producer:${producer.id}]`);
         return producer;
     }
@@ -261,6 +330,7 @@ export class MediaManager {
 
         this.consumers.set(consumer.id, info);
         this.onNewConsumer?.(info);
+        if (info.kind === 'video') void this.applyConsumerQuality(info).catch(() => undefined);
 
         consumer.on('transportclose', () => this.removeConsumer(consumer.id));
         consumer.on('trackended', () => this.removeConsumer(consumer.id));
@@ -276,6 +346,8 @@ export class MediaManager {
     setPaused(kind: msTypes.MediaKind, paused: boolean, source?: string): void {
         for (const producer of this.producers.values()) {
             if (producer.kind !== kind || producer.closed || !this.hasSource(producer, source)) continue;
+            if (paused) this.userPaused.add(producer.id); else this.userPaused.delete(producer.id);
+            if (!paused && kind === 'video' && this.networkProfile === 'audio-only') continue;
             if (paused && !producer.paused) producer.pause();
             if (!paused && producer.paused) producer.resume();
         }
@@ -336,6 +408,7 @@ export class MediaManager {
         const info = this.consumers.get(consumerId);
         if (!info) return;
         this.consumers.delete(consumerId);
+        this.appliedQuality.delete(consumerId);
         info.consumer.close();
         this.onConsumerRemoved?.(consumerId);
     }
@@ -355,6 +428,8 @@ export class MediaManager {
      */
     close(): void {
         this.revision++;
+        for (const timer of this.recoveryTimers) clearTimeout(timer);
+        this.recoveryTimers.clear(); this.userPaused.clear(); this.consumerQuality.clear(); this.networkProfile = 'poor'; this.appliedQuality.clear(); this.qualityUpdates.clear();
         for (const producer of this.producers.values()) {
             producer.close();
         }

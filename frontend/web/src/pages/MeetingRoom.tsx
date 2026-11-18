@@ -1,3 +1,4 @@
+import { nextNetworkProfile } from '../lib/network-policy';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useParams, useLocation, useNavigate } from 'react-router-dom';
 import { signaling } from '../lib/signaling';
@@ -102,30 +103,37 @@ type MediaKind = 'audio' | 'video';
  */
 async function openLocalMedia(micId: string | undefined, cameraId: string | undefined, camera: CameraCapture, stream: MediaStream, isActive: () => boolean, wantsCamera: () => boolean, wantsMic: () => boolean): Promise<{ micNotice?: string; cameraNotice?: string }> {
     const notices: { micNotice?: string; cameraNotice?: string } = {};
+    let accepting = true, micDone = false, cameraDone = false;
     const micTask = (async () => {
         try {
             const { stream: audio, fellBack } = await openMicrophone(micId);
-            if (!isActive()) { audio.getTracks().forEach(track => track.stop()); return; }
+            if (!accepting || !isActive()) { audio.getTracks().forEach(track => track.stop()); return; }
             audio.getTracks().forEach(track => stream.addTrack(track));
             if (fellBack) notices.micNotice = `Your chosen microphone was not available. Using ${deviceLabel(audio.getAudioTracks()[0])}.`;
         } catch (error) {
             // Joining without a microphone is allowed; say why only if the person wanted to talk.
             if (wantsMic()) notices.micNotice = microphoneMessage(error);
         }
+        finally { micDone = true; }
     })();
     const cameraTask = (async () => {
-        if (!wantsCamera()) return;
+        if (!wantsCamera()) { cameraDone = true; return; }
         try {
             const { track, fellBack } = await startCameraWithFallback(constraints => camera.start(constraints), cameraId);
-            if (track && isActive()) stream.addTrack(track); else track?.stop();
+            if (track && accepting && isActive()) stream.addTrack(track); else track?.stop();
             if (track && fellBack) notices.cameraNotice = `Your chosen camera was not available. Using ${deviceLabel(track)}.`;
         } catch (error) {
             // The camera can be retried explicitly after joining.
             notices.cameraNotice = cameraAccessMessage(error);
         }
+        finally { cameraDone = true; }
     })();
     // Mic and camera start together: an external camera warming up no longer delays the microphone.
-    await Promise.all([micTask, cameraTask]);
+    let deadline: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([Promise.all([micTask, cameraTask]), new Promise<void>(resolve => { deadline = setTimeout(resolve, 5000); })]);
+    clearTimeout(deadline); accepting = false;
+    if (!micDone && wantsMic()) notices.micNotice = 'Microphone setup is taking longer. You can listen and chat; press the mic button to try again.';
+    if (!cameraDone) notices.cameraNotice = 'Camera setup is taking longer. Join with audio and try your camera again when ready.';
     return notices;
 }
 
@@ -248,10 +256,26 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     if (!multiCameraRef.current) multiCameraRef.current = new MultiCameraManager(media, undefined, setAdditionalCameras);
     const [multiCameraOpen, setMultiCameraOpen] = useState(false);
     const [qualityOpen, setQualityOpen] = useState(false);
+    const [audioOnly, setAudioOnly] = useState(false);
+    const audioOnlyRef = useRef(false);
+    const [networkProfile, setNetworkProfile] = useState<'good' | 'poor' | 'audio-only'>('poor');
+    const profileRef = useRef<'good' | 'poor' | 'audio-only'>('poor');
+    const profileRevision = useRef(0);
+    const qualityStreak = useRef({ good: 0, poor: 0 });
+    const [mediaRecovery, setMediaRecovery] = useState<'recovering' | 'recovered' | 'failed' | null>(null);
     const [externalConference, setExternalConference] = useState<{ provider: string; status: 'connecting' | 'connected' | 'unknown' } | null>(null);
     const [liveStreaming, setLiveStreaming] = useState<{ active: boolean; provider: string; displayName?: string } | null>(null);
     const getQualityStats = useCallback(() => media.getTransportStats(), []);
-    const reportQualitySample = useCallback((sample: ConnectionQualitySample) => signaling.request('meetingDiagnosticsSample', sample), []);
+    const reportQualitySample = useCallback(async (sample: ConnectionQualitySample) => {
+        const next = nextNetworkProfile(sample.status, profileRef.current, audioOnlyRef.current, qualityStreak.current);
+        if (next !== profileRef.current) {
+            const revision = profileRevision.current;
+            await media.setNetworkProfile(next);
+            if (revision !== profileRevision.current) return;
+            profileRef.current = next; setNetworkProfile(next);
+        }
+        await signaling.request('meetingDiagnosticsSample', sample);
+    }, []);
     const recordingDestinationRef = useRef<'cloud' | 'local'>('cloud');
     const [screenSharing, setScreenSharing] = useState(false);
     const pictureInPictureRef = useRef<MeetingPictureInPictureHandle>(null);
@@ -492,6 +516,30 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             return next;
         });
     }, []);
+
+    useEffect(() => {
+        media.setRecoveryCallback(setMediaRecovery);
+        return () => media.setRecoveryCallback(null);
+    }, []);
+    useEffect(() => {
+        if (!connected) return;
+        const update = () => {
+            const videos = [...document.querySelectorAll<HTMLVideoElement>('.meeting-room video')];
+            for (const peer of peersRef.current.values()) {
+                const tracks = [peer.videoTrack, peer.screenVideoTrack, ...Object.values(peer.cameraTracks || {})].filter(Boolean);
+                const shown = videos.filter(video => (video.srcObject as MediaStream | null)?.getVideoTracks?.().some(track => tracks.includes(track)));
+                let quality: 'high' | 'low' | 'paused' = 'paused';
+                if (!document.hidden) for (const video of shown) {
+                    const box = video.getBoundingClientRect();
+                    if (box.width && box.height && box.bottom > 0 && box.right > 0 && box.top < innerHeight && box.left < innerWidth) quality = box.width >= 400 ? 'high' : quality === 'high' ? 'high' : 'low';
+                }
+                void media.setConsumerVideoQuality(peer.peerId, quality).catch(() => {});
+            }
+        };
+        update(); const timer = window.setInterval(update, 2000);
+        document.addEventListener('visibilitychange', update);
+        return () => { clearInterval(timer); document.removeEventListener('visibilitychange', update); };
+    }, [connected]);
 
     /**
      * The one place mic/camera state changes: local track, sent media (producer), the server, and the UI.
@@ -1194,9 +1242,15 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         receiveReady = true;
                         const audioTrack = stream?.getAudioTracks()[0];
                         const videoTrack = stream?.getVideoTracks()[0];
-                        if (audioTrack?.readyState === 'live') await media.produce(audioTrack, { source: 'mic' });
+                        if (audioTrack?.readyState === 'live') {
+                            try { await media.produce(audioTrack, { source: 'mic' }); }
+                            catch { applyMute('audio', true); showNotice('Your microphone could not connect. You can still listen and chat.'); }
+                        }
                         if (!alive()) return;
-                        if (videoTrack?.readyState === 'live' && !videoOffRef.current) await media.produce(videoTrack, { source: 'camera' });
+                        if (videoTrack?.readyState === 'live' && !videoOffRef.current) {
+                            try { await media.produce(videoTrack, { source: 'camera' }); }
+                            catch { applyMute('video', true); setCameraNotice('Camera could not connect. Audio and chat remain available; try your camera again.'); }
+                        }
                         if (!alive()) return;
                         // Fail closed: if this browser accepted the encryptor but routes media around it,
                         // stop publishing rather than risk sending unencrypted audio or video.
@@ -1226,7 +1280,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         for (const [producerId, producerPeerId] of pendingProducers) {
                             if (!alive()) return;
                             pendingProducers.delete(producerId);
-                            await consumeProducer(producerPeerId, producerId);
+                            void consumeProducer(producerPeerId, producerId);
                         }
                         if (joinResult.polyBridgeEnabled) {
                             let stopped = false;
@@ -1540,6 +1594,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     }, [applyMute]);
 
     const handleToggleVideo = useCallback(async () => {
+        if (audioOnlyRef.current) { showNotice('Turn off Audio-only in Connection quality before starting your camera.'); return; }
         if (roomTransitionBusy.current) { showNotice('Wait for the room change to finish.'); return; }
         if (!canPublishRef.current) { showNotice('Only the webinar organiser can share media.'); return; }
         if (!sessionActive.current) return;
@@ -2157,6 +2212,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             </div>
 
             <div className="meeting-notices">
+            {connected && (networkProfile !== 'good' || mediaRecovery === 'recovering' || mediaRecovery === 'failed') && <div className="meeting-notice" role="status">{mediaRecovery === 'recovering' ? 'Restoring your media connection…' : mediaRecovery === 'failed' ? 'Media recovery failed. Rejoin if audio is unavailable.' : networkProfile === 'audio-only' ? 'Video paused to prioritize audio.' : 'Using lower video quality while the connection settles.'} <button type="button" onClick={() => setQualityOpen(true)}>Connection quality</button></div>}
             {roomTransitioning && <div className="meeting-notice" role="status">Moving rooms and setting up your secure media…</div>}
             {currentBreakoutName && !roomTransitioning && <div className="meeting-notice">Breakout room: {currentBreakoutName} <button type="button" onClick={() => { void moveToBreakout(null).catch(error => showNotice(error instanceof Error ? error.message : 'The main meeting could not be opened.')); }}>Return to main meeting</button></div>}
             {recordingStatus && (recordingStatus.startsWith('Recording saved') || recordingStatus.startsWith('Unsaved copy discarded.')
@@ -2257,7 +2313,15 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             </div>
 
             <MeetingSessionReport open={sessionReportOpen} meetingCode={meetingCode || ''} connected={connected} onClose={() => setSessionReportOpen(false)} />
-            <ConnectionQualityPanel onOpenReport={signedIn ? () => setSessionReportOpen(true) : undefined} open={qualityOpen} connected={connected} getStats={getQualityStats} onSample={reportQualitySample} onClose={() => setQualityOpen(false)} />
+            <ConnectionQualityPanel audioOnly={audioOnly} networkProfile={networkProfile} onAudioOnlyChange={async enabled => {
+                profileRevision.current++;
+                await media.setNetworkProfile(enabled ? 'audio-only' : 'poor');
+                audioOnlyRef.current = enabled; setAudioOnly(enabled);
+                profileRef.current = enabled ? 'audio-only' : 'poor'; setNetworkProfile(profileRef.current);
+                qualityStreak.current = { good: 0, poor: 0 };
+                if (enabled) applyMute('video', true);
+                else showNotice('Audio-only is off. Start your camera when ready.');
+            }} onOpenReport={signedIn ? () => setSessionReportOpen(true) : undefined} open={qualityOpen} connected={connected} getStats={getQualityStats} onSample={reportQualitySample} onClose={() => setQualityOpen(false)} />
             <MultiCameraPanel open={multiCameraOpen} onClose={() => setMultiCameraOpen(false)} cameras={additionalCameras} primaryDeviceId={localStream?.getVideoTracks()[0]?.getSettings().deviceId} canStart={connected && !roomTransitioning && !videoOff && pageVisible && canPublishRef.current && roomSettings.allowCamera} onStart={async deviceId => { if (roomTransitionBusy.current || !connected || videoOff || document.hidden || !canPublishRef.current || !roomSettingsRef.current.allowCamera) throw new Error('Start your main camera and check host camera permissions first.'); await multiCameraRef.current!.startCamera(deviceId, localStreamRef.current?.getVideoTracks()[0]?.getSettings().deviceId); }} onStop={source => multiCameraRef.current!.stopCamera(source)} />
             <MeetingLiveStreaming open={hostToolsOpen} meetingCode={meetingCode || ''} isHost={myRole === 'host'} connected={connected} e2eeRequired={e2eeEnabled} onNotice={showNotice} onStreamingChange={async value => { await signaling.request('liveStreamState', value); setLiveStreaming(value.active ? value : null); }} createComposite={() => createMeetingComposite(() => videoAreaRef.current, () => [...(privateConversationRef.current ? [] : localStreamRef.current?.getAudioTracks() || []), ...Array.from(peersRef.current.values()).flatMap(peer => peer.audioTrack ? [peer.audioTrack] : [])], `QS-VC ${meetingCode}`)} />
             <MeetingPictureInPicture ref={pictureInPictureRef} cameraStartAllowed={pageVisible} peers={peers} localStream={displayedLocalStream} localScreenTrack={screenStream?.getVideoTracks()[0]} sharing={screenSharing} displayName={displayName} videoOff={videoOff} audioMuted={audioMuted} activeSpeaker={activeSpeaker} onToggleAudio={handleToggleAudio} onToggleVideo={handleToggleVideo} onNotice={showNotice} onOpenChange={setPictureInPictureOpen} />

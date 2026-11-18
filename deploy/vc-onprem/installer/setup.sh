@@ -192,8 +192,17 @@ mkdir -p "$PREFIX"; DISK_GB=$(df -Pk "$PREFIX" | awk 'NR==2 {print int($4/1024/1
 (( MEM_GB >= 7 )) && ok "Memory: ${MEM_GB} GB" || fail "memory ${MEM_GB} GB is below the 8 GB minimum"
 MIN_DISK=${QSVC_MIN_DISK_GB:-30}   # lab override only; production needs 30 GB+
 (( DISK_GB >= MIN_DISK )) && ok "Free disk for $PREFIX: ${DISK_GB} GB" || fail "only ${DISK_GB} GB free for $PREFIX (30 GB minimum)"
+# Keep existing installations on their recorded engine; new hosts use Podman.
+RUNTIME=podman
+if [[ -f "$ETC/runtime" ]]; then
+  recorded_runtime=$(sed -n 's/^RUNTIME=//p' "$ETC/runtime")
+  case "$recorded_runtime" in
+    docker|podman) RUNTIME=$recorded_runtime ;;
+    *) fail "unrecognised installed container runtime; contact support before upgrading" ;;
+  esac
+fi
 for p in 80 443 3478; do
-  if ss -Hltn "sport = :$p" 2>/dev/null | grep -q . && ! docker ps --format '{{.Names}}' 2>/dev/null | grep -q '^qsvc-caddy$'; then
+  if ss -Hltn "sport = :$p" 2>/dev/null | grep -q . && ! "$RUNTIME" ps --format '{{.Names}}' 2>/dev/null | grep -q '^qsvc-caddy$'; then
     fail "port $p is already in use by another program"
   fi
 done
@@ -204,9 +213,9 @@ SELINUX=$(getenforce 2>/dev/null || echo Disabled); ok "SELinux: $SELINUX"
 
 # ── 4. Container runtime ─────────────────────────────────────────────────────
 step "Preparing the container runtime"
-RUNTIME=
-if command -v docker >/dev/null && docker info >/dev/null 2>&1 && ! docker info 2>/dev/null | grep -qi podman; then RUNTIME=docker
-elif command -v podman >/dev/null; then RUNTIME=podman
+if [[ $RUNTIME == docker ]]; then
+  command -v docker >/dev/null && docker info >/dev/null 2>&1 || fail "this existing installation uses Docker; restore its Docker service before upgrading (automatic runtime migration is not supported)"
+elif command -v podman >/dev/null; then :
 elif [[ -d $HERE/rpms && $OS_ID =~ ^(rocky|rhel|almalinux|ol)$ ]]; then
   dnf -y --disablerepo='*' install "$HERE"/rpms/*.rpm >>"$LOG" 2>&1 || fail "could not install the bundled Podman packages"
   RUNTIME=podman
@@ -214,9 +223,9 @@ elif command -v dnf >/dev/null; then
   dnf -y install podman >>"$LOG" 2>&1 || fail "Podman is not installed and your package repository could not provide it (install podman, then run setup again)"
   RUNTIME=podman
 elif command -v apt-get >/dev/null; then
-  apt-get install -y podman >>"$LOG" 2>&1 || fail "install Docker or Podman, then run setup again"
+  apt-get install -y podman >>"$LOG" 2>&1 || fail "install Podman, then run setup again"
   RUNTIME=podman
-else fail "install Docker 24+ or Podman 4.9+, then run setup again"; fi
+else fail "install Podman 4.9+, then run setup again"; fi
 if [[ $RUNTIME == podman ]]; then
   systemctl enable --now podman.socket >>"$LOG" 2>&1 || fail "could not start the Podman API socket"
   export DOCKER_HOST=unix:///run/podman/podman.sock
@@ -225,7 +234,7 @@ else
   ok "Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null)"
 fi
 install -m 0755 "$COMPOSE_BIN" /usr/local/libexec/qsvc-compose 2>/dev/null || { mkdir -p /usr/local/libexec; install -m 0755 "$COMPOSE_BIN" /usr/local/libexec/qsvc-compose; }
-ok "docker-compose $(/usr/local/libexec/qsvc-compose version --short)"
+ok "QS-VC Compose client $(/usr/local/libexec/qsvc-compose version --short) (no Docker daemon required with Podman)"
 
 # ── 5. Organisation details ──────────────────────────────────────────────────
 step "Organisation details"

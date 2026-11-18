@@ -593,7 +593,7 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 void prepareSessionSigning().then(() => {
     serviceSecret('INTERNAL_AUTH_SECRET');
     serviceSecret('TURN_ACCESS_SECRET');
-    app.listen(PORT, () => logger.info({ port: PORT }, 'Auth service listening'));
+    app.listen(PORT, process.env.HOST || '0.0.0.0', () => logger.info({ port: PORT }, 'Auth service listening'));
     let processingCancellations = false;
     const cancelMandates = async () => {
         if (processingCancellations) return;

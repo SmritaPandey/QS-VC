@@ -1,7 +1,17 @@
 ; QS-VC Server for Windows Server (Hyper-V). Build: iscc /DAppVersion=1.0.0 QS-VC-Server-Setup.iss
-; Ships next to QS-VC-Server-Appliance-<version>-HyperV.zip (+ .sha256) in the same folder.
+; Embeds the matching appliance and checksum; ApplianceDir is required at compile time.
 #ifndef AppVersion
   #define AppVersion "1.0.0"
+#endif
+#ifndef ApplianceDir
+  #error ApplianceDir must contain the verified version-matched Hyper-V ZIP and checksum
+#endif
+#define ApplianceName "QS-VC-Server-Appliance-" + AppVersion + "-HyperV.zip"
+#if !FileExists(AddBackslash(ApplianceDir) + ApplianceName)
+  #error Missing version-matched Hyper-V appliance ZIP
+#endif
+#if !FileExists(AddBackslash(ApplianceDir) + ApplianceName + ".sha256")
+  #error Missing Hyper-V appliance checksum
 #endif
 [Setup]
 AppId={{6F0A3C2E-8D51-4E6B-9C3A-2B7D5E1F4A90}
@@ -25,6 +35,8 @@ SolidCompression=yes
 SetupLogging=yes
 
 [Files]
+Source: "{#ApplianceDir}\{#ApplianceName}"; Flags: dontcopy nocompression
+Source: "{#ApplianceDir}\{#ApplianceName}.sha256"; Flags: dontcopy
 Source: "Install-QSVCAppliance.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\..\..\frontend\desktop\assets\icon.ico"; DestDir: "{app}"; Flags: ignoreversion
 
@@ -34,18 +46,11 @@ Name: "{autoprograms}\QS-VC Server console"; Filename: "{sys}\vmconnect.exe"; Pa
 [Code]
 var
   OptPage: TInputQueryWizardPage;
-  ZipPage: TInputFileWizardPage;
   ResultCode: Integer;
 
 procedure InitializeWizard;
 begin
-  ZipPage := CreateInputFilePage(wpSelectDir, 'QS-VC appliance', 'Select the Hyper-V appliance file',
-    'Choose the QS-VC Hyper-V appliance ZIP downloaded with this setup.');
-  ZipPage.Add('Appliance file:', 'Appliance (*-HyperV.zip)|*-HyperV.zip', '.zip');
-  ZipPage.Values[0] := ExpandConstant('{src}\QS-VC-Server-Appliance-HyperV.zip');
-  if not FileExists(ZipPage.Values[0]) then
-    ZipPage.Values[0] := ExpandConstant('{src}\QS-VC-Server-Appliance-{#AppVersion}-HyperV.zip');
-  OptPage := CreateInputQueryPage(ZipPage.ID, 'Virtual machine', 'Hyper-V settings',
+  OptPage := CreateInputQueryPage(wpSelectDir, 'Virtual machine', 'Hyper-V settings',
     'The QS-VC Server runs as a Rocky Linux 9 virtual machine on this server.');
   OptPage.Add('External Hyper-V switch on the hub network:', False);
   OptPage.Add('Memory (GB, 16 recommended):', False);
@@ -56,8 +61,6 @@ end;
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  if (CurPageID = ZipPage.ID) and not FileExists(ZipPage.Values[0]) then begin
-    MsgBox('The appliance file was not found.', mbError, MB_OK); Result := False; end;
   if (CurPageID = OptPage.ID) and (Trim(OptPage.Values[0]) = '') then begin
     MsgBox('Enter the name of the External Hyper-V switch.', mbError, MB_OK); Result := False; end;
 end;
@@ -66,9 +69,11 @@ procedure CurStepChanged(CurStep: TSetupStep);
 var Params: String;
 begin
   if CurStep = ssPostInstall then begin
+    ExtractTemporaryFile('{#ApplianceName}');
+    ExtractTemporaryFile('{#ApplianceName}.sha256');
     WizardForm.StatusLabel.Caption := 'Creating the QS-VC Server virtual machine (several minutes)…';
     Params := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\Install-QSVCAppliance.ps1') +
-      '" -VhdxZip "' + ZipPage.Values[0] + '" -Switch "' + OptPage.Values[0] + '" -MemoryGB ' + OptPage.Values[1] + ' -Cpus ' + OptPage.Values[2];
+      '" -VhdxZip "' + ExpandConstant('{tmp}\{#ApplianceName}') + '" -Switch "' + OptPage.Values[0] + '" -MemoryGB ' + OptPage.Values[1] + ' -Cpus ' + OptPage.Values[2];
     if not Exec('powershell.exe', Params, '', SW_SHOW, ewWaitUntilTerminated, ResultCode) then ResultCode := -1;
     if ResultCode = 3010 then
       MsgBox('Hyper-V was enabled. Restart this server, then run QS-VC Server Setup again.', mbInformation, MB_OK)

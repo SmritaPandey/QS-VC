@@ -223,3 +223,55 @@ describe('real media transport statistics', () => {
         await expect(manager.getTransportStats()).rejects.toThrow('stats unavailable');
     });
 });
+
+
+it('keeps audio and explicitly muted cameras unchanged across bandwidth profiles', async () => {
+    const producers: any[] = [];
+    const manager = await managerWithTransport(async (options: any) => {
+        const producer = { id: String(producers.length), kind: options.track.kind, appData: options.appData, closed: false, paused: false,
+            pause: vi.fn(function(this: any) { this.paused = true; }), resume: vi.fn(function(this: any) { this.paused = false; }),
+            setMaxSpatialLayer: vi.fn().mockResolvedValue(undefined), close: vi.fn() };
+        producers.push(producer); return producer;
+    });
+    await manager.produce({ kind: 'audio' } as MediaStreamTrack);
+    await manager.produce({ kind: 'video' } as MediaStreamTrack, { source: 'camera' });
+    expect(producers[1].setMaxSpatialLayer).toHaveBeenCalledWith(0);
+    await manager.setNetworkProfile('audio-only');
+    expect(producers[0].pause).not.toHaveBeenCalled();
+    expect(producers[1].paused).toBe(true);
+    manager.setPaused('video', true, 'camera');
+    await manager.setNetworkProfile('good');
+    expect(producers[1].resume).not.toHaveBeenCalled();
+    manager.close();
+});
+
+it('serializes transport-local ICE retries and cancels them when media closes', async () => {
+    vi.useFakeTimers();
+    const manager = await managerWithTransport(vi.fn());
+    const listener = mocks.transport.on.mock.calls.find((call: any[]) => call[0] === 'connectionstatechange')[1];
+    mocks.transport.connectionState = 'failed';
+    mocks.request.mockResolvedValue({ iceParameters: {} });
+    mocks.transport.restartIce = vi.fn().mockResolvedValue(undefined);
+    listener('failed'); listener('failed');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mocks.transport.restartIce).toHaveBeenCalledOnce();
+    manager.close();
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(mocks.transport.restartIce).toHaveBeenCalledOnce();
+    vi.useRealTimers();
+});
+
+it('requests server-side video pausing for hidden peers and deduplicates unchanged quality', async () => {
+    const manager = await managerWithTransport(vi.fn());
+    const consumer = { id: 'consumer', kind: 'video', track: { id: 'remote', kind: 'video' }, on: vi.fn(), close: vi.fn(), closed: false };
+    mocks.recvTransport = { id: 'recv', closed: false, on: vi.fn(), consume: vi.fn().mockResolvedValue(consumer), close: vi.fn() };
+    await manager.createRecvTransport({ id: 'recv' });
+    mocks.request.mockImplementation(async (method: string) => method === 'consume' ? { consumerId: 'consumer', producerId: 'video', kind: 'video', rtpParameters: {} } : {});
+    await manager.consume('peer', 'video');
+    await manager.setConsumerVideoQuality('peer', 'paused');
+    expect(mocks.request).toHaveBeenCalledWith('setConsumerQuality', { consumerId: 'consumer', quality: 'paused' });
+    const count = mocks.request.mock.calls.length;
+    await manager.setConsumerVideoQuality('peer', 'paused');
+    expect(mocks.request.mock.calls).toHaveLength(count);
+    manager.close();
+});

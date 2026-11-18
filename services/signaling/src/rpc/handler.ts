@@ -721,6 +721,16 @@ export async function handleRpcMessage(
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             // CONNECT TRANSPORT
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            case 'restartIce':
+            case 'setConsumerQuality': {
+                const { peerId, roomId } = connectionState;
+                if (!peerId || !roomId) throw createError(-32000, 'Not joined a room');
+                const target = method === 'restartIce' ? params.transportId : params.consumerId;
+                if (typeof target !== 'string' || !target || target.length > 128) throw createError(-32602, 'Invalid media identifier');
+                if (method === 'setConsumerQuality' && !['high', 'low', 'paused'].includes(params.quality)) throw createError(-32602, 'Invalid quality');
+                const result = method === 'restartIce' ? await sfuClient.restartIce(roomId, target, peerId) : await sfuClient.setConsumerQuality(roomId, target, peerId, params.quality);
+                return { jsonrpc: '2.0', id: id!, result };
+            }
             case 'connectTransport': {
                 const { transportId, dtlsParameters } = params;
                 const { peerId, roomId } = connectionState;

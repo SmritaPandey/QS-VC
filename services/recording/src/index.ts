@@ -15,7 +15,7 @@ const logger = pino({
 // Cloud recording is available only when private storage is configured.
 const app = createRecordingApp();
 const PORT = parseInt(process.env.RECORDING_PORT || '4004', 10);
-const server = app.listen(PORT, () => {
+const server = app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
     logger.info(`QS-VC Recording Service running on port ${PORT}; cloud storage ${process.env.RECORDING_BUCKET ? 'configured' : 'not configured'}`);
 });
 

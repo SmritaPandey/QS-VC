@@ -1,3 +1,4 @@
+import { mediaControls } from './media-controls.js';
 import { createPolyAdapter } from './poly-adapter.js';
 import { resolve } from 'node:path';
 import { authorizedControlRequest } from './control-auth.js';
@@ -16,7 +17,7 @@ import { CascadeManager } from './mediasoup/cascade-manager.js';
 // VALIDATION SCHEMAS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-import { createTransportBody, connectTransportBody, produceBody, consumeBody, resumeBody, producerControlBody, cascadeNodeBody, cascadeHeartbeatBody } from './validation.js';
+import { createTransportBody, connectTransportBody, produceBody, consumeBody, resumeBody, consumerQualityBody, producerControlBody, cascadeNodeBody, cascadeHeartbeatBody } from './validation.js';
 
 function validateBody<T>(schema: z.ZodSchema<T>) {
     return (req: Request, res: Response, next: NextFunction) => {
@@ -165,6 +166,10 @@ app.post<{ roomId: string }>('/api/rooms/:roomId/transports', validateBody(creat
         res.status(500).json({ error: err.message });
     }
 });
+
+const mediaControl = mediaControls(rooms);
+app.post('/api/rooms/:roomId/transports/:transportId/restart-ice', validateBody(resumeBody), mediaControl.restartIce);
+app.post('/api/rooms/:roomId/consumers/:consumerId/quality', validateBody(consumerQualityBody), mediaControl.quality);
 
 // Connect transport (DTLS handshake)
 app.post<{ roomId: string; transportId: string }>('/api/rooms/:roomId/transports/:transportId/connect', validateBody(connectTransportBody), async (req, res) => {
@@ -344,7 +349,7 @@ app.use((err: Error, _req: Request, res: Response, _next: NextFunction) => {
 async function start(): Promise<void> {
     await workerManager.init();
 
-    app.listen(config.port, process.env.SFU_CONTROL_HOST || '0.0.0.0', () => {
+    app.listen(config.port, process.env.SFU_CONTROL_HOST || process.env.HOST || '0.0.0.0', () => {
         logger.info(`🚀 QS-VC SFU running on port ${config.port}`);
         logger.info(`   Workers: ${config.numWorkers}`);
         logger.info(`   RTC ports: ${config.worker.rtcMinPort}-${config.worker.rtcMaxPort}`);

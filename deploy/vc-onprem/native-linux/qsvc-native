@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+[[ $(id -u) == 0 ]] || { echo 'Run sudo qsvc-native COMMAND' >&2; exit 1; }
+units=(qsvc-native-trial qsvc-native-sfu qsvc-native-signaling qsvc-native-auth qsvc-native-meeting qsvc-native-recording qsvc-native-web)
+case ${1:-status} in
+ status) systemctl --no-pager status "${units[@]}" ;;
+ start|stop|restart) systemctl "$1" "${units[@]}" ;;
+ logs) args=(); for unit in "${units[@]}"; do args+=(-u "$unit"); done; journalctl --no-pager -n 100 "${args[@]}" ;;
+ health) for port in 4000 4001 4002 4003 4004; do curl --fail --max-time 5 "http://127.0.0.1:$port/health"; done ;;
+ *) echo 'Usage: qsvc-native status|start|stop|restart|logs|health' >&2; exit 2 ;;
+esac

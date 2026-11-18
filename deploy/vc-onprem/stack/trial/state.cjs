@@ -3,7 +3,7 @@ const { createPublicKey, verify } = require('node:crypto');
 const { dirname, join } = require('node:path');
 const duration = 14 * 24 * 60 * 60 * 1000;
 
-function trialState(file = '/trial/installed-at', now = Date.now()) {
+function trialState(file = join(process.env.QSVC_TRIAL_DIR || '/trial', 'installed-at'), now = Date.now()) {
     try {
         const value = readFileSync(file, 'utf8').trim();
         if (!/^\d{13}$/.test(value)) return 'unavailable';
