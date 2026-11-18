@@ -18,7 +18,7 @@ export interface RoomHostSettings {
     allowReactions: boolean;
 }
 interface Participant { peerId: string; displayName: string; role: string; audioMuted?: boolean; videoOff?: boolean; handRaised?: boolean }
-interface Props { roomDevicesEnabled?: boolean; role: string; myPeerId: string; participants: Participant[]; settings: RoomHostSettings; onClose: () => void; onEndMeeting?: () => void }
+interface Props { broadcastSlotRef?: (element: HTMLDivElement | null) => void; roomDevicesEnabled?: boolean; role: string; myPeerId: string; participants: Participant[]; settings: RoomHostSettings; onClose: () => void; onEndMeeting?: () => void }
 
 export function canManagePeer(role: string, ownId: string, peer: Participant): boolean {
     return (role === 'host' || role === 'co-host') && peer.peerId !== ownId && peer.role !== 'host' && (role === 'host' || peer.role !== 'co-host');
@@ -34,7 +34,7 @@ const LET_EVERYONE: Array<[keyof RoomHostSettings, string, string]> = [
     ['allowCamera', 'Turn on their camera', 'videocam'],
 ];
 
-export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, participants, settings, onClose, onEndMeeting }: Props) {
+export default function HostMeetingTools({ broadcastSlotRef, roomDevicesEnabled, role, myPeerId, participants, settings, onClose, onEndMeeting }: Props) {
     const [roomAlias, setRoomAlias] = useState('');
     const [bridgeBusy, setBridgeBusy] = useState(false);
     const [bridgeError, setBridgeError] = useState('');
@@ -160,6 +160,7 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
                     {confirmation === peer.peerId && <div className="host-tools-confirm"><p>Remove {peer.displayName} from this meeting?</p><button type="button" disabled={busy} onClick={() => { void run('kickPeer', { targetPeerId: peer.peerId }); }}>Remove</button><button type="button" disabled={busy} onClick={() => setConfirmation(null)}>Cancel</button></div>}
                 </li>)}</ul>
             </section>
+            {role === 'host' && broadcastSlotRef && <div ref={broadcastSlotRef} />}
             {role === 'host' && <div className="host-tools-end"><button type="button" disabled={busy} onClick={() => onEndMeeting?.()}><span className="mi mi-sm" aria-hidden="true">call_end</span>End meeting for everyone</button></div>}
         </div>
     </aside>;

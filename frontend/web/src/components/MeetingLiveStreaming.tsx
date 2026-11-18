@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import SelectionInput from './SelectionInput';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getToken } from '../lib/session';
@@ -6,7 +7,7 @@ import '../styles/meeting-live-streaming.css';
 
 type Provider = 'youtube' | 'facebook';
 type Props = {
-    open?: boolean; meetingCode: string; isHost: boolean; connected: boolean; e2eeRequired: boolean;
+    container: HTMLElement | null; onClosePanel: () => void; meetingCode: string; isHost: boolean; connected: boolean; e2eeRequired: boolean;
     createComposite: () => MeetingComposite;
     onNotice: (message: string) => void;
     onStreamingChange: (state: { active: boolean; provider: Provider }) => Promise<void>;
@@ -18,7 +19,7 @@ export function supportedBroadcastMime(): string | undefined {
 }
 
 /** The host explicitly authorizes decoded meeting media to leave for the chosen public platform. */
-export default function MeetingLiveStreaming({ open = true, meetingCode, isHost, connected, e2eeRequired, createComposite, onNotice, onStreamingChange }: Props) {
+export default function MeetingLiveStreaming({ container, onClosePanel, meetingCode, isHost, connected, e2eeRequired, createComposite, onNotice, onStreamingChange }: Props) {
     const [providers, setProviders] = useState<Provider[]>([]);
     const [provider, setProvider] = useState<Provider>('youtube');
     const [configured, setConfigured] = useState(false);
@@ -39,7 +40,7 @@ export default function MeetingLiveStreaming({ open = true, meetingCode, isHost,
         current.composite?.stop();
         if (current.socket) { current.socket.onclose = null; current.socket.onerror = null; current.socket.onmessage = null; current.socket.close(); }
         if (current.announced) void change.current({ active: false, provider: current.announced }).catch(() => {});
-        if (mounted.current) { setPhase(failure ? 'error' : 'stopped'); if (failure) setError(failure); }
+        if (mounted.current) { setPhase(previous => failure ? 'error' : previous === 'idle' ? 'idle' : 'stopped'); if (failure) setError(failure); }
     }, []);
     useEffect(() => {
         mounted.current = true;
@@ -116,19 +117,21 @@ export default function MeetingLiveStreaming({ open = true, meetingCode, isHost,
         } catch (cause) { if (active()) stop(cause instanceof Error ? cause.message : 'Broadcast unavailable.'); }
         finally { if (active()) starting.current = false; }
     }
-    if (!isHost || !open) return null;
+    if (!isHost || !container) return null;
     const running = phase === 'starting' || phase === 'sending';
-    return <section className="meeting-live-streaming" aria-labelledby="live-streaming-title">
+    return createPortal(<section className="meeting-live-streaming" aria-labelledby="live-streaming-title" onKeyDown={event => { if (event.key === 'Escape') onClosePanel(); }}>
         <h3 id="live-streaming-title">Broadcast meeting</h3>
-        <p>Send this meeting’s visible video tiles and audio to your administrator’s configured YouTube or Facebook destination. This is a separate decoded-media output.</p>
-        {e2eeRequired ? <p role="status">Broadcasting is blocked while this meeting requires end-to-end encryption.</p> : !checked ? <p role="status">Checking broadcast configuration…</p> : !configured ? <p role="status">The server needs FFmpeg and an administrator-configured broadcast destination.</p> : <>
-            <label htmlFor="meeting-live-provider">Destination<select id="meeting-live-provider" value={provider} disabled={running} onChange={event => { setProvider(event.target.value as Provider); setConsent(false); }}>{providers.map(value => <option key={value} value={value}>{value === 'youtube' ? 'YouTube' : 'Facebook'}</option>)}</select></label>
-            <label className="meeting-live-consent"><SelectionInput type="checkbox" checked={consent} disabled={running} onChange={event => setConsent(event.target.checked)} />I have informed participants and authorize sending meeting audio and video to this external provider.</label>
-            <button type="button" disabled={!connected || !consent || running} onClick={() => { void start(); }}>Start broadcast output</button>
+        {e2eeRequired ? <p>Unavailable in end-to-end encrypted meetings.</p> : <>
+            <p>Send this meeting’s visible video tiles and audio to your administrator’s configured YouTube or Facebook destination. This is a separate decoded-media output.</p>
+            {!checked ? <p role="status">Checking broadcast configuration…</p> : !configured ? <p role="status">The server needs FFmpeg and an administrator-configured broadcast destination.</p> : <>
+                <label htmlFor="meeting-live-provider">Destination<select id="meeting-live-provider" value={provider} disabled={running} onChange={event => { setProvider(event.target.value as Provider); setConsent(false); }}>{providers.map(value => <option key={value} value={value}>{value === 'youtube' ? 'YouTube' : 'Facebook'}</option>)}</select></label>
+                <label className="meeting-live-consent"><SelectionInput type="checkbox" checked={consent} disabled={running} onChange={event => setConsent(event.target.checked)} />I have informed participants and authorize sending meeting audio and video to this external provider.</label>
+                <button type="button" disabled={!connected || !consent || running} onClick={() => { void start(); }}>Start broadcast output</button>
+            </>}
+            {running && <button type="button" className="meeting-live-stop" onClick={() => { stop(); onNotice('Broadcast output stopped. Check the provider dashboard to confirm its public status.'); }}>Stop broadcast output</button>}
+            {phase !== 'idle' && <p role="status">{phase === 'starting' ? 'Starting encoder connection…' : phase === 'sending' ? 'Sending media to the provider. Confirm public visibility in its live dashboard.' : phase === 'stopped' ? 'Broadcast output stopped.' : ''}</p>}
+            {error && <p role="alert">{error}</p>}
+            <p>The provider may require a separate Go live action. Closing or leaving this meeting stops this browser’s broadcast output.</p>
         </>}
-        {running && <button type="button" className="meeting-live-stop" onClick={() => { stop(); onNotice('Broadcast output stopped. Check the provider dashboard to confirm its public status.'); }}>Stop broadcast output</button>}
-        <p role="status">{phase === 'starting' ? 'Starting encoder connection…' : phase === 'sending' ? 'Sending media to the provider. Confirm public visibility in its live dashboard.' : phase === 'stopped' ? 'Broadcast output stopped.' : ''}</p>
-        {error && <p role="alert">{error}</p>}
-        <p>The provider may require a separate Go live action. Closing or leaving this meeting stops this browser’s broadcast output.</p>
-    </section>;
+    </section>, container);
 }
