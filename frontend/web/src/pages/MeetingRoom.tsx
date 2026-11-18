@@ -260,6 +260,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [audioOnly, setAudioOnly] = useState(false);
     const audioOnlyRef = useRef(false);
     const [networkProfile, setNetworkProfile] = useState<'good' | 'poor' | 'audio-only'>('poor');
+    const [measuredPoorConnection, setMeasuredPoorConnection] = useState(false);
     const profileRef = useRef<'good' | 'poor' | 'audio-only'>('poor');
     const profileRevision = useRef(0);
     const qualityStreak = useRef({ good: 0, poor: 0 });
@@ -269,6 +270,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const getQualityStats = useCallback(() => media.getTransportStats(), []);
     const reportQualitySample = useCallback(async (sample: ConnectionQualitySample) => {
         const next = nextNetworkProfile(sample.status, profileRef.current, audioOnlyRef.current, qualityStreak.current);
+        if (sample.status === 'poor') setMeasuredPoorConnection(true);
+        else if (sample.status === 'unknown' || next === 'good') setMeasuredPoorConnection(false);
         if (next !== profileRef.current) {
             const revision = profileRevision.current;
             await media.setNetworkProfile(next);
@@ -781,6 +784,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         const consumingProducers = new Set<string>();
         const departedPeers = departedPeerIds.current;
         departedPeers.clear();
+        setMeasuredPoorConnection(false);
         const consumerRoutes = new Map<string, { peerId: string; kind: MediaKind; source: string; track: MediaStreamTrack }>();
         const presenterUpdates = new Map<string, boolean>();
         let peerSnapshotReady = false;
@@ -2242,7 +2246,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             </div>
 
             <div className="meeting-notices">
-            {connected && (networkProfile !== 'good' || mediaRecovery === 'recovering' || mediaRecovery === 'failed') && <div className="meeting-notice" role="status">{mediaRecovery === 'recovering' ? 'Restoring your media connection…' : mediaRecovery === 'failed' ? 'Media recovery failed. Rejoin if audio is unavailable.' : networkProfile === 'audio-only' ? 'Video paused to prioritize audio.' : 'Using lower video quality while the connection settles.'} <button type="button" onClick={() => setQualityOpen(true)}>Connection quality</button></div>}
+            {connected && (mediaRecovery === 'recovering' || mediaRecovery === 'failed' || (measuredPoorConnection && !audioOnly && networkProfile !== 'good')) &&
+                <div className="meeting-notice meeting-quality-notice">
+                    <span role="status">{mediaRecovery === 'recovering' ? 'Restoring your media connection…' : mediaRecovery === 'failed' ? 'Media recovery failed. Rejoin if audio is unavailable.' : networkProfile === 'audio-only' ? 'Video is paused to keep audio clear.' : 'Video quality is reduced because of a weak connection.'}</span>
+                    <button type="button" onClick={() => setQualityOpen(true)}>Connection quality</button>
+                </div>}
             {roomTransitioning && <div className="meeting-notice" role="status">Moving rooms and setting up your secure media…</div>}
             {currentBreakoutName && !roomTransitioning && <div className="meeting-notice">Breakout room: {currentBreakoutName} <button type="button" onClick={() => { void moveToBreakout(null).catch(error => showNotice(error instanceof Error ? error.message : 'The main meeting could not be opened.')); }}>Return to main meeting</button></div>}
             {recordingStatus && (recordingStatus.startsWith('Recording saved') || recordingStatus.startsWith('Unsaved copy discarded.')
@@ -2349,6 +2357,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 audioOnlyRef.current = enabled; setAudioOnly(enabled);
                 profileRef.current = enabled ? 'audio-only' : 'poor'; setNetworkProfile(profileRef.current);
                 qualityStreak.current = { good: 0, poor: 0 };
+                setMeasuredPoorConnection(false);
                 if (enabled) applyMute('video', true);
                 else showNotice('Audio-only is off. Start your camera when ready.');
             }} onOpenReport={signedIn ? () => setSessionReportOpen(true) : undefined} open={qualityOpen} connected={connected} getStats={getQualityStats} onSample={reportQualitySample} onClose={() => setQualityOpen(false)} />

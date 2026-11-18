@@ -1102,10 +1102,10 @@ label {
   border-bottom:1px solid var(--border-glass);
   gap:12px;
   flex-wrap:nowrap;
-  overflow:hidden;
+  overflow:visible;
   box-sizing:border-box;
   background:var(--bg-primary, #0b1420);
-  z-index:30;
+  z-index:46;
 }
 .top-bar-left,.top-bar-center,.top-bar-right {
   display:flex;
@@ -1122,6 +1122,7 @@ label {
   overflow:hidden;
 }
 .top-bar-right {
+  position:relative;
   flex-shrink:0;
   justify-content:flex-end;
 }
@@ -3281,7 +3282,7 @@ label {
     min-height:52px;
     gap:8px;
     flex-wrap:nowrap;
-    overflow:hidden;
+    overflow:visible;
   }
   .top-bar-left {
     gap:6px;

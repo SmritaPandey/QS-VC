@@ -20,7 +20,7 @@ export default function EncryptionBadge({ active, securityCode, participants }: 
     }, [open]);
 
     return <div className="qs-e2ee" ref={ref} data-state={active ? 'on' : 'pending'}>
-        <button type="button" className="qs-e2ee-chip" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(v => !v)}
+        <button type="button" className="qs-e2ee-chip" aria-label={active ? 'End-to-end encrypted. Show encryption details' : 'Encrypting. Show encryption details'} aria-expanded={open} aria-controls={panelId} onClick={() => setOpen(v => !v)}
             title={active ? 'Quantum-safe end-to-end encryption is on' : 'Setting up end-to-end encryption…'}>
             <span className="mi mi-sm" aria-hidden="true">{active ? 'lock' : 'lock_clock'}</span>
             <span className="qs-e2ee-label">{active ? 'End-to-end encrypted' : 'Encrypting…'}</span>

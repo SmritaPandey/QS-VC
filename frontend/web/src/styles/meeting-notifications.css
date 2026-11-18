@@ -24,3 +24,9 @@
 .meeting-room .meeting-notices .meeting-recording-status summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
 .meeting-feedback-content a { display: inline-flex; align-items: center; min-height: 44px; color: #8de4d6; text-underline-offset: 3px; }
 .meeting-feedback-content a:focus-visible { outline: 2px solid #71e4d3; outline-offset: 2px; }
+
+.meeting-quality-notice { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:4px 12px; }
+.meeting-quality-notice > span { flex:1 1 190px; }
+.meeting-quality-notice > button { min-height:44px; padding:4px 8px; border:0; border-radius:6px; background:transparent; color:#8de4d6; font:inherit; cursor:pointer; }
+.meeting-quality-notice > button:hover { background:#294354; }
+.meeting-quality-notice > button:focus-visible { outline:2px solid #71e4d3; outline-offset:1px; }

@@ -9,7 +9,7 @@
     min-height:52px;
     gap:8px;
     flex-wrap:nowrap;
-    overflow:hidden;
+    overflow:visible;
   }
   .meeting-room .top-bar-left { min-width:0; gap:6px; flex-shrink:0; }
   .meeting-room .top-bar-center { flex:1; min-width:0; justify-content:center; gap:6px; overflow:hidden; }
