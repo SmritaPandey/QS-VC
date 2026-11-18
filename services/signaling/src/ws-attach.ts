@@ -285,7 +285,7 @@ export function attachSignalingWebSocket(server: http.Server): WebSocketServer {
             ws.isAlive = false;
             ws.ping();
         });
-    }, 30000);
+    }, 10000);
     const ipCleanupInterval = setInterval(() => {
         const current = Date.now();
         for (const [ip, limits] of ipCounts) {

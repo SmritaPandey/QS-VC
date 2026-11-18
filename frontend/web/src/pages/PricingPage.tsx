@@ -27,9 +27,9 @@ export const plans = PAID_PLAN_NAMES.map(name => ({
     offer: PLAN_OFFERS[name.toLowerCase() as PaidPlanKey] || null,
     features: {
         Basic: ['Browser meetings', 'HD video, screen sharing and chat', 'Host controls', 'Background effects', 'AI noise suppression'],
-        Starter: ['Everything in Basic', 'Meeting scheduling', 'AI captions where available', 'Private conversations up to 30 minutes'],
+        Starter: ['Everything in Basic', 'Webinar registration tools', 'AI captions where available', 'Private conversations up to 30 minutes'],
         Pro: ['Everything in Starter', 'Cloud recording where available', 'Live translation where available', 'Private conversations without a plan time cap'],
-        Business: ['Pro meeting features', 'Shared screen and chat', 'Meeting scheduling', 'Cloud recording where available'],
+        Business: ['Pro meeting features', 'Shared screen and chat', 'Webinar registration tools', 'Cloud recording where available'],
     }[name],
 }));
 

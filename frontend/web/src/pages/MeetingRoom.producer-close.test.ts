@@ -41,7 +41,7 @@ it('removes departed peers and closes queued and active consumers before late tr
         departedPeers, pendingProducers, media, presenterUpdates: new Map([['gone', true]]),
         notifiedKnocks: { current: new Set() }, e2eeBundlesRef: { current: new Map() }, bumpE2EEIdentities: vi.fn(),
         setKnocks: vi.fn(), setPeers: (update: (value: typeof peers) => typeof peers) => { peers = update(peers); },
-        e2eeKeyHolderRef: { current: null }, myPeerIdRef: { current: 'self' }, lastHolderHandoverFrom: { current: null },
+        rotateAfterDeparture: vi.fn(),
     })({ peerId: 'gone' });
     expect(departedPeers.has('gone')).toBe(true);
     expect(peers.has('gone')).toBe(false);

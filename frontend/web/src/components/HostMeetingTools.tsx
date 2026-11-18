@@ -123,7 +123,7 @@ export default function HostMeetingTools({ roomDevicesEnabled, role, myPeerId, p
             {roomDevicesEnabled && role === 'host' && <BharatVcConnection />}
             <section className="host-tools-settings" aria-labelledby="host-access-title">
                 <h3 id="host-access-title">Meeting access</h3>
-                <p className="host-access-policy"><span className="mi mi-sm" aria-hidden="true">hourglass_top</span> Everyone waits for host or co-host approval before entering.</p>
+                <p className="host-access-policy"><span className="mi mi-sm" aria-hidden="true">hourglass_top</span> Guests need approval from the host or a co-host. Signed-in attendees can join once the meeting starts.</p>
                 {toggle('locked', 'Lock meeting', 'lock', settings.locked, value => setSetting('locked', value), 'No one new can join.')}
                 {toggle('muteOnEntry', 'Mute people when they join', 'mic_off', settings.muteOnEntry, value => setSetting('muteOnEntry', value))}
             </section>

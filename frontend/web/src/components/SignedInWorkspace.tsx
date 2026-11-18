@@ -20,7 +20,7 @@ import AnimatedNumber from './AnimatedNumber';
 const API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
 const ON_PREM = import.meta.env.VITE_DEPLOYMENT === 'onprem';
 const workspaceFeatures = [
-    { feature: 'meeting_scheduling', label: 'Meeting scheduling', icon: 'calendar_today' },
+    { feature: 'meeting_scheduling', label: 'Webinar registration', icon: 'calendar_today' },
     { feature: 'cloud_recording', label: 'Cloud recording', icon: 'cloud_upload' },
     { feature: 'ai_captions', label: 'AI captions', icon: 'closed_caption' },
     { feature: 'background_effects', label: 'Background effects', icon: 'blur_on' },
@@ -124,11 +124,20 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
     const joinMeeting = (event: React.FormEvent) => {
         event.preventDefault(); setJoinError('');
         let code = join.trim();
+        const params = new URLSearchParams();
         if (/^https?:\/\//i.test(code)) {
-            try { const url = new URL(code); if (url.origin !== window.location.origin) throw new Error(); code = url.pathname.match(/^\/meeting\/([^/]+)(?:\/preview)?\/?$/)?.[1] || ''; } catch { code = ''; }
+            try {
+                const url = new URL(code);
+                if (url.origin !== window.location.origin) throw new Error();
+                code = url.pathname.match(/^\/meeting\/([^/]+)(?:\/preview)?\/?$/)?.[1] || '';
+                for (const key of ['invite', 'guest']) {
+                    const value = url.searchParams.get(key);
+                    if (value) params.set(key, value);
+                }
+            } catch { code = ''; }
         }
         if (!/^[a-z0-9-]{3,40}$/i.test(code)) { setJoinError('Enter a QS-VC meeting code or a link from this website.'); return; }
-        navigate(`/meeting/${encodeURIComponent(code.toUpperCase())}/preview`);
+        navigate(`/meeting/${encodeURIComponent(code.toUpperCase())}/preview${params.size ? `?${params}` : ''}`);
     };
     return <div className="workspace-shell meeting-home account-workspace" ref={root} onKeyDown={event => {
         if (event.key === 'Escape') root.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(detail => { detail.open = false; detail.querySelector<HTMLElement>('summary')?.focus(); });
@@ -136,7 +145,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
         <header className="workspace-header">
             <a className="public-skip" href="#main-content">Skip to content</a>
             <Link className="workspace-brand" to="/app" aria-label="QS-VC meetings"><BrandLogo /></Link>
-            <nav className="workspace-navigation" aria-label="Workspace"><Link to="/app" aria-current="page">Meetings</Link>{canSchedule && <><Link to="/schedule">Schedule</Link><Link to="/schedule?type=webinar">Town halls</Link></>}<AdminDashboardLink /></nav>
+            <nav className="workspace-navigation" aria-label="Workspace"><Link to="/app" aria-current="page">Meetings</Link><Link to="/schedule">Schedule</Link>{canSchedule && <Link to="/schedule?type=webinar">Town halls</Link>}<AdminDashboardLink /></nav>
             <div className="meeting-home-membership">
                 <div className="meeting-home-plan" role="status">
                     {trialActive ? <TrialChip /> : <>
@@ -163,7 +172,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                 <div className="meeting-home-start-actions">
             <details className="workspace-new">
                 <summary className="qsvc-action" aria-busy={creating}><ActionContents><span className="mi" aria-hidden="true">video_call</span>{creating ? 'Creating…' : 'New meeting'}<span className="mi workspace-new-caret" aria-hidden="true">expand_more</span></ActionContents></summary>
-                <div className="workspace-dropdown"><button disabled={creating} onClick={() => newAction(() => setSetupAction('link'))}><span className="mi" aria-hidden="true">link</span>Create a link</button><button disabled={creating} onClick={() => newAction(() => setSetupAction('start'))}><span className="mi" aria-hidden="true">videocam</span>Start now</button>{canSchedule && <button onClick={() => newAction(() => navigate('/schedule'))}><span className="mi" aria-hidden="true">calendar_today</span>Schedule a meeting</button>}</div>
+                <div className="workspace-dropdown"><button disabled={creating} onClick={() => newAction(() => setSetupAction('link'))}><span className="mi" aria-hidden="true">link</span>Create a link</button><button disabled={creating} onClick={() => newAction(() => setSetupAction('start'))}><span className="mi" aria-hidden="true">videocam</span>Start now</button><button onClick={() => newAction(() => navigate('/schedule'))}><span className="mi" aria-hidden="true">calendar_today</span>Schedule a meeting</button></div>
             </details>
                 <div className="workspace-join-section"><p>Have an invitation?</p>
             <form className="workspace-join" onSubmit={joinMeeting}>

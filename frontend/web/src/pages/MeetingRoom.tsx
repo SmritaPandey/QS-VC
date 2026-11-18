@@ -783,6 +783,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         const consumerRoutes = new Map<string, { peerId: string; kind: MediaKind; source: string; track: MediaStreamTrack }>();
         const presenterUpdates = new Map<string, boolean>();
         let peerSnapshotReady = false;
+        let rotateAfterDeparture: ((peerId: string) => void) | undefined;
         const consumeProducer = async (peerId: string, producerId: string) => {
             if (!peerId || !producerId || departedPeers.has(peerId) || (roomTransitionBusy.current && !initializingRef.current)) return;
             if (!receiveReady) { pendingProducers.set(producerId, peerId); return; }
@@ -807,6 +808,16 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             const wasWaiting = !joinedRef.current;
             setWaitingAdmission(null);
             joinedRef.current = false;
+            if (code === 4002) {
+                recoveryStarted = true;
+                void (async () => {
+                    const saved = await finishRecordingRef.current();
+                    stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false);
+                    if (saved) navigate('/meeting-end', { replace: true, state: { meetingCode, inviteToken: initialInviteToken, reason: 'You rejoined this meeting from another tab or device.', left: true } });
+                    else showNotice('You rejoined from another connection. Retry saving your recording before leaving.');
+                })();
+                return;
+            }
             if (recordingRef.current) void finishRecordingRef.current();
             // Ended, removed or signed out: never reconnect automatically.
             if (code === 4000 || code === 4001 || code === 4003 || (wasWaiting && code === 1000)) {
@@ -820,6 +831,32 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         })];
         // Subscribe before joinRoom so a screen producer cannot arrive in the setup-listener gap.
         unsubscribe.push(
+            signaling.on('newPeer', ({ peerId, displayName: name, role, siteLocation, userId }: any) => {
+                departedPeers.delete(peerId);
+                notifiedKnocks.current.delete(peerId);
+                patchPeer(peerId, { displayName: name, role, siteLocation, userId });
+                setKnocks(current => current.filter(k => k.peerId !== peerId));
+            }),
+            signaling.on('peerLeft', ({ peerId }: any) => {
+                departedPeers.add(peerId);
+                presenterUpdates.delete(peerId);
+                for (const [producerId, owner] of pendingProducers) {
+                    if (owner === peerId) { pendingProducers.delete(producerId); media.closeConsumerByProducer(producerId); }
+                }
+                for (const consumer of media.getConsumers()) {
+                    if (consumer.peerId === peerId) media.closeConsumerByProducer(consumer.producerId);
+                }
+                notifiedKnocks.current.delete(peerId);
+                if (e2eeBundlesRef.current.delete(peerId)) bumpE2EEIdentities();
+                setKnocks(current => current.filter(k => k.peerId !== peerId));
+                setPeers(prev => { const next = new Map(prev); next.delete(peerId); return next; });
+                rotateAfterDeparture?.(peerId);
+            }),
+            signaling.on('waitingRoomUpdated', ({ peerId, departed }) => {
+                if (!departed) return;
+                notifiedKnocks.current.delete(peerId);
+                setKnocks(current => current.filter(k => k.peerId !== peerId));
+            }),
             signaling.on('newProducer', ({ peerId, producerId, appData }: any) => {
                 if (appData?.type === 'screen' || appData?.source === 'screen') {
                     presenterUpdates.set(peerId, true);
@@ -925,7 +962,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 setLiveStreaming(joinResult.liveStream || null);
                 setExternalConference(joinResult.externalConference || null);
                 canPublishRef.current = joinResult.canPublish !== false;
-                setMyRole(joinResult.role || (joinResult.isGuest ? 'guest' : 'member'));
+                myRoleRef.current = joinResult.role || (joinResult.isGuest ? 'guest' : 'member');
+                setMyRole(myRoleRef.current);
                 setRoomRecording(joinResult.recording || null);
                 setRoomSettings(current => ({ ...current, ...joinResult.settings }));
                 setRoomDevicesEnabled(joinResult.polyBridgeEnabled === true && joinResult.sfuAvailable === true);
@@ -958,6 +996,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         console.info(`[E2EE] Group key rotated (${reason})`);
                     }).catch(error => { console.error('[E2EE] Rekey failed:', error); showNotice('Your secure connection was interrupted. Please rejoin the meeting.'); });
                     return rotation;
+                };
+                rotateAfterDeparture = peerId => {
+                    // Rotate the key when someone leaves, unless the new holder already rotated it.
+                    if (e2eeKeyHolderRef.current === myPeerIdRef.current && e2eeRef.current?.isActive() && peerId !== lastHolderHandoverFrom.current) void rotateAndDistribute('participant left');
+                    if (peerId === lastHolderHandoverFrom.current) lastHolderHandoverFrom.current = null;
                 };
                 // Listeners first, so nothing sent while we set up media is missed.
                 unsubscribe.push(
@@ -1008,29 +1051,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                             haptic('notice');
                         }
                         setKnocks(current => current.some(k => k.peerId === peerId) ? current : [...current, { peerId, displayName: name || 'Guest' }]);
-                    }),
-                    signaling.on('newPeer', ({ peerId, displayName: name, role, siteLocation, userId }: any) => {
-                        departedPeers.delete(peerId);
-                        notifiedKnocks.current.delete(peerId);
-                        patchPeer(peerId, { displayName: name, role, siteLocation, userId });
-                        setKnocks(current => current.filter(k => k.peerId !== peerId));
-                    }),
-                    signaling.on('peerLeft', ({ peerId }: any) => {
-                        departedPeers.add(peerId);
-                        presenterUpdates.delete(peerId);
-                        for (const [producerId, owner] of pendingProducers) {
-                            if (owner === peerId) { pendingProducers.delete(producerId); media.closeConsumerByProducer(producerId); }
-                        }
-                        for (const consumer of media.getConsumers()) {
-                            if (consumer.peerId === peerId) media.closeConsumerByProducer(consumer.producerId);
-                        }
-                        notifiedKnocks.current.delete(peerId);
-                        if (e2eeBundlesRef.current.delete(peerId)) bumpE2EEIdentities();
-                        setKnocks(current => current.filter(k => k.peerId !== peerId));
-                        setPeers(prev => { const next = new Map(prev); next.delete(peerId); return next; });
-                        // Forward secrecy: the key holder rotates the group key whenever someone leaves.
-                        if (e2eeKeyHolderRef.current === myPeerIdRef.current && e2eeRef.current?.isActive() && peerId !== lastHolderHandoverFrom.current) void rotateAndDistribute('participant left');
-                        if (peerId === lastHolderHandoverFrom.current) lastHolderHandoverFrom.current = null;
                     }),
                     signaling.on('peerKicked', ({ peerId }: any) => setPeers((prev) => { const next = new Map(prev); next.delete(peerId); return next; })),
                     signaling.on('peerMuteChanged', ({ peerId, kind, muted }: any) => {
@@ -1131,6 +1151,13 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     }),
                 );
 
+                if (isManagerNow()) {
+                    void signaling.request('getWaitingRoom').then(({ waitingPeers }) => {
+                        if (!alive() || !isManagerNow()) return;
+                        setKnocks(current => [...current.filter(knock => knock.peerId.startsWith('poly:')), ...waitingPeers]);
+                    }).catch(() => { /* Live requests still arrive through waitingRoomPeer. */ });
+                }
+
                 const e2eeRequired = requiredE2eeRef.current;
                 setE2EEActive(false);
                 media.setE2EEManager(null);
@@ -1145,10 +1172,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     e2eeBundlesRef.current.set(myPeerIdRef.current, localKeyBundle);
                     // Learn everyone's verified identities before registering, so the holder's key can be checked.
                     for (const peer of joinResult.existingPeers || []) {
-                        if (!peer.e2eeKeyBundle) continue;
+                        if (!peer.e2eeKeyBundle || departedPeers.has(peer.peerId)) continue;
                         const bundle = peer.e2eeKeyBundle as E2EEKeyBundle;
                         if (!await e2eeManager.verifyKeyBundle(bundle, peer.peerId)) { showNotice(`${peer.displayName || 'A participant'} could not be verified. Their audio and video are unavailable.`); continue; }
-                        e2eeBundlesRef.current.set(peer.peerId, bundle);
+                        if (!departedPeers.has(peer.peerId)) e2eeBundlesRef.current.set(peer.peerId, bundle);
                     }
                     setE2EEEnabled(true);
                     bumpE2EEIdentities();
@@ -1384,7 +1411,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             stopLocalMedia();
             media.close();
             if (!retainedSocketJoin.current) {
-                signaling.request('leaveRoom', {}).catch(() => { });
+                signaling.notify('leaveRoom');
                 signaling.disconnect();
             }
         };
@@ -1644,6 +1671,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             setCameraNotice('Camera off while you were away. Start it when you are ready.');
         });
         const onPageHide = () => {
+            signaling.notify('leaveRoom');
             stopLocalMedia();
             media.close();
             if (recordingRef.current) void finishRecordingRef.current();
@@ -1902,12 +1930,12 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         stopLocalMedia();
         joinedRef.current = false;
         media.close();
-        signaling.request('leaveRoom', {}).catch(() => { });
+        signaling.notify('leaveRoom');
         signaling.disconnect();
         // Replace the meeting entry so browser Back does not drop people straight back into the call.
-        if (connected) navigate('/meeting-end', { replace: true, state: { meetingCode, duration, participantCount: peersRef.current.size + 1, chatMessageCount: chatMessages.length, left: true } });
+        if (connected) navigate('/meeting-end', { replace: true, state: { meetingCode, inviteToken: meetingInviteToken, duration, participantCount: peersRef.current.size + 1, chatMessageCount: chatMessages.length, left: true } });
         else navigate('/app', { replace: true });
-    }, [finishRecording, navigate, stopLocalMedia, showNotice, meetingCode, connected, duration, chatMessages.length]);
+    }, [finishRecording, navigate, stopLocalMedia, showNotice, meetingCode, meetingInviteToken, connected, duration, chatMessages.length]);
     const handleSendChat = useCallback(async (content: string) => {
         if (roomTransitionBusy.current) { showNotice('Wait for the room change to finish.'); return; }
         if (!roomSettings.allowChat && myRole !== 'host' && myRole !== 'co-host') { showNotice('Chat is disabled by the host.'); return; }

@@ -13,7 +13,7 @@ import { encryptedPollRpc } from '../encrypted-polls.js';
 import { encryptedBoardRpc } from '../encrypted-board.js';
 import { collaborationRpc } from '../collaboration.js';
 import { sfuClient } from '../sfu-client.js';
-import { roomManager, PeerState, PeerRole, type PrivateConversation, type VerifiedSignalingUser, type RoomState } from '../room-manager.js';
+import { roomManager, PeerState, PeerRole, type PrivateConversation, type VerifiedSignalingUser, type RoomState, type WaitingPeer } from '../room-manager.js';
 import { logger } from '../logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
@@ -24,7 +24,7 @@ import { asrParticipants, asrCapabilities, pushAsrAudio, startAsr, stopAsr, stop
 import { generateMinutes, minutesConfigured } from '../minutes.js';
 import { saveTranscript } from '../transcript-store.js';
 
-const { createMeetingInviteToken, verifyMeetingInviteToken } = meetingInvitation;
+const { createMeetingInviteToken, verifyMeetingInviteToken, isSessionMeetingCode, verifySessionMeetingInvite } = meetingInvitation;
 const endingRooms = new WeakSet<object>();
 const roomTeardowns = new WeakMap<object, Promise<void>>();
 const dashboardControls = new WeakMap<object, { sub: string; tenantId: string; action: 'end' | 'cancel'; promise: Promise<void> }>();
@@ -76,31 +76,67 @@ const PERMISSION_MESSAGES = {
     video: 'The host has turned off cameras for participants.',
 } as const;
 
-/**
- * The host has arrived: move pre-host attendees into the host's approval queue.
- */
-function releaseAwaitingHost(roomId: string): void {
+function canEnterWithoutApproval(room: RoomState, user?: VerifiedSignalingUser | null, guest?: boolean): boolean {
+    return !!user?.sub && !guest && !room.removedUserIds.has(user.sub);
+}
+
+/** Release signed-in attendees and show guest requests to the meeting managers. */
+async function releaseAwaitingHost(roomId: string): Promise<void> {
     const room = roomManager.getRoom(roomId);
-    if (!room) return;
-    for (const waiting of [...room.waitingRoom.values()]) {
+    if (!room?.hostStarted) return;
+    const signedIn: WaitingPeer[] = [];
+    for (const waiting of room.waitingRoom.values()) {
         if (!waiting.awaitingHost) continue;
+        if (canEnterWithoutApproval(room, waiting.authUser, waiting.isGuest)) {
+            signedIn.push(waiting);
+            continue;
+        }
         waiting.awaitingHost = false;
         roomManager.sendToSocket(waiting.ws, 'waitingStatus', { status: 'knocking' }, waiting.id);
-        if (room.hostPeerId) roomManager.sendToPeer(roomId, room.hostPeerId, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
-        for (const peer of room.peers.values()) if (peer.role === 'co-host') roomManager.sendToPeer(roomId, peer.id, 'waitingRoomPeer', { peerId: waiting.id, displayName: waiting.displayName });
+        for (const peer of room.peers.values()) {
+            if (isManager(peer)) roomManager.sendToPeer(roomId, peer.id, 'waitingRoomPeer', {
+                peerId: waiting.id, displayName: waiting.displayName, invited: waiting.invited, isGuest: waiting.isGuest,
+            });
+        }
+    }
+    // Each entrant opens two transports. Batch the release to avoid flooding the SFU.
+    for (let i = 0; i < signedIn.length && room.hostStarted; i += 8) {
+        await Promise.all(signedIn.slice(i, i + 8).map(async waiting => {
+            if (room.waitingRoom.get(waiting.id) !== waiting || !waiting.awaitingHost) return;
+            waiting.awaitingHost = false;
+            try {
+                await admitWaitingPeer(roomId, waiting.id, true);
+            } catch (error) {
+                if (room.waitingRoom.get(waiting.id) !== waiting || waiting.awaitingHost) return;
+                room.waitingRoom.delete(waiting.id);
+                roomManager.sendToSocket(waiting.ws, 'rejected', { reason: error instanceof Error ? error.message : 'Could not join. Try again.' }, waiting.id);
+            }
+        }));
     }
 }
 
-async function admitWaitingPeer(roomId: string, targetId: string) {
+async function admitWaitingPeer(roomId: string, targetId: string, automatic = false) {
     const room = roomManager.getRoom(roomId), waiting = room?.waitingRoom.get(targetId);
-    if (!room || !waiting) throw createError(-32000, 'Peer not in waiting room');
+    if (!room || !waiting || waiting.awaitingHost) throw createError(-32000, 'Peer is not waiting for admission');
     if (admittingPeers.has(targetId)) throw createError(-32000, 'Admission already in progress');
     admittingPeers.add(targetId);
     try {
         const result = await joinPeerToRoom(waiting.ws, roomId, waiting.id, waiting.displayName, waiting.rtpCapabilities, { authUser: waiting.authUser, siteLocation: waiting.siteLocation }, null,
-            () => { if (room.waitingRoom.get(targetId) !== waiting) throw createError(-32000, 'Admission cancelled'); },
-            waiting.isGuest ? 'guest' : undefined);
+            () => {
+                if (waiting.inviteExpiresAt !== undefined && Date.now() >= waiting.inviteExpiresAt) {
+                    throw createError(-32005, 'This meeting invitation has expired. Ask the organiser for a valid link.');
+                }
+                if (automatic && room.settings.password && room.settings.password !== waiting.checkedPassword) {
+                    throw createError(-32001, 'Invalid meeting password');
+                }
+                if (room.waitingRoom.get(targetId) !== waiting || waiting.awaitingHost ||
+                    (automatic && (!room.hostStarted || !canEnterWithoutApproval(room, waiting.authUser, waiting.isGuest)))) {
+                    throw createError(-32000, 'Admission cancelled');
+                }
+            },
+            waiting.isGuest ? 'guest' : waiting.initialRole);
         room.waitingRoom.delete(targetId);
+        if (waiting.authUser?.sub) room.removedUserIds.delete(waiting.authUser.sub);
         roomManager.sendToSocket(waiting.ws, 'admitted', result?.result || {}, waiting.id);
         return result;
     } finally { admittingPeers.delete(targetId); }
@@ -213,7 +249,7 @@ const joinRoomSchema = z.object({
     meetingCode: z.string().min(1).max(30),
     displayName: z.string().min(1).max(100),
     siteLocation: z.string().trim().max(120).optional(),
-    inviteToken: z.string().max(128).optional(),
+    inviteToken: z.string().max(512).optional(),
     guestToken: z.string().max(128).optional(),
     rtpCapabilities: z.record(z.string(), z.unknown()).optional(),
     password: z.string().max(50).optional(),
@@ -270,6 +306,7 @@ async function endRoomForEveryone(roomId: string, by: string, peerId?: string, a
         room.peers.clear();
         room.hostPeerId = null;
         room.hostStarted = false;
+        room.removedUserIds.clear();
         for (const waiting of room.waitingRoom.values()) {
             if (waiting.ws?.readyState === 1) {
                 roomManager.sendToSocket(waiting.ws, 'rejected', { reason }, waiting.id);
@@ -411,6 +448,9 @@ export async function handleRpcMessage(
                     await finishPrivateConversationsForPeer(current.id, peerId, 'participant-left');
                     if (!detachedBreakoutPeers.has(peer)) await sfuClient.removePeer(current.id, peerId);
                     detachedBreakoutPeers.delete(peer);
+                    if (ws.readyState !== 1 || current.peers.get(peerId) !== peer) {
+                        throw createError(-32004, 'Connection closed during the room transition.');
+                    }
                     stopAsrForPeer(current.id, peerId); forgetPeerCaptions(current.id, peerId);
                     meetingObservability.left(current.id, peerId);
                     parent.breakoutParticipants ||= new Map();
@@ -594,7 +634,9 @@ export async function handleRpcMessage(
                         error: { code: -32602, message: 'Invalid params: ' + joinParams.error.issues.map(i => i.message).join(', ') },
                     };
                 }
-                const { meetingCode, displayName: rawName, rtpCapabilities, password, inviteToken, guestToken } = joinParams.data;
+                const { meetingCode: requestedCode, displayName: rawName, rtpCapabilities, password, inviteToken, guestToken } = joinParams.data;
+                const sessionMeeting = isSessionMeetingCode(requestedCode);
+                const meetingCode = sessionMeeting ? requestedCode.toUpperCase() : requestedCode;
                 if (connectionState.expectedMeetingCode && connectionState.expectedMeetingCode !== meetingCode.trim().toUpperCase()) {
                     throw createError(-32001, 'This signaling ticket is valid for a different meeting. Reconnect and try again.');
                 }
@@ -609,8 +651,26 @@ export async function handleRpcMessage(
                 const previousRoom = roomManager.getRoomByCode(meetingCode);
                 if (previousRoom?.parentRoomId) throw createError(-32005, 'Enter a breakout through your admitted main-meeting session.');
                 const epoch = previousRoom ? roomEpochs.get(previousRoom) || 0 : 0;
-                const policy = await loadMeetingPolicy(meetingCode);
+                const sharedSchedule = sessionMeeting ? verifySessionMeetingInvite(meetingCode, inviteToken) : null;
+                if (sessionMeeting && !sharedSchedule) {
+                    throw createError(-32005, 'This meeting invitation is missing or expired. Ask the organiser for a valid link.');
+                }
+                const policy = sharedSchedule ? {
+                    hostId: sharedSchedule.hostId,
+                    status: 'waiting',
+                    settings: {
+                        e2eeRequired: sharedSchedule.e2eeRequired,
+                        maxParticipants: sharedSchedule.maxParticipants,
+                        meetingKind: sharedSchedule.meetingKind,
+                        allowRecording: false,
+                    },
+                } : await loadMeetingPolicy(meetingCode);
+                const signedIn = Boolean(connectionState.authUser?.sub);
+                if (!previousRoom && !policy && !signedIn) {
+                    throw createError(-32005, 'Ask the organiser to start the meeting before joining as a guest.');
+                }
                 const room = roomManager.getOrCreateRoom(meetingCode, { ...policy?.settings, waitingRoomEnabled: true });
+                if (!previousRoom) roomManager.scheduleEmptyRoomCleanup(room.id);
                 if ((previousRoom && previousRoom !== room) || (roomEpochs.get(room) || 0) !== epoch) {
                     throw createError(-32004, 'This meeting ended or was cancelled while joining. Reconnect to check its status.');
                 }
@@ -624,28 +684,29 @@ export async function handleRpcMessage(
                     throw createError(-32005, 'This meeting uses end-to-end encrypted media. Use a current version of Chrome, Edge, Safari or Firefox.');
                 }
                 if (policy?.hostId) room.ownerUserId = policy.hostId;
-                const verifiedAccess = await verifySignalingAccess(meetingCode, {
+                const verifiedAccess = sharedSchedule ? null : await verifySignalingAccess(meetingCode, {
                     userId: connectionState.authUser?.sub,
                     guestToken,
                     inviteToken,
                 });
                 checkMeetingOpen();
-                const isInvited = verifyMeetingInviteToken(meetingCode, inviteToken) || !!verifiedAccess?.isInvited;
-                const isGuestUser = Boolean(guestToken || verifiedAccess?.isGuest);
-                const webinarGuest = room.settings.webinar && isGuestUser && !isInvited;
+                const isInvited = sessionMeeting || verifyMeetingInviteToken(meetingCode, inviteToken) || !!verifiedAccess?.isInvited;
+                const isGuestUser = !signedIn || Boolean(guestToken || verifiedAccess?.isGuest);
+                const directEntry = canEnterWithoutApproval(room, connectionState.authUser, isGuestUser);
                 // Platform admins (role from the server-signed session) can enter and run any meeting.
-                const isPlatformAdmin = connectionState.authUser?.role === 'admin';
+                const isPlatformAdmin = !sessionMeeting && connectionState.authUser?.role === 'admin';
                 const isOwner = (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub) || isPlatformAdmin;
                 // Google Meet rule: nobody gets in before the host starts the meeting. They wait, and
                 // are let in (or asked to knock) automatically when the host arrives.
                 if (policy?.status === 'ended' && !room.hostStarted && !isOwner) {
                     throw createError(-32004, 'This meeting has ended. Ask the organiser to restart it or send a new invitation.');
                 }
-                if (room.ownerUserId && !room.hostStarted && !isOwner) {
+                if (!room.hostStarted && !isOwner && (room.ownerUserId || !directEntry)) {
                     if (room.settings.password && room.settings.password !== password) {
                         return { jsonrpc: '2.0', id: id!, error: { code: -32001, message: 'Invalid meeting password' } };
                     }
-                    roomManager.addToWaitingRoom(room.id, { id: peerId, displayName, siteLocation, ws, rtpCapabilities, requestedAt: new Date(), authUser: connectionState.authUser, awaitingHost: true, invited: isInvited, isGuest: isGuestUser });
+                    if (ws.readyState !== 1) throw createError(-32000, 'Connection closed during join');
+                    roomManager.addToWaitingRoom(room.id, { id: peerId, displayName, siteLocation, ws, rtpCapabilities, requestedAt: new Date(), authUser: connectionState.authUser, awaitingHost: true, invited: isInvited, isGuest: isGuestUser, inviteExpiresAt: sharedSchedule?.expiresAt, checkedPassword: room.settings.password, initialRole: verifiedAccess?.role === 'co-host' ? 'co-host' : undefined });
                     connectionState.peerId = peerId;
                     connectionState.roomId = room.id;
                     connectionState.displayName = displayName;
@@ -669,15 +730,17 @@ export async function handleRpcMessage(
                 }
 
                 // Check max participants
-                if (!isPlatformAdmin && room.peers.size >= room.settings.maxParticipants) {
+                if (!isPlatformAdmin && room.peers.size >= room.settings.maxParticipants &&
+                    ![...room.peers.values()].some(peer => peer.userId && peer.userId === connectionState.authUser?.sub)) {
                     return {
                         jsonrpc: '2.0', id: id!,
                         error: { code: -32003, message: 'Meeting is full' },
                     };
                 }
 
-                // Waiting room: if enabled and not the first peer (host), put in waiting room
-                if (!isOwner && (webinarGuest || (room.settings.waitingRoomEnabled && room.peers.size > 0))) {
+                // Guests and removed accounts need approval even after the host has started.
+                if (!isOwner && !directEntry) {
+                    if (ws.readyState !== 1) throw createError(-32000, 'Connection closed during join');
                     roomManager.addToWaitingRoom(room.id, {
                         id: peerId,
                         displayName,
@@ -687,6 +750,7 @@ export async function handleRpcMessage(
                         requestedAt: new Date(),
                         authUser: connectionState.authUser,
                         invited: isInvited,
+                        inviteExpiresAt: sharedSchedule?.expiresAt,
                         isGuest: isGuestUser,
                     });
 
@@ -705,15 +769,27 @@ export async function handleRpcMessage(
                     };
                 }
 
-                // Direct join (no waiting room or first peer)
+                // Direct entry for verified accounts and the organiser.
                 const hostWasPresent = room.hostStarted;
-                const joined = await joinPeerToRoom(ws, room.id, peerId, displayName, rtpCapabilities, connectionState, id!, checkMeetingOpen, verifiedAccess?.role as any);
+                const joined = await joinPeerToRoom(ws, room.id, peerId, displayName, rtpCapabilities, connectionState, id!, () => {
+                    checkMeetingOpen();
+                    if (sharedSchedule && Date.now() >= sharedSchedule.expiresAt) {
+                        throw createError(-32005, 'This meeting invitation has expired. Ask the organiser for a valid link.');
+                    }
+                    if (!isOwner && room.settings.password && room.settings.password !== password) {
+                        throw createError(-32001, 'Invalid meeting password');
+                    }
+                    if (!isOwner && (!canEnterWithoutApproval(room, connectionState.authUser, isGuestUser) ||
+                        (room.ownerUserId && !room.hostStarted))) {
+                        throw createError(-32005, 'Meeting access changed. Try joining again.');
+                    }
+                }, verifiedAccess?.role as any);
                 const me = room.peers.get(peerId);
-                if (me?.role === 'host' && joined?.result) joined.result.inviteToken = createMeetingInviteToken(meetingCode);
+                if (me?.role === 'host' && joined?.result) joined.result.inviteToken = sessionMeeting ? inviteToken : createMeetingInviteToken(meetingCode);
                 if (me?.role === 'host') {
-                    if (!hostWasPresent && room.ownerUserId) void reportMeetingStatus(room.meetingCode, 'active');
+                    if (!sessionMeeting && !hostWasPresent && room.ownerUserId) void reportMeetingStatus(room.meetingCode, 'active');
                     // Let the host's client finish its join before others stream in.
-                    setTimeout(() => releaseAwaitingHost(room.id), 250);
+                    setTimeout(() => { void releaseAwaitingHost(room.id); }, 250);
                 }
                 return joined;
             }
@@ -1326,6 +1402,7 @@ export async function handleRpcMessage(
                 const waiting = roomManager.rejectFromWaitingRoom(roomId, targetPeerId);
                 if (!waiting) throw createError(-32000, 'Peer not in waiting room');
 
+                roomManager.broadcast(roomId, 'waitingRoomUpdated', { peerId: targetPeerId, departed: true });
                 // Notify the rejected peer
                 roomManager.sendToSocket(waiting.ws, 'rejected', { reason: 'Host denied entry' }, waiting.id);
 
@@ -1432,17 +1509,17 @@ export async function handleRpcMessage(
 
                 if (!canManagePeer(roomId, peerId, targetPeerId)) throw createError(-32005, 'Cannot manage this participant');
 
+                const room = roomManager.getRoom(roomId)!;
+                const kicked = room.peers.get(targetPeerId);
+                if (kicked?.userId) (room.parentRoomId ? roomManager.getRoom(room.parentRoomId) : room)?.removedUserIds.add(kicked.userId);
+
                 // Notify the kicked peer
                 roomManager.sendToPeer(roomId, targetPeerId, 'kicked', {
                     reason: reason || 'Removed by host',
                     by: connectionState.displayName,
                 });
 
-                // Remove from SFU and signaling
-                await finishPrivateConversationsForPeer(roomId, targetPeerId, 'participant-left');
-                await sfuClient.removePeer(roomId, targetPeerId).catch(() => { });
-                meetingObservability.left(roomId, targetPeerId);
-                const kicked = roomManager.removePeer(roomId, targetPeerId);
+                const cleanup = handlePeerDisconnect({ roomId, peerId: targetPeerId, displayName: kicked?.displayName, mainRoomId: room.parentRoomId });
 
                 // Close their WebSocket
                 if (kicked?.ws && kicked.ws.readyState === 1) {
@@ -1455,6 +1532,7 @@ export async function handleRpcMessage(
                     by: connectionState.displayName,
                 });
 
+                await cleanup;
                 return { jsonrpc: '2.0', id: id!, result: { kicked: true } };
             }
 
@@ -1503,7 +1581,7 @@ export async function handleRpcMessage(
                 const parsedSettings = roomSettingsSchema.safeParse(settings);
                 if (!parsedSettings.success) throw createError(-32602, 'Invalid settings');
                 if (parsedSettings.data.waitingRoomEnabled === false) {
-                    throw createError(-32005, 'Host approval is required for every attendee.');
+                    throw createError(-32005, 'Host approval is required for guests.');
                 }
                 const settingsRoom = roomManager.getRoom(roomId);
                 if ((parsedSettings.data.allowScreenShare !== undefined || parsedSettings.data.allowFileShare !== undefined) &&
@@ -1607,7 +1685,7 @@ export async function handleRpcMessage(
                 }
 
                 const room = roomManager.getRoom(roomId);
-                if (room?.ownerUserId) void reportMeetingStatus(room.meetingCode, 'ended');
+                if (room?.ownerUserId && !isSessionMeetingCode(room.meetingCode)) void reportMeetingStatus(room.meetingCode, 'ended');
                 await endRoomForEveryone(roomId, connectionState.displayName || 'Host', peerId);
 
                 return { jsonrpc: '2.0', id: id!, result: { ended: true } };
@@ -1886,7 +1964,7 @@ async function joinPeerToRoom(
         initialRole,
         isGuest: Boolean(connectionState?.isGuest || initialRole === 'guest'),
         userId: connectionState.authUser?.sub,
-        platformAdmin: connectionState.authUser?.role === 'admin',
+        platformAdmin: connectionState.authUser?.role === 'admin' && !isSessionMeetingCode(room.meetingCode),
         audioMuted: false,
         videoOff: false,
         handRaised: false,
@@ -1897,6 +1975,29 @@ async function joinPeerToRoom(
         if (ws.readyState !== 1) throw createError(-32000, 'Connection closed during join');
         if (roomIsEnding(room) || (roomEpochs.get(room) || 0) !== epoch) throw createError(-32004, 'This meeting has ended');
         beforeRegister?.();
+        if (!room.parentRoomId && !connectionState.mainRoomId && peerState.userId && !peerState.isGuest) {
+            const sameAccount = (peer: PeerState) => peer.userId === peerState.userId && !peer.isGuest;
+            const previous = [...room.peers.values()].find(sameAccount) || [...room.breakoutParticipants?.values() || []].find(sameAccount);
+            if (previous) {
+                if (room.settings.locked && !peerState.platformAdmin && room.ownerUserId !== peerState.userId) {
+                    throw createError(-32002, 'Meeting is locked');
+                }
+                const inMainRoom = room.peers.has(previous.id);
+                const remaining = room.peers.size - Number(inMainRoom);
+                if (!peerState.platformAdmin && remaining >= room.settings.maxParticipants) {
+                    throw createError(-32003, 'Meeting is full');
+                }
+                if (room.hostPeerId === previous.id) room.hostPeerId = peerId;
+                if (previous.role === 'co-host') peerState.initialRole = 'co-host';
+                if (inMainRoom) {
+                    void handlePeerDisconnect({ roomId, peerId: previous.id, displayName: previous.displayName }, true);
+                } else {
+                    const child = [...room.breakoutRooms?.keys() || []].find(id => roomManager.getRoom(id)?.peers.has(previous.id));
+                    void handlePeerDisconnect({ roomId: child || roomId, mainRoomId: roomId, peerId: previous.id, displayName: previous.displayName });
+                }
+                if (previous.ws.readyState === 1) previous.ws.close(4002, 'Rejoined from another connection');
+            }
+        }
         roomManager.addPeer(roomId, peerState);
         meetingObservability.joined(room, peerState);
     } catch (error) {
@@ -1982,36 +2083,43 @@ async function joinPeerToRoom(
  * Handle peer disconnect (WebSocket close or leaveRoom).
  */
 export async function handlePeerDisconnect(
-    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: VerifiedSignalingUser | null; mainRoomId?: string }
+    connectionState: { peerId?: string; roomId?: string; displayName?: string; authUser?: VerifiedSignalingUser | null; mainRoomId?: string }, replacing = false
 ): Promise<void> {
-    const { peerId, roomId, displayName } = connectionState;
+    const { peerId, roomId, displayName, mainRoomId } = connectionState;
     if (!peerId || !roomId) return;
+    connectionState.mainRoomId = undefined;
+    connectionState.peerId = undefined;
+    connectionState.roomId = undefined;
+    connectionState.displayName = undefined;
+
+    const room = roomManager.getRoom(roomId);
+    const active = room?.peers.has(peerId);
+    const waiting = room?.waitingRoom.has(peerId);
 
     try {
         // Presence must not wait for an unavailable media server.
         stopAsrForPeer(roomId, peerId);
         forgetPeerCaptions(roomId, peerId);
         meetingObservability.left(roomId, peerId);
-        roomManager.removePeer(roomId, peerId);
-        clearEmptyRoomCaptions(roomId);
-        roomManager.broadcast(roomId, 'peerLeft', { peerId, displayName });
-        await finishPrivateConversationsForPeer(roomId, peerId, 'participant-left').catch(error => logger.warn(error, 'Private conversation disconnect cleanup failed'));
-        await sfuClient.removePeer(roomId, peerId).catch(() => { });
+        if (active || waiting) roomManager.removePeer(roomId, peerId, false, replacing);
+        if (!replacing) clearEmptyRoomCaptions(roomId);
+        if (active) roomManager.broadcast(roomId, 'peerLeft', { peerId, displayName });
+        if (waiting) roomManager.broadcast(roomId, 'waitingRoomUpdated', { peerId, departed: true });
+        const main = mainRoomId && roomManager.getRoom(mainRoomId);
+        if (main) {
+            main.breakoutParticipants?.delete(peerId);
+            for (const child of main.breakoutRooms?.values() || []) child.assignedPeerIds.delete(peerId);
+            if (main.id !== roomId && main.hostPeerId === peerId) roomManager.removePeer(main.id, peerId);
+            roomManager.scheduleEmptyRoomCleanup(main.id);
+            publishBreakouts(main);
+        }
+        if (active) {
+            await finishPrivateConversationsForPeer(roomId, peerId, 'participant-left').catch(error => logger.warn(error, 'Private conversation disconnect cleanup failed'));
+            await sfuClient.removePeer(roomId, peerId).catch(() => { });
+        }
     } catch (err) {
         logger.error(err, `Error during peer disconnect: ${peerId}`);
     }
-
-    const main = connectionState.mainRoomId && roomManager.getRoom(connectionState.mainRoomId);
-    if (main) {
-        main.breakoutParticipants?.delete(peerId);
-        for (const child of main.breakoutRooms?.values() || []) child.assignedPeerIds.delete(peerId);
-        if (main.id !== roomId && main.hostPeerId === peerId) roomManager.removePeer(main.id, peerId);
-        publishBreakouts(main);
-    }
-    connectionState.mainRoomId = undefined;
-    connectionState.peerId = undefined;
-    connectionState.roomId = undefined;
-    connectionState.displayName = undefined;
 }
 
 /** End-to-end media encryption is the default. QSVC_E2EE_DEFAULT=off turns the default off. */

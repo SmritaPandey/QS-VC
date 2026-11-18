@@ -40,7 +40,7 @@ export function WaitingAdmission({ meetingCode, onLeave, mode = 'knock' }: { mee
         <span className="mi waiting-admission-icon" aria-hidden="true">{forHost ? 'hourglass_top' : reviewed ? 'mark_chat_read' : 'front_hand'}</span>
         <h1>{forHost ? 'Waiting for the host' : reviewed ? 'Your request has been seen' : 'Asking to join…'}</h1>
         <p role="status" aria-live="polite">{forHost
-            ? `The meeting ${meetingCode} hasn’t started yet. You’ll be moved to the waiting room once the host arrives.`
+            ? `The meeting ${meetingCode} hasn’t started yet. Signed-in attendees can join when the host arrives. Guests wait for approval.`
             : reviewed ? `A host or co-host has seen your request. You’re still in the waiting room for ${meetingCode}; they can admit or decline you.` : `Your request to join ${meetingCode} is in the waiting room until a host or co-host admits you.`}</p>
         <p className="waiting-admission-note">Keep this page open. Your camera and microphone stay off until you’re in.</p>
         <span className="waiting-admission-dots" aria-hidden="true"><i /><i /><i /></span>

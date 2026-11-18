@@ -16,7 +16,7 @@ describe('host tools boundaries', () => {
   const html=renderToStaticMarkup(createElement(WaitingAdmission,{meetingCode:'QS-TEST',onLeave:()=>{}}));
   expect(html).toContain('Leave waiting room'); expect(html).toContain('camera and microphone stay off'); expect(html).not.toContain('<video');
   const forHost=renderToStaticMarkup(createElement(WaitingAdmission,{meetingCode:'QS-TEST',onLeave:()=>{},mode:'host'}));
-  expect(forHost).toContain('Waiting for the host'); expect(forHost).toContain('moved to the waiting room once the host arrives'); expect(forHost).not.toContain('<video');
+  expect(forHost).toContain('Waiting for the host'); expect(forHost).toContain('Signed-in attendees can join when the host arrives'); expect(forHost).not.toContain('<video');
   const seen=renderToStaticMarkup(createElement(WaitingAdmission,{meetingCode:'QS-TEST',onLeave:()=>{},mode:'seen'}));
   expect(seen).toContain('Your request has been seen'); expect(seen).toContain('A host or co-host has seen your request'); expect(seen).toContain('still in the waiting room');
  });

@@ -23,7 +23,7 @@ import WebinarsPage from './pages/WebinarsPage';
 import WebinarPreviewPage from './pages/WebinarPreviewPage';
 import WebinarRegistrationPage from './pages/WebinarRegistrationPage';
 import { EntitlementsProvider } from './lib/entitlements';
-import { Gate, TrialEndedPrompt, UpgradePromptListener } from './components/PlanAccess';
+import { Gate, UpgradePromptListener } from './components/PlanAccess';
 
 import { useSession } from './lib/use-session';
 
@@ -124,7 +124,7 @@ export default function App() {
                 <Route path="/webinars" element={<Gate feature="meeting_scheduling"><WebinarsPage /></Gate>} />
                 <Route path="/webinars/:id/preview" element={<Gate feature="meeting_scheduling"><WebinarPreviewPage /></Gate>} />
                 <Route path="/webinars/register/:publicId" element={<WebinarRegistrationPage />} />
-                <Route path="/schedule" element={<Gate feature="meeting_scheduling"><ScheduleMeeting /></Gate>} />
+                <Route path="/schedule" element={<ScheduleMeeting />} />
                 <Route path="/meeting/:meetingCode/preview" element={<OnPremAccess><PreMeeting /></OnPremAccess>} />
                 <Route path="/meeting/:meetingCode" element={<OnPremAccess><MeetingRoom /></OnPremAccess>} />
                 <Route path="/meeting-end" element={<MeetingEnd />} />
@@ -132,7 +132,6 @@ export default function App() {
                 <Route path="/recordings/shared/:shareToken" element={<RecordingPlayback />} />
                 <Route path="/admin" element={<AdminDashboard />} />
             </Routes>
-            <TrialEndedPrompt />
             <UpgradePromptListener />
             </EntitlementsProvider>
             </BrowserRouter>

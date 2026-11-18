@@ -20,7 +20,7 @@ const sent = (ws: any, method: string) => ws.send.mock.calls.map(([raw]: [string
 
 async function meeting() {
     const code = `e2ee-${crypto.randomUUID().slice(0, 10)}`;
-    const hostWs = socket(), host: any = {};
+    const hostWs = socket(), host: any = { authUser: { sub: 'host-user' } };
     await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host', supportsE2EE: true });
     const guests = [socket(), socket()].map(ws => ({ ws, state: {} as any }));
     for (const g of guests) await rpc(g.ws, g.state, 'joinRoom', { meetingCode: code, displayName: 'Guest', supportsE2EE: true });
@@ -30,7 +30,7 @@ async function meeting() {
 
 describe('end-to-end encryption key holder', () => {
     it('is on by default and refuses browsers that cannot encrypt media', async () => {
-        const ws = socket(), state: any = {};
+        const ws = socket(), state: any = { authUser: { sub: 'host-user' } };
         const reply: any = await rpc(ws, state, 'joinRoom', { meetingCode: `e2ee-${crypto.randomUUID().slice(0, 8)}`, displayName: 'Old browser' });
         expect(reply.error.message).toMatch(/end-to-end encrypted media/);
     });

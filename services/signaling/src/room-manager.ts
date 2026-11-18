@@ -55,6 +55,10 @@ export interface WaitingPeer {
     awaitingHost?: boolean;
     /** Valid invitation link holder; identifies the link path but does not bypass host admission. */
     invited?: boolean;
+    inviteExpiresAt?: number;
+    initialRole?: PeerRole;
+    /** Password already validated against the room settings when this request joined. */
+    checkedPassword?: string | null;
     /** External guest without a registered member account */
     isGuest?: boolean;
     /** Host or co-host has acknowledged the request while leaving the attendee in this queue. */
@@ -80,7 +84,7 @@ export interface RoomSettings {
     e2eeRequired?: boolean;
     meetingKind: 'conference' | 'team' | 'town_hall';
     maxParticipants: number;       // default 25
-    waitingRoomEnabled: boolean;   // host approval is required for every non-host attendee
+    waitingRoomEnabled: boolean;   // browser guests require host approval
     locked: boolean;               // no new joins
     password: string | null;       // meeting password
     muteOnEntry: boolean;          // mute mic on join
@@ -122,6 +126,7 @@ export interface RoomState {
     ownerUserId?: string | null;
     peers: Map<string, PeerState>;
     waitingRoom: Map<string, WaitingPeer>;
+    removedUserIds: Set<string>;
     settings: RoomSettings;
     recording: { peerId: string; displayName: string } | null;
     /** Set once the host (or a platform admin) has joined. Until then nobody else gets in. */
@@ -179,6 +184,7 @@ export class RoomManager {
             hostPeerId: null,
             peers: new Map(),
             waitingRoom: new Map(),
+            removedUserIds: new Set(),
             settings: {
                 ...DEFAULT_SETTINGS,
                 ...settings,
@@ -406,7 +412,7 @@ export class RoomManager {
         }
     }
 
-    removePeer(roomId: string, peerId: string, movingToBreakout = false): PeerState | undefined {
+    removePeer(roomId: string, peerId: string, movingToBreakout = false, replacing = false): PeerState | undefined {
         const room = this.rooms.get(roomId);
         if (!room) return undefined;
 
@@ -430,7 +436,7 @@ export class RoomManager {
             const others = [...room.peers.values()];
             const nextHost = others.find(p => p.role === 'host')
                 || others.find(p => p.role === 'co-host')
-                || (room.ownerUserId ? undefined : others.find(p => !!p.userId) || others[0]);
+                || (room.ownerUserId ? undefined : others.find(p => !!p.userId && !p.isGuest));
             if (nextHost) {
                 nextHost.role = 'host';
                 room.hostPeerId = nextHost.id;
@@ -443,10 +449,10 @@ export class RoomManager {
             }
         }
 
-        if (room.peers.size === 0 && !movingToBreakout) room.hostPeerId = null;
+        if (room.peers.size === 0 && !movingToBreakout && !replacing) room.hostPeerId = null;
 
         this.scheduleEmptyRoomCleanup(roomId);
-        if (room.peers.size === 0 && room.ownerUserId && room.settings.waitingRoomEnabled) {
+        if (!replacing && room.peers.size === 0 && room.ownerUserId && room.settings.waitingRoomEnabled) {
             // Everyone in the call left; the next person in must wait for the host again.
             room.hostStarted = false;
             for (const waiting of room.waitingRoom.values()) {
@@ -491,7 +497,7 @@ export class RoomManager {
     updateSettings(roomId: string, settings: Partial<RoomSettings>): void {
         const room = this.rooms.get(roomId);
         if (!room) return;
-        if (settings.waitingRoomEnabled === false) throw new Error('Host approval is required for every attendee.');
+        if (settings.waitingRoomEnabled === false) throw new Error('Host approval is required for guests.');
         Object.assign(room.settings, settings, { waitingRoomEnabled: true });
         if (!room.settings.allowRecording && room.recording) this.updateRecording(roomId, null);
         this.broadcast(roomId, 'settingsUpdated', { settings: { ...room.settings, password: undefined } });

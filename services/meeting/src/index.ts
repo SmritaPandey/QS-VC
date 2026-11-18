@@ -3,7 +3,7 @@ import { webinarsRouter } from './webinars.js';
 import { registerSessionReportRoutes } from './session-reports.js';
 import { roomDialHandler } from './room-dial.js';
 import { serviceSecret } from '../../../shared/service-secrets.cjs';
-import { insertSchedule, scheduleOccurrences } from './schedule-occurrences.js';
+import { scheduleOccurrences, withinSchedulingWindow } from './schedule-occurrences.js';
 import { meetingAuth, requireFeature, type AuthPayload } from './auth.js';
 import jwt from 'jsonwebtoken';
 import express, { Request, Response, NextFunction } from 'express';
@@ -252,37 +252,30 @@ app.post('/api/meetings', authMiddleware, validateBody(createMeetingBody), async
     }
 });
 
-// Schedule meeting
-app.post('/api/meetings/schedule', scheduleFeature, authMiddleware, validateBody(createMeetingBody), async (req, res) => {
+// Issue private schedule invitations without creating any stored meeting rows.
+app.post('/api/meetings/schedule', authMiddleware, validateBody(createMeetingBody), async (req, res) => {
+    const user = (req as any).user as AuthPayload;
+    const { scheduledStart, scheduledEnd, settings, recurrence }: z.infer<typeof createMeetingBody> = req.body;
+    const times = scheduledStart && scheduleOccurrences(scheduledStart, scheduledEnd, recurrence);
+    if (!times || !withinSchedulingWindow(times)) {
+        return res.status(400).json({ error: 'Choose start times within the next 72 hours and an end after the start.' });
+    }
     try {
-        const user = (req as any).user as AuthPayload;
-        const { title, scheduledStart, scheduledEnd, settings, recurrence }: z.infer<typeof createMeetingBody> = req.body;
-        const times = scheduledStart && scheduleOccurrences(scheduledStart, scheduledEnd, recurrence);
-        if (!times) return res.status(400).json({ error: 'Provide a meeting start and an end after the start.' });
-
-        const seriesId = recurrence ? uuidv4() : undefined;
-        const inserted = await insertWithUniqueMeetingCodes(times.length, async codes => {
-            const occurrences = times.map((time, index) => ({ ...time, id: uuidv4(), meetingCode: codes[index] }));
-            await insertSchedule(pool, user.tenantId, title || 'Scheduled Meeting', user.sub,
-                recurrence ? 'recurring' : 'scheduled', { ...normalizeMeetingSettings(settings), seriesId }, occurrences);
-            return occurrences;
+        const occurrences = times.map(time => {
+            const meetingCode = `QS-S-${crypto.randomBytes(12).toString('hex').toUpperCase()}`;
+            const inviteToken = meetingInvitation.createSessionMeetingInvite(meetingCode, {
+                hostId: user.sub,
+                expiresAt: Date.parse(time.scheduledStart) + 86_400_000,
+                meetingKind: settings?.meetingKind ?? (settings?.webinar ? 'town_hall' : 'conference'),
+                e2eeRequired: settings?.e2eeRequired ?? true,
+                maxParticipants: settings?.maxParticipants ?? 100,
+            });
+            return { ...time, meetingCode, inviteToken };
         });
-        const occurrences = inserted.result;
-        const occurrencesWithInvites = occurrences.map(occurrence => ({ ...occurrence, inviteToken: createMeetingInviteToken(occurrence.meetingCode) }));
-
-        const first = occurrences[0];
-        const inviteToken = createMeetingInviteToken(first.meetingCode);
-        res.status(201).json({
-            ...first,
-            title: title || 'Scheduled Meeting',
-            inviteToken,
-            joinUrl: `${process.env.WEB_URL || 'https://qs-vc.vercel.app'}/meeting/${first.meetingCode}/preview?invite=${encodeURIComponent(inviteToken)}`,
-            seriesId,
-            occurrences: occurrencesWithInvites,
-        });
-    } catch (err: any) {
-        logger.error(err, 'Failed to schedule meeting');
-        res.status(500).json({ error: 'Failed to schedule meeting' });
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(201).json({ occurrences });
+    } catch {
+        return res.status(500).json({ error: 'Could not create invitations. Try again.' });
     }
 });
 
@@ -1054,31 +1047,19 @@ app.get('/api/meetings', authMiddleware, async (req, res) => {
     }
 });
 
-// Update one scheduled occurrence. Serialize changes with the meeting status.
-const editScheduleBody = z.discriminatedUnion('action', [
-    z.object({ action: z.literal('cancel') }),
-    z.object({ action: z.literal('reschedule'), start: z.iso.datetime({ offset: true }), end: z.iso.datetime({ offset: true }) }),
-]);
-
-app.patch('/api/meetings/:id/schedule', scheduleFeature, authMiddleware, validateBody(editScheduleBody), async (req, res) => {
+// Keep cancellation available for meetings saved before session scheduling.
+const editScheduleBody = z.object({ action: z.literal('cancel') });
+app.patch('/api/meetings/:id/schedule', authMiddleware, validateBody(editScheduleBody), async (req, res) => {
     const id = z.string().uuid().safeParse(req.params.id);
     if (!id.success) return res.status(400).json({ error: 'Invalid meeting ID' });
-    const edit = req.body as z.infer<typeof editScheduleBody>;
     const user = (req as any).user as AuthPayload;
-    const rescheduling = edit.action === 'reschedule';
-    if (rescheduling && (Date.parse(edit.start) <= Date.now() || Date.parse(edit.end) <= Date.parse(edit.start))) {
-        return res.status(400).json({ error: 'Choose a future start and a later end' });
-    }
     try {
         const result = await pool.query(
-            `UPDATE meetings SET status = $1, updated_at = NOW(),
-                scheduled_start = COALESCE($2::timestamptz, scheduled_start),
-                scheduled_end = COALESCE($3::timestamptz, scheduled_end)
-             WHERE id = $4 AND tenant_id = $5 AND (host_id = $6 OR $7)
-                 AND scheduled_start IS NOT NULL AND (status = 'waiting' OR ($1 = 'cancelled' AND status = 'cancelled'))
+            `UPDATE meetings SET status = 'cancelled', updated_at = NOW()
+             WHERE id = $1 AND tenant_id = $2 AND (host_id = $3 OR $4)
+                 AND scheduled_start IS NOT NULL AND status IN ('waiting', 'cancelled')
              RETURNING id, status, scheduled_start AS "scheduledStart", scheduled_end AS "scheduledEnd"`,
-            [rescheduling ? 'waiting' : 'cancelled', rescheduling ? edit.start : null,
-                rescheduling ? edit.end : null, id.data, user.tenantId, user.sub, user.role === 'admin'],
+            [id.data, user.tenantId, user.sub, user.role === 'admin'],
         );
         if (!result.rows.length) return res.status(404).json({ error: 'Editable scheduled meeting not found' });
         res.json(result.rows[0]);

@@ -8,43 +8,12 @@ import type { MeetingSetup } from '../components/MeetingSetupDialog';
 import { authenticatedMeetingRequest, meetingsEndpoint } from '../lib/meeting-creation';
 import { shareMeetingInvite } from '../lib/meeting-sharing';
 import { QRCodeSVG } from 'qrcode.react';
-import LoadingMark from '../components/LoadingMark';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import '../styles/account-workspace.css';
 
 const MEETING_API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
 const MEETINGS_ENDPOINT = meetingsEndpoint(MEETING_API);
-const SIGNALING_HTTP = (import.meta.env.VITE_SIGNALING_URL || '')
-    .replace(/^wss:/i, 'https:')
-    .replace(/^ws:/i, 'http:')
-    .replace(/\/ws\/?$/i, '');
-
-async function createMeetingCode(): Promise<{ meetingCode: string; inviteToken?: string }> {
-    // Prefer same-origin Vercel serverless (always available in prod), then backends
-    const endpoints = [
-        '/api/meetings/create',
-        `${MEETING_API}/api/meetings/create`,
-        `${SIGNALING_HTTP}/api/meetings/create`,
-    ].filter((url) => url.startsWith('/') || url.startsWith('http'));
-
-    for (const url of endpoints) {
-        try {
-            const res = await fetch(url, { method: 'POST' });
-            if (!res.ok) continue;
-            const data = await res.json();
-            if (data?.meetingCode) return {
-                meetingCode: data.meetingCode as string,
-                inviteToken: typeof data.inviteToken === 'string' ? data.inviteToken : undefined,
-            };
-        } catch (err) {
-            console.warn('Create meeting attempt failed:', url, err);
-        }
-    }
-
-    // Meeting identifiers are issued by the service so the database can enforce uniqueness.
-    throw new Error('Meeting creation is temporarily unavailable. Please try again shortly.');
-}
 
 export default function Landing() {
     const session = useSession();
@@ -61,10 +30,9 @@ export default function Landing() {
     const [copied, setCopied] = useState(false);
     const navigate = useNavigate();
     const shareDialogRef = useRef<HTMLDivElement>(null);
-    const createButtonRef = useRef<HTMLButtonElement>(null);
     useEffect(() => {
         if (!shareLink) return;
-        const returnTarget = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : createButtonRef.current;
+        const returnTarget = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         const dialog = shareDialogRef.current;
         const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input, a[href], [tabindex="0"]') || []);
         focusable()[0]?.focus();
@@ -86,43 +54,31 @@ export default function Landing() {
         return () => { document.removeEventListener('keydown', onKeyDown); returnTarget?.focus(); };
     }, [shareLink]);
 
-    const handleCreate = async (setup?: MeetingSetup) => {
+    const handleCreate = async (setup: MeetingSetup) => {
         setCreating(true);
         try {
-            let meetingCode: string;
-            let inviteToken: string | undefined;
-            if (setup) {
-                const token = getToken();
-                if (!token) throw new Error('Your sign-in has expired. Sign in again to create a meeting.');
-                const response = await fetch(MEETINGS_ENDPOINT, authenticatedMeetingRequest(token, setup));
-                if (getToken() !== token) throw new Error('Your session changed. Please try creating the meeting again.');
-                if (response.status === 401) {
-                    clearSession(token);
-                    setSessionError('Your session expired. Sign in again to create a meeting.');
-                    throw new Error('Your session expired. Sign in again to create a meeting.');
-                }
-                if (!response.ok) {
-                    const data = await response.json().catch(() => null);
-                    throw new Error(typeof data?.message === 'string' ? data.message : 'Could not create the meeting. Please try again.');
-                }
-                const data = await response.json();
-                const code = data.meetingCode || data.code;
-                if (typeof code !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(code)) throw new Error('The meeting service returned an invalid invitation. Please try again.');
-                meetingCode = code;
-                inviteToken = typeof data.inviteToken === 'string' ? data.inviteToken : undefined;
-            } else {
-                if (signedIn) throw new Error('Choose a meeting type before creating a meeting.');
-                ({ meetingCode, inviteToken } = await createMeetingCode());
+            const token = getToken();
+            if (!token) throw new Error('Your sign-in has expired. Sign in again to create a meeting.');
+            const response = await fetch(MEETINGS_ENDPOINT, authenticatedMeetingRequest(token, setup));
+            if (getToken() !== token) throw new Error('Your session changed. Please try creating the meeting again.');
+            if (response.status === 401) {
+                clearSession(token);
+                setSessionError('Your session expired. Sign in again to create a meeting.');
+                throw new Error('Your session expired. Sign in again to create a meeting.');
             }
+            if (!response.ok) {
+                const data = await response.json().catch(() => null);
+                throw new Error(typeof data?.message === 'string' ? data.message : 'Could not create the meeting. Please try again.');
+            }
+            const data = await response.json();
+            const code = data.meetingCode || data.code;
+            if (typeof code !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(code)) throw new Error('The meeting service returned an invalid invitation. Please try again.');
+            const inviteToken = typeof data.inviteToken === 'string' ? data.inviteToken : undefined;
             const inviteQuery = inviteToken ? `?invite=${encodeURIComponent(inviteToken)}` : '';
-            const fullLink = `${window.location.origin}/meeting/${meetingCode}/preview${inviteQuery}`;
-            if (setup?.startNow) { navigate(`/meeting/${meetingCode}/preview${inviteQuery}`); return; }
-            setShareMeetingCode(meetingCode);
-            setShareLink(fullLink);
-        } catch (err) {
-            console.error('Failed to create meeting:', err);
-            if (!setup) alert('Failed to create meeting. Please try again in a moment.');
-            else throw err;
+            const previewPath = `/meeting/${code}/preview${inviteQuery}`;
+            if (setup.startNow) { navigate(previewPath); return; }
+            setShareMeetingCode(code);
+            setShareLink(`${window.location.origin}${previewPath}`);
         } finally {
             setCreating(false);
         }
@@ -198,7 +154,7 @@ export default function Landing() {
                 {session.status === 'unavailable' && <p role="status">Account unavailable. <button type="button" onClick={() => void refreshSession()}>Try again</button></p>}
                 <div className="landing-hero">
                     <h1>Guest meetings</h1>
-                    <p className="landing-subtitle">Join with a meeting code or create an instant meeting. Sign in to see your plan and scheduled meetings.</p>
+                    <p className="landing-subtitle">Join with a meeting code. Sign in to start a meeting or see your scheduled meetings.</p>
                 </div>
 
                 <div className="landing-actions">
@@ -217,21 +173,11 @@ export default function Landing() {
 
                     <div className="action-card">
                         <h2>Start an instant meeting</h2>
-                        <p>Create a link to share with participants.</p>
-                        <button
-                            className="btn-primary qsvc-action"
-                            ref={createButtonRef}
-                            onClick={() => handleCreate()}
-                            disabled={creating} aria-busy={creating}
-                        ><ActionContents>
-                            {creating ? (
-                                <LoadingMark label="Creating meeting…" />
-                            ) : (
-                                <>
-                                    <span className="mi mi-sm" aria-hidden="true">videocam</span>
-                                    Create meeting
-                                </>
-                            )}</ActionContents></button>
+                        <p>Sign in to start a meeting and admit guests.</p>
+                        <Link className="btn-primary qsvc-action" to="/login?next=%2Fapp"><ActionContents>
+                            <span className="mi mi-sm" aria-hidden="true">videocam</span>
+                            Sign in to start
+                        </ActionContents></Link>
                         <Link className="guest-schedule-link" to="/schedule">Sign in to schedule<span className="mi" aria-hidden="true">arrow_forward</span></Link>
                     </div>
                 </div>

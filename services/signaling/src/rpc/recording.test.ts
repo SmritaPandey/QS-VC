@@ -48,7 +48,10 @@ describe('recording notifications', () => {
             expect((await rpc(host.ws, host.state, 'setRecordingState', params))?.error?.code).toBe(-32602);
         }
         expect(roomManager.getRoom(host.state.roomId)?.recording).toBeNull();
-        const guestHost = await join(`guest-${crypto.randomUUID().slice(0, 10)}`);
+        const guestHost = await join(code);
+        const room = roomManager.getRoom(host.state.roomId)!;
+        room.peers.get(guestHost.state.peerId)!.role = 'host';
+        room.hostPeerId = guestHost.state.peerId;
         expect((await rpc(guestHost.ws, guestHost.state, 'setRecordingState', { recording: true }))?.error?.code).toBe(-32005);
     });
 

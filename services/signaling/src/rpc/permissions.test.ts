@@ -100,7 +100,7 @@ describe('production meeting permissions', () => {
 
     it('lets a ticket-bound persisted organiser end a live meeting without joining, disconnecting attendees and waiters', async () => {
         const hostWs = socket(), guestWs = socket(), waitingWs = socket(), dashboardWs = socket();
-        const host: any = {}, guest: any = {}, waiting: any = {};
+        const host: any = { authUser: { sub: 'host-user' } }, guest: any = {}, waiting: any = {};
         const code = `DASH-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
         await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
         await rpc(guestWs, guest, 'joinRoom', { meetingCode: code, displayName: 'Guest' });
@@ -148,7 +148,7 @@ describe('production meeting permissions', () => {
     });
 
     it('does not disconnect an active room when its end status cannot be saved', async () => {
-        const ws = socket(), host: any = {};
+        const ws = socket(), host: any = { authUser: { sub: 'host-user' } };
         const code = `FAIL-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
         await rpc(ws, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
         vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', tenantId: 'tenant', status: 'active', settings: {} } as any);
@@ -169,7 +169,7 @@ describe('production meeting permissions', () => {
     });
 
     it('does not register a host whose media setup finishes after the meeting ended', async () => {
-        const ws = socket(), host: any = {}, joining: any = { authUser: { sub: 'owner' } };
+        const ws = socket(), host: any = { authUser: { sub: 'host-user' } }, joining: any = { authUser: { sub: 'owner' } };
         const code = `RACE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
         await rpc(ws, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
         const room = roomManager.getRoom(host.roomId)!;
@@ -188,7 +188,7 @@ describe('production meeting permissions', () => {
 
     it('rejects a delayed active-policy response from a join begun before the meeting ended', async () => {
         const code = `ACTIVE-RACE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-        const host: any = {}, hostWs = socket();
+        const host: any = { authUser: { sub: 'host-user' } }, hostWs = socket();
         await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
         const room = roomManager.getRoom(host.roomId)!;
         room.ownerUserId = 'owner';
@@ -207,7 +207,7 @@ describe('production meeting permissions', () => {
 
     it('shares concurrent dashboard teardown and permits a fresh host restart only after it finishes', async () => {
         const code = `END-RACE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-        const host: any = {}, hostWs = socket();
+        const host: any = { authUser: { sub: 'host-user' } }, hostWs = socket();
         await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
         const room = roomManager.getRoom(host.roomId)!;
         room.ownerUserId = 'owner';
@@ -242,7 +242,7 @@ describe('production meeting permissions', () => {
 
     it('keeps the dashboard persistence guard when an in-room end finishes first', async () => {
         const code = `SAVE-RACE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-        const host: any = {}, hostWs = socket();
+        const host: any = { authUser: { sub: 'host-user' } }, hostWs = socket();
         await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
         roomManager.getRoom(host.roomId)!.ownerUserId = 'owner';
         const policy = { hostId: 'owner', status: 'active', settings: {} } as any;
@@ -270,7 +270,7 @@ describe('production meeting permissions', () => {
 
     it('does not save or tear down a fresh run after a dashboard policy lookup for the old run finishes late', async () => {
         const code = `CONTROL-RACE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
-        const host: any = {}, hostWs = socket();
+        const host: any = { authUser: { sub: 'host-user' } }, hostWs = socket();
         await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
         const room = roomManager.getRoom(host.roomId)!;
         room.ownerUserId = 'owner';
@@ -351,7 +351,7 @@ describe('production meeting permissions', () => {
 
     it('only issues relay credentials to the admitted socket, caching repeated requests', async () => {
         vi.mocked(admittedPeerIceServers).mockClear();
-        const hostWs = socket(), waitingWs = socket(), host: any = {}, waiting: any = {};
+        const hostWs = socket(), waitingWs = socket(), host: any = { authUser: { sub: 'host-user' } }, waiting: any = {};
         const code = `turn-${crypto.randomUUID().slice(0, 10)}`;
         try {
             expect((await rpc(waitingWs, waiting, 'getIceServers'))?.error).toBeDefined();
@@ -370,7 +370,7 @@ describe('production meeting permissions', () => {
         } finally { await handlePeerDisconnect(waiting); await handlePeerDisconnect(host); }
     });
     it('notifies queued guests when the host ends the meeting', async () => {
-        const hostWs=socket(), guestWs=socket(), host:any={}, guest:any={};
+        const hostWs=socket(), guestWs=socket(), host:any={ authUser: { sub: 'host-user' } }, guest:any={};
         const code=`end-${crypto.randomUUID().slice(0,10)}`;
         await rpc(hostWs,host,'joinRoom',{meetingCode:code,displayName:'Host'});
         await rpc(hostWs,host,'updateSettings',{settings:{waitingRoomEnabled:true}});
@@ -382,7 +382,7 @@ describe('production meeting permissions', () => {
         await handlePeerDisconnect(host); await handlePeerDisconnect(guest);
     });
     it('retains queued guests when locked or full and reports admit-all failures', async () => {
-        const hostWs = socket(), host: any = {}, guests = [socket(), socket()], states: any[] = [{}, {}];
+        const hostWs = socket(), host: any = { authUser: { sub: 'host-user' } }, guests = [socket(), socket()], states: any[] = [{}, {}];
         const code = `admit-${crypto.randomUUID().slice(0, 10)}`;
         await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
         await rpc(hostWs, host, 'updateSettings', { settings: { waitingRoomEnabled: true } });
@@ -400,7 +400,7 @@ describe('production meeting permissions', () => {
     });
     it('prevents co-hosts from managing hosts or fellow co-hosts or ending meetings', async () => {
         const code = `roles-${crypto.randomUUID().slice(0, 10)}`;
-        const sockets = [socket(),socket(),socket()], states: any[] = [{},{},{}];
+        const sockets = [socket(),socket(),socket()], states: any[] = [{ authUser: { sub: 'host-user' } }, {}, {}];
         for(let i=0;i<3;i++) await rpc(sockets[i], states[i], 'joinRoom', { meetingCode: code, displayName: `User${i}` });
         for(let i=1;i<3;i++) await rpc(sockets[0], states[0], 'admitPeer', { targetPeerId: states[i].peerId });
         for(let i=1;i<3;i++) await rpc(sockets[0],states[0],'changeRole',{targetPeerId:states[i].peerId,newRole:'co-host'});
@@ -414,7 +414,7 @@ describe('production meeting permissions', () => {
     });
     it('routes collaboration only to joined peers in their own room', async () => {
         const a = socket(), b = socket(), visitor = socket();
-        const sa: any = {}, sb: any = {};
+        const sa: any = { authUser: { sub: 'host-a' } }, sb: any = { authUser: { sub: 'host-b' } };
         await rpc(a, sa, 'joinRoom', { meetingCode: `board-a-${crypto.randomUUID().slice(0, 8)}`, displayName: 'A' });
         await rpc(b, sb, 'joinRoom', { meetingCode: `board-b-${crypto.randomUUID().slice(0, 8)}`, displayName: 'B' });
         for (const state of [sa, sb]) roomManager.getRoom(state.roomId)!.settings.e2eeRequired = false;
@@ -425,7 +425,7 @@ describe('production meeting permissions', () => {
         await handlePeerDisconnect(sa); await handlePeerDisconnect(sb);
     });
     it('validates host settings without mutating the room on invalid input', async () => {
-        const ws = socket(), state: any = {};
+        const ws = socket(), state: any = { authUser: { sub: 'host-user' } };
         await rpc(ws, state, 'joinRoom', { meetingCode: `settings-${crypto.randomUUID().slice(0, 12)}`, displayName: 'Host' });
         expect((await rpc(ws, state, 'updateSettings', { settings: { waitingRoomEnabled: 'false' } }))?.error).toBeDefined();
         expect(roomManager.getRoom(state.roomId)?.settings.waitingRoomEnabled).toBe(true);
@@ -438,7 +438,7 @@ describe('production meeting permissions', () => {
     });
     it('does not register a connection that closes during media setup', async () => {
         const ws = socket();
-        const state: any = {};
+        const state: any = { authUser: { sub: 'host-user' } };
         const code = `test-${crypto.randomUUID().slice(0, 12)}`;
         const joined = rpc(ws, state, 'joinRoom', { meetingCode: code, displayName: 'Leaving' });
         ws.readyState = 3;
@@ -449,13 +449,13 @@ describe('production meeting permissions', () => {
     it('ignores client host roles and only allows the server host to promote members', async () => {
         const code = `test-${crypto.randomUUID().slice(0, 12)}`;
         const hostWs = socket(), memberWs = socket();
-        const host: any = {}, member: any = {};
+        const host: any = { authUser: { sub: 'host-user' } }, member: any = {};
         const first = await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Demo host' });
         const second = await rpc(memberWs, member, 'joinRoom', { meetingCode: code, displayName: 'Demo guest', role: 'host' });
         expect(first?.result.role).toBe('host');
         expect(second?.result.status).toBe('waiting');
         await rpc(hostWs, host, 'admitPeer', { targetPeerId: member.peerId });
-        expect(sent(memberWs).find(m => m.method === 'admitted')?.params.role).toBe('member');
+        expect(sent(memberWs).find(m => m.method === 'admitted')?.params.role).toBe('guest');
         expect((await rpc(memberWs, member, 'changeRole', { targetPeerId: member.peerId, newRole: 'co-host' }))?.error?.code).toBe(-32005);
         expect((await rpc(memberWs, member, 'muteAll'))?.error?.code).toBe(-32005);
         expect((await rpc(hostWs, host, 'changeRole', { targetPeerId: member.peerId, newRole: 'co-host' }))?.result.changed).toBe(true);
@@ -470,7 +470,7 @@ describe('production meeting permissions', () => {
     it('rejects concurrent joins and prevents waiting peers from sending chat', async () => {
         const code = `test-${crypto.randomUUID().slice(0, 12)}`;
         const hostWs = socket(), guestWs = socket();
-        const host: any = {}, guest: any = {};
+        const host: any = { authUser: { sub: 'host-user' } }, guest: any = {};
         const [first, repeated] = await Promise.all([
             rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' }),
             rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Duplicate' }),
@@ -548,9 +548,11 @@ describe('private side conversations', () => {
     it('rejects unsigned hosts and declines private audio producers outside an active session', async () => {
         const code = `private-guard-${crypto.randomUUID().slice(0, 10)}`;
         const host = socket(), target = socket();
-        const hostState: any = {}, targetState: any = {};
+        const hostState: any = { authUser: { sub: 'host-user' } }, targetState: any = {};
         try {
-            await rpc(host, hostState, 'joinRoom', { meetingCode: code, displayName: 'Anonymous host' });
+            await rpc(host, hostState, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+            // Exercise the private-audio guard independently of the join policy.
+            hostState.authUser = undefined;
             await rpc(target, targetState, 'joinRoom', { meetingCode: code, displayName: 'Target' });
             await rpc(host, hostState, 'admitPeer', { targetPeerId: targetState.peerId });
             expect((await rpc(host, hostState, 'startPrivateConversation', { targetPeerId: targetState.peerId }))?.error?.code).toBe(-32005);
@@ -631,7 +633,7 @@ it('holds guests until the saved host starts the meeting, then knocks them when 
     } finally { vi.mocked(loadMeetingPolicy).mockResolvedValue(null); }
 });
 
-it('keeps signed-in invitees waiting after the host arrives even when saved settings disable the waiting room', async () => {
+it('automatically admits a signed-in attendee who arrived before the host', async () => {
     const { loadMeetingPolicy } = await import('../meeting-policy.js');
     vi.mocked(loadMeetingPolicy).mockResolvedValue({hostId:'owner',status:'waiting',settings:{meetingKind:'conference',waitingRoomEnabled:true,allowChat:true,allowScreenShare:true,allowRecording:true}});
     const code=`auto-${crypto.randomUUID().slice(0,10)}`;
@@ -640,12 +642,9 @@ it('keeps signed-in invitees waiting after the host arrives even when saved sett
         expect((await rpc(guest,guestState,'joinRoom',{meetingCode:code,displayName:'Colleague'}))?.result.status).toBe('waitingForHost');
         await rpc(host,hostState,'joinRoom',{meetingCode:code,displayName:'Owner'});
         await tick();
-        expect(sent(guest).some(m => m.method === 'admitted')).toBe(false);
+        expect(sent(guest).some(m => m.method === 'admitted')).toBe(true);
         const room = roomManager.getRoom(hostState.roomId)!;
-        expect(room.settings.waitingRoomEnabled).toBe(true);
-        expect(room.peers.has(guestState.peerId)).toBe(false);
-        expect(room.waitingRoom.has(guestState.peerId)).toBe(true);
-        expect((await rpc(host,hostState,'admitPeer',{targetPeerId:guestState.peerId}))?.result.admitted).toBe(true);
+        expect(room.waitingRoom.has(guestState.peerId)).toBe(false);
         expect(room.peers.get(guestState.peerId)?.userId).toBe('colleague');
         await handlePeerDisconnect(guestState); await handlePeerDisconnect(hostState);
     } finally { vi.mocked(loadMeetingPolicy).mockResolvedValue(null); }
@@ -674,7 +673,7 @@ it('hands the host role to a co-host, then back to the owner when they return', 
 
 it('enforces host management: mics, cameras, reactions and lowering hands', async () => {
     const code=`manage-${crypto.randomUUID().slice(0,10)}`;
-    const host=socket(), hostState:any={}, guest=socket(), guestState:any={};
+    const host=socket(), hostState:any={ authUser: { sub: 'host-user' } }, guest=socket(), guestState:any={};
     await rpc(host,hostState,'joinRoom',{meetingCode:code,displayName:'Host'});
     await rpc(guest,guestState,'joinRoom',{meetingCode:code,displayName:'Guest'});
     await rpc(host,hostState,'admitPeer',{targetPeerId:guestState.peerId});
@@ -699,7 +698,7 @@ it('enforces host management: mics, cameras, reactions and lowering hands', asyn
 
 it('does not let hosts disable approval or remove people from the waiting room', async () => {
     const code=`quick-${crypto.randomUUID().slice(0,10)}`;
-    const host=socket(), hostState:any={}, guest=socket(), guestState:any={};
+    const host=socket(), hostState:any={ authUser: { sub: 'host-user' } }, guest=socket(), guestState:any={};
     await rpc(host,hostState,'joinRoom',{meetingCode:code,displayName:'Host'});
     await rpc(host,hostState,'updateSettings',{settings:{waitingRoomEnabled:true}});
     expect((await rpc(guest,guestState,'joinRoom',{meetingCode:code,displayName:'Guest'}))?.result.status).toBe('waiting');
@@ -736,7 +735,7 @@ it('keeps valid invitation links in the same queue until host approval and repor
     const code = `invite-${crypto.randomUUID().slice(0, 10)}`;
     vi.mocked(loadMeetingPolicy).mockResolvedValue({ hostId: 'owner', status: 'waiting', settings: { meetingKind: 'conference', waitingRoomEnabled: true, allowChat: true, allowScreenShare: true, allowRecording: true } });
     const host = socket(), hostState: any = { authUser: { sub: 'owner' } };
-    const invited = socket(), invitedState: any = { authUser: { sub: 'invitee' } };
+    const invited = socket(), invitedState: any = {};
     const inviteToken = meetingInvitation.createMeetingInviteToken(code);
     try {
         await rpc(host, hostState, 'joinRoom', { meetingCode: code, displayName: 'Owner' });
@@ -757,12 +756,11 @@ it('keeps valid invitation links in the same queue until host approval and repor
 
 it('caps co-hosts at five under simultaneous promotion requests', async () => {
     const code = `cohost-limit-${crypto.randomUUID().slice(0, 8)}`;
-    const host = socket(), hostState: any = {};
+    const host = socket(), hostState: any = { authUser: { sub: 'host-user' } };
     await rpc(host, hostState, 'joinRoom', { meetingCode: code, displayName: 'Host' });
     const people = await Promise.all(Array.from({ length: 6 }, async (_, index) => {
-        const ws = socket(), state: any = {};
+        const ws = socket(), state: any = { authUser: { sub: `person-${index}` } };
         await rpc(ws, state, 'joinRoom', { meetingCode: code, displayName: `Person ${index + 1}` });
-        await rpc(host, hostState, 'admitPeer', { targetPeerId: state.peerId });
         return { ws, state };
     }));
     const outcomes = await Promise.all(people.map(({ state }) => rpc(host, hostState, 'changeRole', { targetPeerId: state.peerId, newRole: 'co-host' })));
@@ -800,7 +798,7 @@ it('keeps one host when the signed-in owner returns after a platform administrat
 
 it('spotlights for everyone, tracks presenters and clears both when people leave', async () => {
     const code=`spot-${crypto.randomUUID().slice(0,10)}`;
-    const host=socket(), hostState:any={}, guest=socket(), guestState:any={};
+    const host=socket(), hostState:any={ authUser: { sub: 'host-user' } }, guest=socket(), guestState:any={};
     await rpc(host,hostState,'joinRoom',{meetingCode:code,displayName:'Host'});
     await rpc(guest,guestState,'joinRoom',{meetingCode:code,displayName:'Guest'});
     await rpc(host,hostState,'admitPeer',{targetPeerId:guestState.peerId});
@@ -863,7 +861,7 @@ it('scopes Poly snapshots and admission to the joined room and hides lobby data 
     const { sfuClient } = await import('../sfu-client.js');
     vi.stubEnv('POLY_BRIDGE_ENABLED', 'true');
     const host = socket(), guest = socket();
-    const hostState: any = {}, guestState: any = {};
+    const hostState: any = { authUser: { sub: 'host-user' } }, guestState: any = {};
     const meetingCode = `poly-${crypto.randomUUID().slice(0, 10)}`;
     try {
         expect((await rpc(guest, guestState, 'polySnapshot'))?.error?.code).toBe(-32000);
@@ -905,4 +903,170 @@ it('lets only the signed-in meeting host enable the room-device bridge', async (
         await handlePeerDisconnect(hostState);
         vi.unstubAllEnvs();
     }
+});
+
+it('replaces a returning account and broadcasts the old tile leaving before the new one joins', async () => {
+    const code = `rejoin-${crypto.randomUUID().slice(0, 10)}`;
+    const host = socket(), oldSocket = socket(), newSocket = socket();
+    const hostState: any = { authUser: { sub: 'owner' } };
+    const oldState: any = { authUser: { sub: 'attendee' } };
+    const newState: any = { authUser: { sub: 'attendee' } };
+    await rpc(host, hostState, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+    const room = roomManager.getRoom(hostState.roomId)!;
+    room.settings.maxParticipants = 2;
+    await rpc(oldSocket, oldState, 'joinRoom', { meetingCode: code, displayName: 'Attendee' });
+    const oldPeerId = oldState.peerId;
+    host.send.mockClear();
+    const result = await rpc(newSocket, newState, 'joinRoom', { meetingCode: code, displayName: 'Attendee' });
+    expect(result?.result.existingPeers.map((peer: any) => peer.peerId)).toEqual([hostState.peerId]);
+    expect(oldSocket.close).toHaveBeenCalledWith(4002, 'Rejoined from another connection');
+    expect(sent(host).filter(m => ['peerLeft', 'newPeer'].includes(m.method)).map(m => [m.method, m.params.peerId]))
+        .toEqual([['peerLeft', oldPeerId], ['newPeer', newState.peerId]]);
+    await handlePeerDisconnect(oldState);
+    expect(room.peers.size).toBe(2);
+    expect(room.peers.has(newState.peerId)).toBe(true);
+    expect(sent(host).filter(m => m.method === 'peerLeft')).toHaveLength(1);
+    await handlePeerDisconnect(newState);
+    await handlePeerDisconnect(hostState);
+});
+
+it('lets the host rejoin without transferring their role to someone else', async () => {
+    const code = `rehost-${crypto.randomUUID().slice(0, 10)}`;
+    const oldSocket = socket(), newSocket = socket(), attendee = socket();
+    const oldState: any = { authUser: { sub: 'owner' } };
+    const newState: any = { authUser: { sub: 'owner' } };
+    const attendeeState: any = { authUser: { sub: 'attendee' } };
+    await rpc(oldSocket, oldState, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+    await rpc(attendee, attendeeState, 'joinRoom', { meetingCode: code, displayName: 'Attendee' });
+    const result = await rpc(newSocket, newState, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+    expect(result?.result.role).toBe('host');
+    expect(roomManager.getRoom(newState.roomId)?.peers.get(attendeeState.peerId)?.role).toBe('member');
+    expect(sent(attendee).some(m => m.method === 'hostTransferred')).toBe(false);
+    await handlePeerDisconnect(oldState);
+    await handlePeerDisconnect(attendeeState);
+    await handlePeerDisconnect(newState);
+});
+
+it('requires fresh admission after an account is removed and retracts disconnected guest requests', async () => {
+    const code = `readmit-${crypto.randomUUID().slice(0, 10)}`;
+    const host = socket(), attendee = socket(), back = socket(), guest = socket();
+    const hostState: any = { authUser: { sub: 'owner' } };
+    const attendeeState: any = { authUser: { sub: 'attendee' } };
+    const backState: any = { authUser: { sub: 'attendee' } };
+    const guestState: any = {};
+    expect((await rpc(guest, {}, 'joinRoom', { meetingCode: code, displayName: 'Guest' }))?.error?.code).toBe(-32005);
+    await rpc(host, hostState, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+    await rpc(attendee, attendeeState, 'joinRoom', { meetingCode: code, displayName: 'Attendee' });
+    await rpc(host, hostState, 'kickPeer', { targetPeerId: attendeeState.peerId });
+    expect((await rpc(back, backState, 'joinRoom', { meetingCode: code, displayName: 'Attendee' }))?.result.status).toBe('waiting');
+    expect((await rpc(guest, guestState, 'joinRoom', { meetingCode: code, displayName: 'Guest' }))?.result.status).toBe('waiting');
+    const guestPeerId = guestState.peerId;
+    host.send.mockClear();
+    await handlePeerDisconnect(guestState);
+    expect(sent(host)).toContainEqual(expect.objectContaining({ method: 'waitingRoomUpdated', params: { peerId: guestPeerId, departed: true } }));
+    expect(sent(host).some(m => m.method === 'peerLeft')).toBe(false);
+    await handlePeerDisconnect(backState);
+    await handlePeerDisconnect(attendeeState);
+    await handlePeerDisconnect(hostState);
+});
+
+it.each(['direct', 'before host'])('checks the current password at registration for %s entry', async arrival => {
+    const code = `password-${crypto.randomUUID().slice(0, 10)}`;
+    const room = roomManager.getOrCreateRoom(code);
+    room.ownerUserId = 'owner';
+    room.settings.password = 'old';
+    const host = socket(), attendee = socket();
+    const hostState: any = { authUser: { sub: 'owner' } };
+    const attendeeState: any = { authUser: { sub: 'attendee' } };
+    const join = () => rpc(attendee, attendeeState, 'joinRoom', { meetingCode: code, displayName: 'Attendee', password: 'old' });
+    if (arrival === 'before host') {
+        expect((await join())?.result.status).toBe('waitingForHost');
+        await rpc(host, hostState, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+        await rpc(host, hostState, 'updateSettings', { settings: { password: 'new' } });
+        await vi.waitFor(() => {
+            expect(sent(attendee)).toContainEqual(expect.objectContaining({ method: 'rejected', params: { reason: 'Invalid meeting password' } }));
+        });
+    } else {
+        await rpc(host, hostState, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+        let resume!: () => void;
+        vi.mocked(sfuClient.getRtpCapabilities).mockImplementationOnce(() => new Promise(resolve => {
+            resume = () => resolve({ rtpCapabilities: {} } as never);
+        }));
+        const joining = join();
+        await vi.waitFor(() => expect(resume).toBeTypeOf('function'));
+        await rpc(host, hostState, 'updateSettings', { settings: { password: 'new' } });
+        resume();
+        expect((await joining)?.error?.message).toBe('Invalid meeting password');
+    }
+    expect(room.peers.size).toBe(1);
+    await handlePeerDisconnect(attendeeState);
+    await handlePeerDisconnect(hostState);
+});
+
+it('removes the previous session from its breakout when the same account rejoins the main meeting', async () => {
+    const code = `breakout-rejoin-${crypto.randomUUID().slice(0, 10)}`;
+    const host = socket(), attendee = socket(), back = socket();
+    const hostState: any = { authUser: { sub: 'owner' } };
+    const attendeeState: any = { authUser: { sub: 'attendee' } };
+    const backState: any = { authUser: { sub: 'attendee' } };
+    await rpc(host, hostState, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+    await rpc(attendee, attendeeState, 'joinRoom', { meetingCode: code, displayName: 'Attendee' });
+    const { roomId: breakoutRoomId } = (await rpc(host, hostState, 'createBreakoutRoom', { name: 'Breakout' }))!.result.rooms[0];
+    const oldId = attendeeState.peerId;
+    await rpc(host, hostState, 'assignBreakoutParticipants', { breakoutRoomId, peerIds: [oldId] });
+    await rpc(host, hostState, 'openBreakoutRooms');
+    expect((await rpc(attendee, attendeeState, 'joinBreakoutRoom', { breakoutRoomId }))?.result.roomId).toBe(breakoutRoomId);
+    const result = await rpc(back, backState, 'joinRoom', { meetingCode: code, displayName: 'Attendee' });
+    expect(result?.result.roomId).toBe(hostState.roomId);
+    expect(roomManager.getRoom(breakoutRoomId)?.peers.has(oldId)).toBe(false);
+    expect(attendee.close).toHaveBeenCalledWith(4002, 'Rejoined from another connection');
+    await handlePeerDisconnect(attendeeState);
+    expect(roomManager.getRoom(hostState.roomId)?.breakoutParticipants?.has(oldId)).toBe(false);
+    expect(roomManager.getRoom(hostState.roomId)?.peers.has(backState.peerId)).toBe(true);
+    await handlePeerDisconnect(backState);
+    await handlePeerDisconnect(hostState);
+});
+
+it('keeps transcript saving active when a sole host reconnects', async () => {
+    const code = `transcript-rejoin-${crypto.randomUUID().slice(0, 10)}`;
+    const host = socket(), back = socket();
+    const hostState: any = { authUser: { sub: 'owner' } };
+    const backState: any = { authUser: { sub: 'owner' } };
+    await rpc(host, hostState, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+    expect((await rpc(host, hostState, 'setTranscriptSaving', { enabled: true }))?.result.saving).toBe(true);
+    await rpc(back, backState, 'joinRoom', { meetingCode: code, displayName: 'Host' });
+    await handlePeerDisconnect(hostState);
+    expect((await rpc(back, backState, 'getTranscript'))?.result.saving).toBe(true);
+    await handlePeerDisconnect(backState);
+});
+
+it('requires a valid private schedule invitation and grants host controls only to the issuing account', async () => {
+    const meetingCode = 'QS-S-AABBCCDDEEFF001122334455';
+    const inviteToken = meetingInvitation.createSessionMeetingInvite(meetingCode, {
+        hostId: 'owner', expiresAt: Date.now() + 60_000, meetingKind: 'team', e2eeRequired: false, maxParticipants: 4,
+    });
+    const host = socket(), guest = socket(), outsider = socket();
+    const hostState: any = { authUser: { sub: 'owner' } };
+    const guestState: any = {};
+    const adminInvitee: any = { authUser: { sub: 'admin', role: 'admin' } };
+    const join = (ws: any, state: any, token?: string) => rpc(ws, state, 'joinRoom', { meetingCode, displayName: 'Attendee', inviteToken: token });
+    expect((await join(outsider, adminInvitee))?.error?.message).toContain('invitation');
+    expect((await join(guest, guestState, inviteToken + 'bad'))?.error?.message).toContain('invitation');
+    expect(roomManager.getRoomByCode(meetingCode)).toBeUndefined();
+    expect((await rpc(guest, guestState, 'joinRoom', {
+        meetingCode: meetingCode.toLowerCase(), displayName: 'Guest', inviteToken,
+    }))?.result.status).toBe('waitingForHost');
+    expect((await join(outsider, adminInvitee, inviteToken))?.result.status).toBe('waitingForHost');
+    const hosted = await join(host, hostState, inviteToken);
+    expect(hosted?.result).toMatchObject({ role: 'host', inviteToken, settings: { meetingKind: 'team', maxParticipants: 4 } });
+    await tick();
+    expect(sent(outsider).find(msg => msg.method === 'admitted')?.params.role).toBe('member');
+    expect(sent(guest).find(msg => msg.method === 'admitted')).toBeUndefined();
+    expect((await rpc(host, hostState, 'admitPeer', { targetPeerId: guestState.peerId }))?.result.admitted).toBe(true);
+    expect(sent(guest).find(msg => msg.method === 'admitted')?.params.role).toBe('guest');
+    expect(meetingInvitation.verifySessionMeetingInvite(meetingCode, inviteToken, Date.now() + 120_000)).toBeNull();
+    expect(meetingInvitation.verifySessionMeetingInvite('QS-S-00112233445566778899AABB', inviteToken)).toBeNull();
+    await handlePeerDisconnect(guestState);
+    await handlePeerDisconnect(adminInvitee);
+    await handlePeerDisconnect(hostState);
 });

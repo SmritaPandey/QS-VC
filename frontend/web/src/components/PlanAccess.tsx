@@ -81,7 +81,7 @@ export function UpgradePrompt({ requiredPlan, onClose, blocking = false, signInR
             <button className="upgrade-close" type="button" aria-label="Close upgrade prompt" onClick={onClose} disabled={blocking}>×</button>
             <span className="mi upgrade-icon" aria-hidden="true">{trialEnded ? 'hourglass_disabled' : enterprisePending || enterpriseRejected ? 'domain' : 'lock'}</span>
             <h2 id="upgrade-title">{trialEnded ? `Your ${trialTier} trial has ended` : enterprisePending ? 'Quantum-Premise access pending' : enterpriseRejected ? 'Quantum-Premise access not approved' : guest ? 'Sign in to use extra features' : <>Available on {requiredLabel} {requiredPlan === 'pro' && <CrownBadge plan="pro" />}</>}</h2>
-            <p id="upgrade-copy">{trialEnded ? 'Choose a plan to keep using your meetings workspace.' : enterprisePending ? 'Your Quantum-Premise request is waiting for administrator approval.' : enterpriseRejected ? 'Contact your organisation administrator to discuss Quantum-Premise access.' : guest ? 'Sign in to access this meeting feature.' : 'Choose a plan to access this feature.'}</p>
+            <p id="upgrade-copy">{trialEnded ? 'Choose a plan to keep using this feature.' : enterprisePending ? 'Your Quantum-Premise request is waiting for administrator approval.' : enterpriseRejected ? 'Contact your organisation administrator to discuss Quantum-Premise access.' : guest ? 'Sign in to access this meeting feature.' : 'Choose a plan to access this feature.'}</p>
             {actions}
         </section>
     </div>;
@@ -101,7 +101,7 @@ export function Gate({ feature, requiredPlan, children, preview }: { feature: st
     if (featureAllowed) return <>{children}</>;
     return <div className="plan-gate-shell">
         <div ref={contentRef} className="plan-gate-preview" aria-hidden="true">{preview || children}</div>
-        {entitlements.status !== 'trial_expired' && <UpgradePrompt requiredPlan={minimumPlan} onClose={() => navigate('/app')} />}
+        <UpgradePrompt requiredPlan={minimumPlan} onClose={() => navigate('/app')} />
     </div>;
 }
 
@@ -109,12 +109,6 @@ export function RequirePlan({ feature, requiredPlan, children }: { feature: stri
     const entitlements = useEntitlements();
     if (hasFeature(entitlements, feature)) return <>{children}</>;
     return <UpgradePrompt requiredPlan={requiredPlan || entitlements.featureMinimumPlans[feature] || 'starter'} blocking />;
-}
-
-export function TrialEndedPrompt() {
-    const entitlements = useEntitlements();
-    if (entitlements.isPlatformAdmin || entitlements.status !== 'trial_expired') return null;
-    return <UpgradePrompt requiredPlan="starter" blocking />;
 }
 
 export function UpgradePromptListener() {

@@ -9,6 +9,7 @@ interface MeetingEndState {
     chatMessageCount?: number;
     participants?: string[];
     meetingCode?: string;
+    inviteToken?: string;
     recordingAvailable?: boolean;
     recordingUrl?: string;
     reason?: string;
@@ -21,6 +22,7 @@ export default function MeetingEnd() {
     const location = useLocation();
     const { meetingCode } = useParams<{ meetingCode: string }>();
     const state = (location.state as MeetingEndState) || {};
+    const rejoinPath = `/meeting/${encodeURIComponent(meetingCode || state.meetingCode || '')}/preview${state.inviteToken ? `?invite=${encodeURIComponent(state.inviteToken)}` : ''}`;
 
     const formatDuration = (s: number) => {
         if (!s) return '0m';
@@ -71,7 +73,7 @@ export default function MeetingEnd() {
                 )}
 
                 <div className="meeting-end-actions">
-                    {(meetingCode || state.meetingCode) && state.left !== false && state.canRejoin !== false && <button className="btn-rejoin qsvc-action qsvc-action--secondary" onClick={() => navigate(`/meeting/${encodeURIComponent(meetingCode || state.meetingCode || '')}/preview`, { replace: true })}><ActionContents>
+                    {(meetingCode || state.meetingCode) && state.left !== false && state.canRejoin !== false && <button className="btn-rejoin qsvc-action qsvc-action--secondary" onClick={() => navigate(rejoinPath, { replace: true })}><ActionContents>
                         <span className="mi mi-sm" aria-hidden="true" style={{ verticalAlign: 'middle', marginRight: '6px' }}>replay</span>
                         Rejoin</ActionContents></button>}
                     <button className="btn-new-meeting qsvc-action" onClick={() => navigate('/app', { replace: true })}><ActionContents>

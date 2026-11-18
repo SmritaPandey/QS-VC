@@ -1,6 +1,5 @@
+import { readSessionMeetings, scheduledStarts, SCHEDULE_WINDOW_MESSAGE, SCHEDULE_WINDOW_MS, type SessionMeeting, writeSessionMeetings } from '../lib/session-schedule';
 import SelectionInput from '../components/SelectionInput';
-import CancelScheduledMeeting from '../components/CancelScheduledMeeting';
-import { downloadICS, openGoogleCalendar, openOutlookCalendar, type CalendarEvent } from '../lib/calendar-integration';
 import { useSession } from '../lib/use-session';
 import ThemeSelect from '../components/ThemeSelect';
 import ActionContents from '../components/ActionContents';
@@ -23,18 +22,15 @@ type MeetingDuration = 15 | 30 | 45 | 60 | 90 | 120;
 
 interface ScheduleFormData {
     title: string;
-    description: string;
     date: string;
     time: string;
     duration: MeetingDuration;
     enableWaitingRoom: boolean;
     meetingKind: MeetingKind;
-    repeat: 'none' | 'daily' | 'weekly';
+    repeat: 'none' | 'daily';
     repeatCount: number;
     enableE2EE: boolean;
-    enableRecording: boolean;
     maxParticipants: number;
-    password: string;
 }
 
 const durationOptions: { value: MeetingDuration; label: string }[] = [
@@ -46,6 +42,10 @@ const durationOptions: { value: MeetingDuration; label: string }[] = [
     { value: 120, label: '2 hours' },
 ];
 
+function localDate(date: Date): string {
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 const ScheduleMeeting: React.FC = () => {
     const navigate = useNavigate();
     const { pathname, search } = useLocation();
@@ -53,22 +53,28 @@ const ScheduleMeeting: React.FC = () => {
     const schedulingKind: MeetingKind = requestedKind === 'webinar' || requestedKind === 'town_hall' ? 'town_hall' : requestedKind === 'team' ? 'team' : 'conference';
     const schedulingTownHall = schedulingKind === 'town_hall';
     const [submitting, setSubmitting] = useState(false);
-    const [cancelledCodes, setCancelledCodes] = useState<string[]>([]);
-    const [scheduled, setScheduled] = useState<(CalendarEvent & { id?: string; inviteToken?: string; meetingKind: MeetingKind; occurrences?: { id?: string; meetingCode: string; scheduledStart: string; scheduledEnd: string; inviteToken?: string }[] }) | null>(null);
-    const [copySuccess, setCopySuccess] = useState(false);
-    // Scheduling saves a meeting to an account, so guests are asked to sign in first.
+    const [meetings, setMeetings] = useState<SessionMeeting[]>([]);
+    const [copiedId, setCopiedId] = useState('');
+    const [error, setError] = useState('');
+    const [notice, setNotice] = useState('');
     const session = useSession();
-    const signedIn = session.status === 'authenticated' || Boolean(session.profile);
-    useEffect(() => { setScheduled(null); }, [session.profile?.id]);
+    const userId = session.status === 'authenticated' ? session.profile?.id : undefined;
+    useEffect(() => {
+        setMeetings([]);
+        setError('');
+        setNotice('');
+        if (!userId) return;
+        try { setMeetings(readSessionMeetings(userId)); }
+        catch { setError('Your browser session schedule could not be opened.'); }
+    }, [userId]);
 
-    // Default to tomorrow at 10:00
-    const tomorrow = new Date();
+    const now = new Date();
+    const tomorrow = new Date(now);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
     const [form, setForm] = useState<ScheduleFormData>({
         title: '',
-        description: '',
-        date: tomorrow.toISOString().split('T')[0],
+        date: localDate(tomorrow),
         time: '10:00',
         duration: 60,
         enableWaitingRoom: true,
@@ -76,9 +82,7 @@ const ScheduleMeeting: React.FC = () => {
         repeat: 'none',
         repeatCount: 2,
         enableE2EE: true,
-        enableRecording: true,
         maxParticipants: 100,
-        password: '',
     });
 
     const updateField = <K extends keyof ScheduleFormData>(key: K, value: ScheduleFormData[K]) => {
@@ -86,90 +90,75 @@ const ScheduleMeeting: React.FC = () => {
     };
     useEffect(() => { setForm(previous => ({ ...previous, meetingKind: schedulingKind })); }, [schedulingKind]);
 
-    const handleSubmit = async (e: React.FormEvent) => {
-        e.preventDefault();
-        if (submitting) return;
+    const handleSubmit = async (event: React.FormEvent) => {
+        event.preventDefault();
         const token = getToken();
+        if (submitting || !token || !userId) return;
+        setError('');
+        setNotice('');
         setSubmitting(true);
 
-        const startDateTime = new Date(`${form.date}T${form.time}`);
-        const endDateTime = new Date(startDateTime.getTime() + form.duration * 60000);
-
+        const title = form.title.trim() || 'Scheduled Meeting';
+        const start = new Date(`${form.date}T${form.time}`).getTime();
+        const count = form.repeat === 'daily' ? form.repeatCount : 1;
         try {
+            scheduledStarts(start, count);
             const res = await fetch(`${MEETINGS_ENDPOINT}/schedule`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
                 body: JSON.stringify({
-                    title: form.title || 'Scheduled Meeting',
                     type: 'scheduled',
-                    scheduledStart: startDateTime.toISOString(),
-                    scheduledEnd: endDateTime.toISOString(),
-                    recurrence: form.repeat === 'none' ? undefined : { frequency: form.repeat, count: form.repeatCount },
+                    scheduledStart: new Date(start).toISOString(),
+                    scheduledEnd: new Date(start + form.duration * 60_000).toISOString(),
+                    recurrence: count > 1 ? { frequency: 'daily', count } : undefined,
                     settings: {
                         maxParticipants: form.maxParticipants,
                         meetingKind: form.meetingKind,
-                        waitingRoom: true,
-                        webinar: form.meetingKind === 'town_hall',
                         e2eeRequired: form.enableE2EE,
-                        recordingAllowed: false,
-                        chatEnabled: true,
-                        screenShareEnabled: true,
                     },
                 }),
             });
-
             if (getToken() !== token) return;
             if (res.status === 401) { clearSession(token); return; }
-            if (!res.ok) throw new Error('Failed to schedule');
             const data = await res.json();
             if (getToken() !== token) return;
-
-            const meetingCode = data.meetingCode || data.code;
-            if (typeof meetingCode !== 'string' || !/^[A-Za-z0-9-]{1,80}$/.test(meetingCode)) throw new Error('Invalid meeting code');
-            setCancelledCodes([]);
-            const inviteToken = typeof data.inviteToken === 'string' ? data.inviteToken : undefined;
-            setScheduled({
-                id: typeof data.id === 'string' ? data.id : undefined,
-                inviteToken,
-                title: form.title || 'Scheduled Meeting',
-                occurrences: data.occurrences,
-                meetingKind: form.meetingKind,
-                startTime: startDateTime,
-                endTime: endDateTime,
-                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                attendees: [],
-                reminders: [],
-                isPrivate: true,
-                meetingCode,
-                meetingUrl: `${window.location.origin}/meeting/${meetingCode}/preview${inviteToken ? `?invite=${encodeURIComponent(inviteToken)}` : ''}`,
-            });
-        } catch (err) {
-            console.error('Schedule error:', err);
-            alert('Failed to schedule meeting. Please try again.');
+            if (!res.ok) throw new Error(data.error || 'Could not schedule the meeting. Try again.');
+            const added = data.occurrences.map((item: { meetingCode: string; scheduledStart: string; inviteToken: string }): SessionMeeting => ({
+                id: item.meetingCode, title, start: item.scheduledStart, duration: form.duration, meetingKind: form.meetingKind,
+                previewPath: `/meeting/${encodeURIComponent(item.meetingCode)}/preview?invite=${encodeURIComponent(item.inviteToken)}`,
+            }));
+            const next = [...readSessionMeetings(userId), ...added].sort((a, b) => a.start.localeCompare(b.start));
+            writeSessionMeetings(userId, next);
+            setMeetings(next);
+            setNotice(added.length === 1 ? 'Meeting scheduled in this tab.' : `${added.length} meetings scheduled in this tab.`);
+        } catch (error) {
+            setError(error instanceof Error ? error.message : 'Could not save the schedule in this tab.');
         } finally {
             setSubmitting(false);
         }
     };
 
-    const copyInvitation = () => {
-        if (!scheduled) return;
-        const text = `You're invited to a meeting!\n\n` +
-            `📋 ${form.title || 'Scheduled Meeting'}\n` +
-            `📅 ${new Date(`${form.date}T${form.time}`).toLocaleString()}\n` +
-            `⏱ ${form.duration} minutes\n` +
-            `🔗 ${scheduled.meetingUrl}\n` +
-            `📝 Code: ${scheduled.meetingCode}\n` +
-            (form.password ? `🔒 Password: ${form.password}\n` : '') +
-            `\nPowered by QS-VC`;
-        navigator.clipboard.writeText(text);
-        setCopySuccess(true);
-        setTimeout(() => setCopySuccess(false), 2000);
+    const removeMeeting = (id: string) => {
+        if (!userId) return;
+        try {
+            const next = readSessionMeetings(userId).filter(meeting => meeting.id !== id);
+            writeSessionMeetings(userId, next);
+            setMeetings(next);
+            setNotice('Removed from this tab. Any previously shared link can still be opened until it expires.');
+        } catch { setError('Could not remove this meeting from the browser session.'); }
+    };
+
+    const copyInvitation = async (meeting: SessionMeeting) => {
+        try {
+            await navigator.clipboard.writeText(`${meeting.title}\n${new Date(meeting.start).toLocaleString()} (${meeting.duration} min)\n${window.location.origin}${meeting.previewPath}`);
+            setCopiedId(meeting.id);
+        } catch { setError('Could not copy the invitation. Open its link and copy the address.'); }
     };
 
     // ━━━ SIGN-IN PROMPT (guests) ━━━
-    if (!signedIn && session.status !== 'anonymous') return <div className="schedule-page"><div className="schedule-container"><section className="schedule-signin" role="status"><ThemeSelect /><h1>{session.status === 'checking' ? 'Checking account…' : 'Account unavailable'}</h1>{session.status === 'unavailable' && <button type="button" onClick={() => void refreshSession()}>Try again</button>}<Link to="/app">Open meeting app</Link></section></div></div>;
+    if (!userId && session.status !== 'anonymous') return <div className="schedule-page"><div className="schedule-container"><section className="schedule-signin" role="status"><ThemeSelect /><h1>{session.status === 'checking' ? 'Checking account…' : 'Account unavailable'}</h1>{session.status === 'unavailable' && <button type="button" onClick={() => void refreshSession()}>Try again</button>}<Link to="/app">Open meeting app</Link></section></div></div>;
 
-    if (!signedIn) {
+    if (!userId) {
         const next = encodeURIComponent(pathname + search);
         return (
             <div className="schedule-page">
@@ -177,90 +166,13 @@ const ScheduleMeeting: React.FC = () => {
                     <section className="schedule-signin" aria-labelledby="schedule-signin-title"><ThemeSelect />
                         <div className="schedule-signin-icon"><span className="mi" aria-hidden="true">event_available</span></div>
                         <h1 id="schedule-signin-title">Sign in to schedule a meeting.</h1>
-                        <p>Scheduled meetings are saved to your account, so you can share the invitation and start the meeting as host. Guests can still join any meeting with a code.</p>
+                        <p>Schedule a meeting in this tab and share a private invitation. Guests can open your link and ask to join.</p>
                         <div className="schedule-signin-actions">
                             <Link className="public-primary qsvc-action" to={`/login?next=${next}`}><ActionContents><span className="mi" aria-hidden="true">login</span>Sign in</ActionContents></Link>
                             <Link className="btn-secondary qsvc-action qsvc-action--secondary" to={`/signup?next=${next}`}><ActionContents>Create a free account</ActionContents></Link>
                         </div>
                         <Link className="schedule-signin-guest" to="/app">Join a meeting as a guest instead</Link>
                     </section>
-                </div>
-            </div>
-        );
-    }
-
-    // ━━━ CONFIRMATION VIEW ━━━
-    if (scheduled) {
-        const firstCancelled = cancelledCodes.includes(scheduled.meetingCode);
-        return (
-            <div className="schedule-page">
-                <div className="schedule-container">
-                    <div className="schedule-success"><ThemeSelect />
-                        <div className="success-icon"><span className="mi" aria-hidden="true">check_circle</span></div>
-                        <h1>{firstCancelled && (!scheduled.occurrences || scheduled.occurrences.length <= 1) ? 'Meeting cancelled.' : scheduled.meetingKind === 'town_hall' ? 'Town hall scheduled.' : 'Meeting scheduled.'}</h1>
-                        {cancelledCodes.length > 0 && <p role="status">Cancelled occurrences: {cancelledCodes.length}.</p>}
-                        {!firstCancelled && <p>Share the invitation link with attendees. Everyone waits for the host or a co-host to admit them.</p>}
-                        <div className="success-details">
-                            <div className="detail-row">
-                                <span className="detail-label">Title</span>
-                                <span className="detail-value">{form.title || 'Scheduled Meeting'}</span>
-                            </div>
-                            <div className="detail-row">
-                                <span className="detail-label">Date & Time</span>
-                                <span className="detail-value">
-                                    {new Date(`${form.date}T${form.time}`).toLocaleString()}
-                                </span>
-                            </div>
-                            <div className="detail-row">
-                                <span className="detail-label">Duration</span>
-                                <span className="detail-value">{form.duration} minutes</span>
-                            </div>
-                            <div className="detail-row">
-                                <span className="detail-label">Meeting Code</span>
-                                <span className="detail-value code">{scheduled.meetingCode}</span>
-                            </div>
-                            <div className="detail-row">
-                                <span className="detail-label">Link</span>
-                                <span className="detail-value link">{firstCancelled ? 'Cancelled' : scheduled.meetingUrl}</span>
-                            </div>
-                        </div>
-                        {scheduled.occurrences && scheduled.occurrences.length > 1 && <section aria-label="Series occurrences">
-                            <h2>Series occurrences</h2>
-                            <ul>{scheduled.occurrences.map(occurrence => {
-                                const meetingUrl = `${window.location.origin}/meeting/${encodeURIComponent(occurrence.meetingCode)}/preview${occurrence.inviteToken ? `?invite=${encodeURIComponent(occurrence.inviteToken)}` : ''}`;
-                                const event = {
-                                    ...scheduled, meetingCode: occurrence.meetingCode, meetingUrl,
-                                    startTime: new Date(occurrence.scheduledStart), endTime: new Date(occurrence.scheduledEnd),
-                                };
-                                if (cancelledCodes.includes(occurrence.meetingCode)) return <li key={occurrence.meetingCode}>
-                                    {event.startTime.toLocaleString()} · Cancelled
-                                </li>;
-                                return <li key={occurrence.meetingCode}>
-                                    <Link to={new URL(meetingUrl).pathname}>{event.startTime.toLocaleString()}</Link>{' '}
-                                    <button type="button" onClick={() => downloadICS(event)}>Download event</button>{' '}
-                                    <button type="button" onClick={() => openGoogleCalendar(event)}>Add to Google Calendar</button>{' '}
-                                    <button type="button" onClick={() => openOutlookCalendar(event)}>Add to Outlook</button>
-                                    {occurrence.id && <CancelScheduledMeeting id={occurrence.id}
-                                        title={`${scheduled.title} on ${event.startTime.toLocaleString()}`}
-                                        onCancelled={() => setCancelledCodes(codes => [...codes, occurrence.meetingCode])} />}
-                                </li>;
-                            })}</ul>
-                        </section>}
-                        <div className="success-actions">
-                            {!firstCancelled && (!scheduled.occurrences || scheduled.occurrences.length <= 1) && scheduled.id && <CancelScheduledMeeting
-                                id={scheduled.id} title={scheduled.title} onCancelled={() => setCancelledCodes([scheduled.meetingCode])} />}
-                            {!firstCancelled && <>
-                            <button type="button" className="qsvc-action qsvc-action--secondary" onClick={() => downloadICS(scheduled)}><ActionContents>Download calendar event</ActionContents></button>
-                            {(!scheduled.occurrences || scheduled.occurrences.length <= 1) && <>
-                                <button type="button" className="qsvc-action qsvc-action--secondary" onClick={() => openGoogleCalendar(scheduled)}>Add to Google Calendar</button>
-                                <button type="button" className="qsvc-action qsvc-action--secondary" onClick={() => openOutlookCalendar(scheduled)}>Add to Outlook</button>
-                            </>}
-                            <button className="btn-primary qsvc-action" onClick={copyInvitation}><ActionContents><span className="mi" aria-hidden="true">{copySuccess ? 'check' : 'content_copy'}</span>{copySuccess ? 'Copied' : 'Copy invitation'}</ActionContents></button>
-                            </>}
-                            <button className="btn-secondary qsvc-action qsvc-action--secondary" onClick={() => navigate('/app')}><ActionContents>
-                                Back to meetings</ActionContents></button>
-                        </div>
-                    </div>
                 </div>
             </div>
         );
@@ -273,7 +185,8 @@ const ScheduleMeeting: React.FC = () => {
                 <header className="schedule-header"><ThemeSelect />
                     <button className="btn-back qsvc-action qsvc-action--secondary" onClick={() => navigate('/app')}><ActionContents><span className="mi" aria-hidden="true">arrow_back</span> Back to meetings</ActionContents></button>
                     <h1>{schedulingTownHall ? 'Schedule a town hall.' : 'Schedule a meeting.'}</h1>
-                    <p>Plan a future meeting, then share its invitation link.</p>
+                    <p>Schedule within the next 72 hours. Your schedule stays in this browser tab and clears when the session ends.</p>
+                    {meetings.length > 0 && <a href="#session-schedule-title">View meetings scheduled in this tab</a>}
                 </header>
 
                 <form onSubmit={handleSubmit} className="schedule-form">
@@ -292,18 +205,6 @@ const ScheduleMeeting: React.FC = () => {
                                 maxLength={255}
                             />
                         </div>
-                        <div className="form-group">
-                            <label htmlFor="description">Description (optional)</label>
-                            <textarea
-                                id="description"
-                                placeholder="Add an agenda or description..."
-                                value={form.description}
-                                onChange={e => updateField('description', e.target.value)}
-                                className="form-textarea"
-                                rows={3}
-                                maxLength={2000}
-                            />
-                        </div>
                         <fieldset className="schedule-kind-options">
                             <legend>Meeting type</legend>
                             {([
@@ -320,6 +221,7 @@ const ScheduleMeeting: React.FC = () => {
                     {/* ── Date & Time ── */}
                     <section className="form-section">
                         <h2>When</h2>
+                        <p>{SCHEDULE_WINDOW_MESSAGE}</p>
                         <div className="form-row">
                             <div className="form-group">
                                 <label htmlFor="date">Date</label>
@@ -329,7 +231,8 @@ const ScheduleMeeting: React.FC = () => {
                                     value={form.date}
                                     onChange={e => updateField('date', e.target.value)}
                                     className="form-input"
-                                    min={new Date().toISOString().split('T')[0]}
+                                    min={localDate(now)}
+                                    max={localDate(new Date(now.getTime() + SCHEDULE_WINDOW_MS))}
                                     required
                                 />
                             </div>
@@ -364,7 +267,7 @@ const ScheduleMeeting: React.FC = () => {
                     {/* ── Invitations ── */}
                     <section className="form-section">
                         <h2>Share with attendees</h2>
-                        <p className="schedule-share-note">We’ll create an invitation link after you schedule. Copy and share it with attendees from the confirmation screen.</p>
+                        <p className="schedule-share-note">Share the private link with your attendees. Guests need approval when they arrive. Invitations expire 24 hours after the scheduled start.</p>
                     </section>
 
                     {/* ── Settings ── */}
@@ -375,11 +278,10 @@ const ScheduleMeeting: React.FC = () => {
                             <select id="meeting-repeat" className="form-input" value={form.repeat} onChange={event => updateField('repeat', event.target.value as ScheduleFormData['repeat'])}>
                                 <option value="none">Does not repeat</option>
                                 <option value="daily">Daily</option>
-                                <option value="weekly">Weekly</option>
                             </select>
                             {form.repeat !== 'none' && <>
                                 <label htmlFor="meeting-repeat-count">Number of meetings</label>
-                                <input id="meeting-repeat-count" className="form-input" type="number" required min={2} max={12} value={form.repeatCount} onChange={event => updateField('repeatCount', event.target.valueAsNumber)} />
+                                <input id="meeting-repeat-count" className="form-input" type="number" required min={2} max={3} value={form.repeatCount} onChange={event => updateField('repeatCount', event.target.valueAsNumber)} />
                                 <p>Occurrences repeat at the same UTC time.</p>
                             </>}
                         </div>
@@ -396,17 +298,8 @@ const ScheduleMeeting: React.FC = () => {
                                 />
                                 <span className="toggle-text">Post-quantum end-to-end encryption (ML-KEM-1024 / ML-DSA-87)</span>
                             </label>
-                            <label className="toggle-label">
-                                <SelectionInput
-                                    type="checkbox"
-                                    checked={false}
-                                    disabled
-                                    onChange={e => updateField('enableRecording', e.target.checked)}
-                                />
-                                <span className="toggle-text">Recording disabled for demo</span>
-                            </label>
                         </div>
-                        <p id="schedule-waiting-room-note" className="schedule-share-note">Attendees stay in the waiting room until the host or a co-host admits them.</p>
+                        <p id="schedule-waiting-room-note" className="schedule-share-note">The host starts the meeting. Unsigned guests then wait for admission.</p>
 
                         <div className="form-row">
                             <div className="form-group">
@@ -419,18 +312,6 @@ const ScheduleMeeting: React.FC = () => {
                                     value={form.maxParticipants}
                                     onChange={e => updateField('maxParticipants', parseInt(e.target.value) || 100)}
                                     className="form-input"
-                                />
-                            </div>
-                            <div className="form-group">
-                                <label htmlFor="password">Meeting Password (optional)</label>
-                                <input
-                                    id="password"
-                                    type="text"
-                                    placeholder="Leave blank for no password"
-                                    value={form.password}
-                                    onChange={e => updateField('password', e.target.value)}
-                                    className="form-input"
-                                    maxLength={50}
                                 />
                             </div>
                         </div>
@@ -463,6 +344,25 @@ const ScheduleMeeting: React.FC = () => {
                             <><span className="mi" aria-hidden="true">calendar_today</span> Schedule meeting</>
                         )}</ActionContents></button>
                 </form>
+                {error && <p role="alert">{error}</p>}
+                {notice && <p role="status">{notice}</p>}
+                {meetings.length > 0 && <section className="form-section" aria-labelledby="session-schedule-title">
+                    <h2 id="session-schedule-title">Scheduled in this tab</h2>
+                    {meetings.map(meeting => {
+                        const expired = Date.now() >= Date.parse(meeting.start) + 86_400_000;
+                        return <article className="preview-card" key={meeting.id}>
+                            <h3>{meeting.title}</h3>
+                            <p><time dateTime={meeting.start}>{new Date(meeting.start).toLocaleString()}</time> · {meeting.duration} minutes · {meeting.meetingKind === 'town_hall' ? 'Town hall' : meeting.meetingKind === 'team' ? 'Team meeting' : 'Conferencing'}</p>
+                            <div className="success-actions">
+                                {expired ? <span>Invitation expired</span> : <>
+                                    <Link to={meeting.previewPath} className="public-primary qsvc-action"><ActionContents>Open meeting</ActionContents></Link>
+                                    <button type="button" className="qsvc-action qsvc-action--secondary" onClick={() => void copyInvitation(meeting)}><ActionContents>{copiedId === meeting.id ? 'Copied' : 'Copy invitation'}</ActionContents></button>
+                                </>}
+                                <button type="button" className="qsvc-action qsvc-action--secondary" onClick={() => removeMeeting(meeting.id)}><ActionContents>Remove from this tab</ActionContents></button>
+                            </div>
+                        </article>;
+                    })}
+                </section>}
             </div>
         </div>
     );

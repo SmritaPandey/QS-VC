@@ -12,19 +12,10 @@ export function scheduleOccurrences(start: string, end: string | undefined, recu
     });
 }
 
-type Occurrence = NonNullable<ReturnType<typeof scheduleOccurrences>>[number] & { id: string; meetingCode: string };
-
-export async function insertSchedule(
-    db: { query(sql: string, values: unknown[]): Promise<unknown> },
-    tenantId: string, title: string, hostId: string, type: 'scheduled' | 'recurring',
-    settings: object, occurrences: Occurrence[],
-) {
-    await db.query(
-        `INSERT INTO meetings (id, tenant_id, meeting_code, title, host_id, type, status, scheduled_start, scheduled_end, settings)
-         SELECT x.id, $1, x."meetingCode", $2, $3, $4, 'waiting', x."scheduledStart", x."scheduledEnd", $5
-         FROM jsonb_to_recordset($6::jsonb) AS x(
-             id uuid, "meetingCode" text, "scheduledStart" timestamptz, "scheduledEnd" timestamptz
-         )`,
-        [tenantId, title, hostId, type, JSON.stringify(settings), JSON.stringify(occurrences)],
-    );
+export function withinSchedulingWindow(times: { scheduledStart: string }[], now = Date.now()): boolean {
+    const latest = now + 3 * 86_400_000;
+    return times.length > 0 && times.every(({ scheduledStart }) => {
+        const start = Date.parse(scheduledStart);
+        return start > now && start <= latest;
+    });
 }
