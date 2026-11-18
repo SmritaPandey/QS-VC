@@ -32,3 +32,20 @@ it('clears the screen tile when an older server only reports presentation ending
     expect(presenterUpdates.get('presenter')).toBe(false);
     expect(patchPeer).toHaveBeenCalledWith('presenter', { presenting: false, screenVideoTrack: undefined });
 });
+it('removes departed peers and closes queued and active consumers before late tracks can restore them', () => {
+    const departedPeers = new Set<string>();
+    const pendingProducers = new Map([['pending', 'gone'], ['other', 'stays']]);
+    const media = { getConsumers: () => [{ peerId: 'gone', producerId: 'active' }], closeConsumerByProducer: vi.fn() };
+    let peers = new Map([['gone', {}], ['stays', {}]]);
+    listener('peerLeft', {
+        departedPeers, pendingProducers, media, presenterUpdates: new Map([['gone', true]]),
+        notifiedKnocks: { current: new Set() }, e2eeBundlesRef: { current: new Map() }, bumpE2EEIdentities: vi.fn(),
+        setKnocks: vi.fn(), setPeers: (update: (value: typeof peers) => typeof peers) => { peers = update(peers); },
+        e2eeKeyHolderRef: { current: null }, myPeerIdRef: { current: 'self' }, lastHolderHandoverFrom: { current: null },
+    })({ peerId: 'gone' });
+    expect(departedPeers.has('gone')).toBe(true);
+    expect(peers.has('gone')).toBe(false);
+    expect(peers.has('stays')).toBe(true);
+    expect(pendingProducers.has('pending')).toBe(false);
+    expect(media.closeConsumerByProducer.mock.calls).toEqual([['pending'], ['active']]);
+});

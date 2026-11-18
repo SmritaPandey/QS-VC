@@ -146,7 +146,7 @@ function joinPolicyGuidance(message: string) {
 
 /**
  * Keeps people in the meeting through brief network drops (Wi-Fi switch, laptop sleep, server restart):
- * the meeting session is re-created up to three times before "Connection lost" is shown.
+ * the meeting session is re-created with bounded backoff before "Connection lost" is shown.
  */
 const PERMISSION_LABELS = {
     allowScreenShare: 'Screen sharing',
@@ -163,16 +163,20 @@ export default function MeetingRoom() {
     const { meetingCode } = useParams<{ meetingCode: string }>();
     const [attempt, setAttempt] = useState(0);
     const failures = useRef(0);
+    const hasConnected = useRef(false);
+    const retryTimer = useRef<ReturnType<typeof setTimeout>>();
+    useEffect(() => () => clearTimeout(retryTimer.current), []);
     const carried = useRef<{ audioMuted?: boolean; videoOff?: boolean }>({});
     const reconnect = useCallback((current: { audioMuted: boolean; videoOff: boolean }) => {
-        if (failures.current >= 3) return false;
+        if (failures.current >= 8) return false;
         failures.current++;
         carried.current = current;
-        window.setTimeout(() => setAttempt(value => value + 1), 1200 * failures.current);
+        clearTimeout(retryTimer.current);
+        retryTimer.current = setTimeout(() => setAttempt(value => value + 1), Math.min(1200 * 2 ** (failures.current - 1), 10000));
         return true;
     }, []);
-    const connectedOk = useCallback(() => { failures.current = 0; }, []);
-    return <MeetingRoomSession key={`${meetingCode}-${attempt}`} reconnecting={attempt > 0} carried={carried.current} onDropped={reconnect} onConnected={connectedOk} />;
+    const connectedOk = useCallback(() => { failures.current = 0; hasConnected.current = true; }, []);
+    return <MeetingRoomSession key={`${meetingCode}-${attempt}`} reconnecting={hasConnected.current} carried={carried.current} onDropped={reconnect} onConnected={connectedOk} />;
 }
 
 interface SessionProps {
@@ -478,7 +482,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     }
 
     /** Update one remote peer without dropping fields set elsewhere (tracks, flags, name). */
+    const departedPeerIds = useRef(new Set<string>());
     const patchPeer = useCallback((peerId: string, patch: Partial<PeerData>) => {
+        if (departedPeerIds.current.has(peerId)) return;
         setPeers((prev) => {
             const next = new Map(prev);
             const current = next.get(peerId) || { peerId, displayName: patch.displayName || 'Guest' };
@@ -719,15 +725,18 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         let mounted = true;
         sessionActive.current = true;
         initializingRef.current = true;
-        const alive = () => mounted && sessionActive.current;
+        let recoveryStarted = false;
+        const alive = () => mounted && sessionActive.current && !recoveryStarted;
         let receiveReady = false;
         const pendingProducers = new Map<string, string>();
         const consumingProducers = new Set<string>();
+        const departedPeers = departedPeerIds.current;
+        departedPeers.clear();
         const consumerRoutes = new Map<string, { peerId: string; kind: MediaKind; source: string; track: MediaStreamTrack }>();
         const presenterUpdates = new Map<string, boolean>();
         let peerSnapshotReady = false;
         const consumeProducer = async (peerId: string, producerId: string) => {
-            if (!peerId || !producerId || (roomTransitionBusy.current && !initializingRef.current)) return;
+            if (!peerId || !producerId || departedPeers.has(peerId) || (roomTransitionBusy.current && !initializingRef.current)) return;
             if (!receiveReady) { pendingProducers.set(producerId, peerId); return; }
             if (consumingProducers.has(producerId)) return;
             consumingProducers.add(producerId);
@@ -736,10 +745,13 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         };
         let settleAdmission: ((outcome: { result?: any; error?: string; cancelled?: boolean }) => void) | undefined;
         const dropped = () => {
+            if (recoveryStarted || !mounted) return;
+            recoveryStarted = true;
+            settleAdmission?.({ cancelled: true });
             const current = { audioMuted: audioMutedRef.current, videoOff: videoOffRef.current };
             stopLocalMedia(); media.close(); signaling.disconnect();
-            setConnected(false); setLocalStream(null); setVideoOff(true); setAudioMuted(true);
-            if (onDropped(current)) setRestoring(true); else { setRestoring(false); setConnectionLost(true); }
+            setConnected(false); setPeers(new Map()); setLocalStream(null); setVideoOff(true); setAudioMuted(true);
+            if (onDropped(current)) setRestoring(reconnecting); else { setRestoring(false); setConnectionLost(true); }
         };
         const unsubscribe: Array<() => void> = [signaling.on('disconnected', ({ code }: { code?: number }) => {
             settleAdmission?.({ cancelled: true });
@@ -750,8 +762,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             if (recordingRef.current) void finishRecordingRef.current();
             // Ended, removed or signed out: never reconnect automatically.
             if (code === 4000 || code === 4001 || code === 4003 || (wasWaiting && code === 1000)) {
+                recoveryStarted = true;
                 stopLocalMedia(); media.close(); signaling.disconnect();
-                setConnected(false); setLocalStream(null); setVideoOff(true); setAudioMuted(true);
+                setConnected(false); setPeers(new Map()); setLocalStream(null); setVideoOff(true); setAudioMuted(true);
                 setConnectionLost(true);
                 return;
             }
@@ -949,11 +962,20 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         setKnocks(current => current.some(k => k.peerId === peerId) ? current : [...current, { peerId, displayName: name || 'Guest' }]);
                     }),
                     signaling.on('newPeer', ({ peerId, displayName: name, role, siteLocation, userId }: any) => {
+                        departedPeers.delete(peerId);
                         notifiedKnocks.current.delete(peerId);
                         patchPeer(peerId, { displayName: name, role, siteLocation, userId });
                         setKnocks(current => current.filter(k => k.peerId !== peerId));
                     }),
                     signaling.on('peerLeft', ({ peerId }: any) => {
+                        departedPeers.add(peerId);
+                        presenterUpdates.delete(peerId);
+                        for (const [producerId, owner] of pendingProducers) {
+                            if (owner === peerId) { pendingProducers.delete(producerId); media.closeConsumerByProducer(producerId); }
+                        }
+                        for (const consumer of media.getConsumers()) {
+                            if (consumer.peerId === peerId) media.closeConsumerByProducer(consumer.producerId);
+                        }
                         notifiedKnocks.current.delete(peerId);
                         if (e2eeBundlesRef.current.delete(peerId)) bumpE2EEIdentities();
                         setKnocks(current => current.filter(k => k.peerId !== peerId));
@@ -1135,6 +1157,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         if (!alive()) return;
                         media.setConsumerCallbacks(
                             (info: ConsumerInfo) => {
+                                if (!alive() || departedPeers.has(info.peerId)) { media.closeConsumerByProducer(info.producerId); return; }
                                 const source = String(info.appData?.source || info.appData?.type || '');
                                 consumerRoutes.set(info.id, { peerId: info.peerId, kind: info.kind, source, track: info.track });
                                 if (source === 'private-audio' && info.kind === 'audio') {
@@ -2141,6 +2164,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 : <div className="meeting-recording-status" role="status">{recordingStatus}
                 {pendingRecording.current ? <details><summary>Recording actions</summary><button type="button" onClick={() => void savePendingRecording()}>Retry saving</button><button type="button" onClick={() => { const pending = pendingRecording.current; if (pending) recordingManager.downloadLocally(pending.blob, `QS-VC-${meetingCode}.${pending.format}`); }}>Download unsaved copy</button><button type="button" onClick={() => { if (window.confirm('Discard the unsaved recording? This copy cannot be recovered.')) { pendingRecording.current = null; recordingManager.pending = null; setRecordingStatus('Unsaved copy discarded. You can leave the meeting.'); } }}>Discard unsaved copy</button></details> : <a href={`/recordings/${encodeURIComponent(meetingCode || '')}`}>Manage recordings</a>}
             </div>)}
+            {!connected && !restoring && !connectionLost && !roomTransitioning && <div className="meeting-notice" role="status"><span className="mi mi-sm meeting-spin" aria-hidden="true">progress_activity</span> Connecting to the meeting…</div>}
             {restoring && !connectionLost && <div className="meeting-notice" role="status"><span className="mi mi-sm meeting-spin" aria-hidden="true">progress_activity</span> Reconnecting… Hold on, we’re getting you back into the meeting.</div>}
             {connectionLost && <div className="meeting-notice" role="alert">Connection lost. Check your internet connection, then rejoin.
                 <button className="btn-outline" onClick={() => navigate(meetingPreviewPath, { replace: true })}>Rejoin meeting</button>

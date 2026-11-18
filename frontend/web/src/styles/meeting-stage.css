@@ -155,7 +155,7 @@
 
 @media (max-width:767px) {
   .meeting-room .meeting-local-clock { display: none; }
-  .meeting-room .meeting-info-trigger { flex-basis:36px; width:36px; height:36px; }
+  .meeting-room .meeting-info-trigger { flex-basis:44px; width:44px; height:44px; }
   .top-bar-chips { max-width:130px; }
   .qs-topchip { max-width:120px; font-size:11px; padding:2px 8px; }
   .meeting-information-dialog { inset:60px 10px 10px; width:auto; max-height:calc(100dvh - 80px); border-radius:16px; }

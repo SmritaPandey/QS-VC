@@ -1978,15 +1978,15 @@ export async function handlePeerDisconnect(
     if (!peerId || !roomId) return;
 
     try {
-        await finishPrivateConversationsForPeer(roomId, peerId, 'participant-left');
-        await sfuClient.removePeer(roomId, peerId).catch(() => { });
-
+        // Presence must not wait for an unavailable media server.
         stopAsrForPeer(roomId, peerId);
         forgetPeerCaptions(roomId, peerId);
         meetingObservability.left(roomId, peerId);
         roomManager.removePeer(roomId, peerId);
         clearEmptyRoomCaptions(roomId);
         roomManager.broadcast(roomId, 'peerLeft', { peerId, displayName });
+        await finishPrivateConversationsForPeer(roomId, peerId, 'participant-left').catch(error => logger.warn(error, 'Private conversation disconnect cleanup failed'));
+        await sfuClient.removePeer(roomId, peerId).catch(() => { });
     } catch (err) {
         logger.error(err, `Error during peer disconnect: ${peerId}`);
     }

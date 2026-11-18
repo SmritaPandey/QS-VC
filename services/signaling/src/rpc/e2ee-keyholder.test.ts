@@ -11,6 +11,7 @@ vi.mock('../sfu-client.js', () => ({ sfuClient: {
 } }));
 import { handleRpcMessage, handlePeerDisconnect } from './handler.js';
 import { roomManager } from '../room-manager.js';
+import { sfuClient } from '../sfu-client.js';
 
 const socket = () => ({ readyState: 1, send: vi.fn(), close: vi.fn(), bufferedAmount: 0 });
 const rpc = (ws: any, state: any, method: string, params: any = {}) => handleRpcMessage(ws, { jsonrpc: '2.0', id: 1, method, params }, state);
@@ -73,4 +74,25 @@ describe('end-to-end encryption key holder', () => {
         const room = roomManager.getOrCreatePersistentRoom(`room-${crypto.randomUUID().slice(0, 8)}`, { autoAdmit: true });
         expect(room.settings.e2eeRequired).toBe(false);
     });
+});
+
+it('removes and announces a disconnected peer before stalled SFU cleanup completes', async () => {
+    const { host, guests, room } = await meeting();
+    const [departing, observer] = guests;
+    const peerId = departing.state.peerId;
+    let release!: () => void;
+    vi.mocked(sfuClient.removePeer).mockImplementationOnce(() => new Promise(resolve => { release = () => resolve({} as never); }));
+    const cleanup = handlePeerDisconnect(departing.state);
+    expect(room.peers.has(peerId)).toBe(false);
+    expect(sent(observer.ws, 'peerLeft').at(-1)?.params.peerId).toBe(peerId);
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    release();
+    await cleanup;
+    expect(departing.state.peerId).toBeUndefined();
+    vi.mocked(sfuClient.removePeer).mockRejectedValueOnce(new Error('SFU unavailable'));
+    const observerId = observer.state.peerId;
+    await handlePeerDisconnect(observer.state);
+    expect(room.peers.has(observerId)).toBe(false);
+    expect(observer.state.peerId).toBeUndefined();
+    await handlePeerDisconnect(host);
 });
