@@ -33,7 +33,24 @@ jobs:
           persist-credentials: false
       # Historical leaks intentionally fail until rotation and history cleanup.
       - name: Scan with redacted output
-        run: docker run --rm -v "$PWD:/repo:ro" ghcr.io/gitleaks/gitleaks:v8.24.2 git --redact --log-opts="--all" /repo
+        run: |
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          chmod 777 "$RUNNER_TEMP/gitleaks"
+          docker run --rm -v "$PWD:/repo:ro" -v "$RUNNER_TEMP/gitleaks:/reports" \
+            ghcr.io/gitleaks/gitleaks:v8.24.2 git --redact=100 \
+            --report-format=json --report-path=/reports/gitleaks.json --log-opts="--all" /repo
+      - name: Show safe finding locations
+        if: always()
+        shell: bash
+        run: |
+          python3 - <<'PYREPORT'
+          import json, os
+          from pathlib import Path
+          report = Path(os.environ['RUNNER_TEMP']) / 'gitleaks/gitleaks.json'
+          if report.exists():
+              for finding in json.loads(report.read_text()):
+                  print(json.dumps({key: finding.get(key) for key in ('RuleID', 'File', 'StartLine', 'Commit', 'Fingerprint')}))
+          PYREPORT
 
   python-tests:
     name: Model integrity tests
