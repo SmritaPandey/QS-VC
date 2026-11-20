@@ -270,3 +270,74 @@
 .admin-workspace .admin-workspace-links label { display:grid; gap:6px; min-width:0; }
 .admin-workspace .admin-workspace-links :is(button,a) { min-height:44px; padding:10px 14px; border:1px solid var(--border-tone,#698293); border-radius:8px; background:var(--bg-secondary); color:var(--text-primary); font:inherit; text-decoration:none; cursor:pointer; }
 .admin-workspace .admin-workspace-links button:disabled { opacity:.5; cursor:default; }
+
+.admin-workspace .admin-access-terms {
+    margin-bottom: 24px;
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    background: var(--bg-secondary);
+}
+.admin-workspace .admin-access-terms > summary {
+    display: flex;
+    align-items: center;
+    min-height: 52px;
+    gap: 10px;
+    padding: 10px 16px;
+    cursor: pointer;
+    list-style: none;
+}
+.admin-workspace .admin-access-terms > summary::-webkit-details-marker { display: none; }
+.admin-workspace .admin-access-terms > summary .mi { color: var(--accent-primary); }
+.admin-workspace .admin-access-terms > summary::after {
+    content: '';
+    width: 8px;
+    height: 8px;
+    margin-inline-start: auto;
+    border: solid currentColor;
+    border-width: 0 2px 2px 0;
+    transform: translateY(-2px) rotate(45deg);
+}
+.admin-workspace .admin-access-terms[open] > summary::after { transform: translateY(2px) rotate(225deg); }
+.admin-workspace .admin-access-terms-content {
+    display: grid;
+    gap: 16px;
+    border-top: 1px solid var(--border-subtle);
+    padding: 16px;
+}
+.admin-workspace .admin-access-terms form { display: grid; gap: 8px 12px; justify-items: start; width: min(100%, 580px); }
+.admin-workspace .admin-access-terms form > div { display: grid; gap: 6px; width: 100%; }
+.admin-workspace .admin-access-terms input { width: 100%; min-width: 0; }
+.admin-workspace .admin-access-terms button {
+    min-height: 44px;
+    padding: 8px 14px;
+    border: 1px solid var(--accent-primary);
+    border-radius: 8px;
+    background: var(--surface-tint);
+    color: var(--accent-primary);
+    font: inherit;
+    cursor: pointer;
+}
+.admin-workspace .admin-access-terms button:disabled { opacity: .55; cursor: default; }
+.admin-workspace .admin-access-terms :is(summary, button, input):focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+}
+.admin-workspace .admin-user-plan-summary article { gap: 2px; padding: 8px 12px; }
+.admin-workspace .admin-user-plan-summary strong { font-size: 20px; }
+.admin-workspace .admin-account-filters {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(130px, 170px) minmax(145px, 190px);
+    gap: 10px;
+    margin-bottom: 16px;
+}
+@media (max-width: 640px) {
+    .admin-workspace .admin-account-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .admin-workspace .admin-account-filters .search-input { grid-column: 1 / -1; }
+}
+@media (min-width: 641px) {
+    .admin-workspace .admin-access-lookup {
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: end;
+    }
+    .admin-workspace .admin-access-lookup label { grid-column: 1 / -1; }
+}

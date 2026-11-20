@@ -106,30 +106,32 @@ export default function EnterpriseAccessTerms({ canIssueLicense = true }: { canI
         } finally { setBusy(false); }
     }
 
-    return <section className="admin-section" aria-labelledby="enterprise-terms-title">
-        <h2 id="enterprise-terms-title">Quantum-Premise access terms</h2>
-        <form onSubmit={findCustomer}>
-            <label htmlFor="enterprise-customer-email">Customer email</label>{' '}
-            <input id="enterprise-customer-email" name="email" type="email" required maxLength={255} />{' '}
-            <button type="submit" disabled={busy}>Find customer</button>
-        </form>
-        {customer && <form key={customer.id} onSubmit={saveTerm}>
-            <p>{customer.display_name} ({customer.email})</p>
-            <p>{customer.expires_at ? `Current expiry: ${new Date(customer.expires_at).toLocaleString()}` : 'No dated access term.'}</p>
-            <p>Choose the agreed end date for the monthly, annual, or custom term.</p>
-            <div><label htmlFor="enterprise-workspace-url">HTTPS workspace URL</label>{' '}
-                <input id="enterprise-workspace-url" name="workspaceUrl" type="url" required maxLength={2048} defaultValue={customer.workspace_url || ''} /></div>
-            <div><label htmlFor="enterprise-expires-at">Access ends in your local time</label>{' '}
-                <input id="enterprise-expires-at" name="expiresAt" type="datetime-local" required /></div>
-            <button type="submit" disabled={busy}>Save access term</button>
-        </form>}
-        {canIssueLicense && customer?.expires_at && Date.parse(customer.expires_at) > Date.now() && <form onSubmit={issueLicense}>
-            <label htmlFor="onprem-installation-id">On-prem installation ID</label>{' '}
-            <input id="onprem-installation-id" name="installationId" required maxLength={36} />{' '}
-            <button type="submit" disabled={busy}>Download signed license</button>
-        </form>}
-        {busy && <p role="status">Working…</p>}
-        {message && <p role="status">{message}</p>}
-        {error && <p role="alert">{error}</p>}
-    </section>;
+    return <details className="admin-access-terms">
+        <summary><span className="mi" aria-hidden="true">domain</span>Quantum-Premise access terms</summary>
+        <div className="admin-access-terms-content">
+            <form className="admin-access-lookup" onSubmit={findCustomer}>
+                <label htmlFor="enterprise-customer-email">Customer email</label>
+                <input id="enterprise-customer-email" name="email" type="email" required maxLength={255} />
+                <button type="submit" disabled={busy}>Find customer</button>
+            </form>
+            {customer && <form key={customer.id} onSubmit={saveTerm}>
+                <p>{customer.display_name} ({customer.email})</p>
+                <p>{customer.expires_at ? `Current expiry: ${new Date(customer.expires_at).toLocaleString()}` : 'No dated access term.'}</p>
+                <p>Choose the agreed end date for the monthly, annual, or custom term.</p>
+                <div><label htmlFor="enterprise-workspace-url">HTTPS workspace URL</label>{' '}
+                    <input id="enterprise-workspace-url" name="workspaceUrl" type="url" required maxLength={2048} defaultValue={customer.workspace_url || ''} /></div>
+                <div><label htmlFor="enterprise-expires-at">Access ends in your local time</label>{' '}
+                    <input id="enterprise-expires-at" name="expiresAt" type="datetime-local" required /></div>
+                <button type="submit" disabled={busy}>Save access term</button>
+            </form>}
+            {canIssueLicense && customer?.expires_at && Date.parse(customer.expires_at) > Date.now() && <form onSubmit={issueLicense}>
+                <label htmlFor="onprem-installation-id">On-prem installation ID</label>{' '}
+                <input id="onprem-installation-id" name="installationId" required maxLength={36} />{' '}
+                <button type="submit" disabled={busy}>Download signed license</button>
+            </form>}
+            {busy && <p role="status">Working…</p>}
+            {message && <p role="status">{message}</p>}
+            {error && <p role="alert">{error}</p>}
+        </div>
+    </details>;
 }

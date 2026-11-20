@@ -157,7 +157,10 @@ https://$QSVC_DOMAIN {
  handle /api/auth/* {
   reverse_proxy 127.0.0.1:4002
  }
- @meetings path /api/notifications /api/notifications/* /api/meetings /api/meetings/* /api/users/* /api/admin/*
+ @meetings {
+     path /api/notifications /api/notifications/* /api/meetings /api/meetings/* /api/users/* /api/admin/*
+     not path /api/admin/rooms /api/admin/rooms/*
+ }
  handle @meetings {
   reverse_proxy 127.0.0.1:4003
  }
@@ -165,7 +168,7 @@ https://$QSVC_DOMAIN {
  handle @recording {
   reverse_proxy 127.0.0.1:4004
  }
- @signal path /ws /api/ice-servers /api/signaling-ticket
+ @signal path /ws /api/ice-servers /api/signaling-ticket /api/admin/rooms /api/admin/rooms/*
  handle @signal {
   reverse_proxy 127.0.0.1:4001 {
    header_up X-QSVC-Client-IP {http.request.remote.host}

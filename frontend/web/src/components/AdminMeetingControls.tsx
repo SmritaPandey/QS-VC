@@ -25,8 +25,10 @@ export default function AdminMeetingControls() {
         setLoading(true); setError('');
         try {
             const response = await fetch(`${signalingApi()}/api/admin/rooms`, { headers: { Authorization: `Bearer ${getToken()}` }, cache: 'no-store', signal: AbortSignal.timeout(8000) });
+            if (response.status === 404) throw new Error('Live participant controls are unavailable on this connection server.');
             if (!response.ok) throw new Error(failureMessage(response.status));
             const data = await response.json();
+            if (!Array.isArray(data.rooms)) throw new Error('The live room service returned an unexpected response.');
             if (current === generation.current) setRooms(data.rooms);
         } catch (failure) { if (current === generation.current) { setRooms([]); setNotice(''); setError(failure instanceof Error ? failure.message : 'Live rooms could not be loaded.'); } }
         finally { if (current === generation.current) setLoading(false); }
@@ -56,12 +58,12 @@ export default function AdminMeetingControls() {
         {error && <p role="alert">{error}</p>}
         {notice && <p role="status">{notice}</p>}
         {!loading && !error && rooms.length === 0 && <p role="status">No live rooms found.</p>}
-        {!loading && rooms.map(room => <details key={room.id}>
+        {rooms.map(room => <details key={room.id}>
             <summary>{room.meetingCode} · {room.participants.length} participants</summary>
             <p>Started {new Date(room.startedAt).toLocaleString()}</p>
             <ul>{room.participants.map(peer => <li key={peer.id}>
                 <div><span>{peer.displayName}</span><small>{peer.role} · Microphone {peer.audioMuted ? 'muted' : 'on'} · Camera {peer.videoOff ? 'off' : 'on'}</small></div>
-                <div className="admin-media-actions"><button type="button" disabled={Boolean(pending)} onClick={() => { void stopMedia(room, peer, 'audio'); }} aria-label={`Mute meeting microphone for ${peer.displayName}`}>Mute microphone</button><button type="button" disabled={Boolean(pending)} onClick={() => { void stopMedia(room, peer, 'video'); }} aria-label={`Turn off all meeting cameras for ${peer.displayName}`}>Turn off cameras</button></div>
+                <div className="admin-media-actions"><button type="button" disabled={loading || Boolean(pending)} onClick={() => { void stopMedia(room, peer, 'audio'); }} aria-label={`Mute meeting microphone for ${peer.displayName}`}>Mute microphone</button><button type="button" disabled={loading || Boolean(pending)} onClick={() => { void stopMedia(room, peer, 'video'); }} aria-label={`Turn off all meeting cameras for ${peer.displayName}`}>Turn off cameras</button></div>
             </li>)}</ul>
         </details>)}
     </section>;

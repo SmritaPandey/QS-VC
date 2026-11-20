@@ -80,6 +80,11 @@
         }
     }
 
+    @liveRooms path /api/admin/rooms /api/admin/rooms/*
+    handle @liveRooms {
+        reverse_proxy signaling:4001
+    }
+
     # Frontend Static Web App (Served via Nginx)
     handle {
         reverse_proxy web:5173

@@ -174,7 +174,7 @@ function AdminDashboard({ deployment }: { deployment: AdminDeployment }) {
                 {activeTab === 'users' && (
                     <div className="admin-users">
                         <div className="tab-header">
-                            <h2>User Management</h2>
+                            <h2>Account directory</h2>
                             <span className="badge">{totalUsers === null ? 'Account count unavailable' : <><AnimatedNumber value={totalUsers} /> total users</>}</span>
                         </div>
 
@@ -184,7 +184,7 @@ function AdminDashboard({ deployment }: { deployment: AdminDeployment }) {
                             </article>)}
                         </div>
 
-                        <div className="filter-bar">
+                        <div className="filter-bar admin-account-filters">
                             <input
                                 type="text"
                                 aria-label="Search accounts"
