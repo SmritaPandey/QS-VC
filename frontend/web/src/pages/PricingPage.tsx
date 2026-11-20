@@ -64,6 +64,10 @@ export default function PricingPage() {
     const session = useSession();
     const entitlements = useEntitlements();
     const isAdmin = entitlements.isPlatformAdmin || session.profile?.role === 'admin';
+    const upgradeTargets = { basic: 'Starter', starter: 'Pro', pro: 'Business', business: 'Enterprise' } as const;
+    const currentTier = entitlements.plan.replace(/_trial$/, '');
+    const upgradeTarget = session.status === 'authenticated' && entitlements.verified && !isAdmin
+        ? upgradeTargets[currentTier as keyof typeof upgradeTargets] : undefined;
     const eligibleForTrial = !isAdmin && entitlements.plan === 'guest' && !entitlements.trialUsed
         && entitlements.status === 'paid_active' && !entitlements.loading
         && (session.status === 'anonymous' || entitlements.verified);
@@ -75,6 +79,7 @@ export default function PricingPage() {
                 <header className="public-page-intro pricing-comparison-intro">
                     <h1 id="pricing-title">Find your QS-VC plan</h1>
                     <p>{eligibleForTrial ? 'Choose a plan to start your 14-day trial.' : 'Compare plans and choose what works for your team.'}</p>
+                    {upgradeTarget && <a className="account-workspace-link" href={`#plan-${upgradeTarget.toLowerCase()}`}>Unlock more with {upgradeTarget}<span className="mi" aria-hidden="true">arrow_forward</span></a>}
                 </header>
                 <div className="pricing-comparison-controls">
                     <div className="pricing-billing-switch" role="group" aria-label="Billing period">

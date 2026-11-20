@@ -29,6 +29,13 @@ const endingRooms = new WeakSet<object>();
 const roomTeardowns = new WeakMap<object, Promise<void>>();
 const dashboardControls = new WeakMap<object, { sub: string; tenantId: string; action: 'end' | 'cancel'; promise: Promise<void> }>();
 const cancelledRooms = new WeakSet<object>();
+const endedCodes = new Map<string, number>();
+const sessionInviteExpirations = new WeakMap<RoomState, number>();
+const endedCodeCleanup = setInterval(() => {
+    const now = Date.now();
+    for (const [code, expiry] of endedCodes) if (expiry <= now) endedCodes.delete(code);
+}, 60_000);
+endedCodeCleanup.unref();
 const roomEpochs = new WeakMap<object, number>();
 const closingBreakouts = new WeakSet<RoomState>();
 const movingBreakoutPeers = new Set<string>();
@@ -284,6 +291,9 @@ async function endRoomForEveryone(roomId: string, by: string, peerId?: string, a
     if (existing) return existing;
     endingRooms.add(room);
     if (action === 'cancel') cancelledRooms.add(room);
+    if (action === 'end' && !room.parentRoomId) {
+        endedCodes.set(room.meetingCode.trim().toUpperCase(), sessionInviteExpirations.get(room) ?? Date.now() + 86_400_000);
+    }
     roomEpochs.set(room, (roomEpochs.get(room) || 0) + 1);
     const reason = action === 'cancel' ? 'Host cancelled the meeting' : 'Host ended the meeting';
     const closeReason = action === 'cancel' ? 'Meeting cancelled' : 'Meeting ended';
@@ -649,6 +659,9 @@ export async function handleRpcMessage(
                 // Get or create the signaling room
                 // Always resolve persisted ownership before creating a room. An unavailable
                 // database must not turn a scheduled meeting into a guest-owned room.
+                const codeKey = meetingCode.trim().toUpperCase();
+                const isEnded = () => (endedCodes.get(codeKey) ?? 0) > Date.now();
+                if (isEnded()) throw createError(-32004, 'This meeting has ended. Ask the organiser for a new invitation.');
                 const previousRoom = roomManager.getRoomByCode(meetingCode);
                 if (previousRoom?.parentRoomId) throw createError(-32005, 'Enter a breakout through your admitted main-meeting session.');
                 const epoch = previousRoom ? roomEpochs.get(previousRoom) || 0 : 0;
@@ -671,11 +684,15 @@ export async function handleRpcMessage(
                         allowRecording: false,
                     },
                 } : await loadMeetingPolicy(meetingCode);
+                if (policy?.status === 'ended' || isEnded()) {
+                    throw createError(-32004, 'This meeting has ended. Ask the organiser for a new invitation.');
+                }
                 const signedIn = Boolean(connectionState.authUser?.sub);
                 if (!previousRoom && !policy && !signedIn) {
                     throw createError(-32005, 'Ask the organiser to start the meeting before joining as a guest.');
                 }
                 const room = roomManager.getOrCreateRoom(meetingCode, { ...policy?.settings, waitingRoomEnabled: true });
+                if (sharedSchedule) sessionInviteExpirations.set(room, sharedSchedule.expiresAt);
                 if (!previousRoom) roomManager.scheduleEmptyRoomCleanup(room.id);
                 if ((previousRoom && previousRoom !== room) || (roomEpochs.get(room) || 0) !== epoch) {
                     throw createError(-32004, 'This meeting ended or was cancelled while joining. Reconnect to check its status.');
@@ -704,9 +721,6 @@ export async function handleRpcMessage(
                 const isOwner = guestHost || (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub) || isPlatformAdmin;
                 // Google Meet rule: nobody gets in before the host starts the meeting. They wait, and
                 // are let in (or asked to knock) automatically when the host arrives.
-                if (policy?.status === 'ended' && !room.hostStarted && !isOwner) {
-                    throw createError(-32004, 'This meeting has ended. Ask the organiser to restart it or send a new invitation.');
-                }
                 if (!room.hostStarted && !isOwner && (room.ownerUserId || !directEntry)) {
                     if (room.settings.password && room.settings.password !== password) {
                         return { jsonrpc: '2.0', id: id!, error: { code: -32001, message: 'Invalid meeting password' } };
@@ -1691,8 +1705,10 @@ export async function handleRpcMessage(
                 }
 
                 const room = roomManager.getRoom(roomId);
-                if (room?.ownerUserId && !isSessionMeetingCode(room.meetingCode)) void reportMeetingStatus(room.meetingCode, 'ended');
-                await endRoomForEveryone(roomId, connectionState.displayName || 'Host', peerId);
+                const teardown = endRoomForEveryone(roomId, connectionState.displayName || 'Host', peerId);
+                const persisted = room?.ownerUserId && !isSessionMeetingCode(room.meetingCode)
+                    ? reportMeetingStatus(room.meetingCode, 'ended') : undefined;
+                await Promise.all([teardown, persisted]);
 
                 return { jsonrpc: '2.0', id: id!, result: { ended: true } };
             }

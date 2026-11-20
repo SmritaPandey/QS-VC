@@ -45,6 +45,21 @@ describe('meeting home account status', () => {
         expect(render()).not.toContain('Plan unavailable');
     });
 
+    it.each(['basic', 'starter', 'pro', 'business'] as const)('shows Manage plan for %s', tier => {
+        vi.mocked(useEntitlements).mockReturnValue({ ...plan, plan: tier, features: [] });
+        expect(render()).toContain('Manage plan');
+    });
+
+    it.each([
+        { plan: 'enterprise', status: 'enterprise_approved', isPlatformAdmin: false },
+        { plan: 'pro', status: 'paid_active', isPlatformAdmin: true },
+    ] as const)('hides plan management for $plan when admin access is $isPlatformAdmin', access => {
+        vi.mocked(useEntitlements).mockReturnValue({ ...plan, ...access, features: [] });
+        const html = render();
+        expect(html).not.toContain('Manage plan');
+        expect(html).not.toContain('Compare plans');
+    });
+
     it('shows a trial that ended without a zero-day active-trial chip', () => {
         vi.mocked(useEntitlements).mockReturnValue({ ...plan, features: [], plan: 'starter_trial', status: 'trial_expired', trialEndsAt: '2026-01-01T00:00:00Z' });
         const html = render();

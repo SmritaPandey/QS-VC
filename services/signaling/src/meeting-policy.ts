@@ -12,7 +12,6 @@ export async function loadMeetingPolicy(code: string, allowCancelled = false) {
     if (response.status === 404) return null;
     if (!response.ok) throw new Error('Meeting access could not be verified. Please retry.');
     const policy = policySchema.parse(await response.json());
-    // An ended meeting can be started again by its host (same link, like Google Meet); cancelled ones cannot.
     if (policy.status === 'cancelled' && !allowCancelled) throw new Error('This meeting was cancelled.');
     const { waitingRoom, chatEnabled, screenShareEnabled: _legacyScreenShareEnabled, recording_allowed, e2eeRequired, ...settings } = policy.settings;
     return { ...policy, settings: {

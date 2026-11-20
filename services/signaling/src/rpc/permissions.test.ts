@@ -205,7 +205,7 @@ describe('production meeting permissions', () => {
         await handlePeerDisconnect(host);
     });
 
-    it('shares concurrent dashboard teardown and permits a fresh host restart only after it finishes', async () => {
+    it('shares concurrent dashboard teardown and refuses later joins on the ended code', async () => {
         const code = `END-RACE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
         const host: any = { authUser: { sub: 'host-user' } }, hostWs = socket();
         await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
@@ -224,7 +224,6 @@ describe('production meeting permissions', () => {
         expect(sfuClient.removePeer).toHaveBeenCalledTimes(removeCalls + 1);
         let secondFinished = false;
         void second.then(() => { secondFinished = true; });
-        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ ...policy, status: 'ended' });
         const early: any = { authUser: { sub: 'owner' } };
         expect((await rpc(socket(), early, 'joinRoom', { meetingCode: code, displayName: 'Too soon' }))?.error).toBeDefined();
         expect(secondFinished).toBe(false);
@@ -232,10 +231,9 @@ describe('production meeting permissions', () => {
         expect((await first)?.result).toEqual({ ended: true });
         expect((await second)?.result).toEqual({ ended: true });
         expect(room.peers.size).toBe(0);
-        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ ...policy, status: 'ended' });
         const restarted: any = { authUser: { sub: 'owner' } }, restartedWs = socket();
-        expect((await rpc(restartedWs, restarted, 'joinRoom', { meetingCode: code, displayName: 'Restarted owner' }))?.result?.role).toBe('host');
-        expect(room.peers.has(restarted.peerId)).toBe(true);
+        expect((await rpc(restartedWs, restarted, 'joinRoom', { meetingCode: code, displayName: 'Returning owner' }))?.error?.message).toContain('has ended');
+        expect(restarted.peerId).toBeUndefined();
         expect(restartedWs.close).not.toHaveBeenCalled();
         await handlePeerDisconnect(host); await handlePeerDisconnect(restarted);
     });
@@ -255,20 +253,18 @@ describe('production meeting permissions', () => {
         const second = rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code });
         await vi.waitFor(() => expect(saved).toBeTypeOf('function'));
         await rpc(hostWs, host, 'endMeeting');
-        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ ...policy, status: 'ended' });
         const early: any = { authUser: { sub: 'owner' } };
         expect((await rpc(socket(), early, 'joinRoom', { meetingCode: code, displayName: 'Early restart' }))?.error).toBeDefined();
         expect(endHostedMeetingStatus).toHaveBeenCalledTimes(saveCalls + 1);
         saved();
         expect((await first)?.result).toEqual({ ended: true });
         expect((await second)?.result).toEqual({ ended: true });
-        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ ...policy, status: 'ended' });
         const restarted: any = { authUser: { sub: 'owner' } };
-        expect((await rpc(socket(), restarted, 'joinRoom', { meetingCode: code, displayName: 'Fresh restart' }))?.result?.role).toBe('host');
+        expect((await rpc(socket(), restarted, 'joinRoom', { meetingCode: code, displayName: 'Returning owner' }))?.error?.message).toContain('has ended');
         await handlePeerDisconnect(host); await handlePeerDisconnect(restarted);
     });
 
-    it('does not save or tear down a fresh run after a dashboard policy lookup for the old run finishes late', async () => {
+    it('rejects stale dashboard policy and joins after an in-room end', async () => {
         const code = `CONTROL-RACE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
         const host: any = { authUser: { sub: 'host-user' } }, hostWs = socket();
         await rpc(hostWs, host, 'joinRoom', { meetingCode: code, displayName: 'Host' });
@@ -281,13 +277,12 @@ describe('production meeting permissions', () => {
         const ending = rpc(socket(), dashboard, 'endHostedMeeting', { meetingCode: code });
         await vi.waitFor(() => expect(loaded).toBeTypeOf('function'));
         await rpc(hostWs, host, 'endMeeting');
-        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'ended', settings: {} } as any);
         const restarted: any = { authUser: { sub: 'owner' } }, restartedWs = socket();
-        await rpc(restartedWs, restarted, 'joinRoom', { meetingCode: code, displayName: 'New run' });
+        expect((await rpc(restartedWs, restarted, 'joinRoom', { meetingCode: code, displayName: 'Returning owner' }))?.error?.message).toContain('has ended');
         loaded({ hostId: 'owner', status: 'active', settings: {} });
         expect((await ending)?.error?.message).toContain('changed');
         expect(endHostedMeetingStatus).toHaveBeenCalledTimes(saveCalls);
-        expect(room.peers.has(restarted.peerId)).toBe(true);
+        expect(restarted.peerId).toBeUndefined();
         expect(restartedWs.close).not.toHaveBeenCalled();
         await handlePeerDisconnect(host); await handlePeerDisconnect(restarted);
     });
@@ -1106,4 +1101,26 @@ it('does not allow guest-hosted invitations in the intranet deployment', async (
         expect(result?.error?.message).toContain('unavailable in this workspace');
         expect(roomManager.getRoomByCode(meetingCode)).toBeUndefined();
     } finally { vi.unstubAllEnvs(); }
+});
+
+it('rejects the code and the original invitation after a session meeting ends', async () => {
+    const meetingCode = 'QS-S-C0FFEE112233445566778899';
+    const owner = { authUser: { sub: 'owner' } };
+    const inviteToken = meetingInvitation.createSessionMeetingInvite(meetingCode, {
+        hostId: 'owner', expiresAt: Date.now() + 60_000, meetingKind: 'team', e2eeRequired: false, maxParticipants: 5,
+    });
+    const host = socket();
+    const params = { meetingCode, displayName: 'Owner' };
+    expect((await rpc(host, owner, 'joinRoom', { ...params, inviteToken }))?.result.role).toBe('host');
+    expect((await rpc(host, owner, 'endMeeting'))?.result.ended).toBe(true);
+    expect((await rpc(socket(), {}, 'joinRoom', { ...params, meetingCode: meetingCode.toLowerCase() }))?.error?.message).toContain('has ended');
+    expect((await rpc(socket(), { authUser: { sub: 'owner' } }, 'joinRoom', { ...params, inviteToken }))?.error?.message).toContain('has ended');
+    await handlePeerDisconnect(owner);
+});
+
+it('rejects a persisted ended meeting code before creating a signaling room', async () => {
+    const meetingCode = 'ENDED-POLICY-TEST';
+    vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'ended', settings: {} } as any);
+    expect((await rpc(socket(), { authUser: { sub: 'owner' } }, 'joinRoom', { meetingCode, displayName: 'Owner' }))?.error?.code).toBe(-32004);
+    expect(roomManager.getRoomByCode(meetingCode)).toBeUndefined();
 });

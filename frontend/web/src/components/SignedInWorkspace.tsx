@@ -47,7 +47,8 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
     const trialActive = !isAdmin && entitlements.verified && entitlements.status === 'trial_active';
     const planReady = entitlements.isPlatformAdmin || (entitlements.verified && !entitlements.loading);
     const canSchedule = planReady && hasFeature(entitlements, 'meeting_scheduling');
-    const canComparePlans = !ON_PREM && planReady && !canSchedule && entitlements.plan !== 'enterprise';
+    const canManagePlan = !ON_PREM && planReady && !isAdmin && planKey !== 'enterprise';
+    const canComparePlans = canManagePlan && !canSchedule;
     const planStatus = isAdmin ? 'Administrator' : entitlements.loading ? 'Checking plan…'
         : !entitlements.verified ? 'Plan unavailable'
             : entitlements.status === 'trial_expired' ? `${planName} trial ended`
@@ -155,7 +156,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                     </>}
                 </div>
                 {ON_PREM ? <a className="meeting-home-plan-link" href="#workspace-plan-access">Plan access</a> :
-                    <Link className="meeting-home-plan-link" to="/pricing">{freeMember && !entitlements.trialUsed ? 'Choose a trial plan' : 'Manage plan'}</Link>}
+                    canManagePlan && <Link className="meeting-home-plan-link" to="/pricing">{freeMember && !entitlements.trialUsed ? 'Choose a trial plan' : 'Manage plan'}</Link>}
             </div>
             <details className="workspace-account">
                 <summary aria-label="Your account"><span className="workspace-account-initial" aria-hidden="true">{profile?.displayName.trim().charAt(0).toUpperCase() || 'Q'}</span></summary>
