@@ -145,7 +145,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
         <header className="workspace-header">
             <a className="public-skip" href="#main-content">Skip to content</a>
             <Link className="workspace-brand" to="/app" aria-label="QS-VC meetings"><BrandLogo /></Link>
-            <nav className="workspace-navigation" aria-label="Workspace"><Link to="/app" aria-current="page">Home</Link><Link to="/schedule">Schedule</Link>{canSchedule && <Link to="/schedule?type=webinar">Town halls</Link>}<AdminDashboardLink /></nav>
+            <nav className="workspace-navigation" aria-label="Workspace"><Link to="/app" aria-current="page">Meetings</Link><Link to="/schedule">Schedule</Link>{canSchedule && <Link to="/schedule?type=webinar">Town halls</Link>}<AdminDashboardLink /></nav>
             <div className="meeting-home-membership">
                 <div className="meeting-home-plan" role="status">
                     {trialActive ? <TrialChip /> : <>
