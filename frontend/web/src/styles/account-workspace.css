@@ -40,3 +40,45 @@
 .account-workspace .account-workspace-access p { font-size:13px; line-height:1.5; margin:14px 0 0; }
 .account-workspace-link { display:inline-flex; align-items:center; gap:8px; min-height:44px; color:var(--accent-primary); }
 @media(max-width:1000px){ .account-workspace .account-workspace-tools { grid-template-columns:minmax(0,1fr); } }
+
+@media (min-width: 1001px) and (min-height: 600px) {
+    .meeting-home.account-workspace {
+        display: flex;
+        flex-direction: column;
+        height: 100dvh;
+        min-height: 0;
+    }
+
+    .meeting-home.account-workspace .workspace-header {
+        flex: none;
+        position: relative;
+        z-index: 2;
+    }
+
+    .meeting-home.account-workspace .workspace-body {
+        flex: 1;
+        width: 100%;
+        min-height: 0;
+        grid-template-rows: minmax(0, 1fr);
+        align-items: stretch;
+        padding-block: clamp(20px, 5dvh, 48px);
+        margin-block: 0;
+    }
+
+    .meeting-home.account-workspace :is(.account-workspace-tools, .workspace-main) {
+        align-self: stretch;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior-y: contain;
+        scrollbar-gutter: stable;
+    }
+
+    .meeting-home.account-workspace .account-workspace-tools {
+        padding: 4px;
+    }
+
+    .meeting-home.account-workspace .workspace-main:focus-visible {
+        outline: 3px solid var(--border-focus);
+        outline-offset: 3px;
+    }
+}

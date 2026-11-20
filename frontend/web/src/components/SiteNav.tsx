@@ -14,7 +14,7 @@ import { useEntitlements } from '../lib/entitlements';
 import AdminDashboardLink from './AdminDashboardLink';
 
 const quickLinks = [
-    { to: '/#features', label: 'Meetings', icon: 'videocam' },
+    { to: '/', label: 'Home', icon: 'home' },
     { to: '/pricing', label: 'Plans', icon: 'view_agenda' },
     { to: '/intranet', label: 'On-prem', icon: 'domain' },
     { to: '/contact', label: 'Contact us', icon: 'mail' },
@@ -73,7 +73,7 @@ export default function SiteNav({ accountAction, brandName = 'QS-VC' }: { accoun
                 <Link className="public-brand" to="/" aria-label={`${brandName} home`}><BrandLogo name={brandName} /></Link>
                 <button className="public-menu-toggle" type="button" aria-label={open ? 'Close navigation' : 'Open navigation'} aria-expanded={open} aria-controls="public-nav-links" onClick={() => setOpen(value => !value)}><span className="mi" aria-hidden="true">{open ? 'close' : 'menu'}</span></button>
                 <div className="public-nav-links" id="public-nav-links" data-open={open} onKeyDown={event => { if (event.key === 'Escape') { setOpen(false); document.querySelector<HTMLButtonElement>('.public-menu-toggle')?.focus(); } }}>
-                    <a href="/#features" onClick={() => setOpen(false)}>Meetings</a>
+                    <Link to="/" aria-current={pathname === '/' ? 'page' : undefined} onClick={() => setOpen(false)}>Home</Link>
                     <Link to="/pricing" aria-current={pathname === '/pricing' ? 'page' : undefined} onClick={() => setOpen(false)}>Plans</Link>
                     <Link to="/intranet" aria-current={pathname === '/intranet' ? 'page' : undefined} onClick={() => setOpen(false)}>On-prem</Link>
                     <Link to="/contact" aria-current={pathname === '/contact' ? 'page' : undefined} onClick={() => setOpen(false)}>Contact us</Link>
@@ -88,7 +88,7 @@ export default function SiteNav({ accountAction, brandName = 'QS-VC' }: { accoun
         {scrolled && !formVisible && <aside className="public-floating-nav" ref={dockRef} aria-label="Quick navigation" data-open={dockOpen} onKeyDown={event => { if (event.key === 'Escape') { setDockOpen(false); dockButton.current?.focus(); } }}>
             <div className="public-floating-nav-inner">
                 <button className="public-dock-toggle" ref={dockButton} type="button" aria-label={dockOpen ? 'Close quick navigation' : 'Open quick navigation'} aria-expanded={dockOpen} aria-controls="public-dock-links" onClick={() => setDockOpen(value => !value)}><span className="mi" aria-hidden="true">{dockOpen ? 'close' : 'menu'}</span></button>
-                <nav id="public-dock-links" aria-label="Page shortcuts">{quickLinks.map(link => link.to.includes('#') ? <a href={link.to} key={link.to} aria-label={link.label} onClick={() => setDockOpen(false)}><span className="mi" aria-hidden="true">{link.icon}</span><span className="public-dock-label">{link.label}</span></a> : <Link to={link.to} key={link.to} aria-label={link.label} aria-current={pathname === link.to ? 'page' : undefined} onClick={() => setDockOpen(false)}><span className="mi" aria-hidden="true">{link.icon}</span><span className="public-dock-label">{link.label}</span></Link>)}
+                <nav id="public-dock-links" aria-label="Page shortcuts">{quickLinks.map(link => <Link to={link.to} key={link.to} aria-label={link.label} aria-current={pathname === link.to ? 'page' : undefined} onClick={() => setDockOpen(false)}><span className="mi" aria-hidden="true">{link.icon}</span><span className="public-dock-label">{link.label}</span></Link>)}
                     <a href="#nav-top" aria-label="Back to top" onClick={() => { setDockOpen(false); requestAnimationFrame(() => headerRef.current?.querySelector<HTMLAnchorElement>('.public-brand')?.focus()); }}><span className="mi" aria-hidden="true">north</span><span className="public-dock-label">Back to top</span></a>
                 </nav>
             </div>

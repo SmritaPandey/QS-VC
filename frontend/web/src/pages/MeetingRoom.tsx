@@ -1797,7 +1797,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     const savePendingRecording = useCallback(async () => {
         const pending = pendingRecording.current;
-        if (!pending || !meetingCode || busyRef.current.record) return !pending;
+        if (!pending || busyRef.current.record) return !pending;
         busyRef.current.record = true;
         setRecordingStatus('Saving recording privately… Keep this tab open.');
         try {
@@ -1806,11 +1806,12 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             pendingRecording.current = null; recordingManager.pending = null;
             setRecordingStatus(recordingDestinationRef.current === 'local' ? 'Recording saved to your device.' : 'Recording saved.');
             return true;
-        } catch {
-            setRecordingStatus('Upload failed. Retry before leaving.');
+        } catch (error) {
+            const detail = error instanceof Error ? error.message : 'Saving failed.';
+            setRecordingStatus(`${detail} Retry saving or download the unsaved copy before leaving.`);
             return false;
         } finally { busyRef.current.record = false; }
-    }, [meetingCode]);
+    }, []);
 
     const finishRecording = useCallback((): Promise<boolean> => {
         if (finalizingRecording.current) return finalizingRecording.current;
@@ -1851,13 +1852,16 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         if (busyRef.current.record || pendingRecording.current) { showNotice('Finish saving the previous recording first.'); return; }
         if (myRole !== 'host' || !getToken()) { showNotice('Sign in as the meeting host to record.'); return; }
         if (!connected || !meetingCode) return;
-        if (!window.confirm('Record this meeting? Everyone will see a recording indicator. Recording stops near 70 MB. Keep this tab open until saving finishes.')) return;
+        const saveTo = requiredE2eeRef.current ? 'local' : destination;
+        const saveNote = saveTo === 'local' ? 'The recording will download to this device.' : 'The recording will save to cloud storage.';
+        if (!window.confirm(`Record this meeting? Everyone will see a recording indicator. ${saveNote} Recording stops near 70 MB. Keep this tab open until saving finishes.`)) return;
         busyRef.current.record = true;
-        recordingDestinationRef.current = destination;
+        recordingDestinationRef.current = saveTo;
+        let announced = false;
         try {
-            // Validate cloud readiness before capturing; lists require authenticated ownership.
-            if (destination === 'cloud') await recordingRequest(`meeting/${encodeURIComponent(meetingCode)}`);
+            if (saveTo === 'cloud') await recordingRequest(`meeting/${encodeURIComponent(meetingCode)}`, { signal: AbortSignal.timeout(8000) });
             await signaling.request('setRecordingState', { recording: true });
+            announced = true;
             if (!sessionActive.current || !joinedRef.current) throw new Error('The meeting has disconnected.');
             const composite = createMeetingComposite(() => videoAreaRef.current, () => [
                 ...(privateConversationRef.current ? [] : localStreamRef.current?.getAudioTracks() || []),
@@ -1873,10 +1877,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             recordingRef.current = true;
             setIsRecording(true);
             setRecordingStatus('');
-        } catch {
+        } catch (error) {
             compositeRef.current?.stop(); compositeRef.current = null;
-            void signaling.request('setRecordingState', { recording: false }).catch(() => {});
-            showNotice('Recording could not start. Try again.');
+            if (announced) void signaling.request('setRecordingState', { recording: false }).catch(() => {});
+            showNotice(error instanceof Error ? error.message : 'Recording could not start. Try again.');
         } finally { busyRef.current.record = false; }
     }, [finishRecording, meetingCode, myRole, connected, showNotice, entitlements.loading, entitlements.features, entitlements.featureMinimumPlans, isPlatformAdmin, location.hash, location.pathname, location.search]);
 
@@ -2255,7 +2259,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             {roomTransitioning && <div className="meeting-notice" role="status">Moving rooms and setting up your secure media…</div>}
             {currentBreakoutName && !roomTransitioning && <div className="meeting-notice">Breakout room: {currentBreakoutName} <button type="button" onClick={() => { void moveToBreakout(null).catch(error => showNotice(error instanceof Error ? error.message : 'The main meeting could not be opened.')); }}>Return to main meeting</button></div>}
             {recordingStatus && (recordingStatus.startsWith('Recording saved') || recordingStatus.startsWith('Unsaved copy discarded.')
-                ? <MeetingToast key={recordingStatus} onDismiss={dismissRecordingStatus}><span>{recordingStatus}</span><a href={`/recordings/${encodeURIComponent(meetingCode || '')}`}>Manage recordings</a></MeetingToast>
+                ? <MeetingToast key={recordingStatus} onDismiss={dismissRecordingStatus}><span>{recordingStatus}</span>{recordingStatus === 'Recording saved.' && <a href={`/recordings/${encodeURIComponent(meetingCode || '')}`}>Manage recordings</a>}</MeetingToast>
                 : <div className="meeting-recording-status" role="status">{recordingStatus}
                 {pendingRecording.current ? <details><summary>Recording actions</summary><button type="button" onClick={() => void savePendingRecording()}>Retry saving</button><button type="button" onClick={() => { const pending = pendingRecording.current; if (pending) recordingManager.downloadLocally(pending.blob, `QS-VC-${meetingCode}.${pending.format}`); }}>Download unsaved copy</button><button type="button" onClick={() => { if (window.confirm('Discard the unsaved recording? This copy cannot be recovered.')) { pendingRecording.current = null; recordingManager.pending = null; setRecordingStatus('Unsaved copy discarded. You can leave the meeting.'); } }}>Discard unsaved copy</button></details> : <a href={`/recordings/${encodeURIComponent(meetingCode || '')}`}>Manage recordings</a>}
             </div>)}

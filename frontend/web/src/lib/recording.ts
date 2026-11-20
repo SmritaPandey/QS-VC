@@ -69,7 +69,7 @@ export class RecordingManager {
 
     async uploadRecording(meetingCode: string, blob: Blob, id: string = crypto.randomUUID()): Promise<CloudRecording> {
         if (blob.size > MAX_RECORDING_BYTES) throw new Error('Recording exceeds the 80 MB demo limit. Keep it open and download it manually.');
-        return recordingRequest(encodeURIComponent(meetingCode), { method: 'POST', headers: { 'Content-Type': blob.type.includes('mp4') ? 'video/mp4' : 'video/webm', 'X-Recording-Id': id }, body: blob });
+        return recordingRequest(encodeURIComponent(meetingCode), { method: 'POST', headers: { 'Content-Type': blob.type.includes('mp4') ? 'video/mp4' : 'video/webm', 'X-Recording-Id': id }, body: blob, signal: AbortSignal.timeout(180_000) });
     }
 
     downloadLocally(blob: Blob, filename: string) {

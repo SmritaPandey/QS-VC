@@ -145,7 +145,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
         <header className="workspace-header">
             <a className="public-skip" href="#main-content">Skip to content</a>
             <Link className="workspace-brand" to="/app" aria-label="QS-VC meetings"><BrandLogo /></Link>
-            <nav className="workspace-navigation" aria-label="Workspace"><Link to="/app" aria-current="page">Meetings</Link><Link to="/schedule">Schedule</Link>{canSchedule && <Link to="/schedule?type=webinar">Town halls</Link>}<AdminDashboardLink /></nav>
+            <nav className="workspace-navigation" aria-label="Workspace"><Link to="/app" aria-current="page">Home</Link><Link to="/schedule">Schedule</Link>{canSchedule && <Link to="/schedule?type=webinar">Town halls</Link>}<AdminDashboardLink /></nav>
             <div className="meeting-home-membership">
                 <div className="meeting-home-plan" role="status">
                     {trialActive ? <TrialChip /> : <>
@@ -199,7 +199,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                     canComparePlans && <Link className="account-workspace-link" to="/pricing">Compare plans<span className="mi" aria-hidden="true">arrow_forward</span></Link>}
             </section>
             </div>
-            <section className="workspace-main" aria-label="Your meetings">
+            <section className="workspace-main" aria-label="Your meetings" tabIndex={0}>
                 <div className="workspace-agenda-intro"><span className="meeting-home-section-label">Your meetings</span><p>Make time for what’s next.</p></div>
                 <div className="workspace-views" role="tablist" aria-label="Which meetings to show" onKeyDown={event => {
                     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
