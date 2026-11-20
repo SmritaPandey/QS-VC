@@ -224,30 +224,32 @@ function AdminDashboard({ deployment }: { deployment: AdminDeployment }) {
                                 <p>{userSearch || userPlanFilter !== 'all' || userRoleFilter !== 'all' ? 'No users match these filters' : 'No users registered yet'}</p>
                             </div>
                         ) : (
-                            <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Account directory"><table className="admin-table">
+                            <div className="admin-table-scroll" tabIndex={0} role="region" aria-label="Account directory"><table className="admin-table admin-account-table">
                                 <thead>
                                     <tr>
-                                        <th>Name</th>
-                                        <th>Email</th>
-                                        <th>Mobile</th>
-                                        <th>Role</th>
-                                        <th>Plan</th>
-                                        {hosted && <th>Payment</th>}
-                                        <th>Status</th>
-                                        <th>Joined</th>
-                                        <th>Last Login</th>
-                                        <th>Meetings</th>
+                                        <th scope="col">Name</th>
+                                        <th scope="col">Email</th>
+                                        <th scope="col">Mobile</th>
+                                        <th scope="col">Role</th>
+                                        <th scope="col">Plan</th>
+                                        {hosted && <th scope="col">Payment</th>}
+                                        <th scope="col">Status</th>
+                                        <th scope="col">Joined</th>
+                                        <th scope="col">Last Login</th>
+                                        <th scope="col" className="admin-account-count">Meetings</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     {users.map(u => (
                                         <tr key={u.id}>
-                                            <td className="user-name">
-                                                <div className="avatar-sm">{u.displayName?.[0]?.toUpperCase() || '?'}</div>
-                                                {u.displayName}
+                                            <td className="admin-account-name">
+                                                <div className="user-name">
+                                                    <span className="avatar-sm" aria-hidden="true">{u.displayName?.[0]?.toUpperCase() || '?'}</span>
+                                                    <span>{u.displayName}</span>
+                                                </div>
                                             </td>
-                                            <td>{u.email}</td>
-                                            <td>{u.phoneNumber || '—'}</td>
+                                            <td className="admin-account-email">{u.email}</td>
+                                            <td className="admin-account-compact">{u.phoneNumber || '—'}</td>
                                             <td>
                                                 <span className={`role-badge role-${u.role}`}>{u.role}</span>
                                             </td>
@@ -256,9 +258,9 @@ function AdminDashboard({ deployment }: { deployment: AdminDeployment }) {
                                             <td>
                                                 <span className={`status-badge status-${u.status}`}>{u.status}</span>
                                             </td>
-                                            <td>{new Date(u.createdAt).toLocaleDateString()}</td>
-                                            <td>{u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : '—'}</td>
-                                            <td>{u.meetingCount.toLocaleString()}</td>
+                                            <td className="admin-account-compact">{new Date(u.createdAt).toLocaleDateString()}</td>
+                                            <td className="admin-account-compact">{u.lastLogin ? new Date(u.lastLogin).toLocaleDateString() : '—'}</td>
+                                            <td className="admin-account-count">{u.meetingCount.toLocaleString()}</td>
                                         </tr>
                                     ))}
                                 </tbody>

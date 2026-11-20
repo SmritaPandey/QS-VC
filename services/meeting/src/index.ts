@@ -56,7 +56,7 @@ const createMeetingBody = z.object({
         maxParticipants: z.number().int().min(2).max(500).default(100),
         waitingRoom: z.boolean().default(true),
         webinar: z.boolean().default(false),
-        meetingKind: z.enum(['conference', 'team', 'town_hall']).optional(),
+        meetingKind: z.enum(['conference', 'team', 'town_hall', 'webinar']).optional(),
         e2eeRequired: z.boolean().default(true),
         recordingAllowed: z.boolean().default(true),
         chatEnabled: z.boolean().default(true),

@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import VideoTile from './VideoTile';
-import { autoPageSize, computeLayout, gridShape, type LayoutPerson } from '../lib/meeting-layout';
+import { autoPageSize, computeLayout, gridShape, isOnStage, type LayoutPerson } from '../lib/meeting-layout';
 import '../styles/meeting-stage.css';
 import '../styles/multi-content-stage.css';
 
@@ -94,8 +94,9 @@ export default function VideoGrid({ localStream, localCameraTracks = {}, siteLoc
     ];
 
     // "Spotlight" and "Sidebar" views always show one large tile: the focus, else whoever is speaking.
+    const focusable = webinar ? people.filter(isOnStage) : people;
     const forcedFocus = (viewMode === 'spotlight' || viewMode === 'sidebar') && !pinnedId && !spotlightId && !people.some(p => p.presenting)
-        ? (activeSpeaker && activeSpeaker !== selfId ? activeSpeaker : people.find(p => !p.isLocal)?.id ?? null) : null;
+        ? (focusable.find(p => p.id === activeSpeaker)?.id ?? focusable.find(p => !p.isLocal)?.id ?? focusable[0]?.id ?? null) : null;
     const preview = computeLayout({ people, webinar, pinnedId: pinnedId || forcedFocus, spotlightId, activeSpeaker, pageSize: 1, page: 0 });
     // A presentation always gets the main stage, even when a viewer prefers a tiled gallery.
     const hasFocus = !!preview.focusId && (viewMode !== 'tiled' || preview.focusReason === 'presenting');

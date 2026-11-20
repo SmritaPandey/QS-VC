@@ -312,3 +312,47 @@
 .qs-e2ee-code strong { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:18px; letter-spacing:.06em; color:#f4fbff; }
 .qs-e2ee-panel .qs-e2ee-hint { font-size:12px; margin:0; }
 @media (max-width:640px) { .qs-e2ee-label { display:none; } .qs-e2ee-chip { padding:5px 8px; } }
+
+.meeting-room-status { position: relative; flex: 0 0 auto; z-index: 10; }
+.meeting-room .meeting-room-status .meeting-notices.meeting-notices { top: calc(100% + 8px); }
+.meeting-format-tools {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px clamp(10px, 2vw, 24px);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  flex-wrap: wrap;
+}
+.meeting-format-label,
+.meeting-format-tools button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+  font-size: 0.875rem;
+}
+.meeting-format-label {
+  color: var(--accent-primary);
+  font-weight: 500;
+  margin-inline-end: 8px;
+}
+.meeting-format-tools button {
+  min-height: 44px;
+  padding: 4px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  color: inherit;
+  cursor: pointer;
+}
+.meeting-format-tools button:hover,
+.meeting-format-tools button[aria-pressed=true] { border-color: var(--accent-primary); }
+.meeting-format-tools button:focus-visible {
+  outline: 2px solid var(--accent-primary);
+  outline-offset: -3px;
+}
+.meeting-format-tools .mi { font-size: 18px; }

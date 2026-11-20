@@ -43,7 +43,7 @@ function verifySessionMeetingInvite(meetingCode, token, now = Date.now(), secret
     try {
         const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
         if (typeof claims.hostId !== 'string' || !claims.hostId || !Number.isSafeInteger(claims.expiresAt) || claims.expiresAt <= now ||
-            !['conference', 'team', 'town_hall'].includes(claims.meetingKind) || typeof claims.e2eeRequired !== 'boolean' ||
+            !['conference', 'team', 'town_hall', 'webinar'].includes(claims.meetingKind) || typeof claims.e2eeRequired !== 'boolean' ||
             !Number.isInteger(claims.maxParticipants) || claims.maxParticipants < 2 || claims.maxParticipants > 500) return null;
         return claims;
     } catch {

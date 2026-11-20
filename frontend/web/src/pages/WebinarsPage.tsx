@@ -48,7 +48,7 @@ export function WebinarFields({ fields, answers, onChange, disabled = false }: {
 }
 export default function WebinarsPage() {
     const session = useSession();
-    const [webinars,setWebinars] = useState<WebinarData[]>([]); const [meetings,setMeetings] = useState<Array<{id:string;title:string;scheduledStart:string}>>([]);
+    const [webinars,setWebinars] = useState<WebinarData[]>([]); const [meetings,setMeetings] = useState<Array<{id:string;title:string;scheduledStart:string | null}>>([]);
     const [form,setForm] = useState<WebinarData>({...emptyWebinar}); const [busy,setBusy] = useState(false); const [loading,setLoading] = useState(true);
     const [rosterLoading,setRosterLoading] = useState(false);
     const [notice,setNotice] = useState(''); const [error,setError] = useState('');
@@ -67,12 +67,12 @@ export default function WebinarsPage() {
     async function review(id:string,status:string) { if(!form.id || busy)return;setBusy(true);setError('');try { await webinarRequest(`/${form.id}/registrations/${id}`,{method:'PATCH',body:JSON.stringify({status})});await edit(form.id, form.registrationOffset || 0); }catch(cause){setError((cause as Error).message);}finally{setBusy(false);} }
     function update<K extends keyof WebinarData>(key:K,value:WebinarData[K]) { setForm(previous=>({...previous,[key]:value})); }
     if(session.status !== 'authenticated')return <WebinarLayout><h1>Webinars</h1><p>{loading?'Checking your account…':'Sign in to organize webinars and review registrations.'}</p><Link to="/login">Sign in</Link></WebinarLayout>;
-    return <WebinarLayout><header className="webinar-page-header"><div><p className="webinar-eyebrow">Organizer workspace</p><h1>Webinars</h1><p>Prepare registration, review attendees and preview your event page.</p></div><Link to="/schedule">Schedule a meeting first</Link></header>
+    return <WebinarLayout><header className="webinar-page-header"><div><p className="webinar-eyebrow">Organizer workspace</p><h1>Webinars</h1><p>Prepare registration, review attendees and preview your event page.</p></div><Link to="/app">Create a webinar meeting link</Link></header>
         {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}{loading && <p role="status">Loading webinars…</p>}
         <div className="webinar-workspace"><aside aria-label="Your webinars"><button type="button" disabled={busy||rosterLoading} onClick={()=>setForm({...emptyWebinar,customFields:[],speakers:[]})}>New webinar</button>{!loading&&!webinars.length&&<p>No webinars yet.</p>}<ul>{webinars.map(webinar=><li key={webinar.id}><button type="button" disabled={busy||rosterLoading} onClick={()=>void edit(webinar.id!)} aria-pressed={form.id===webinar.id}>{webinar.title}<small>{webinar.published?'Registration open':'Draft'}</small></button></li>)}</ul></aside>
         <div><form className="webinar-form" onSubmit={event=>void save(event)}><h2>{form.id?'Edit webinar':'Create webinar'}</h2><fieldset disabled={busy||rosterLoading}><legend className="sr-only">Webinar details</legend>
-            <label>Scheduled meeting<select required value={form.meetingId} disabled={!!form.id} onChange={event=>update('meetingId',event.target.value)}><option value="">Choose your scheduled meeting</option>{meetings.map(meeting=><option value={meeting.id} key={meeting.id}>{meeting.title} · {new Date(meeting.scheduledStart).toLocaleDateString()}</option>)}</select></label>
-            {!meetings.length&&!loading&&<p>Create a scheduled meeting before adding its registration page.</p>}
+            <label>Webinar meeting link<select required value={form.meetingId} disabled={!!form.id} onChange={event=>update('meetingId',event.target.value)}><option value="">Choose a webinar link</option>{meetings.map(meeting=><option value={meeting.id} key={meeting.id}>{meeting.title}{meeting.scheduledStart ? ` · ${new Date(meeting.scheduledStart).toLocaleDateString()}` : ''}</option>)}</select></label>
+            {!meetings.length&&!loading&&<p>From Meetings, choose New meeting → Create a link → Webinar, then come back to set up registration.</p>}
             <label>Webinar title<input required maxLength={200} value={form.title} onChange={event=>update('title',event.target.value)}/></label>
             <label>About the webinar<textarea maxLength={4000} rows={4} value={form.description} onChange={event=>update('description',event.target.value)}/></label>
             <label>Registration limit<input required type="number" min={1} max={30000} value={form.registrationLimit} onChange={event=>update('registrationLimit',Number(event.target.value))}/></label><p className="webinar-help">This limits registrations. Live meeting capacity depends on your service and plan.</p>

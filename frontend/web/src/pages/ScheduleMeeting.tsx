@@ -51,8 +51,7 @@ const ScheduleMeeting: React.FC = () => {
     const navigate = useNavigate();
     const { pathname, search } = useLocation();
     const requestedKind = new URLSearchParams(search).get('meetingKind') || new URLSearchParams(search).get('type');
-    const schedulingKind: MeetingKind = requestedKind === 'webinar' || requestedKind === 'town_hall' ? 'town_hall' : requestedKind === 'team' ? 'team' : 'conference';
-    const schedulingTownHall = schedulingKind === 'town_hall';
+    const schedulingKind: MeetingKind = requestedKind === 'webinar' || requestedKind === 'town_hall' || requestedKind === 'team' ? requestedKind : 'conference';
     const pending = useRef(false);
     const confirmation = useRef<HTMLElement>(null);
     const [submitting, setSubmitting] = useState(false);
@@ -66,7 +65,7 @@ const ScheduleMeeting: React.FC = () => {
     const guest = !ON_PREM && session.status === 'anonymous';
     const storageId = userId ?? (guest ? 'guest' : undefined);
     const limitedDates = guest || ON_PREM;
-    const allowedKind = guest && schedulingKind === 'town_hall' ? 'conference' : schedulingKind;
+    const allowedKind = guest && (schedulingKind === 'town_hall' || schedulingKind === 'webinar') ? 'conference' : schedulingKind;
     useEffect(() => {
         setMeetings([]);
         setNewMeetingIds([]);
@@ -216,7 +215,7 @@ const ScheduleMeeting: React.FC = () => {
             <div className="schedule-container">
                 <header className="schedule-header"><ThemeSelect />
                     <button className="btn-back qsvc-action qsvc-action--secondary" onClick={() => navigate('/app')}><ActionContents><span className="mi" aria-hidden="true">arrow_back</span> Back to meetings</ActionContents></button>
-                    <h1>{schedulingTownHall && !guest ? 'Schedule a town hall' : 'Schedule a meeting'}</h1>
+                    <h1>{form.meetingKind === 'town_hall' ? 'Schedule a town hall' : form.meetingKind === 'webinar' ? 'Schedule a webinar' : 'Schedule a meeting'}</h1>
                     <p>{limitedDates ? 'Schedule within the next 72 hours.' : 'Schedule up to seven meetings in a rolling week across devices.'} Your schedule stays in this browser tab and clears when the session ends.</p>
                     {meetings.length > 0 && <a href="#session-schedule-title">View meetings scheduled in this tab</a>}
                 </header>
@@ -243,8 +242,9 @@ const ScheduleMeeting: React.FC = () => {
                             {([
                                 ['conference', guest ? 'Instant meeting' : 'Conferencing', 'A standard room for a conversation or collaboration.'],
                                 ['team', 'Team meeting', 'A working session for your team.'],
-                                ['town_hall', 'Town hall', 'A presentation-style room with a stage.'],
-                            ] as const).filter(([kind]) => !guest || kind !== 'town_hall').map(([kind, label, detail]) => <label key={kind} className="schedule-kind-option" data-selected={form.meetingKind === kind}>
+                                ['town_hall', 'Town hall', 'Leadership updates and moderated questions.'],
+                                ['webinar', 'Webinar', 'A presentation with Q&A and polls.'],
+                            ] as const).filter(([kind]) => !guest || kind === 'conference' || kind === 'team').map(([kind, label, detail]) => <label key={kind} className="schedule-kind-option" data-selected={form.meetingKind === kind}>
                                 <SelectionInput type="radio" name="schedule-meeting-kind" value={kind} checked={form.meetingKind === kind} onChange={() => updateField('meetingKind', kind)} />
                                 <span><strong>{label}</strong><small>{detail}</small></span>
                             </label>)}
@@ -355,7 +355,7 @@ const ScheduleMeeting: React.FC = () => {
                                     weekday: 'long', month: 'long', day: 'numeric'
                                 }) : 'Select date'}</span>
                                 <span><span className="mi mi-sm" aria-hidden="true">schedule</span> {form.time} ({form.duration} min)</span>
-                                <span><span className="mi mi-sm" aria-hidden="true">groups</span> {form.meetingKind === 'town_hall' ? 'Town hall' : form.meetingKind === 'team' ? 'Team meeting' : guest ? 'Instant meeting' : 'Conferencing'}</span>
+                                <span><span className="mi mi-sm" aria-hidden="true">groups</span> {form.meetingKind === 'webinar' ? 'Webinar' : form.meetingKind === 'town_hall' ? 'Town hall' : form.meetingKind === 'team' ? 'Team meeting' : guest ? 'Instant meeting' : 'Conferencing'}</span>
                                 {form.enableE2EE && <span><span className="mi mi-sm" aria-hidden="true">lock</span> E2EE</span>}
                                 {form.enableWaitingRoom && <span>Waiting room enabled</span>}
                             </div>
@@ -381,7 +381,7 @@ const ScheduleMeeting: React.FC = () => {
                         const expired = Date.now() >= Date.parse(meeting.start) + 86_400_000;
                         return <article className="preview-card" data-new={newMeetingIds.includes(meeting.id)} key={meeting.id}>
                             <h3>{meeting.title}</h3>
-                            <p><time dateTime={meeting.start}>{new Date(meeting.start).toLocaleString()}</time> · {meeting.duration} minutes · {meeting.meetingKind === 'town_hall' ? 'Town hall' : meeting.meetingKind === 'team' ? 'Team meeting' : guest ? 'Instant meeting' : 'Conferencing'}</p>
+                            <p><time dateTime={meeting.start}>{new Date(meeting.start).toLocaleString()}</time> · {meeting.duration} minutes · {meeting.meetingKind === 'webinar' ? 'Webinar' : meeting.meetingKind === 'town_hall' ? 'Town hall' : meeting.meetingKind === 'team' ? 'Team meeting' : guest ? 'Instant meeting' : 'Conferencing'}</p>
                             <div className="success-actions">
                                 {expired ? <span>Invitation expired</span> : <>
                                     <Link state={{ title: meeting.title }} to={meeting.previewPath} className="public-primary qsvc-action"><ActionContents>Open meeting</ActionContents></Link>

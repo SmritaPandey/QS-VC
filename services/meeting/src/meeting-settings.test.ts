@@ -21,3 +21,7 @@ describe('normalizeMeetingSettings', () => {
         expect(normalizeMeetingSettings({ webinar: true })).toMatchObject({ meetingKind: 'town_hall', webinar: true });
     });
 });
+
+it('preserves webinar as a distinct audience format', () => {
+    expect(normalizeMeetingSettings({ meetingKind: 'webinar' })).toMatchObject({ meetingKind: 'webinar', webinar: true, waitingRoom: true });
+});

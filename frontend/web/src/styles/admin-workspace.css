@@ -167,6 +167,23 @@
 .admin-workspace .admin-table :is(th, td) { padding: 12px 14px; }
 .admin-workspace .admin-table tbody tr:last-child td { border-bottom: 0; }
 
+/* Keep the cells in the table formatting context as other columns wrap. */
+.admin-workspace .admin-account-table td {
+  min-width: 0;
+  vertical-align: middle;
+}
+.admin-workspace .admin-account-table .admin-account-name { min-width: 10rem; }
+.admin-workspace .admin-account-table .admin-account-email { min-width: 13rem; }
+.admin-account-table .avatar-sm { flex: 0 0 36px; }
+.admin-account-table .user-name { gap: 10px; }
+.admin-account-table .user-name > :last-child { min-width: 0; }
+.admin-account-table .admin-account-compact,
+.admin-account-table .admin-account-count {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.admin-account-table .admin-account-count { text-align: end; }
+
 .admin-workspace .admin-deployment-panel {
   display: grid;
   gap: 16px;

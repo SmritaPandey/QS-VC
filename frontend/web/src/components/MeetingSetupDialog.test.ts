@@ -4,15 +4,16 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import MeetingSetupDialog from './MeetingSetupDialog';
 
 describe('MeetingSetupDialog', () => {
-    it('offers an instant meeting alongside conferencing, team meeting, and town hall/webinar', () => {
+    it('offers an instant meeting alongside conferencing, team meeting, webinar, and town hall', () => {
         const html = renderToStaticMarkup(createElement(MeetingSetupDialog, {
             action: 'link', creating: false, onClose: () => {}, onCreate: () => {},
         }));
         expect(html).toContain('Instant meeting');
         expect(html).toContain('Conferencing');
         expect(html).toContain('Team meeting');
-        expect(html).toContain('Town hall / webinar');
-        expect(html.match(/type="radio"/g)).toHaveLength(4);
+        expect(html).toContain('Town hall');
+        expect(html).toContain('Webinar');
+        expect(html.match(/type="radio"/g)).toHaveLength(5);
         expect(html).toContain('Guests wait until you or a co-host admits them');
         expect(html).toContain('Create invitation link');
         expect(html).not.toContain('Start meeting</button>');

@@ -1,3 +1,6 @@
+import { FORMAT_ACTIONS, MEETING_FORMATS, roomFormat, type FormatAction } from '../lib/meeting-formats';
+import type { MeetingKind } from '../components/MeetingSetupDialog';
+import type { CollaborationTab } from '../components/MeetingCollaboration';
 import { getGuestHostToken } from '../lib/session-schedule';
 import { nextNetworkProfile } from '../lib/network-policy';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
@@ -362,7 +365,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [pinnedId, setPinnedId] = useState<string | null>(null);
     const [spotlightId, setSpotlightId] = useState<string | null>(null);
     const [roomDevicesEnabled, setRoomDevicesEnabled] = useState(false);
-    const [webinar, setWebinar] = useState(false);
+    const [meetingKind, setMeetingKind] = useState<MeetingKind>('conference');
+    const formatOpener = useRef<HTMLButtonElement | null>(null);
+    const [tabRequest, setTabRequest] = useState<{ tab: CollaborationTab }>();
+    const format = MEETING_FORMATS[meetingKind];
+    const webinar = meetingKind === 'webinar' || meetingKind === 'town_hall';
     const [myOnStage, setMyOnStage] = useState(false);
     const [captionsOn, setCaptionsOn] = useState(false);
     const [noiseMode, setNoiseMode] = useState<'off' | 'standard' | 'ai'>('standard');
@@ -975,7 +982,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 setRoomRecording(joinResult.recording || null);
                 setRoomSettings(current => ({ ...current, ...joinResult.settings }));
                 setRoomDevicesEnabled(joinResult.polyBridgeEnabled === true && joinResult.sfuAvailable === true);
-                setWebinar(!!joinResult.settings?.webinar);
+                setMeetingKind(roomFormat(joinResult.settings));
                 setSpotlightId(joinResult.spotlightPeerId || null);
                 joinedRef.current = true;
                 if (joinResult.settings?.muteOnEntry && joinResult.role !== 'host' && !audioMutedRef.current) {
@@ -1220,7 +1227,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 const hasCam = stream.getVideoTracks().some(track => track.readyState === 'live');
                 setLocalStream(stream);
                 if (opened.cameraNotice) setCameraNotice(opened.cameraNotice);
-                if (!hasMic) { audioMutedRef.current = true; setAudioMuted(true); showNotice(!canPublishRef.current ? 'You are watching this webinar. Only the organiser can share media.' : opened.micNotice || 'No microphone available. You can still listen and chat.'); }
+                if (!hasMic) { audioMutedRef.current = true; setAudioMuted(true); showNotice(!canPublishRef.current ? 'You are in the audience. The host can invite you to share on stage.' : opened.micNotice || 'No microphone available. You can still listen and chat.'); }
                 else if (opened.micNotice) showNotice(opened.micNotice);
                 if (!hasCam) videoOffRef.current = true;
                 setVideoOff(videoOffRef.current);
@@ -1570,7 +1577,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     const handleToggleAudio = useCallback(async () => {
         if (roomTransitionBusy.current) { showNotice('Wait for the room change to finish.'); return; }
-        if (!canPublishRef.current) { showNotice('Only the webinar organiser can share media.'); return; }
+        if (!canPublishRef.current) { showNotice('Only people on stage can share media.'); return; }
         if (!sessionActive.current) return;
         if (privateConversationRef.current) { await togglePrivateMicrophone(); return; }
         if (audioMutedRef.current && !roomSettingsRef.current.allowMicrophone && !isManagerNow()) { showNotice('The host has turned off microphones for participants. Raise your hand to ask to speak.'); return; }
@@ -1631,7 +1638,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const handleToggleVideo = useCallback(async () => {
         if (audioOnlyRef.current) { showNotice('Turn off Audio-only in Connection quality before starting your camera.'); return; }
         if (roomTransitionBusy.current) { showNotice('Wait for the room change to finish.'); return; }
-        if (!canPublishRef.current) { showNotice('Only the webinar organiser can share media.'); return; }
+        if (!canPublishRef.current) { showNotice('Only people on stage can share media.'); return; }
         if (!sessionActive.current) return;
         if (!videoOffRef.current) { applyMute('video', true); setCameraNotice(''); return; }
         if (document.hidden) { showNotice('Return to the meeting tab to start your camera.'); return; }
@@ -1785,7 +1792,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     const handleScreenShare = useCallback(() => {
         if (roomTransitionBusy.current) { showNotice('Wait for the room change to finish.'); return; }
-        if (!canPublishRef.current) { showNotice('Only the webinar organiser can share media.'); return; }
+        if (!canPublishRef.current) { showNotice('Only people on stage can share media.'); return; }
         if (!sharingRef.current && myRoleRef.current !== 'host' && !roomSettings.allowScreenShare) { showNotice('Only the host can share until they allow screen sharing.'); return; }
         if (sharingRef.current) {
             stopScreenShare();
@@ -2099,6 +2106,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const effectPreview = useMemo(() => processedTrack ? new MediaStream([processedTrack]) : localStream, [processedTrack, localStream]);
 
     const closePanels = useCallback(() => {
+        formatOpener.current = null;
         setChatOpen(false);
         setParticipantsOpen(false);
         setActivitiesOpen(false);
@@ -2190,7 +2198,13 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const activityOnStage = activitiesOpen && (!secureActivities || !!e2eeRef.current);
     const sidePanelOpen = chatOpen || participantsOpen || hostToolsOpen || effectsOpen;
     const manager = myRole === 'host' || myRole === 'co-host';
-    const closeActivityPanel = () => { setActivitiesOpen(false); setHostToolsOpen(false); document.querySelector<HTMLButtonElement>('[aria-controls="meeting-more-controls"]')?.focus(); };
+    const restoreFormatFocus = () => {
+        const opener = formatOpener.current;
+        formatOpener.current = null;
+        if (opener?.isConnected) opener.focus();
+        else roomRef.current?.querySelector<HTMLButtonElement>('[aria-controls="meeting-more-controls"]')?.focus();
+    };
+    const closeActivityPanel = () => { setActivitiesOpen(false); setHostToolsOpen(false); restoreFormatFocus(); };
     const currentEncryptionManager = e2eeRef.current;
     const encryptedNotes = useMemo(() => currentEncryptionManager ? {
         manager: currentEncryptionManager,
@@ -2213,8 +2227,22 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         </div>
     </div></main>;
 
+    function openFormatAction(action: FormatAction, opener: HTMLButtonElement) {
+        if (action === 'captions') { toggleCaptions(); return; }
+        closePanels();
+        formatOpener.current = opener;
+        if (action === 'breakouts' || action === 'host') {
+            if (action === 'breakouts') setBreakoutsOpen(true);
+            else setHostToolsOpen(true);
+            requestAnimationFrame(() => roomRef.current?.querySelector<HTMLButtonElement>(
+                action === 'breakouts' ? '#meeting-breakouts .panel-close' : '#meeting-host-tools .panel-close',
+            )?.focus());
+        }
+        else { setTabRequest({ tab: action }); setActivitiesOpen(true); }
+    }
+
     return (
-        <div className="meeting-room" data-captions-on={captionsOn} data-chat-open={chatOpen} ref={roomRef} data-fullscreen={isFullscreen || undefined}>
+        <div className="meeting-room" data-meeting-kind={meetingKind} data-captions-on={captionsOn} data-chat-open={chatOpen} ref={roomRef} data-fullscreen={isFullscreen || undefined}>
             <div className="meeting-top-bar">
                 <div className="top-bar-left">
                     <TenantBrand branding={organisationBranding} meeting />
@@ -2240,7 +2268,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         {spotlightId && <span className="qs-topchip qs-topchip--spot"><span className="mi" aria-hidden="true">star</span>Spotlight: {spotlightId === myPeerIdRef.current ? 'You' : peers.get(spotlightId)?.displayName || 'participant'}{manager && <button type="button" onClick={() => setSpotlightFor(null)}>Remove</button>}</span>}
                         {webinar && (() => {
                             const audience = (manager || myOnStage ? 0 : 1) + Array.from(peers.values()).filter(p => p.role !== 'host' && p.role !== 'co-host' && !p.onStage).length;
-                            return <span className="qs-topchip qs-topchip--spot" title="Webinar"><span className="mi" aria-hidden="true">podium</span>{!manager && !myOnStage ? 'You’re in the audience' : myOnStage && !manager ? 'You’re on stage' : 'Webinar'}{audience > 0 ? ` · ${audience} watching` : ''}</span>;
+                            return <span className="qs-topchip qs-topchip--spot" title={format.label}><span className="mi" aria-hidden="true">{format.icon}</span>{!manager && !myOnStage ? 'You’re in the audience' : myOnStage && !manager ? 'You’re on stage' : 'On stage'}{audience > 0 ? ` · ${audience} watching` : ''}</span>;
                         })()}
                     </div>
                 </div>
@@ -2251,6 +2279,21 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 </div>
             </div>
 
+            <div className="meeting-room-status">
+            {connected && <div className="meeting-format-tools" role="group" aria-label={`${format.label} tools`}>
+                <span className="meeting-format-label"><span className="mi" aria-hidden="true">{format.icon}</span>{format.label}</span>
+                {format.actions.filter(action => action !== 'host' || manager).map(action => {
+                    const item = FORMAT_ACTIONS[action];
+                    return <button key={action} type="button" aria-pressed={action === 'captions' ? captionsOn : undefined}
+                        aria-expanded={action === 'captions' ? undefined : action === 'breakouts' ? breakoutsOpen :
+                            action === 'host' ? hostToolsOpen : undefined}
+                        aria-controls={action === 'breakouts' && breakoutsOpen ? 'meeting-breakouts' :
+                            action === 'host' && hostToolsOpen ? 'meeting-host-tools' : undefined}
+                        onClick={event => openFormatAction(action, event.currentTarget)}>
+                        <span className="mi" aria-hidden="true">{item.icon}</span>{item.label}
+                    </button>;
+                })}
+            </div>}
             <div className="meeting-notices">
             {connected && (mediaRecovery === 'recovering' || mediaRecovery === 'failed' || (measuredPoorConnection && !audioOnly && networkProfile !== 'good')) &&
                 <div className="meeting-notice meeting-quality-notice">
@@ -2288,6 +2331,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             </div>}
 
             </div>
+            </div>
 
             {screenSharing && (
                 <div className="presenting-banner" role="status" aria-live="polite">
@@ -2306,8 +2350,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 </div>
             )}
 
-            <div className="meeting-content" data-activity-stage={activityOnStage || undefined}>
-                {(!secureActivities || encryptedNotes) && <MeetingCollaboration key={`${meetingCode}:${roomJoinEpoch}:${secureActivities}`} open={activitiesOpen}
+            <div className="meeting-content" data-activity-stage={activityOnStage || undefined} data-activity-dock={activityOnStage && webinar || undefined}>
+                {(!secureActivities || encryptedNotes) && <MeetingCollaboration key={`${meetingCode}:${roomJoinEpoch}:${secureActivities}`} open={activitiesOpen} tabRequest={tabRequest}
                     connected={connected && (!secureActivities || e2eeActive)} role={myRole} myPeerId={myPeerIdRef.current}
                     onClose={closeActivityPanel} encryptedNotes={secureActivities ? encryptedNotes : undefined} canShareFiles={myRole === 'host' || roomSettings.allowFileShare === true} canEditBoard={myRole === 'host' || roomSettings.allowScreenShare === true} />}
                 <div ref={videoAreaRef} className={`video-area ${sidePanelOpen ? 'with-panel' : ''}`}>
@@ -2322,7 +2366,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         </MeetingToast>
                     </div>}
                     <VideoGrid localStream={displayedLocalStream} localCameraTracks={Object.fromEntries(additionalCameras.map(camera => [camera.source, camera.track]))} siteLocation={state.siteLocation} userId={session.profile?.id} localScreenTrack={screenStream?.getVideoTracks()[0]} myPeerId={myPeerIdRef.current} myRole={myRole} myOnStage={myOnStage} peers={peers} displayName={displayName} videoOff={videoOff} audioMuted={audioMuted} handRaised={handRaised} sharing={screenSharing}
-                        viewMode={activityOnStage ? 'tiled' : viewMode} tilesPerPage={activityOnStage ? 4 : tilesPerPage} webinar={webinar} speaking={speaking} activeSpeaker={activeSpeaker} spotlightId={spotlightId} pinnedId={pinnedId}
+                        viewMode={activityOnStage && !webinar ? 'tiled' : viewMode === 'auto' ? format.layout : viewMode} tilesPerPage={activityOnStage && !webinar ? 4 : tilesPerPage} webinar={webinar} speaking={speaking} activeSpeaker={activeSpeaker} spotlightId={spotlightId} pinnedId={pinnedId}
                         canManage={manager} onPin={setPinnedId} onSpotlight={setSpotlightFor} onToggleStage={setStageFor} />
                     <RemoteAudio peers={peers} volume={privateConversation ? focusPrivateAudio ? 0 : 0.24 : translatedSpeaking ? 0.2 : 1} outputDeviceId={audioOutputId} onOutputError={reportAudioOutputError} />
                     {privateAudioTrack && <PrivateAudioPlayback track={privateAudioTrack} outputDeviceId={audioOutputId} onOutputError={reportAudioOutputError} />}
@@ -2336,7 +2380,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         viewOnly={!signedIn} viewerLanguage={guestCaptionLanguage} />
                 </div>
 
-                {breakoutsOpen && <MeetingBreakouts connected={connected} isHost={myRole === 'host'} currentRoomId={currentRoomId} transitioning={roomTransitioning} participants={[{ peerId: myPeerIdRef.current || 'self', displayName: `${displayName} (You)` }, ...Array.from(peers.values()).map(peer => ({ peerId: peer.peerId, displayName: peer.displayName }))]} onJoin={moveToBreakout} onClose={() => setBreakoutsOpen(false)} />}
+                {breakoutsOpen && <MeetingBreakouts connected={connected} isHost={myRole === 'host'} currentRoomId={currentRoomId} transitioning={roomTransitioning} participants={[{ peerId: myPeerIdRef.current || 'self', displayName: `${displayName} (You)` }, ...Array.from(peers.values()).map(peer => ({ peerId: peer.peerId, displayName: peer.displayName }))]} onJoin={moveToBreakout} onClose={() => { setBreakoutsOpen(false); restoreFormatFocus(); }} />}
                 {chatOpen && <MeetingChat messages={chatMessages} onSend={handleSendChat} onClose={closeChat} />}
 
                 {participantsOpen && (

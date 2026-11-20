@@ -14,7 +14,7 @@ export function authenticatedMeetingRequest(token: string, setup: MeetingSetup):
             type: 'instant',
             settings: {
                 meetingKind: setup.meetingKind,
-                webinar: setup.meetingKind === 'town_hall',
+                webinar: setup.meetingKind === 'town_hall' || setup.meetingKind === 'webinar',
                 waitingRoom: true,
             },
         }),

@@ -101,7 +101,7 @@ export function webinarsRouter(pool: Pool, auth: RequestHandler, feature: Reques
     router.get('/owned-meetings', async (req, res) => {
         const user = (req as unknown as { user: AuthPayload }).user;
         try { return res.json({ meetings: await transaction(pool, user.tenantId, async client => (await client.query(`SELECT id, title, meeting_code AS "meetingCode", scheduled_start AS "scheduledStart"
-            FROM public.meetings WHERE tenant_id = $1 AND host_id = $2 AND type = 'scheduled' AND status <> 'ended' ORDER BY scheduled_start DESC LIMIT 100`, [user.tenantId, user.sub])).rows) }); }
+            FROM public.meetings WHERE tenant_id = $1 AND host_id = $2 AND settings->>'meetingKind' = 'webinar' AND status IN ('waiting', 'active') ORDER BY COALESCE(scheduled_start, created_at) DESC LIMIT 100`, [user.tenantId, user.sub])).rows) }); }
         catch { return res.sendStatus(503); }
     });
     router.get('/', async (req, res) => {
@@ -116,19 +116,23 @@ export function webinarsRouter(pool: Pool, auth: RequestHandler, feature: Reques
         const user = (req as unknown as { user: AuthPayload }).user; const data = parsed.data;
         try {
             const result = await transaction(pool, user.tenantId, async client => {
-                if (id?.success && !await owner(client, id.data, user, true)) return null;
-                const meeting = (await client.query(`SELECT id FROM public.meetings WHERE id = $1 AND tenant_id = $2 AND host_id = $3 AND type = 'scheduled' AND status <> 'ended' FOR UPDATE`, [data.meetingId, user.tenantId, user.sub])).rows[0];
-                if (!meeting) return null;
                 if (id?.success) {
+                    const previous = await owner(client, id.data, user, true);
+                    if (!previous) return null;
+                    // Keep existing registrations attached to their original room.
+                    if (previous.meetingId !== data.meetingId) throw new Error('MEETING_FIXED');
                     const registrations = (await client.query(`SELECT COUNT(*)::int AS count FROM public.webinar_registrations WHERE webinar_id = $1 AND status <> 'rejected'`, [id.data])).rows[0].count;
                     if (registrations > data.registrationLimit) throw new Error('CAPACITY');
-                    // A published registration cannot silently be moved to a different meeting.
-                    const previous = await owner(client, id.data, user);
-                    if (previous.meetingId !== data.meetingId) throw new Error('MEETING_FIXED');
                     await client.query(`UPDATE public.webinars SET title=$2, description=$3, registration_limit=$4, published=$5, custom_fields=$6, branding=$7, speakers=$8, updated_at=NOW() WHERE id=$1`,
                         [id.data, data.title, data.description, data.registrationLimit, data.published, JSON.stringify(data.customFields), JSON.stringify(data.branding), JSON.stringify(data.speakers)]);
                     return { id: id.data, publicId: previous.publicId };
                 }
+                // Registration must never change the live room's publishing policy.
+                const meeting = (await client.query(`SELECT id FROM public.meetings
+                    WHERE id = $1 AND tenant_id = $2 AND host_id = $3
+                    AND settings->>'meetingKind' = 'webinar' AND status IN ('waiting', 'active') FOR UPDATE`,
+                [data.meetingId, user.tenantId, user.sub])).rows[0];
+                if (!meeting) return null;
                 const webinarId = randomUUID(); const publicId = randomUUID();
                 await client.query(`INSERT INTO public.webinars(id,public_id,tenant_id,meeting_id,owner_id,title,description,registration_limit,published,custom_fields,branding,speakers)
                     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [webinarId,publicId,user.tenantId,data.meetingId,user.sub,data.title,data.description,data.registrationLimit,data.published,JSON.stringify(data.customFields),JSON.stringify(data.branding),JSON.stringify(data.speakers)]);

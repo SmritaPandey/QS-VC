@@ -12,20 +12,22 @@ import EncryptedMeetingFiles from './EncryptedMeetingFiles';
 import WhiteboardStickyNotes from './WhiteboardStickyNotes';
 import '../styles/meeting-collaboration.css';
 
-interface Props { open: boolean; connected: boolean; role: string; myPeerId: string; onClose: () => void; encryptedNotes?: EncryptedNotesAccess; canShareFiles?: boolean; canEditBoard?: boolean }
+interface Props { tabRequest?: { tab: CollaborationTab }; open: boolean; connected: boolean; role: string; myPeerId: string; onClose: () => void; encryptedNotes?: EncryptedNotesAccess; canShareFiles?: boolean; canEditBoard?: boolean }
 const TABS = [['board', 'draw', 'Whiteboard'], ['polls', 'poll', 'Polls'], ['questions', 'help', 'Q&A'], ['notes', 'description', 'Notes'], ['files', 'attach_file', 'Files']] as const;
-type Tab = typeof TABS[number][0];
+export type CollaborationTab = typeof TABS[number][0];
+type Tab = CollaborationTab;
 const PALETTE = ['#102a43', '#006d77', '#c9364f', '#5141be'];
 const FILE_ICONS: Record<string, string> = { 'image/png': 'image', 'image/jpeg': 'image', 'application/pdf': 'picture_as_pdf', 'text/plain': 'description' };
 const fileSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : `${Math.ceil(bytes / 1024)} KB`;
 
-export default function MeetingCollaboration({ open, connected, role, myPeerId, onClose, encryptedNotes, canShareFiles = true, canEditBoard = true }: Props) {
+export default function MeetingCollaboration({ tabRequest, open, connected, role, myPeerId, onClose, encryptedNotes, canShareFiles = true, canEditBoard = true }: Props) {
     const [snapshot, setSnapshot] = useState<CollaborationState>(EMPTY_COLLABORATION);
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
-    const [tab, setTab] = useState<Tab>('board');
+    const [tab, setTab] = useState<Tab>(tabRequest?.tab ?? 'board');
     const tabs = TABS;
+    useEffect(() => { if (tabRequest) { setTab(tabRequest.tab); setError(''); } }, [tabRequest]);
     const [board, setBoard] = useState<EncryptedBoardState>({revision:0,strokes:[],stickyNotes:[],records:new Map()});
     const [boardError, setBoardError] = useState('');
     const boardRefresh = useRef<() => void>(() => {});

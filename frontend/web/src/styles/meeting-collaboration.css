@@ -149,3 +149,18 @@
 }
 
 .meeting-room .meeting-collaboration[hidden], .meeting-collaboration .collaboration-form[hidden] { display:none; }
+
+
+/* Audience interaction leaves the presentation as the primary surface. */
+.meeting-room .meeting-content[data-activity-dock] {
+  grid-template-columns: minmax(0, 1fr) clamp(270px, 29vw, 410px);
+}
+.meeting-content[data-activity-dock] > .video-area { grid-area: 1 / 1; }
+.meeting-content[data-activity-dock] > .meeting-collaboration { grid-area: 1 / 2; }
+@media (max-width:767px) and (orientation:portrait) {
+  .meeting-room .meeting-content[data-activity-dock] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(105px, 38%) minmax(0, 1fr);
+  }
+  .meeting-content[data-activity-dock] > .meeting-collaboration { grid-area: 2 / 1; }
+}

@@ -1,7 +1,7 @@
 import SelectionInput from './SelectionInput';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 
-export type MeetingKind = 'conference' | 'team' | 'town_hall';
+export type MeetingKind = 'conference' | 'team' | 'town_hall' | 'webinar';
 export interface MeetingSetup { title: string; meetingKind: MeetingKind; startNow: boolean }
 
 interface Props {
@@ -16,9 +16,10 @@ type SetupKind = MeetingKind | 'instant';
 
 const kinds: Array<{ value: SetupKind; label: string; detail: string }> = [
     { value: 'instant', label: 'Instant meeting', detail: 'Start a meeting right away and invite people to join.' },
-    { value: 'conference', label: 'Conferencing', detail: 'A standard meeting for conversations and collaboration.' },
-    { value: 'team', label: 'Team meeting', detail: 'A working session for your team.' },
-    { value: 'town_hall', label: 'Town hall / webinar', detail: 'A presentation-style room with a stage.' },
+    { value: 'conference', label: 'Conferencing', detail: 'A speaker-focused room with breakout rooms.' },
+    { value: 'team', label: 'Team meeting', detail: 'An equal video grid with shared notes and a whiteboard.' },
+    { value: 'town_hall', label: 'Town hall', detail: 'Share updates from the stage and take audience questions.' },
+    { value: 'webinar', label: 'Webinar', detail: 'Present or teach with audience Q&A and polls.' },
 ];
 
 export default function MeetingSetupDialog({ action, creating, guest = false, onClose, onCreate }: Props) {

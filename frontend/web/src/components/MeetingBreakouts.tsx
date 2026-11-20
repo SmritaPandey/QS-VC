@@ -41,7 +41,7 @@ export default function MeetingBreakouts({ connected, isHost, currentRoomId, tra
     const disabled = busy || transitioning || !connected;
     const roomsOpen = snapshot?.rooms.some(room => room.open) || false;
     const inBreakout = !!snapshot && !!currentRoomId && currentRoomId !== snapshot.mainRoomId;
-    return <section className="side-panel meeting-breakouts" aria-labelledby="meeting-breakouts-title">
+    return <section id="meeting-breakouts" className="side-panel meeting-breakouts" aria-labelledby="meeting-breakouts-title" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
         <div className="panel-header"><h3 id="meeting-breakouts-title">Breakout rooms</h3><button type="button" className="panel-close" aria-label="Close breakout rooms" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></div>
         <div className="meeting-breakouts-content">
             <p>Move into a smaller conversation, then return to the main meeting. Your screen share stops when you move.</p>
