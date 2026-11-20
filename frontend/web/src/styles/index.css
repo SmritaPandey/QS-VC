@@ -4977,3 +4977,53 @@ label {
 .pricing-admin-included { margin:auto 0 0; padding:12px 0; border-top:1px solid var(--border-tone,#d5e0e5); color:var(--text-secondary); text-align:center; }
 .pricing-card-actions .pricing-trial-button .qsvc-action__inner { min-height:48px; }
 @media(max-width:640px) { .pricing-trial-note { font-size:16px; } .pricing-card-actions { gap:6px; } }
+
+.schedule-page.schedule-editor { padding-block-start:clamp(24px, 4vw, 48px); }
+.schedule-editor .schedule-header { margin-bottom:26px; }
+.schedule-composer {
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) minmax(260px, .58fr);
+  align-items:start;
+  gap:20px;
+}
+.schedule-fields {
+  min-width:0;
+  display:grid;
+  gap:16px;
+}
+.schedule-composer .form-section, .schedule-saved {
+  padding:clamp(16px, 2.8vw, 26px);
+}
+.schedule-composer .form-section h2, .schedule-saved h2 {
+  margin-bottom:14px;
+}
+.schedule-fields h2 + p { margin-bottom:12px; color:var(--text-secondary); }
+.schedule-composer .form-row {
+  grid-template-columns:repeat(auto-fit,minmax(min(100%, 130px),1fr));
+  gap:12px;
+}
+.schedule-options summary {
+  color:var(--text-primary);
+  font-weight:500;
+  cursor:pointer;
+}
+.schedule-options[open] summary { margin-bottom:18px; }
+.schedule-review {
+  position:sticky;
+  top:20px;
+  display:grid;
+  gap:12px;
+  min-width:0;
+}
+.schedule-composer .schedule-review h2 { margin:0; }
+.schedule-review .preview-card { padding:14px; overflow-wrap:anywhere; }
+.schedule-review .preview-meta { gap:8px 12px; }
+.schedule-saved { margin-top:20px; }
+.schedule-saved .preview-card + .preview-card { margin-top:12px; }
+.schedule-saved .preview-card[data-new=true] { border-color:var(--accent-primary); }
+.schedule-confirmation, .schedule-error { color:var(--text-primary); margin:0 0 12px; }
+.schedule-error { border-inline-start:3px solid var(--accent-danger, #ba394e); padding-inline-start:10px; }
+@media (max-width: 760px) {
+  .schedule-composer { grid-template-columns:minmax(0, 1fr); }
+  .schedule-review { position:static; }
+}

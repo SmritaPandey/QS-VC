@@ -186,7 +186,10 @@ describe('configuration and auth verification', () => {
                 verified++;
                 return Response.json({ valid: true, payload: { sub: 'host', tenantId: 'tenant' } });
             }
-            if (url.includes('/api/meetings/code/DEMO')) return Response.json({ hostId: 'host', status: 'active' });
+            if (url.includes('/api/meetings/code/DEMO')) {
+                expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer session');
+                return Response.json({ hostId: 'host', status: 'active' });
+            }
             return realFetch(input, init);
         });
         try {

@@ -1,4 +1,5 @@
 import { bharatVcDial, disconnectBharatVc } from '../bharat-vc.js';
+import { recordMeetingAttendance } from '../meeting-attendance.js';
 import { meetingObservability } from '../meeting-observability.js';
 import { admittedPeerIceServers } from '../turn.js';
 import { loadMeetingPolicy, reportMeetingStatus, endHostedMeetingStatus, verifySignalingAccess } from '../meeting-policy.js';
@@ -1671,8 +1672,8 @@ export async function handleRpcMessage(
                 const previousRoom = roomManager.getRoomByCode(code);
                 const epoch = previousRoom ? roomEpochs.get(previousRoom) || 0 : 0;
                 const policy = await loadMeetingPolicy(code, action === 'cancel');
-                if (!policy || policy.hostId !== user.sub) {
-                    throw createError(-32005, 'Only the meeting organiser can change it here');
+                if (!policy?.hostId || (policy.hostId !== user.sub && !user.managedMeetingOwnerIds?.includes(policy.hostId))) {
+                    throw createError(-32005, 'Only the organiser or a delegated meeting admin can change it here');
                 }
                 if (action === 'cancel' ? policy.status !== 'waiting' && policy.status !== 'cancelled' : policy.status !== 'active' && policy.status !== 'ended') {
                     throw createError(-32005, 'This meeting can no longer be changed here. Refresh your meetings.');
@@ -2031,6 +2032,9 @@ async function joinPeerToRoom(
         }
         roomManager.addPeer(roomId, peerState);
         meetingObservability.joined(room, peerState);
+        if (!room.parentRoomId && room.ownerUserId && !isSessionMeetingCode(room.meetingCode) && connectionState.authUser) {
+            void recordMeetingAttendance(room.meetingCode, connectionState.authUser, displayName);
+        }
     } catch (error) {
         await sfuClient.removePeer(roomId, peerId).catch(() => { });
         throw error;

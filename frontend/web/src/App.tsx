@@ -14,6 +14,7 @@ import PreMeeting from './pages/PreMeeting';
 import MeetingRoom from './pages/MeetingRoom';
 import MeetingEnd from './pages/MeetingEnd';
 import RecordingPlayback from './pages/RecordingPlayback';
+import MeetingAdmins from './pages/MeetingAdmins';
 import OrganisationSso from './pages/OrganisationSso';
 import SsoComplete from './pages/SsoComplete';
 import PersonalSignInComplete from './pages/PersonalSignInComplete';
@@ -119,6 +120,7 @@ export default function App() {
                 <Route path="/login" element={<Login />} /><Route path="/signup" element={<Signup />} />
                 <Route path="/sso/personal/complete" element={<PersonalSignInComplete />} />
                 <Route path="/sso/complete" element={<SsoComplete />} />
+                <Route path="/organisation/meeting-admins" element={<MeetingAdmins />} />
                 <Route path="/organisation/sso" element={<OrganisationSso />} />
                 <Route path="/app" element={<OnPremAccess><Landing /></OnPremAccess>} />
                 <Route path="/webinars" element={<Gate feature="meeting_scheduling"><WebinarsPage /></Gate>} />

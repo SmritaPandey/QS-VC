@@ -1,3 +1,5 @@
+import { sessionMeetingRows } from '../lib/session-schedule';
+import { meetingJoinPath } from '../lib/meeting-join-path';
 import CancelScheduledMeeting from './CancelScheduledMeeting';
 import AdminDashboardLink from './AdminDashboardLink';
 import { useSession } from '../lib/use-session';
@@ -26,7 +28,7 @@ const workspaceFeatures = [
     { feature: 'background_effects', label: 'Background effects', icon: 'blur_on' },
     { feature: 'ai_noise_suppression', label: 'AI noise suppression', icon: 'graphic_eq' },
 ];
-type Meeting = { id: string; meetingCode: string; title: string; status: string; scheduledStart?: string; createdAt: string; isHost?: boolean; canCancel?: boolean };
+type Meeting = { id: string; meetingCode: string; title: string; status: string; scheduledStart?: string; createdAt: string; isHost?: boolean; canCancel?: boolean; canEnd?: boolean; previewPath?: string };
 type View = 'day' | 'hosted' | 'invitations';
 const VIEW_KEY = 'qsvc:workspace-view';
 function savedView(): View { try { const v = localStorage.getItem(VIEW_KEY); return (v === 'hosted' || v === 'invitations') ? v : 'day'; } catch { return 'day'; } }
@@ -48,6 +50,10 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
     const planReady = entitlements.isPlatformAdmin || (entitlements.verified && !entitlements.loading);
     const canSchedule = planReady && hasFeature(entitlements, 'meeting_scheduling');
     const canManagePlan = !ON_PREM && planReady && !isAdmin && planKey !== 'enterprise';
+    const canDelegate = entitlements.verified && (
+        (planKey === 'business' && entitlements.status === 'paid_active') ||
+        (planKey === 'enterprise' && entitlements.status === 'enterprise_approved')
+    );
     const canComparePlans = canManagePlan && !canSchedule;
     const planStatus = isAdmin ? 'Administrator' : entitlements.loading ? 'Checking plan…'
         : !entitlements.verified ? 'Plan unavailable'
@@ -55,6 +61,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                 : entitlements.status === 'paid_expired' ? `${planName} expired`
                     : entitlements.status === 'enterprise_pending' ? 'Quantum-Premise pending'
                         : entitlements.status === 'enterprise_rejected' ? 'Quantum-Premise not approved' : planName;
+    const [organisationView, setOrganisationView] = useState(false);
     const [meetings, setMeetings] = useState<Meeting[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -108,14 +115,18 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                 const value = await response.json();
                 if (!Array.isArray(value.meetings)) throw new Error();
                 if (!active || getToken() !== token) return;
+                setOrganisationView(value.visibility === 'organisation');
                 const items = value.meetings.filter((m: Meeting) => typeof m.id === 'string' && typeof m.meetingCode === 'string');
                 setMeetings(old => offset ? [...old, ...items.filter((m: Meeting) => !old.some(item => item.id === m.id))] : items);
                 setMore(value.meetings.length === 50);
-            }).catch(() => { if (active) setError('We couldn’t load your organisation’s meetings. Try again.'); })
+            }).catch(() => { if (active) setError('We couldn’t load your meetings. Try again.'); })
             .finally(() => { clearTimeout(timeout); if (active) setLoading(false); });
         return () => { active = false; clearTimeout(timeout); controller.abort(); };
     }, [selectedKey, offset, refresh, onExpired]);
     const selectDay = (day: Date) => { if (dateKey(day) === selectedKey) return; setSelected(day); setOffset(0); setMeetings([]); };
+    const dayMeetings: Meeting[] = [...meetings, ...sessionMeetingRows(profile?.id).filter(meeting =>
+        dateKey(new Date(meeting.scheduledStart)) === selectedKey)]
+        .sort((a, b) => (a.scheduledStart || a.createdAt).localeCompare(b.scheduledStart || b.createdAt));
     const monday = moveDay(selected, -(selected.getDay()+6)%7);
     const newAction = (action: () => void) => {
         const detail = root.current?.querySelector<HTMLDetailsElement>('.workspace-new');
@@ -124,21 +135,9 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
     };
     const joinMeeting = (event: React.FormEvent) => {
         event.preventDefault(); setJoinError('');
-        let code = join.trim();
-        const params = new URLSearchParams();
-        if (/^https?:\/\//i.test(code)) {
-            try {
-                const url = new URL(code);
-                if (url.origin !== window.location.origin) throw new Error();
-                code = url.pathname.match(/^\/meeting\/([^/]+)(?:\/preview)?\/?$/)?.[1] || '';
-                for (const key of ['invite', 'guest']) {
-                    const value = url.searchParams.get(key);
-                    if (value) params.set(key, value);
-                }
-            } catch { code = ''; }
-        }
-        if (!/^[a-z0-9-]{3,40}$/i.test(code)) { setJoinError('Enter a QS-VC meeting code or a link from this website.'); return; }
-        navigate(`/meeting/${encodeURIComponent(code.toUpperCase())}/preview${params.size ? `?${params}` : ''}`);
+        const target = meetingJoinPath(join, window.location.origin);
+        if (!target) { setJoinError('Enter a meeting code or the full invitation link from this website.'); return; }
+        navigate(target);
     };
     return <div className="workspace-shell meeting-home account-workspace" ref={root} onKeyDown={event => {
         if (event.key === 'Escape') root.current?.querySelectorAll<HTMLDetailsElement>('details[open]').forEach(detail => { detail.open = false; detail.querySelector<HTMLElement>('summary')?.focus(); });
@@ -160,7 +159,7 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
             </div>
             <details className="workspace-account">
                 <summary aria-label="Your account"><span className="workspace-account-initial" aria-hidden="true">{profile?.displayName.trim().charAt(0).toUpperCase() || 'Q'}</span></summary>
-                <div className="workspace-dropdown"><ThemeSelect /><p>{profile?.displayName || (profileError ? 'Account unavailable' : 'Loading account…')}</p>{profile && <span>{profile.email}</span>}{profileError && <button className="qsvc-action qsvc-action--secondary" onClick={() => void refreshSession()}><ActionContents>Retry account</ActionContents></button>}<AdminDashboardLink /><Link to="/recordings">My recordings</Link><Link to="/organisation/sso">Sign-in settings</Link><Link to="/">Visit website<span className="mi" aria-hidden="true">north_east</span></Link><button disabled={signingOut} onClick={onSignOut}>{signingOut ? 'Signing out…' : 'Sign out'}<span className="mi" aria-hidden="true">logout</span></button></div>
+                <div className="workspace-dropdown"><ThemeSelect /><p>{profile?.displayName || (profileError ? 'Account unavailable' : 'Loading account…')}</p>{profile && <span>{profile.email}</span>}{profileError && <button className="qsvc-action qsvc-action--secondary" onClick={() => void refreshSession()}><ActionContents>Retry account</ActionContents></button>}<AdminDashboardLink /><Link to="/recordings">My recordings</Link>{canDelegate && <Link to="/organisation/meeting-admins">Meeting admins</Link>}<Link to="/organisation/sso">Sign-in settings</Link><Link to="/">Visit website<span className="mi" aria-hidden="true">north_east</span></Link><button disabled={signingOut} onClick={onSignOut}>{signingOut ? 'Signing out…' : 'Sign out'}<span className="mi" aria-hidden="true">logout</span></button></div>
             </details>
         </header>
         {sessionError && <p role="alert" className="workspace-alert">{sessionError}</p>}
@@ -230,15 +229,15 @@ export default function SignedInWorkspace({ creating, signingOut, sessionError, 
                         </div>
                         <PendingInvitations onCountChange={setPendingInviteCount} onExpired={onExpired} />
                     </section>
-                ) : view === 'hosted' ? <section id="workspace-view-panel" role="tabpanel" aria-labelledby="tab-hosted" className="workspace-schedule"><div className="workspace-day-heading"><div><h2>Meetings I host</h2><p>Start, share or review the meetings you created.</p></div></div><HostedMeetings onExpired={onExpired} /></section> : <div id="workspace-view-panel" role="tabpanel" aria-labelledby="tab-day">
-                <div className="workspace-day-heading"><div><h2>{selected.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</h2><p>Meetings in your organisation</p></div><div className="workspace-date-actions"><button onClick={() => selectDay(new Date(new Date().setHours(0,0,0,0)))}>Today</button><label className="workspace-date-picker"><span className="workspace-sr">Choose a date</span><input type="date" value={selectedKey} onChange={event => { const parts = event.target.value.split('-').map(Number); if (parts.length === 3 && parts.every(Boolean)) selectDay(new Date(parts[0],parts[1]-1,parts[2])); }} /></label></div></div>
+                ) : view === 'hosted' ? <section id="workspace-view-panel" role="tabpanel" aria-labelledby="tab-hosted" className="workspace-schedule"><div className="workspace-day-heading"><div><h2>Meetings I host</h2><p>Start, share or review the meetings you created.</p></div></div><HostedMeetings onExpired={onExpired} accountId={profile?.id} /></section> : <div id="workspace-view-panel" role="tabpanel" aria-labelledby="tab-day">
+                <div className="workspace-day-heading"><div><h2>{selected.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'})}</h2><p>{organisationView ? 'Meetings in your organisation' : 'Meetings you host, manage, joined or were invited to'}</p></div><div className="workspace-date-actions"><button onClick={() => selectDay(new Date(new Date().setHours(0,0,0,0)))}>Today</button><label className="workspace-date-picker"><span className="workspace-sr">Choose a date</span><input type="date" value={selectedKey} onChange={event => { const parts = event.target.value.split('-').map(Number); if (parts.length === 3 && parts.every(Boolean)) selectDay(new Date(parts[0],parts[1]-1,parts[2])); }} /></label></div></div>
                 <div className="workspace-week" aria-label="Choose meeting day"><button className="workspace-week-arrow" aria-label="Previous week" onClick={() => selectDay(moveDay(selected,-7))}><span className="mi" aria-hidden="true">chevron_left</span></button><div className="workspace-days">{Array.from({length:7},(_,index) => { const day = moveDay(monday,index); return <button key={dateKey(day)} aria-label={day.toLocaleDateString(undefined,{weekday:'long',year:'numeric',month:'long',day:'numeric'})} aria-pressed={dateKey(day) === selectedKey} onClick={() => selectDay(day)}><span>{day.toLocaleDateString(undefined,{weekday:'short'})}</span><span>{day.getDate()}</span><i aria-hidden="true" data-today={dateKey(day) === dateKey(new Date())} /></button>; })}</div><button className="workspace-week-arrow" aria-label="Next week" onClick={() => selectDay(moveDay(selected,7))}><span className="mi" aria-hidden="true">chevron_right</span></button></div>
                 <section className="workspace-schedule" aria-label="Meetings for the selected date" aria-busy={loading}>
-                    {loading && !offset ? <div className="workspace-state" role="status"><span className="mi" aria-hidden="true">calendar_month</span><h2>Loading meetings…</h2><p>Your schedule will appear here.</p></div> : error ? <div className="workspace-state" role="alert"><span className="mi" aria-hidden="true">cloud_off</span><h2>Meetings aren’t available right now</h2><p>{error}</p><button className="qsvc-action qsvc-action--secondary" onClick={() => setRefresh(value => value+1)}><ActionContents>Try again</ActionContents></button></div> : !meetings.length ? <div className="workspace-state"><div className="workspace-empty-calendar" aria-hidden="true"><span className="mi">event_available</span><i /></div><h2>No meetings on this day</h2><p>Set aside time for your next conversation.</p><Link className="qsvc-action" to="/schedule"><ActionContents><span className="mi" aria-hidden="true">add</span>Schedule a meeting</ActionContents></Link></div> : <><div className="workspace-list" key={selectedKey}>{meetings.map(meeting => <article className="workspace-meeting-row" data-status={meeting.status} key={meeting.id}><time dateTime={meeting.scheduledStart || meeting.createdAt}>{new Date(meeting.scheduledStart || meeting.createdAt).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</time><div><h2>{meeting.title || 'Untitled meeting'}</h2><p><span className="workspace-code">{meeting.meetingCode}</span><span className="workspace-status">{meeting.status === 'active' ? 'In progress' : meeting.status === 'ended' ? 'Ended' : meeting.status === 'cancelled' ? 'Cancelled' : 'Scheduled'}</span>{meeting.isHost && <span className="workspace-host-badge"><span className="mi" aria-hidden="true">shield_person</span>You host</span>}</p></div><div className="workspace-row-actions"><Link className="workspace-row-join workspace-row-secondary" to={`/recordings/${encodeURIComponent(meeting.meetingCode)}`}>Recordings</Link>{(meeting.status === 'active' ? meeting.isHost : meeting.status === 'waiting' && (meeting.scheduledStart ? meeting.canCancel : meeting.isHost)) && <CancelScheduledMeeting
+                    {loading && !offset ? <div className="workspace-state" role="status"><span className="mi" aria-hidden="true">calendar_month</span><h2>Loading meetings…</h2><p>Your schedule will appear here.</p></div> : error ? <div className="workspace-state" role="alert"><span className="mi" aria-hidden="true">cloud_off</span><h2>Meetings aren’t available right now</h2><p>{error}</p><button className="qsvc-action qsvc-action--secondary" onClick={() => setRefresh(value => value+1)}><ActionContents>Try again</ActionContents></button></div> : !dayMeetings.length ? <div className="workspace-state"><div className="workspace-empty-calendar" aria-hidden="true"><span className="mi">event_available</span><i /></div><h2>No meetings on this day</h2><p>Set aside time for your next conversation.</p><Link className="qsvc-action" to="/schedule"><ActionContents><span className="mi" aria-hidden="true">add</span>Schedule a meeting</ActionContents></Link></div> : <><div className="workspace-list" key={selectedKey}>{dayMeetings.map(meeting => <article className="workspace-meeting-row" data-status={meeting.status} key={meeting.id}><time dateTime={meeting.scheduledStart || meeting.createdAt}>{new Date(meeting.scheduledStart || meeting.createdAt).toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})}</time><div><h2>{meeting.title || 'Untitled meeting'}</h2><p><span className="workspace-code">{meeting.meetingCode}</span><span className="workspace-status">{meeting.status === 'active' ? 'In progress' : meeting.status === 'ended' ? 'Ended' : meeting.status === 'cancelled' ? 'Cancelled' : meeting.status === 'expired' ? 'Invitation expired' : 'Scheduled'}</span>{meeting.isHost && <span className="workspace-host-badge"><span className="mi" aria-hidden="true">shield_person</span>You host</span>}</p></div><div className="workspace-row-actions">{meeting.isHost && !meeting.previewPath && <Link className="workspace-row-join workspace-row-secondary" to={`/recordings/${encodeURIComponent(meeting.meetingCode)}`}>Recordings</Link>}{!meeting.previewPath && (meeting.status === 'active' ? (meeting.canEnd ?? meeting.isHost) : meeting.status === 'waiting' && (meeting.scheduledStart ? meeting.canCancel : (meeting.canEnd ?? meeting.isHost))) && <CancelScheduledMeeting
                     id={meeting.id} title={meeting.title || meeting.meetingCode} meetingCode={meeting.meetingCode}
                     instant={!meeting.scheduledStart} active={meeting.status === 'active'} onExpired={onExpired}
                     onCancelled={() => setMeetings(items => items.map(item => item.id === meeting.id ? { ...item, status: meeting.status === 'active' ? 'ended' : 'cancelled' } : item))} />}
-                    {meeting.status !== 'ended' && meeting.status !== 'cancelled' && <Link className="workspace-row-join qsvc-action" to={`/meeting/${encodeURIComponent(meeting.meetingCode)}/preview`}><ActionContents>Join</ActionContents></Link>}</div></article>)}</div>{more && <button className="workspace-load-more qsvc-action qsvc-action--secondary" disabled={loading} onClick={() => setOffset(value => value+50)}><ActionContents>{loading ? 'Loading…' : 'Load more meetings'}</ActionContents></button>}</>}
+                    {meeting.status !== 'ended' && meeting.status !== 'cancelled' && meeting.status !== 'expired' && <Link className="workspace-row-join qsvc-action" state={meeting.previewPath ? { title: meeting.title } : undefined} to={meeting.previewPath || `/meeting/${encodeURIComponent(meeting.meetingCode)}/preview`}><ActionContents>Join</ActionContents></Link>}</div></article>)}</div>{more && <button className="workspace-load-more qsvc-action qsvc-action--secondary" disabled={loading} onClick={() => setOffset(value => value+50)}><ActionContents>{loading ? 'Loading…' : 'Load more meetings'}</ActionContents></button>}</>}
                 </section>
                 </div>}
             </section>

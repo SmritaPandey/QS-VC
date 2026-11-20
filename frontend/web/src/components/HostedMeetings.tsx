@@ -1,3 +1,4 @@
+import { sessionMeetingRows } from '../lib/session-schedule';
 import CancelScheduledMeeting from './CancelScheduledMeeting';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -9,7 +10,7 @@ const API = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || 
 
 export type HostedMeeting = {
     id: string; meetingCode: string; title: string; status: string; type?: string;
-    inviteToken?: string;
+    inviteToken?: string; previewPath?: string;
     scheduledStart?: string | null; scheduledEnd?: string | null; actualStart?: string | null; actualEnd?: string | null; createdAt: string;
 };
 
@@ -23,7 +24,7 @@ export function groupHosted(meetings: HostedMeeting[], now = Date.now()) {
     for (const m of meetings) {
         if (m.status === 'cancelled') continue;
         if (m.status === 'active') live.push(m);
-        else if (m.status !== 'ended' && m.scheduledStart && new Date(m.scheduledEnd || m.scheduledStart).getTime() >= now - 15 * 60_000) upcoming.push(m);
+        else if (m.status !== 'ended' && m.status !== 'expired' && m.scheduledStart && new Date(m.scheduledEnd || m.scheduledStart).getTime() >= now - 15 * 60_000) upcoming.push(m);
         else past.push(m);
     }
     upcoming.sort((a, b) => when(a).getTime() - when(b).getTime());
@@ -34,7 +35,8 @@ export function groupHosted(meetings: HostedMeeting[], now = Date.now()) {
 export function HostedMeetingRow({ meeting, label, onCancelled, onExpired }: { meeting: HostedMeeting; label: string; onCancelled: () => void; onExpired: () => void }) {
     const [copied, setCopied] = useState(false);
     const start = when(meeting);
-    const link = `${window.location.origin}/meeting/${encodeURIComponent(meeting.meetingCode)}/preview${meeting.inviteToken ? `?invite=${encodeURIComponent(meeting.inviteToken)}` : ''}`;
+    const preview = meeting.previewPath || `/meeting/${encodeURIComponent(meeting.meetingCode)}/preview${meeting.inviteToken ? `?invite=${encodeURIComponent(meeting.inviteToken)}` : ''}`;
+    const link = `${window.location.origin}${preview}`;
     const ended = meeting.status === 'ended';
     return <article className="workspace-meeting-row" data-status={meeting.status}>
         <time dateTime={start.toISOString()}><span className="workspace-row-day">{fmtDay(start)}</span>{meeting.scheduledStart || meeting.actualStart ? fmtTime(start) : ''}</time>
@@ -43,21 +45,21 @@ export function HostedMeetingRow({ meeting, label, onCancelled, onExpired }: { m
             <p><span className="workspace-code">{meeting.meetingCode}</span><span className="workspace-status">{label}</span></p>
         </div>
         <div className="workspace-row-actions">
-            {(meeting.status === 'waiting' || meeting.status === 'active') && <CancelScheduledMeeting id={meeting.id}
+            {!meeting.previewPath && (meeting.status === 'waiting' || meeting.status === 'active') && <CancelScheduledMeeting id={meeting.id}
                 title={meeting.title || meeting.meetingCode} meetingCode={meeting.meetingCode}
                 instant={!meeting.scheduledStart} active={meeting.status === 'active'} onCancelled={onCancelled} onExpired={onExpired} />}
-            <button type="button" className="workspace-row-join workspace-row-secondary" aria-label={`Copy invite link for ${meeting.title || meeting.meetingCode}`} onClick={() => { void navigator.clipboard?.writeText(link).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1800); }).catch(() => {}); }}>
+            {meeting.status !== 'expired' && <button type="button" className="workspace-row-join workspace-row-secondary" aria-label={`Copy invite link for ${meeting.title || meeting.meetingCode}`} onClick={() => { void navigator.clipboard?.writeText(link).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1800); }).catch(() => {}); }}>
                 <span className="mi mi-sm" aria-hidden="true">{copied ? 'check' : 'link'}</span>{copied ? 'Copied' : 'Copy link'}
-            </button>
-            {ended
+            </button>}
+            {meeting.status !== 'expired' && (ended
                 ? <Link className="workspace-row-join workspace-row-secondary" to={`/recordings/${encodeURIComponent(meeting.meetingCode)}`}>Recordings</Link>
-                : <Link className="workspace-row-join qsvc-action" to={`/meeting/${encodeURIComponent(meeting.meetingCode)}/preview`}><ActionContents>{meeting.status === 'active' ? 'Rejoin' : 'Start'}</ActionContents></Link>}
+                : <Link className="workspace-row-join qsvc-action" state={meeting.previewPath ? { title: meeting.title } : undefined} to={preview}><ActionContents>{meeting.status === 'active' ? 'Rejoin' : 'Start'}</ActionContents></Link>)}
         </div>
     </article>;
 }
 
 /** "Meetings I host": everything the signed-in user created, so they can start, share or review it. */
-export default function HostedMeetings({ onExpired }: { onExpired: () => void }) {
+export default function HostedMeetings({ onExpired, accountId }: { onExpired: () => void; accountId?: string }) {
     const [meetings, setMeetings] = useState<HostedMeeting[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState('');
@@ -111,13 +113,14 @@ export default function HostedMeetings({ onExpired }: { onExpired: () => void })
 
     if (loading) return <div className="workspace-state" role="status"><span className="mi" aria-hidden="true">calendar_month</span><h2>Loading your meetings…</h2><p>Meetings you created will appear here.</p></div>;
     if (error) return <div className="workspace-state" role="alert"><span className="mi" aria-hidden="true">cloud_off</span><h2>Your meetings aren’t available right now</h2><p>{error}</p><button className="qsvc-action qsvc-action--secondary" onClick={() => setRefresh(v => v + 1)}><ActionContents>Try again</ActionContents></button></div>;
-    const { live, upcoming, past } = groupHosted(meetings);
+    const localMeetings = sessionMeetingRows(accountId);
+    const { live, upcoming, past } = groupHosted([...meetings, ...localMeetings]);
     const shownPast = showAllPast ? past : past.slice(0, 8);
     return <div className="workspace-hosted">
         <section className="workspace-personal-overview" aria-label="Your meeting activity">
             <dl>
-                <div><dt>Links created</dt><dd>{summary ? <AnimatedNumber value={summary.links} /> : '—'}</dd></div>
-                <div><dt>Meetings scheduled</dt><dd>{summary ? <AnimatedNumber value={summary.scheduled} /> : '—'}</dd></div>
+                <div><dt>Links created</dt><dd>{summary ? <AnimatedNumber value={summary.links + localMeetings.length} /> : '—'}</dd></div>
+                <div><dt>Meetings scheduled</dt><dd>{summary ? <AnimatedNumber value={summary.scheduled + localMeetings.length} /> : '—'}</dd></div>
                 <div><dt>Meetings marked active</dt><dd>{summary ? <AnimatedNumber value={summary.active} /> : '—'}</dd></div>
             </dl>
             {summaryUnavailable && <p role="status">Activity totals are unavailable. Your meeting list is still available.</p>}
@@ -134,7 +137,7 @@ export default function HostedMeetings({ onExpired }: { onExpired: () => void })
             {upcoming.length ? upcoming.map(m => <HostedMeetingRow key={m.id} meeting={m} onCancelled={() => cancelled(m)} onExpired={onExpired} label="Scheduled" />) : <p className="workspace-group-empty">Nothing scheduled. <Link to="/schedule">Schedule a meeting</Link></p>}
         </section>}
         {(filter === 'all' || filter === 'past') && past.length > 0 && <section aria-labelledby="hosted-past"><h3 id="hosted-past" className="workspace-group-title">Past and instant ({past.length})</h3>
-            {shownPast.map(m => <HostedMeetingRow key={m.id} meeting={m} onCancelled={() => cancelled(m)} onExpired={onExpired} label={m.status === 'ended' ? 'Ended' : 'Not started'} />)}
+            {shownPast.map(m => <HostedMeetingRow key={m.id} meeting={m} onCancelled={() => cancelled(m)} onExpired={onExpired} label={m.status === 'ended' ? 'Ended' : m.status === 'expired' ? 'Invitation expired' : 'Not started'} />)}
             {past.length > shownPast.length && <button className="workspace-load-more qsvc-action qsvc-action--secondary" onClick={() => setShowAllPast(true)}><ActionContents>Show all {past.length}</ActionContents></button>}
         </section>}
     </div>;

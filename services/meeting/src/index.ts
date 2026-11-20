@@ -15,6 +15,7 @@ import http from 'http';
 import { Pool } from 'pg';
 import { databaseConfig } from '../../../shared/database.cjs';
 import { tenantDatabase } from '../../../shared/tenant-database.cjs';
+import { canViewOrganisationMeetings, delegatedMeetingAccess, personalMeetingVisibility } from './meeting-visibility.js';
 import { meetingRange } from './meeting-range.js';
 import { v4 as uuidv4 } from 'uuid';
 import { generateMeetingCode, insertWithUniqueMeetingCodes } from './meeting-code.js';
@@ -404,7 +405,7 @@ app.post('/api/internal/meetings/:code/verify-access', express.json(), async (re
                  WHERE m.meeting_code = $1 AND i.invitee_user_id = $2`,
                 [code, userId]
             );
-            if (invResult.rows.length > 0 && invResult.rows[0].invitation_status !== 'revoked') {
+            if (invResult.rows.length > 0 && ['pending', 'accepted'].includes(invResult.rows[0].invitation_status)) {
                 return res.json({
                     valid: true,
                     isGuest: false,
@@ -423,6 +424,30 @@ app.post('/api/internal/meetings/:code/verify-access', express.json(), async (re
     } catch (err: any) {
         logger.warn('Error in verify-access: ' + err.message);
         res.status(503).json({ error: 'Access verification unavailable' });
+    }
+});
+
+// Only signaling can record attendance, after the authenticated participant enters the room.
+app.post('/api/internal/meetings/:code/attendance', async (req, res) => {
+    try {
+        jwt.verify((req.headers.authorization || '').replace(/^Bearer /, ''), serviceSecret('MEETING_POLICY_SECRET'), { algorithms: ['HS256'], audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', maxAge: 30 });
+    } catch { return res.status(401).json({ error: 'Invalid service authentication' }); }
+    const input = z.object({ userId: z.string().uuid(), tenantId: z.string().uuid(), displayName: z.string().min(1).max(255) }).safeParse(req.body);
+    if (!input.success) return res.status(400).json({ error: 'Invalid attendance' });
+    const { userId, tenantId, displayName } = input.data;
+    try {
+        await pool.runWithTenant(tenantId, () => pool.query(
+            `INSERT INTO meeting_participants (meeting_id, user_id, display_name)
+             SELECT meetings.id, users.id, $4 FROM meetings
+             JOIN users ON users.id = $3 AND users.tenant_id = meetings.tenant_id
+             WHERE meetings.meeting_code = $1 AND meetings.tenant_id = $2
+             ON CONFLICT (meeting_id, user_id) DO NOTHING`,
+            [String(req.params.code).toUpperCase(), tenantId, userId, displayName],
+        ));
+        res.sendStatus(204);
+    } catch (error) {
+        logger.error(error, 'Could not record meeting attendance');
+        res.sendStatus(503);
     }
 });
 
@@ -512,11 +537,27 @@ app.get('/api/meetings/code/:code/transcript', meetingCodeLookupLimit, authMiddl
     }
 });
 
-app.get('/api/meetings/code/:code', meetingCodeLookupLimit, async (req, res) => {
+app.get('/api/meetings/code/:code', meetingCodeLookupLimit, async (req, res, next) => {
+    if (req.headers.authorization) return next();
+    // Existing desktop clients check that a code exists before opening the join page.
     try {
+        const result = await pool.query('SELECT status FROM public.qsvc_meeting_by_code($1)', [String(req.params.code).toUpperCase()]);
+        res.setHeader('Cache-Control', 'no-store');
+        if (!result.rows.length) return res.status(404).json({ error: 'Meeting not found' });
+        return res.json({ status: result.rows[0].status });
+    } catch (error) {
+        logger.error(error, 'Failed to check meeting code');
+        return res.status(503).json({ error: 'Meeting lookup temporarily unavailable' });
+    }
+}, authMiddleware, async (req, res) => {
+    try {
+        const user = (req as any).user as AuthPayload;
         const result = await pool.query(
-            `SELECT * FROM public.qsvc_meeting_by_code($1)`,
-            [String(req.params.code).toUpperCase()]
+            `SELECT meetings.*, users.display_name AS host_name FROM meetings
+             LEFT JOIN users ON users.id = meetings.host_id AND users.tenant_id = meetings.tenant_id
+             WHERE meetings.meeting_code = $1 AND meetings.tenant_id = $2
+                 AND ($4::boolean OR ${personalMeetingVisibility('$3')} OR ${delegatedMeetingAccess('$3')})`,
+            [String(req.params.code).toUpperCase(), user.tenantId, user.sub, canViewOrganisationMeetings(user.role)]
         );
 
         if (result.rows.length === 0) {
@@ -524,6 +565,7 @@ app.get('/api/meetings/code/:code', meetingCodeLookupLimit, async (req, res) => 
         }
 
         const m = result.rows[0];
+        res.setHeader('Cache-Control', 'no-store');
         res.json({
             id: m.id,
             meetingCode: m.meeting_code,
@@ -892,8 +934,12 @@ app.post('/api/meetings/:code/validate-access', async (req, res) => {
         if (!meetingRes.rows.length) return res.status(404).json({ error: 'Meeting not found' });
         const meeting = meetingRes.rows[0];
 
-        // 1. Host or admin
-        if (user && (user.sub === meeting.host_id || user.role === 'admin')) {
+        // Keep the code-based join path available without revealing another tenant's details.
+        const tenantAdmin = user?.role === 'admin' && await pool.runWithTenant(user.tenantId, async () => {
+            const result = await pool.query('SELECT id FROM meetings WHERE id = $1 AND tenant_id = $2', [meeting.id, user.tenantId]);
+            return Boolean(result.rows.length);
+        });
+        if (user && (user.sub === meeting.host_id || tenantAdmin)) {
             return res.json({
                 authorized: true,
                 accessType: 'host',
@@ -911,7 +957,7 @@ app.post('/api/meetings/:code/validate-access', async (req, res) => {
                  WHERE meeting_id = $1 AND invitee_user_id = $2`,
                 [meeting.id, user.sub]
             );
-            if (invRes.rows.length > 0 && invRes.rows[0].invitation_status !== 'revoked') {
+            if (invRes.rows.length > 0 && ['pending', 'accepted'].includes(invRes.rows[0].invitation_status)) {
                 return res.json({
                     authorized: true,
                     accessType: 'invited_member',
@@ -963,8 +1009,6 @@ app.post('/api/meetings/:code/validate-access', async (req, res) => {
             authorized: true,
             accessType: 'open',
             role: 'participant',
-            title: meeting.title,
-            hostName: meeting.host_name,
             status: meeting.status,
         });
     } catch (err: any) {
@@ -1036,11 +1080,16 @@ app.get('/api/meetings', authMiddleware, async (req, res) => {
         try { range = meetingRange(req.query.start, req.query.end); }
         catch { return res.status(400).json({ error: 'Provide a valid start/end date range of up to 31 days.' }); }
 
-        let query = `SELECT * FROM meetings WHERE tenant_id = $1`;
-        const params: any[] = [user.tenantId];
-        let idx = 2;
+        let query = `SELECT meetings.*, ${delegatedMeetingAccess('$2', true)} AS delegated_control
+                     FROM meetings WHERE tenant_id = $1`;
+        const params: any[] = [user.tenantId, user.sub];
+        let idx = 3;
         // ?host=me lists only meetings the signed-in user created (their "Meetings I host" view).
-        if (req.query.host === 'me') { query += ` AND host_id = $${idx++}`; params.push(user.sub); }
+        if (req.query.host === 'me') {
+            query += ` AND host_id = $2`;
+        } else if (!canViewOrganisationMeetings(user.role)) {
+            query += ` AND (${personalMeetingVisibility('$2')} OR ${delegatedMeetingAccess('$2')})`;
+        }
 
         if (range) {
             query += ` AND COALESCE(scheduled_start, created_at) >= $${idx++} AND COALESCE(scheduled_start, created_at) < $${idx++}`;
@@ -1056,7 +1105,9 @@ app.get('/api/meetings', authMiddleware, async (req, res) => {
 
         const result = await pool.query(query, params);
 
+        res.setHeader('Cache-Control', 'no-store');
         res.json({
+            visibility: canViewOrganisationMeetings(user.role) && req.query.host !== 'me' ? 'organisation' : 'personal',
             meetings: result.rows.map((m: any) => ({
                 id: m.id,
                 meetingCode: m.meeting_code,
@@ -1070,7 +1121,8 @@ app.get('/api/meetings', authMiddleware, async (req, res) => {
                 createdAt: m.created_at,
                 hostId: m.host_id,
                 isHost: m.host_id === user.sub,
-                canCancel: m.host_id === user.sub || user.role === 'admin',
+                canCancel: m.host_id === user.sub || user.role === 'admin' || m.delegated_control,
+                canEnd: m.host_id === user.sub || m.delegated_control,
                 ...(m.host_id === user.sub ? { inviteToken: createMeetingInviteToken(m.meeting_code) } : {}),
             })),
             total: result.rowCount,
@@ -1090,7 +1142,7 @@ app.patch('/api/meetings/:id/schedule', authMiddleware, validateBody(editSchedul
     try {
         const result = await pool.query(
             `UPDATE meetings SET status = 'cancelled', updated_at = NOW()
-             WHERE id = $1 AND tenant_id = $2 AND (host_id = $3 OR $4)
+             WHERE id = $1 AND tenant_id = $2 AND (host_id = $3 OR $4 OR ${delegatedMeetingAccess('$3', true)})
                  AND scheduled_start IS NOT NULL AND status IN ('waiting', 'cancelled')
              RETURNING id, status, scheduled_start AS "scheduledStart", scheduled_end AS "scheduledEnd"`,
             [id.data, user.tenantId, user.sub, user.role === 'admin'],

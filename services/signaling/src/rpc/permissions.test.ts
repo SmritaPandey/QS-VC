@@ -138,6 +138,23 @@ describe('production meeting permissions', () => {
         } finally { vi.mocked(loadMeetingPolicy).mockResolvedValue(null); }
     });
 
+    it('uses the delegated administrator’s verified identity and rechecks the grant before ending', async () => {
+        const code = `DELEGATE-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+        const state = {
+            authUser: { sub: 'delegate', tenantId: 'tenant', managedMeetingOwnerIds: ['owner'] },
+            expectedMeetingCode: code,
+        };
+        const policy = { hostId: 'owner', status: 'active', settings: {} } as any;
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce(policy);
+        vi.mocked(endHostedMeetingStatus).mockRejectedValueOnce(new Error('Delegation revoked'));
+        expect((await rpc(socket(), state, 'endHostedMeeting', { meetingCode: code }))?.error?.message).toBe('Delegation revoked');
+        expect(endHostedMeetingStatus).toHaveBeenLastCalledWith(code, 'delegate', 'tenant', 'end');
+
+        vi.mocked(loadMeetingPolicy).mockResolvedValueOnce(policy);
+        expect((await rpc(socket(), state, 'endHostedMeeting', { meetingCode: code }))?.result).toEqual({ ended: true });
+        expect(endHostedMeetingStatus).toHaveBeenLastCalledWith(code, 'delegate', 'tenant', 'end');
+    });
+
     it('passes the verified tenant to storage and rejects a cross-tenant organiser spoof', async () => {
         const state = { authUser: { sub: 'owner', tenantId: 'other-tenant' }, expectedMeetingCode: 'ABC-123' };
         vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'active', settings: {} } as any);

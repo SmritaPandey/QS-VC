@@ -13,7 +13,7 @@ interface Options {
     storage?: RecordingStorage;
     authenticate?: (authorization: string) => Promise<Identity | null>;
     authorizeFeature?: (authorization: string | undefined, feature: string) => Promise<'allow' | 'deny' | 'unauthorized'>;
-    meeting?: (code: string) => Promise<Meeting | null>;
+    meeting?: (code: string, authorization: string | undefined) => Promise<Meeting | null>;
     maxUploadBytes?: number;
 }
 const codePattern = /^[A-Z0-9-]{1,30}$/;
@@ -39,9 +39,9 @@ async function authenticate(authorization: string): Promise<Identity | null> {
     if (!result.valid || typeof result.payload?.sub !== 'string' || typeof result.payload.tenantId !== 'string') return null;
     return result.payload;
 }
-async function loadMeeting(code: string): Promise<Meeting | null> {
+async function loadMeeting(code: string, authorization: string | undefined): Promise<Meeting | null> {
     const base = process.env.MEETING_INTERNAL_URL || 'http://localhost:4003';
-    const response = await fetch(`${base}/api/meetings/code/${encodeURIComponent(code)}`, { signal: AbortSignal.timeout(5000) });
+    const response = await fetch(`${base}/api/meetings/code/${encodeURIComponent(code)}`, { headers: authorization ? { Authorization: authorization } : {}, signal: AbortSignal.timeout(5000) });
     if (response.status === 404) return null;
     if (!response.ok) throw new Error('Meeting unavailable');
     const value = await response.json() as Meeting;
@@ -103,7 +103,7 @@ export function createRecordingApp(options: Options = {}) {
         if (!user) return null;
         const code = String(req.params.meetingCode);
         if (!codePattern.test(code)) { res.status(400).json({ error: 'Invalid meeting code.' }); return null; }
-        const value = await meeting(code);
+        const value = await meeting(code, req.headers.authorization);
         if (!value || value.hostId !== user.sub) { res.status(404).json({ error: 'Meeting not found.' }); return null; }
         // Hashing keeps caller-provided identity strings out of storage paths.
         return { user, meeting: value, code, prefix: `${accountPrefix(user)}${code}/` };

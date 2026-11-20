@@ -212,16 +212,17 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const initialMeetingTitle = typeof state.title === 'string' ? state.title.trim() : '';
     const [meetingTitle, setMeetingTitle] = useState(initialMeetingTitle);
     useEffect(() => {
-        if (!meetingCode || initialMeetingTitle) return;
+        const token = getToken();
+        if (!meetingCode || initialMeetingTitle || !signedIn || !token) return;
         const controller = new AbortController();
-        fetch(`${MEETING_API}/api/meetings/code/${encodeURIComponent(meetingCode)}`, { signal: controller.signal })
+        fetch(`${MEETING_API}/api/meetings/code/${encodeURIComponent(meetingCode)}`, { headers: { Authorization: `Bearer ${token}` }, signal: controller.signal })
             .then(response => response.ok ? response.json() : null)
             .then(meeting => {
                 if (typeof meeting?.title === 'string' && meeting.title.trim()) setMeetingTitle(meeting.title.trim());
             })
             .catch(() => { /* The room remains usable if its title is unavailable. */ });
         return () => controller.abort();
-    }, [meetingCode, initialMeetingTitle]);
+    }, [meetingCode, initialMeetingTitle, signedIn]);
     const displayedMeetingTitle = meetingTitle.length > MAX_MEETING_TITLE_LENGTH
         ? `${meetingTitle.slice(0, MAX_MEETING_TITLE_LENGTH - 1).trimEnd()}…`
         : meetingTitle || 'Meeting';

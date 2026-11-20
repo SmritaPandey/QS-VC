@@ -1,3 +1,4 @@
+import { meetingJoinPath } from '../lib/meeting-join-path';
 import { useSession } from '../lib/use-session';
 import ActionContents from '../components/ActionContents';
 import SiteNav from '../components/SiteNav';
@@ -145,9 +146,10 @@ export default function Landing() {
     };
 
     const handleJoin = () => {
-        const code = joinCode.trim().toUpperCase();
-        if (!code) return;
-        navigate(`/meeting/${encodeURIComponent(code)}/preview`);
+        const target = meetingJoinPath(joinCode, window.location.origin);
+        if (!target) { setSessionError('Enter a meeting code or the full invitation link from this website.'); return; }
+        setSessionError('');
+        navigate(target);
     };
 
     const handleExpired = useCallback(() => { setSessionError('Your session expired. Sign in to see your meetings.'); }, []);

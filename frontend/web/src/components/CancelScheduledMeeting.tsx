@@ -19,7 +19,7 @@ export default function CancelScheduledMeeting({ id, title, meetingCode, instant
 
     const cancel = async () => {
         if (pending.current || !window.confirm(active
-            ? `End “${title}” for everyone? Everyone in the meeting and waiting room will be disconnected. You can start it again with the same link.`
+            ? `End “${title}” for everyone? Everyone in the meeting and waiting room will be disconnected. The join link will stop working.`
             : `Cancel “${title}”? Its join link will stop working.${instant ? ' Anyone waiting to join will be disconnected.' : ' Update any external calendar invitations separately.'}`)) return;
         const token = getToken();
         if (!token) { onExpired?.(); return; }

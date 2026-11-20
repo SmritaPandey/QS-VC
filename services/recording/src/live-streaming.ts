@@ -11,7 +11,7 @@ type Meeting = { hostId: string | null; status: string; settings?: { allowRecord
 type Dependencies = {
     authenticate: (authorization: string) => Promise<Identity | null>;
     authorizeFeature: (authorization: string | undefined, feature: string) => Promise<'allow' | 'deny' | 'unauthorized'>;
-    meeting: (code: string) => Promise<Meeting | null>;
+    meeting: (code: string, authorization: string | undefined) => Promise<Meeting | null>;
     environment?: NodeJS.ProcessEnv;
     encoderAvailable?: () => boolean;
     startEncoder?: (destination: string) => ChildProcessWithoutNullStreams;
@@ -61,7 +61,7 @@ export function createLiveStreaming(dependencies: Dependencies) {
         if (!CODE.test(code) || !authorization?.startsWith('Bearer ')) return null;
         const user = await dependencies.authenticate(authorization);
         if (!user?.sub || !user.tenantId || await dependencies.authorizeFeature(authorization, 'cloud_recording') !== 'allow') return null;
-        const meeting = await dependencies.meeting(code);
+        const meeting = await dependencies.meeting(code, authorization);
         if (!meeting || meeting.hostId !== user.sub || meeting.status !== 'active' || meeting.settings?.e2eeRequired
             || meeting.settings?.allowRecording === false || meeting.settings?.recording_allowed === false) return null;
         return user;

@@ -17,6 +17,7 @@ import { v4 as uuidv4 } from 'uuid';
 import crypto from 'crypto';
 import dotenv from 'dotenv';
 import pino from 'pino';
+import { planMeetingAdmins } from './plan-meeting-admins.js';
 import { createSession, validateSession, requireEnterpriseTerm, endSession, sessionErrorStatus, InvalidSessionError } from './sessions.js';
 import { contactRouter, contactRequestError } from './contact.js';
 import { downloadLeadRequestError } from './download-leads.js';
@@ -203,6 +204,7 @@ async function verifyToken(token: string): Promise<jwt.JwtPayload> {
 // ROUTES
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+app.use('/api/auth/meeting-admins', planMeetingAdmins(pool, verifyToken));
 app.use('/api/auth/enterprise', enterpriseRouter(verifyToken, pool));
 app.use('/api/auth/admin', platformAdminAnalyticsRouter(verifyToken, pool));
 app.use('/api/auth/billing', billingRouter(pool, verifyToken, logger));
@@ -394,12 +396,17 @@ app.get('/api/auth/verify', async (req, res) => {
         }
         const role = effectiveRole(result.rows[0].email, result.rows[0].role);
         const entitlements = getEntitlements({ ...result.rows[0], role }, now);
+        const managed = await pool.query(
+            "SELECT owner_id FROM public.active_plan_meeting_admins WHERE tenant_id = $1 AND delegate_id = $2 AND role = 'admin'",
+            [payload.tenantId, payload.sub],
+        );
         res.set('Cache-Control', 'no-store');
         res.json({ valid: true, payload: {
             ...payload,
             role,
             plan: entitlements.plan,
             status: entitlements.status,
+            managedMeetingOwnerIds: managed.rows.map(row => row.owner_id),
             privateConversationLimitMs: getPrivateConversationLimitMs({ sub: payload.sub, role, ...entitlements }),
         } });
     } catch (err) {

@@ -39,3 +39,21 @@ export function getGuestHostToken(meetingCode: string): string | undefined {
     try { return sessionStorage.getItem(`qsvc:guest-host:${meetingCode.toUpperCase()}`) || undefined; }
     catch { return undefined; }
 }
+
+/** Adapt this account's tab-local schedule for the workspace without treating it as server data. */
+export function sessionMeetingRows(userId: string | undefined) {
+    if (!userId) return [];
+    try {
+        return readSessionMeetings(userId).map(meeting => ({
+            id: meeting.id,
+            meetingCode: meeting.id,
+            title: meeting.title,
+            status: Date.now() >= Date.parse(meeting.start) + DAY_MS ? 'expired' : 'waiting',
+            scheduledStart: meeting.start,
+            scheduledEnd: new Date(Date.parse(meeting.start) + meeting.duration * 60_000).toISOString(),
+            createdAt: meeting.start,
+            previewPath: meeting.previewPath,
+            isHost: true,
+        }));
+    } catch { return []; }
+}

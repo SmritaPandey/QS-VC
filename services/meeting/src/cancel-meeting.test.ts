@@ -26,7 +26,8 @@ it('atomically checks persisted host, tenant and live status inside the verified
     const { query, runWithTenant, response } = await end([{ id }]);
     expect(runWithTenant).toHaveBeenCalledWith(tenantId, expect.any(Function));
     expect(query).toHaveBeenCalledWith(expect.stringContaining("status IN ('active', 'ended')"), ['ABC-123', tenantId, hostId]);
-    expect(query.mock.calls[0][0]).toContain('meeting_code = $1 AND tenant_id = $2 AND host_id = $3');
+    expect(query.mock.calls[0][0]).toContain('meeting_code = $1 AND tenant_id = $2 AND (host_id = $3 OR EXISTS');
+    expect(query.mock.calls[0][0]).toContain("a.delegate_id = $3 AND a.role = 'admin'");
     expect(query.mock.calls[0][0]).toContain('actual_end = COALESCE(actual_end, NOW())');
     expect(response.json).toHaveBeenCalledWith({ updated: true });
 });
@@ -50,7 +51,7 @@ it('confirms dashboard cancellation only for the persisted owner’s waiting ins
     const { query, runWithTenant, response } = await end([{ id }], { hostId, tenantId, action: 'cancel' });
     expect(runWithTenant).toHaveBeenCalledWith(tenantId, expect.any(Function));
     expect(query).toHaveBeenCalledWith(expect.stringContaining("SET status = 'cancelled'"), ['ABC-123', tenantId, hostId]);
-    expect(query.mock.calls[0][0]).toContain('meeting_code = $1 AND tenant_id = $2 AND host_id = $3');
+    expect(query.mock.calls[0][0]).toContain('meeting_code = $1 AND tenant_id = $2 AND (host_id = $3 OR EXISTS');
     expect(query.mock.calls[0][0]).toContain("type = 'instant' AND scheduled_start IS NULL AND status IN ('waiting', 'cancelled')");
     expect(response.json).toHaveBeenCalledWith({ updated: true });
 });

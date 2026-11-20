@@ -250,6 +250,7 @@ export default function PreMeeting() {
         navigate(`/meeting/${meetingCode}${inviteQuery}`, {
             state: {
                 displayName: name,
+                title: typeof location.state?.title === 'string' ? location.state.title : undefined,
                 siteLocation: siteLocation.trim(),
                 audioMuted,
                 videoOff,

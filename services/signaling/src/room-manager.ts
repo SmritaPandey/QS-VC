@@ -40,6 +40,7 @@ export interface VerifiedSignalingUser {
     role?: string;
     plan?: Plan;
     status?: 'trial_active' | 'trial_expired' | 'paid_active' | 'enterprise_pending' | 'enterprise_approved' | 'enterprise_rejected';
+    managedMeetingOwnerIds?: string[];
     privateConversationLimitMs?: number | null;
 }
 
