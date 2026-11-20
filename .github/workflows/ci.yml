@@ -205,9 +205,20 @@ jobs:
           only-fixed: true
           # Reuse the vulnerability database between runs instead of downloading it per image.
           cache-db: true
-      - name: Retry scan when Grype produced no report
+      - name: Check whether the failed scan produced a usable report
+        id: grype-report
+        if: steps.grype.outcome == 'failure'
+        env:
+          REPORT: qsvc-${{ matrix.image }}.sarif
+        run: |
+          if jq -e '.version == "2.1.0" and (.runs | type == "array" and length > 0)' "$REPORT" >/dev/null 2>&1; then
+            echo "usable=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "usable=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Retry scan when Grype produced no usable report
         id: grype-retry
-        if: ${{ steps.grype.outcome == 'failure' && hashFiles(format('qsvc-{0}.sarif', matrix.image)) == '' }}
+        if: steps.grype.outcome == 'failure' && steps.grype-report.outputs.usable == 'false'
         continue-on-error: true
         uses: anchore/scan-action@v7
         env:
@@ -222,8 +233,15 @@ jobs:
           cache-db: false
       - name: Require a successful vulnerability scan
         if: ${{ !cancelled() && steps.grype.outcome == 'failure' && steps.grype-retry.outcome != 'success' }}
+        env:
+          IMAGE: ${{ matrix.image }}
         run: |
-          echo "::error::Grype did not complete a passing scan. Check the scan steps and the vulnerability report when available."
+          report="qsvc-$IMAGE.sarif"
+          if jq -e '.version == "2.1.0" and (.runs | type == "array" and length > 0)' "$report" >/dev/null 2>&1; then
+            echo "::error title=Grype scan failed for $IMAGE::See the scan log and the qsvc-$IMAGE-grype artifact for the blocking findings."
+          else
+            echo "::error title=Grype scan incomplete for $IMAGE::Neither attempt produced a usable SARIF report. See the Scan SBOM and retry logs for the scanner error."
+          fi
           exit 1
       - name: Upload vulnerability report
         if: ${{ !cancelled() }}
