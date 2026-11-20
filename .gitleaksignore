@@ -5,3 +5,7 @@ c0af3804e9d606375f8626c962b64165d3c07802:deploy/keycloak/compose.yml:generic-api
 
 # Verified false positive: empty TURN_PASSWORD quote matched across the next template line.
 c5f0c85912ea619ddf1380a072fccf9c4b4ef6e2:deploy/vc-onprem/native-linux/answers.example.env:generic-api-key:22
+
+# Verified test fixture: synthetic JWT sample for AI PII scrubbing unit test.
+04df8c657072f36bdb65a9663ea7e41240562231:services/signaling/src/ai/ai.test.ts:jwt:22
+04df8c657072f36bdb65a9663ea7e41240562231:services/signaling/src/ai/ai.test.ts:generic-api-key:22

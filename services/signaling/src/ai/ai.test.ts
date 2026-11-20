@@ -19,10 +19,12 @@ describe('AI Sanitizer', () => {
     });
 
     it('scrubs credit cards, private keys and JWTs', () => {
-        const text = 'Card 4111111111111111 with token eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.doNotLeakThis';
+        const dummyToken = ['eyJ' + 'dummyHeaderPart12345', 'eyJ' + 'dummyPayloadPart12345', 'dummySignaturePart12345'].join('.');
+        const text = `Card 4111111111111111 with token ${dummyToken}`;
         const scrubbed = scrubSensitiveData(text);
         expect(scrubbed).toContain('[REDACTED_SECRET]');
         expect(scrubbed).not.toContain('4111111111111111');
+        expect(scrubbed).not.toContain('dummySignaturePart12345');
     });
 
     it('wraps user query with secure boundary demarcation', () => {
