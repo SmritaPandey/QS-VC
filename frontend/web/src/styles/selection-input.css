@@ -1,17 +1,13 @@
-/* Adapted from Uiverse.io by PriyanshuGupta28 and JaydipPrajapati1910. */
 .qsvc-selection { position:relative; display:inline-flex; flex:0 0 40px; width:40px; height:40px; vertical-align:middle; align-items:center; justify-content:center; }
 .qsvc-selection input[type] { position:absolute !important; inset:0 !important; width:100% !important; height:100% !important; min-height:0 !important; margin:0 !important; padding:0 !important; opacity:0 !important; z-index:1; cursor:pointer; appearance:none; }
-.qsvc-selection svg { display:block; width:32px; height:32px; overflow:visible; pointer-events:none; }
-.checkbox-wrapper .background { fill:rgb(75,50,121); transition:fill .3s ease; }
-.checkbox-wrapper .stroke { fill:none; stroke:#fff; stroke-width:2; stroke-dashoffset:100; stroke-dasharray:100; transition:stroke-dashoffset .4s ease; }
-.checkbox-wrapper .check { fill:none; stroke:#fff; stroke-linecap:round; stroke-linejoin:round; stroke-width:2; stroke-dashoffset:22; stroke-dasharray:22; transition:stroke-dashoffset .3s ease; }
-.checkbox-wrapper input:hover:not(:disabled) + svg .check { stroke-dashoffset:0; }
-.checkbox-wrapper input:checked + svg .background { fill:#421c64; }
-.checkbox-wrapper input:checked + svg :is(.stroke,.check) { stroke-dashoffset:0; }
-.checkbox-wrapper input:indeterminate + svg .check { stroke-dashoffset:0; transform:translateY(1px) scaleY(.15); transform-origin:center; }
-.qsvc-selection input:focus-visible + :is(svg,.circle) { outline:3px solid var(--border-focus,#008b8b); outline-offset:4px; border-radius:50%; }
+.qsvc-selection :is(.circle,.qsvc-checkbox-indicator) { position:relative; box-sizing:border-box; width:100%; height:100%; background:var(--bg-secondary,#fff); border:1px solid var(--text-muted,#708493); pointer-events:none; }
+.qsvc-checkbox-indicator { border-radius:5px; }
+.qsvc-checkbox-indicator::after { content:''; position:absolute; width:6px; height:10px; inset:2px 0 0; margin-inline:auto; border:solid var(--accent-primary,#006d77); border-width:0 2px 2px 0; transform:rotate(45deg) scale(0); transition:transform .16s ease; }
+.checkbox-wrapper input:checked + .qsvc-checkbox-indicator::after { transform:rotate(45deg) scale(1); }
+.checkbox-wrapper input:indeterminate + .qsvc-checkbox-indicator::after { width:10px; height:2px; inset:0; margin:auto; border:0; background:var(--accent-primary,#006d77); transform:none; }
+.qsvc-selection input:focus-visible + :is(.circle,.qsvc-checkbox-indicator) { outline:3px solid var(--border-focus,#008b8b); outline-offset:3px; }
 .qsvc-selection input:disabled { cursor:not-allowed; }
-.qsvc-selection input:disabled + :is(svg,.circle) { opacity:.45; }
+.qsvc-selection input:disabled + :is(.circle,.qsvc-checkbox-indicator) { opacity:.55; }
 .qsvc-selection.is-switch { flex-basis:44px; width:44px; height:28px; }
 .is-switch .qsvc-switch-indicator { position:relative; display:block; width:42px; height:24px; border:1px solid #708493; border-radius:999px; background:#203242; pointer-events:none; transition:background-color .2s ease,border-color .2s ease; }
 .is-switch .qsvc-switch-indicator::after { content:''; position:absolute; top:3px; left:3px; width:16px; height:16px; border-radius:50%; background:#dce7ef; transition:transform .2s ease,background-color .2s ease; }
@@ -19,13 +15,14 @@
 .is-switch input:checked + .qsvc-switch-indicator::after { transform:translateX(18px); background:#fff; }
 .is-switch input:focus-visible + .qsvc-switch-indicator { outline:3px solid var(--border-focus,#008b8b); outline-offset:3px; }
 .is-switch input:disabled + .qsvc-switch-indicator { opacity:.45; }
-.radio-input .circle { position:relative; width:28px; height:28px; border-radius:50%; background:#171717; border:1px solid #708493; box-shadow:inset 2px 5px 10px #050505; transition:transform .2s ease,border-color .2s ease; pointer-events:none; }
-.radio-input .circle::after { content:''; position:absolute; inset:8px; border-radius:50%; background:#ffdf38; transform:scale(0) rotate(0); transition:transform .25s ease; }
-.radio-input input:checked + .circle { border-color:#ffdf38; box-shadow:none; }
-.radio-input input:checked + .circle::after { transform:scale(1) rotate(360deg); }
-@media(hover:hover) { .radio-input input:hover:not(:disabled) + .circle { transform:scale(1.12); box-shadow:none; } }
+.qsvc-selection:is(.radio-input,.checkbox-wrapper) { flex:0 0 20px; width:20px; height:20px; }
+.radio-input .circle { border-radius:50%; }
+.radio-input .circle::after { content:''; position:absolute; inset:4px; border-radius:50%; background:var(--accent-primary,#006d77); transform:scale(0); transition:transform .16s ease; }
+.qsvc-selection input:is(:checked,:indeterminate,:hover:not(:disabled)) + :is(.circle,.qsvc-checkbox-indicator) { border-color:var(--accent-primary,#006d77); }
+.radio-input input:checked + .circle::after { transform:scale(1); }
 @media(prefers-reduced-motion:reduce) { .qsvc-selection *, .qsvc-selection *::after { transition:none !important; } }
 @media(forced-colors:active) {
  .qsvc-selection input[type] { opacity:1 !important; appearance:auto; width:24px !important; height:24px !important; inset:8px !important; }
- .qsvc-selection :is(svg,.circle,.qsvc-switch-indicator) { display:none; }
+ .qsvc-selection:is(.radio-input,.checkbox-wrapper) input[type] { width:100% !important; height:100% !important; inset:0 !important; }
+ .qsvc-selection :is(.qsvc-checkbox-indicator,.circle,.qsvc-switch-indicator) { display:none; }
 }

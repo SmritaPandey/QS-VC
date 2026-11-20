@@ -34,8 +34,6 @@
 .payment-mode-badge--test { color: var(--text-primary); background: color-mix(in srgb, var(--accent-warning, #d7a83c) 16%, var(--bg-secondary)); }
 .payment-gateway.is-selected { border-color: var(--accent-primary); background: var(--surface-tint, #e7f6f3); }
 .payment-gateway:has(input:focus-visible) { outline: 3px solid color-mix(in srgb, var(--accent-primary) 42%, transparent); outline-offset: 2px; }
-.public-site .payment-page .payment-options .payment-gateway input[type="radio"] { appearance: none; box-sizing: border-box; flex: 0 0 20px; width: 20px; height: 20px; min-width: 20px; min-height: 20px; max-width: 20px; max-height: 20px; padding: 0; margin: 0; box-shadow: none; border: 1.5px solid var(--border-tone, #8ba0ab); border-radius: 50%; background: var(--bg-secondary); }
-.public-site .payment-page .payment-options .payment-gateway input[type="radio"]:checked { border: 6px solid var(--accent-primary); }
 .payment-gateway-copy { min-width: 0; }
 .payment-gateway strong, .payment-gateway small { display: block; }
 .payment-gateway strong { color: var(--text-primary); font-size: 17px; font-weight: 500; line-height: 1.35; }

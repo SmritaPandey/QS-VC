@@ -47,8 +47,8 @@
 .collaboration-card { padding:16px; border:1px solid #385063; border-radius:12px; margin-bottom:16px; }
 .collaboration-card>fieldset { min-width:0; padding:0; border:0; margin:0 0 12px; }
 .collaboration-poll-choice { display:flex; align-items:center; gap:10px; min-height:44px; margin-bottom:8px; }
-.collaboration-poll-choice>span:first-of-type { flex:1; overflow-wrap:anywhere; }
-.collaboration-poll-choice>span:last-child { color:#b5ced6; font-size:13px; white-space:nowrap; }
+.collaboration-poll-choice>.qsvc-selection + span { flex:1; overflow-wrap:anywhere; }
+.collaboration-poll-choice>span:nth-of-type(3) { color:#b5ced6; font-size:13px; white-space:nowrap; }
 .collaboration-poll-choice input { accent-color:#43d9c2; }
 .collaboration-author { color:#b5ced6; margin:0 0 8px; }
 .collaboration-answer { padding:12px; background:#16473f; border-radius:8px; }
