@@ -178,9 +178,9 @@ jobs:
           push: false
           load: true
           tags: qsvc-${{ matrix.image }}:latest
-          # Refresh Alpine packages even when the web runtime's base digest hasn't changed.
+          # Re-run apk upgrade even when the pinned Alpine base image hasn't changed.
           pull: ${{ matrix.image == 'web' }}
-          no-cache-filters: ${{ matrix.image == 'web' && 'runtime' || '' }}
+          no-cache-filters: ${{ matrix.image != 'sfu' && 'runtime' || '' }}
           # Unchanged layers (npm installs, the mediasoup worker) come from the cache.
           cache-from: type=gha,scope=qsvc-${{ matrix.image }}
           cache-to: type=gha,mode=max,scope=qsvc-${{ matrix.image }}
