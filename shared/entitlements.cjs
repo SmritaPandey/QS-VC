@@ -1,6 +1,7 @@
 'use strict';
 
 const PLAN_LEVEL = Object.freeze(require('./plan-levels.json'));
+const RECORDING_STORAGE_GIB = Object.freeze(require('./recording-storage-gib.json'));
 const PAID_PLANS = ['basic', 'starter', 'pro', 'business'];
 
 function isTrialPlan(plan) {
@@ -28,7 +29,7 @@ const FEATURE_MIN_PLAN = Object.freeze({
     ai_captions: 'starter',
     background_effects: 'basic',
     ai_noise_suppression: 'basic',
-    cloud_recording: 'pro',
+    cloud_recording: 'basic',
 });
 
 function can(user, feature) {
@@ -93,4 +94,4 @@ function getPrivateConversationLimitMs(user) {
         : PRIVATE_CONVERSATION_LIMIT_MS.guest;
 }
 
-module.exports = { PLAN_LEVEL, FEATURE_MIN_PLAN, PRIVATE_CONVERSATION_LIMIT_MS, can, resolvePlan, startTrial, getEntitlements, getPrivateConversationLimitMs };
+module.exports = { PLAN_LEVEL, RECORDING_STORAGE_GIB, FEATURE_MIN_PLAN, PRIVATE_CONVERSATION_LIMIT_MS, can, resolvePlan, startTrial, getEntitlements, getPrivateConversationLimitMs };

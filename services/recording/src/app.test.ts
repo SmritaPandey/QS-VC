@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { Server } from 'node:http';
+import type { Plan } from '../../../shared/entitlements.cjs';
 import { createRecordingApp } from './app.js';
 import type { RecordingStorage, StoredObject } from './storage.js';
 
@@ -7,6 +8,7 @@ const video = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc
 const objects = new Map<string, StoredObject>();
 let unavailable = false;
 let recordingAllowed = true;
+let hostPlan: Plan = 'basic';
 const storage: RecordingStorage = {
     async put(key, body, type, ifAbsent) { if (unavailable) throw Error('S3 unavailable'); if (ifAbsent && objects.has(key)) throw { $metadata: { httpStatusCode: 412 } }; objects.set(key, { body, type, size: body.length, modified: new Date() }); },
     async get(key) { return objects.get(key) || null; },
@@ -29,7 +31,7 @@ describe('private cloud recordings', () => {
     beforeAll(async () => {
         ({ server, base } = await listen(createRecordingApp({
             storage, maxUploadBytes: 1024,
-            authenticate: async authorization => authorization === 'Bearer expired' ? null : { sub: authorization === 'Bearer other' ? 'other' : 'host', tenantId: 'tenant' },
+            authenticate: async authorization => authorization === 'Bearer expired' ? null : { sub: authorization === 'Bearer other' ? 'other' : 'host', tenantId: 'tenant', plan: hostPlan },
             authorizeFeature: async () => recordingAllowed ? 'allow' : 'deny',
             meeting: async code => code === 'MISSING' ? null : { hostId: 'host', status: code === 'ENDED' ? 'ended' : code === 'CANCELLED' ? 'cancelled' : 'active', settings: code === 'NO-RECORD' ? { recording_allowed: false } : {} },
         })));
@@ -51,12 +53,12 @@ describe('private cloud recordings', () => {
         expect((await request('/NO-RECORD', 'POST', video)).status).toBe(403);
         expect(objects.size).toBe(0);
     });
-    it('rejects direct guest and Starter recording API calls with the Pro requirement', async () => {
+    it('rejects uploads from accounts without recording access', async () => {
         recordingAllowed = false;
         try {
             const response = await request('/DEMO', 'POST', video);
             expect(response.status).toBe(403);
-            expect(await response.json()).toEqual({ code: 'UPGRADE_REQUIRED', requiredPlan: 'pro', feature: 'cloud_recording' });
+            expect(await response.json()).toEqual({ code: 'UPGRADE_REQUIRED', requiredPlan: 'basic', feature: 'cloud_recording' });
             expect(objects.size).toBe(0);
         } finally { recordingAllowed = true; }
     });
@@ -76,6 +78,46 @@ describe('private cloud recordings', () => {
         expect(playback).toMatchObject({ url: expect.stringContaining('signed=yes'), expiresIn: 300 });
         expect((await request(`/DEMO/${item.id}/playback`, 'GET', undefined, 'other')).status).toBe(404);
         expect((await request(`/DEMO/${item.id}`, 'DELETE', undefined, 'other')).status).toBe(404);
+    });
+    it('lists account recordings across meetings and isolates the library by owner', async () => {
+        await upload();
+        const otherMeeting = await request('/SECOND', 'POST', video);
+        expect(otherMeeting.status).toBe(201);
+        const list = await (await request('/mine')).json() as { recordings: { meetingCode: string }[] };
+        expect(list.recordings.map(item => item.meetingCode)).toEqual(expect.arrayContaining(['SECOND', 'DEMO']));
+        const otherLibrary = await (await request('/mine', 'GET', undefined, 'other')).json();
+        expect(otherLibrary).toMatchObject({ recordings: [] });
+        expect((await request('/mine', 'GET', undefined, '')).status).toBe(401);
+    });
+    it.each([
+        ['basic', 2], ['starter', 5], ['pro', 15], ['business', 50], ['enterprise', 100],
+    ] as const)('allows %s to fill its %i GiB allowance and blocks the next upload', async (plan, quota) => {
+        hostPlan = plan;
+        const original = new Map(objects);
+        objects.clear();
+        try {
+            const seeded = await request('/QUOTA-SEED', 'POST', video);
+            expect(seeded.status).toBe(201);
+            const [[key, saved]] = objects;
+            objects.set(key, { ...saved, size: quota * 1024 ** 3 - video.length });
+
+            expect((await request('/DEMO', 'POST', video)).status).toBe(201);
+            const rejected = await request('/DEMO', 'POST', video);
+            expect(rejected.status).toBe(409);
+            expect(await rejected.json()).toMatchObject({ code: 'RECORDING_QUOTA_EXCEEDED' });
+
+            const { id } = await seeded.json() as { id: string };
+            recordingAllowed = false;
+            expect((await request(`/QUOTA-SEED/${id}/playback`)).status).toBe(200);
+            expect((await request(`/QUOTA-SEED/${id}`, 'DELETE')).status).toBe(204);
+            recordingAllowed = true;
+            expect((await request('/DEMO', 'POST', video)).status).toBe(201);
+        } finally {
+            objects.clear();
+            for (const [key, value] of original) objects.set(key, value);
+            hostPlan = 'basic';
+            recordingAllowed = true;
+        }
     });
     it('creates explicit share links; replacement and revocation invalidate previous tokens', async () => {
         const item = await upload();

@@ -393,7 +393,26 @@ describe('production meeting permissions', () => {
         for (const state of states) await handlePeerDisconnect(state);
         await handlePeerDisconnect(host);
     });
-    it('prevents co-hosts from managing hosts or fellow co-hosts or ending meetings', async () => {
+    it('keeps a started meeting open after everyone leaves and restores it from its active status', async () => {
+        const settings = { meetingKind: 'conference' as const, waitingRoomEnabled: true, allowChat: true, allowScreenShare: false, allowRecording: true };
+        for (const restored of [false, true]) {
+            const code = `REJOIN-${crypto.randomUUID().slice(0, 8).toUpperCase()}`;
+            if (restored) {
+                vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'active', settings });
+            } else {
+                const host = { authUser: { sub: 'owner' } };
+                vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'waiting', settings });
+                expect((await rpc(socket(), host, 'joinRoom', { meetingCode: code, displayName: 'Host' }))?.error).toBeUndefined();
+                await handlePeerDisconnect(host);
+            }
+            const attendee = { authUser: { sub: 'attendee' } };
+            const joined = await rpc(socket(), attendee, 'joinRoom', { meetingCode: code, displayName: 'Attendee' });
+            expect(joined?.result?.roomId).toBeDefined();
+            expect((await rpc(socket(), {}, 'joinRoom', { meetingCode: code, displayName: 'Guest' }))?.result.status).toBe('waiting');
+            await handlePeerDisconnect(attendee);
+        }
+    });
+    it('prevents co-hosts from managing hosts or fellow co-hosts but lets them end the meeting', async () => {
         const code = `roles-${crypto.randomUUID().slice(0, 10)}`;
         const sockets = [socket(),socket(),socket()], states: any[] = [{ authUser: { sub: 'host-user' } }, {}, {}];
         for(let i=0;i<3;i++) await rpc(sockets[i], states[i], 'joinRoom', { meetingCode: code, displayName: `User${i}` });
@@ -403,8 +422,10 @@ describe('production meeting permissions', () => {
             expect((await rpc(sockets[1],states[1],'kickPeer',{targetPeerId:target.peerId}))?.error?.code).toBe(-32005);
             expect((await rpc(sockets[1],states[1],'hostMutePeer',{targetPeerId:target.peerId}))?.error?.code).toBe(-32005);
         }
-        expect((await rpc(sockets[1],states[1],'endMeeting'))?.error?.code).toBe(-32005);
         expect(roomManager.getRoom(states[0].roomId)?.peers.size).toBe(3);
+        expect((await rpc(sockets[1], states[1], 'endMeeting'))?.error).toBeUndefined();
+        const returning = { authUser: { sub: 'host-user' } };
+        expect((await rpc(socket(), returning, 'joinRoom', { meetingCode: code, displayName: 'Host' }))?.error?.message).toMatch(/ended/i);
         for(const state of states.reverse()) await handlePeerDisconnect(state);
     });
     it('routes collaboration only to joined peers in their own room', async () => {

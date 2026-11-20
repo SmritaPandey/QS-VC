@@ -128,6 +128,7 @@ export default function App() {
                 <Route path="/meeting/:meetingCode/preview" element={<OnPremAccess><PreMeeting /></OnPremAccess>} />
                 <Route path="/meeting/:meetingCode" element={<OnPremAccess><MeetingRoom /></OnPremAccess>} />
                 <Route path="/meeting-end" element={<MeetingEnd />} />
+                <Route path="/recordings" element={<RecordingPlayback />} />
                 <Route path="/recordings/:meetingId" element={<RecordingPlayback />} />
                 <Route path="/recordings/shared/:shareToken" element={<RecordingPlayback />} />
                 <Route path="/admin" element={<AdminDashboard />} />

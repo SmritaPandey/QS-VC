@@ -30,11 +30,16 @@ export async function reportMeetingStatus(code: string, status: 'active' | 'ende
     const base = process.env.MEETING_INTERNAL_URL || 'http://localhost:4003';
     const token = jwt.sign({}, serviceSecret('MEETING_POLICY_SECRET'), { audience: 'qsvc-meeting-policy', issuer: 'qsvc-internal', expiresIn: 30 });
     try {
-        await fetch(`${base}/api/internal/meetings/${encodeURIComponent(code)}/status`, {
+        const response = await fetch(`${base}/api/internal/meetings/${encodeURIComponent(code)}/status`, {
             method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ status }), signal: AbortSignal.timeout(4000),
         });
-    } catch { /* The live meeting does not depend on this record. */ }
+        if (status === 'ended' && (!response.ok || (await response.json() as { updated?: boolean }).updated !== true)) {
+            throw new Error('Meeting end was not confirmed.');
+        }
+    } catch {
+        if (status === 'ended') throw new Error('The meeting end could not be saved. Try again.');
+    }
 }
 
 /** Dashboard controls must confirm the persisted tenant/owner and save the terminal state. */

@@ -161,7 +161,7 @@ export default function HostMeetingTools({ broadcastSlotRef, roomDevicesEnabled,
                 </li>)}</ul>
             </section>
             {role === 'host' && broadcastSlotRef && <div ref={broadcastSlotRef} />}
-            {role === 'host' && <div className="host-tools-end"><button type="button" disabled={busy} onClick={() => onEndMeeting?.()}><span className="mi mi-sm" aria-hidden="true">call_end</span>End meeting for everyone</button></div>}
+            <div className="host-tools-end"><button type="button" disabled={busy} onClick={() => onEndMeeting?.()}><span className="mi mi-sm" aria-hidden="true">call_end</span>End meeting for everyone</button></div>
         </div>
     </aside>;
 }

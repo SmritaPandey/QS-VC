@@ -20,12 +20,12 @@ export default function RecordingPlayback() {
     const mounted = useRef(true);
     const [pending, setPending] = useState(recordingManager.pending);
     useEffect(() => { const warn = (event: BeforeUnloadEvent) => { if (recordingManager.pending) { event.preventDefault(); event.returnValue = ''; } }; window.addEventListener('beforeunload', warn); return () => window.removeEventListener('beforeunload', warn); }, []);
-    const base = encodeURIComponent(meetingId);
+    const listing = meetingId ? `meeting/${encodeURIComponent(meetingId)}` : 'mine';
     useEffect(() => {
         mounted.current = true;
         const controller = new AbortController();
         setLoading(true); setError(''); setVideo('');
-        const path = shareToken ? `shared/${encodeURIComponent(shareToken)}` : `meeting/${base}`;
+        const path = shareToken ? `shared/${encodeURIComponent(shareToken)}` : listing;
         recordingRequest(path, { signal: controller.signal }, !!shareToken).then(result => {
             if (!mounted.current) return;
             if (shareToken) setVideo(result.url);
@@ -35,13 +35,13 @@ export default function RecordingPlayback() {
         })
             .finally(() => { if (mounted.current) setLoading(false); });
         return () => { mounted.current = false; controller.abort(); };
-    }, [base, shareToken]);
+    }, [listing, shareToken]);
 
     const action = async (recording: CloudRecording, kind: 'play' | 'download' | 'delete' | 'share' | 'revoke') => {
         if (busy) return;
         document.querySelectorAll<HTMLDetailsElement>('.recordings-actions[open]').forEach(menu => { menu.open = false; menu.querySelector('summary')?.focus(); });
         setBusy(recording.id); setError(''); setNotice('');
-        const path = `${base}/${encodeURIComponent(recording.id)}`;
+        const path = `${encodeURIComponent(recording.meetingCode)}/${encodeURIComponent(recording.id)}`;
         try {
             if (kind === 'play' || kind === 'download') {
                 const result = await recordingRequest(`${path}/playback`);
@@ -49,7 +49,7 @@ export default function RecordingPlayback() {
                 else {
                     const response = await fetch(result.url);
                     if (!response.ok) throw new Error('Download failed. Try again.');
-                    recordingManager.downloadLocally(await response.blob(), `QS-VC-${meetingId}-${recording.id}.${recording.format}`);
+                    recordingManager.downloadLocally(await response.blob(), `QS-VC-${recording.meetingCode}-${recording.id}.${recording.format}`);
                     setNotice('Download requested. Check your browser’s downloads.');
                 }
             } else if (kind === 'delete') {
@@ -74,7 +74,7 @@ export default function RecordingPlayback() {
     };
     return <div className="public-site recordings-page"><SiteNav /><main id="main-content" className="recordings-shell">
         <Link className="recordings-back" to="/app">← Back to meetings</Link>
-        <header><div><h1 id="recordings-title" tabIndex={-1}>{shareToken ? 'Shared recording' : 'Meeting recordings'}</h1><p>{shareToken ? 'This recording was shared by its host.' : 'Saved privately until you delete them. Downloads start only when you choose.'}</p></div>{!shareToken && <span className="recordings-code">{meetingId}</span>}</header>
+        <header><div><h1 id="recordings-title" tabIndex={-1}>{shareToken ? 'Shared recording' : meetingId ? 'Meeting recordings' : 'My recordings'}</h1><p>{shareToken ? 'This recording was shared by its host.' : 'Saved privately until you delete them. Downloads start only when you choose.'}</p></div>{meetingId && !shareToken && <span className="recordings-code">{meetingId}</span>}</header>
         {pending && <section className="recordings-message" aria-label="Unsaved recording"><h2>Recording waiting to save</h2><p>Keep this tab open. This copy is only in memory until upload succeeds.</p><details className="recordings-actions"><summary aria-label="Unsaved recording actions"><span className="mi" aria-hidden="true">more_horiz</span></summary><div className="recordings-menu"><button type="button" disabled={!!busy} onClick={async () => {
             setBusy('pending'); setError('');
             try { await recordingManager.uploadRecording(pending.meetingCode, pending.blob, pending.id); recordingManager.pending = null; setPending(null); setNotice('Recording saved. Reload to refresh the list.'); }
@@ -88,7 +88,7 @@ export default function RecordingPlayback() {
         {!loading && !shareToken && !recordings.length && !error && <div className="recordings-empty"><h2>No recordings yet</h2><p>Sign in as the meeting host, then choose Record in the meeting’s More menu.</p></div>}
         {!shareToken && <ul className="recordings-list">{recordings.map(recording => <li key={recording.id}>
             <button type="button" className="recordings-play" disabled={!!busy} onClick={() => void action(recording, 'play')} aria-label={`Play recording from ${new Date(recording.createdAt).toLocaleString()}`}><span className="mi" aria-hidden="true">play_arrow</span></button>
-            <div className="recordings-info"><h2>{new Date(recording.createdAt).toLocaleString()}</h2><p>{(recording.size / 1024 / 1024).toFixed(1)} MB · {recording.format.toUpperCase()}</p></div>
+            <div className="recordings-info"><h2>{new Date(recording.createdAt).toLocaleString()}</h2><p>{(recording.size / 1024 / 1024).toFixed(1)} MB · {recording.format.toUpperCase()}{!meetingId && ` · ${recording.meetingCode}`}</p></div>
             <details className="recordings-actions" onKeyDown={event => { if (event.key === 'Escape') { event.currentTarget.open = false; event.currentTarget.querySelector('summary')?.focus(); } }}><summary id={`actions-${recording.id}`} aria-label={`Actions for recording from ${new Date(recording.createdAt).toLocaleString()}`}><span className="mi" aria-hidden="true">more_horiz</span></summary><div className="recordings-menu">
                 <button type="button" disabled={!!busy} onClick={() => void action(recording, 'download')}>Download</button>
                 <button type="button" disabled={!!busy} onClick={() => void action(recording, 'share')}>Create share link</button>
@@ -100,7 +100,7 @@ export default function RecordingPlayback() {
         </li>)}</ul>}
         {!shareToken && nextCursor && <button type="button" disabled={!!busy} onClick={async () => {
             setBusy('page'); setError('');
-            try { const result = await recordingRequest(`meeting/${base}?cursor=${encodeURIComponent(nextCursor)}`); setRecordings(current => [...current, ...result.recordings].filter((item, index, all) => all.findIndex(other => other.id === item.id) === index)); setNextCursor(result.nextCursor); }
+            try { const result = await recordingRequest(`${listing}?cursor=${encodeURIComponent(nextCursor)}`); setRecordings(current => [...current, ...result.recordings].filter((item, index, all) => all.findIndex(other => other.id === item.id) === index)); setNextCursor(result.nextCursor); }
             catch { setError('Could not load more recordings. Try again.'); }
             finally { setBusy(''); }
         }}>Load more recordings</button>}

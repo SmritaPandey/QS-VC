@@ -36,10 +36,11 @@ it.each([
     () => Promise.resolve(Response.json({ updated: false })),
     () => Promise.resolve(Response.json({ updated: true }, { status: 503 })),
     () => Promise.reject(new Error('network failed')),
-])('requires confirmed persistence for dashboard ending, while keeping in-call reporting best effort', async reply => {
+])('requires confirmed persistence for both ways to end and keeps start reporting best effort', async reply => {
     vi.stubGlobal('fetch', vi.fn().mockImplementation(reply));
     await expect(endHostedMeetingStatus('ABC-123', 'host', 'tenant')).rejects.toThrow();
-    await expect(reportMeetingStatus('ABC-123', 'ended')).resolves.toBeUndefined();
+    await expect(reportMeetingStatus('ABC-123', 'ended')).rejects.toThrow();
+    await expect(reportMeetingStatus('ABC-123', 'active')).resolves.toBeUndefined();
 });
 it('accepts a confirmed end update', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ updated: true })));

@@ -30,10 +30,13 @@ const roomTeardowns = new WeakMap<object, Promise<void>>();
 const dashboardControls = new WeakMap<object, { sub: string; tenantId: string; action: 'end' | 'cancel'; promise: Promise<void> }>();
 const cancelledRooms = new WeakSet<object>();
 const endedCodes = new Map<string, number>();
+const startedSessionCodes = new Map<string, number>();
 const sessionInviteExpirations = new WeakMap<RoomState, number>();
 const endedCodeCleanup = setInterval(() => {
     const now = Date.now();
-    for (const [code, expiry] of endedCodes) if (expiry <= now) endedCodes.delete(code);
+    for (const codes of [endedCodes, startedSessionCodes]) {
+        for (const [code, expiry] of codes) if (expiry <= now) codes.delete(code);
+    }
 }, 60_000);
 endedCodeCleanup.unref();
 const roomEpochs = new WeakMap<object, number>();
@@ -292,7 +295,9 @@ async function endRoomForEveryone(roomId: string, by: string, peerId?: string, a
     endingRooms.add(room);
     if (action === 'cancel') cancelledRooms.add(room);
     if (action === 'end' && !room.parentRoomId) {
-        endedCodes.set(room.meetingCode.trim().toUpperCase(), sessionInviteExpirations.get(room) ?? Date.now() + 86_400_000);
+        const code = room.meetingCode.trim().toUpperCase();
+        startedSessionCodes.delete(code);
+        endedCodes.set(code, sessionInviteExpirations.get(room) ?? Date.now() + 86_400_000);
     }
     roomEpochs.set(room, (roomEpochs.get(room) || 0) + 1);
     const reason = action === 'cancel' ? 'Host cancelled the meeting' : 'Host ended the meeting';
@@ -713,6 +718,7 @@ export async function handleRpcMessage(
                     inviteToken,
                 });
                 checkMeetingOpen();
+                if (policy?.status === 'active' || (startedSessionCodes.get(codeKey) ?? 0) > Date.now()) room.hostStarted = true;
                 const isInvited = sessionMeeting || verifyMeetingInviteToken(meetingCode, inviteToken) || !!verifiedAccess?.isInvited;
                 const isGuestUser = !signedIn || Boolean(guestToken || verifiedAccess?.isGuest);
                 const directEntry = canEnterWithoutApproval(room, connectionState.authUser, isGuestUser);
@@ -807,6 +813,7 @@ export async function handleRpcMessage(
                 const me = room.peers.get(peerId);
                 if (me?.role === 'host' && joined?.result) joined.result.inviteToken = sessionMeeting ? inviteToken : createMeetingInviteToken(meetingCode);
                 if (me?.role === 'host') {
+                    if (sharedSchedule) startedSessionCodes.set(codeKey, sharedSchedule.expiresAt);
                     if (!sessionMeeting && !hostWasPresent && room.ownerUserId) void reportMeetingStatus(room.meetingCode, 'active');
                     // Let the host's client finish its join before others stream in.
                     setTimeout(() => { void releaseAwaitingHost(room.id); }, 250);
@@ -1700,15 +1707,15 @@ export async function handleRpcMessage(
             case 'endMeeting': {
                 const { peerId, roomId } = connectionState;
                 if (!peerId || !roomId) throw createError(-32000, 'Not joined a room');
-                if (roomManager.getRoom(roomId)?.peers.get(peerId)?.role !== 'host') {
-                    throw createError(-32005, 'Only host can end meeting');
+                if (!roomManager.isHostOrCoHost(roomId, peerId)) {
+                    throw createError(-32005, 'Only the host or co-host can end the meeting');
                 }
 
                 const room = roomManager.getRoom(roomId);
-                const teardown = endRoomForEveryone(roomId, connectionState.displayName || 'Host', peerId);
-                const persisted = room?.ownerUserId && !isSessionMeetingCode(room.meetingCode)
-                    ? reportMeetingStatus(room.meetingCode, 'ended') : undefined;
-                await Promise.all([teardown, persisted]);
+                if (room?.ownerUserId && !room.parentRoomId && !isSessionMeetingCode(room.meetingCode)) {
+                    await reportMeetingStatus(room.meetingCode, 'ended');
+                }
+                await endRoomForEveryone(roomId, connectionState.displayName || 'Host', peerId);
 
                 return { jsonrpc: '2.0', id: id!, result: { ended: true } };
             }

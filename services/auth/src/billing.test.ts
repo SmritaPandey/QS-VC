@@ -884,8 +884,7 @@ it.each((['basic', 'starter', 'pro', 'business'] as const).flatMap(plan =>
     }
     expect(queries.filter(query => query.sql.includes('UPDATE public.users SET subscription_plan'))).toHaveLength(1);
     expect(account).toMatchObject({ subscription_plan: plan, subscription_expires_at: expectedEnd });
-    const expectedFeatures = plan === 'basic' ? ['background_effects', 'ai_noise_suppression']
-        : plan === 'starter' ? ['meeting_scheduling', 'ai_captions', 'background_effects', 'ai_noise_suppression']
+    const expectedFeatures = plan === 'basic' ? ['background_effects', 'ai_noise_suppression', 'cloud_recording']
             : ['meeting_scheduling', 'ai_captions', 'background_effects', 'ai_noise_suppression', 'cloud_recording'];
     expect(getEntitlements(account)).toMatchObject({ plan, status: 'paid_active', trialUsed: true, features: expectedFeatures });
     expect(getEntitlements(account, expectedEnd)).toMatchObject({ plan, status: 'paid_expired', features: [] });

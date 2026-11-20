@@ -63,6 +63,37 @@ echo "Verified and staged $staged desktop package(s)"
 # 3. Install the approved source artifact
 # 4. Build and test the new Docker images
 
+echo "Verifying private recording storage with the recording container..."
+
+docker compose -f "$COMPOSE" --env-file "$ENV_FILE" run --rm --no-deps -T recording node --input-type=module <<'NODE'
+import { randomUUID } from 'node:crypto';
+import { createS3Storage } from './services/recording/dist/storage.js';
+
+const storage = createS3Storage(process.env.RECORDING_BUCKET);
+const key = `recordings/deployment-check/${randomUUID()}.webm`;
+const body = Buffer.from('QS-VC private storage test');
+try {
+    if (await storage.head(key)) throw new Error('Unexpected existing storage test object');
+    await storage.put(key, body, 'video/webm', true);
+    const page = await storage.list(key);
+    if (!page.objects.some(item => item.key === key && item.size === body.length)) {
+        throw new Error('Recording storage did not report the uploaded bytes');
+    }
+    const origin = new URL(process.env.WEB_URL).origin;
+    const response = await fetch(await storage.playback(key), { headers: { Origin: origin }, signal: AbortSignal.timeout(10000) });
+    if (response.headers.get('access-control-allow-origin') !== origin) {
+        throw new Error('Recording storage does not allow downloads from the website origin');
+    }
+    if (!response.ok || !body.equals(Buffer.from(await response.arrayBuffer()))) {
+        throw new Error('Recording storage could not return the uploaded bytes');
+    }
+} finally {
+    await storage.remove(key);
+}
+if (await storage.head(key)) throw new Error('Recording storage test object was not removed');
+console.log('Private recording storage upload, listing, download and cleanup verified.');
+NODE
+
 echo "Retrieving temporary migration credentials..."
 
 # Preferred: SSM Parameter Store (SecureString). Fallback: MIGRATION_DATABASE_URL in the

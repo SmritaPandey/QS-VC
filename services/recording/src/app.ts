@@ -4,10 +4,10 @@ import rateLimit from 'express-rate-limit';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createS3Storage, type RecordingStorage } from './storage.js';
 import { createLiveStreaming } from './live-streaming.js';
-import { FEATURE_MIN_PLAN } from '../../../shared/entitlements.cjs';
+import { FEATURE_MIN_PLAN, RECORDING_STORAGE_GIB, type Plan } from '../../../shared/entitlements.cjs';
 
 export const MAX_RECORDING_BYTES = 80 * 1024 * 1024;
-interface Identity { sub: string; tenantId: string }
+interface Identity { sub: string; tenantId: string; plan?: Plan; role?: string }
 interface Meeting { hostId: string | null; status: string; settings?: { allowRecording?: boolean; recording_allowed?: boolean; e2eeRequired?: boolean } }
 interface Options {
     storage?: RecordingStorage;
@@ -19,7 +19,14 @@ interface Options {
 const codePattern = /^[A-Z0-9-]{1,30}$/;
 const idPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
+const recordingFilename = /^([a-f0-9-]+)\.(mp4|webm)$/;
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+const accountPrefix = (user: Identity) => `recordings/${hash(user.tenantId)}/${hash(user.sub)}/`;
+const quotaGiB = (user: Identity) => {
+    if (user.role === 'admin') return RECORDING_STORAGE_GIB.enterprise;
+    const plan = user.plan?.replace(/_trial$/, '') as keyof typeof RECORDING_STORAGE_GIB | undefined;
+    return plan ? RECORDING_STORAGE_GIB[plan] ?? 0 : 0;
+};
 const bytes = (value: unknown) => Buffer.from(JSON.stringify(value));
 const parse = (value: { body: Uint8Array } | null) => value ? JSON.parse(Buffer.from(value.body).toString('utf8')) : null;
 
@@ -63,6 +70,7 @@ export function createRecordingApp(options: Options = {}) {
     const meeting = options.meeting || loadMeeting;
     const maxBytes = options.maxUploadBytes || MAX_RECORDING_BYTES;
     let uploads = 0;
+    const savingAccounts = new Set<string>();
     app.disable('x-powered-by');
     app.use(cors({ origin: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:5173'], methods: ['GET', 'POST', 'DELETE'], credentials: true }));
     app.use('/api', (_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
@@ -81,13 +89,15 @@ export function createRecordingApp(options: Options = {}) {
         if (!user || !user.sub || !user.tenantId) { res.status(401).json({ error: 'Your session expired. Sign in again.' }); return null; }
         return user;
     };
-    const owner = async (req: Request, res: Response) => {
-        const authorization = req.headers.authorization;
-        const access = await authorize(typeof authorization === 'string' ? authorization : undefined, 'cloud_recording');
-        if (access === 'unauthorized') { res.status(401).json({ error: 'Your session expired. Sign in again.' }); return null; }
-        if (access === 'deny') {
-            res.status(403).json({ code: 'UPGRADE_REQUIRED', requiredPlan: FEATURE_MIN_PLAN.cloud_recording, feature: 'cloud_recording' });
-            return null;
+    const owner = async (req: Request, res: Response, writing = false) => {
+        if (writing) {
+            const authorization = req.headers.authorization;
+            const access = await authorize(typeof authorization === 'string' ? authorization : undefined, 'cloud_recording');
+            if (access === 'unauthorized') { res.status(401).json({ error: 'Your session expired. Sign in again.' }); return null; }
+            if (access === 'deny') {
+                res.status(403).json({ code: 'UPGRADE_REQUIRED', requiredPlan: FEATURE_MIN_PLAN.cloud_recording, feature: 'cloud_recording' });
+                return null;
+            }
         }
         const user = await identity(req, res);
         if (!user) return null;
@@ -96,7 +106,7 @@ export function createRecordingApp(options: Options = {}) {
         const value = await meeting(code);
         if (!value || value.hostId !== user.sub) { res.status(404).json({ error: 'Meeting not found.' }); return null; }
         // Hashing keeps caller-provided identity strings out of storage paths.
-        return { user, meeting: value, code, prefix: `recordings/${hash(user.tenantId)}/${hash(user.sub)}/${code}/` };
+        return { user, meeting: value, code, prefix: `${accountPrefix(user)}${code}/` };
     };
     const locate = async (req: Request, res: Response) => {
         const scope = await owner(req, res);
@@ -123,21 +133,28 @@ export function createRecordingApp(options: Options = {}) {
         if (!item) return res.status(404).json({ error: 'This recording is no longer shared.' });
         return res.json({ url: await storage!.playback(pointer.key), expiresIn: 300, recording: { id: pointer.id, meetingCode: pointer.meetingCode, format: pointer.format, createdAt: item.modified.toISOString(), size: item.size } });
     }));
-    app.get('/api/recordings/meeting/:meetingCode', route(async (req, res) => {
-        const scope = await owner(req, res);
-        if (!scope) return;
+    const listRecordings = async (req: Request, res: Response, prefix: string, code?: string) => {
         const cursor = req.query.cursor;
         if (cursor !== undefined && (typeof cursor !== 'string' || cursor.length > 4096)) return res.status(400).json({ error: 'Invalid page cursor.' });
-        const page = await storage!.list(scope.prefix, cursor as string | undefined);
+        const page = await storage!.list(prefix, cursor);
         return res.json({ recordings: page.objects.flatMap(item => {
-            const name = item.key.slice(scope.prefix.length);
-            const [id, format] = name.split('.');
-            return idPattern.test(id) && ['mp4', 'webm'].includes(format) && name === `${id}.${format}`
-                ? [{ id, meetingCode: scope.code, createdAt: item.modified.toISOString(), size: item.size, format }] : [];
+            const relative = item.key.slice(prefix.length);
+            const [meetingCode, name, extra] = code ? [code, relative] : relative.split('/');
+            const match = name?.match(recordingFilename);
+            return codePattern.test(meetingCode) && extra === undefined && match && idPattern.test(match[1])
+                ? [{ id: match[1], meetingCode, createdAt: item.modified.toISOString(), size: item.size, format: match[2] }] : [];
         }).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), nextCursor: page.nextCursor || null });
+    };
+    app.get('/api/recordings/mine', route(async (req, res) => {
+        const user = await identity(req, res);
+        if (user) return listRecordings(req, res, accountPrefix(user));
+    }));
+    app.get('/api/recordings/meeting/:meetingCode', route(async (req, res) => {
+        const scope = await owner(req, res);
+        if (scope) return listRecordings(req, res, scope.prefix, scope.code);
     }));
     app.post('/api/recordings/:meetingCode', route(async (req, res) => {
-        const scope = await owner(req, res);
+        const scope = await owner(req, res, true);
         if (!scope) return;
         const settings = scope.meeting.settings;
         // The final upload can arrive after the host ends the live meeting.
@@ -161,15 +178,35 @@ export function createRecordingApp(options: Options = {}) {
         if (!isVideo) return res.status(415).json({ error: 'The uploaded file is not a supported recording.' });
         const id = requestedId || randomUUID(), format = type === 'video/mp4' ? 'mp4' : 'webm';
         const key = `${scope.prefix}${id}.${format}`;
-        try { await storage!.put(key, body, type, true); }
-        catch (error) {
-            const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-            if (status !== 412) throw error;
+        const prefix = accountPrefix(scope.user);
+        if (savingAccounts.has(prefix)) return res.status(503).json({ error: 'Another recording is saving to your account. Try again shortly.' });
+        savingAccounts.add(prefix);
+        try {
+            const response = (createdAt: Date, status: number) =>
+                res.status(status).json({ id, meetingCode: scope.code, createdAt: createdAt.toISOString(), size: body.length, format });
             const existing = await storage!.head(key);
-            if (!existing || existing.size !== body.length || existing.type !== type) return res.status(409).json({ error: 'Recording identifier already belongs to another upload.' });
-            return res.status(200).json({ id, meetingCode: scope.code, createdAt: existing.modified.toISOString(), size: existing.size, format });
+            if (existing) {
+                if (existing.size !== body.length || existing.type !== type) return res.status(409).json({ error: 'Recording identifier already belongs to another upload.' });
+                return response(existing.modified, 200);
+            }
+            const quota = quotaGiB(scope.user);
+            const capacity = quota * 1024 ** 3;
+            let usage = 0;
+            let cursor: string | undefined;
+            do {
+                const page = await storage!.list(prefix, cursor);
+                usage += page.objects.reduce((total, item) =>
+                    recordingFilename.test(item.key.slice(item.key.lastIndexOf('/') + 1)) ? total + item.size : total, 0);
+                if (usage + body.length > capacity) {
+                    return res.status(409).json({ code: 'RECORDING_QUOTA_EXCEEDED', error: `Your ${quota} GiB cloud recording allowance is full. Delete a recording or download this copy to your device.` });
+                }
+                cursor = page.nextCursor;
+            } while (cursor);
+            await storage!.put(key, body, type, true);
+            return response(new Date(), 201);
+        } finally {
+            savingAccounts.delete(prefix);
         }
-        return res.status(201).json({ id, meetingCode: scope.code, createdAt: new Date().toISOString(), size: body.length, format });
     }));
     app.get('/api/recordings/:meetingCode/:id/playback', route(async (req, res) => {
         const recording = await locate(req, res);

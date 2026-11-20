@@ -10,6 +10,7 @@ export interface Entitlements {
     featureMinimumPlans: Readonly<Record<string, PaidPlan>>;
     privateConversationLimitSeconds?: number | null;
 }
+export const RECORDING_STORAGE_GIB: Readonly<Record<Exclude<PaidPlan, 'guest'>, number>>;
 export const PLAN_LEVEL: Record<Plan, number>;
 export const PRIVATE_CONVERSATION_LIMIT_MS: Readonly<Record<Plan, number | null>>;
 export const FEATURE_MIN_PLAN: Readonly<Record<string, PaidPlan>>;

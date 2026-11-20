@@ -453,14 +453,6 @@ export class RoomManager {
         if (room.peers.size === 0 && !movingToBreakout && !replacing) room.hostPeerId = null;
 
         this.scheduleEmptyRoomCleanup(roomId);
-        if (!replacing && room.peers.size === 0 && room.ownerUserId && room.settings.waitingRoomEnabled) {
-            // Everyone in the call left; the next person in must wait for the host again.
-            room.hostStarted = false;
-            for (const waiting of room.waitingRoom.values()) {
-                waiting.awaitingHost = true;
-                this.sendToSocket(waiting.ws, 'waitingStatus', { status: 'waitingForHost' }, waiting.id);
-            }
-        }
         return peer;
     }
 

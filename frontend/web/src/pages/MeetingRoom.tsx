@@ -1080,7 +1080,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         showNotice(`${by || 'The host'} turned off your ${k === 'audio' ? 'microphone' : 'camera'}.`);
                     }),
                     signaling.on('kicked', async () => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/meeting-end', { replace: true, state: { meetingCode, reason: 'You were removed from the meeting.', left: true, canRejoin: false } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
-                    signaling.on('meetingEnded', async () => { const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/meeting-end', { replace: true, state: { meetingCode, reason: 'The meeting has ended.', left: false } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
+                    signaling.on('meetingEnded', async () => { joinedRef.current = false; const saved = await finishRecordingRef.current(); stopLocalMedia(); media.close(); signaling.disconnect(); setConnected(false); if (saved) navigate('/meeting-end', { replace: true, state: { meetingCode, reason: 'The meeting has ended.', left: false } }); else showNotice('Meeting ended. Retry saving your recording before leaving.'); }),
                     signaling.on('chatMessage', (msg: ChatMessage) => {
                         void (async () => {
                             if (!alive() || seenChatMessages.current.has(msg.id)) return;
@@ -1846,7 +1846,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         if (recordingRef.current) { await finishRecording(); return; }
         if (!isPlatformAdmin && entitlements.loading) { showNotice('Checking your plan…'); return; }
         if (!hasFeature(entitlements, 'cloud_recording')) {
-            window.dispatchEvent(new CustomEvent('qsvc:upgrade-required', { detail: { requiredPlan: entitlements.featureMinimumPlans.cloud_recording || 'pro', feature: 'cloud_recording', returnTo: `${location.pathname}${location.search}${location.hash}` } }));
+            window.dispatchEvent(new CustomEvent('qsvc:upgrade-required', { detail: { requiredPlan: entitlements.featureMinimumPlans.cloud_recording || 'basic', feature: 'cloud_recording', returnTo: `${location.pathname}${location.search}${location.hash}` } }));
             return;
         }
         if (busyRef.current.record || pendingRecording.current) { showNotice('Finish saving the previous recording first.'); return; }
@@ -1989,13 +1989,13 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     }, [showNotice]);
     const endForEveryone = useCallback(async () => {
         setLeaveOpen(false);
-        try { await signaling.request('endMeeting', {}); } catch { showNotice('The meeting could not be ended.'); return; }
-        void handleLeave();
-    }, [handleLeave, showNotice]);
+        try { await signaling.request('endMeeting', {}); }
+        catch { if (joinedRef.current) showNotice('The meeting could not be ended. Try again.'); }
+    }, [showNotice]);
     const requestLeave = useCallback(() => {
-        if (myRole === 'host' && connected && peers.size > 0) { setLeaveOpen(true); return; }
+        if ((myRole === 'host' || myRole === 'co-host') && connected) { setLeaveOpen(true); return; }
         void handleLeave();
-    }, [myRole, connected, peers.size, handleLeave]);
+    }, [myRole, connected, handleLeave]);
 
     const privateConversationLimitMs = isPlatformAdmin ? null : entitlements.privateConversationLimitSeconds !== undefined
         ? (entitlements.privateConversationLimitSeconds === null ? null : entitlements.privateConversationLimitSeconds * 1000)

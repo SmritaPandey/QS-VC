@@ -7,6 +7,7 @@ import { PAID_PLAN_NAMES, PLAN_OFFERS, TRIAL_DAYS, getPlanPrice, type BillingPer
 import { formatConvertedAmount, useCurrencyRates } from '../lib/currency-rates';
 import { useSession } from '../lib/use-session';
 import { useEntitlements } from '../lib/entitlements';
+import RECORDING_STORAGE_GIB from '../../../../shared/recording-storage-gib.json';
 import PLAN_LEVEL from '../../../../shared/plan-levels.json';
 
 export const plans = PAID_PLAN_NAMES.map(name => ({
@@ -25,15 +26,16 @@ export const plans = PAID_PLAN_NAMES.map(name => ({
         Business: 'groups',
     }[name],
     offer: PLAN_OFFERS[name.toLowerCase() as PaidPlanKey] || null,
-    features: {
+    features: [...{
         Basic: ['Browser meetings', 'HD video, screen sharing and chat', 'Host controls', 'Background effects', 'AI noise suppression'],
         Starter: ['Everything in Basic', 'Webinar registration tools', 'AI captions where available', 'Private conversations up to 30 minutes'],
-        Pro: ['Everything in Starter', 'Cloud recording where available', 'Live translation where available', 'Private conversations without a plan time cap'],
-        Business: ['Pro meeting features', 'Shared screen and chat', 'Webinar registration tools', 'Cloud recording where available'],
-    }[name],
+        Pro: ['Everything in Starter', 'Live translation where available', 'Private conversations without a plan time cap'],
+        Business: ['Pro meeting features', 'Shared screen and chat', 'Webinar registration tools'],
+    }[name], `${RECORDING_STORAGE_GIB[name.toLowerCase() as PaidPlanKey]} GiB cloud recording storage`],
 }));
 
 const enterpriseFeatures = [
+    `${RECORDING_STORAGE_GIB.enterprise} GiB cloud recording storage per user on Enterprise Online`,
     'Deployment sized for your organisation', 'On-premises or air-gapped installation options',
     'SIP / H.323 room device options', 'White-label branding options', 'Support and SLA by agreement',
 ];

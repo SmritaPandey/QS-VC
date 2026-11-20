@@ -19,6 +19,13 @@ function missing(error: unknown) {
 export function createS3Storage(bucket: string): RecordingStorage {
     const client = new S3Client({ region: process.env.AWS_REGION || 'ap-south-1', requestHandler: { connectionTimeout: 5000, requestTimeout: 60000 } });
     const params = (Key: string) => ({ Bucket: bucket, Key });
+    async function objectMissing(error: unknown, key: string): Promise<boolean> {
+        if (missing(error)) return true;
+        if ((error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode !== 403) return false;
+        // Prefix-scoped ListBucket access can make a missing object look forbidden to HEAD and GET.
+        const page = await client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: key, MaxKeys: 1 }));
+        return !(page.Contents ?? []).some(item => item.Key === key);
+    }
     return {
         async put(key, body, type, ifAbsent = false) {
             await client.send(new PutObjectCommand({ ...params(key), Body: body, ContentType: type, ServerSideEncryption: 'AES256', CacheControl: 'private, no-store', ...(ifAbsent ? { IfNoneMatch: '*' } : {}) }));
@@ -27,13 +34,13 @@ export function createS3Storage(bucket: string): RecordingStorage {
             try {
                 const value = await client.send(new GetObjectCommand(params(key)));
                 return { body: await value.Body!.transformToByteArray(), type: value.ContentType || '', size: value.ContentLength || 0, modified: value.LastModified || new Date(0) };
-            } catch (error) { if (missing(error)) return null; throw error; }
+            } catch (error) { if (await objectMissing(error, key)) return null; throw error; }
         },
         async head(key) {
             try {
                 const value = await client.send(new HeadObjectCommand(params(key)));
                 return { type: value.ContentType || '', size: value.ContentLength || 0, modified: value.LastModified || new Date(0) };
-            } catch (error) { if (missing(error)) return null; throw error; }
+            } catch (error) { if (await objectMissing(error, key)) return null; throw error; }
         },
         async remove(key) { await client.send(new DeleteObjectCommand(params(key))); },
         async list(prefix, cursor) {
