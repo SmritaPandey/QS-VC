@@ -33,7 +33,7 @@ import MeetingInformation from '../components/MeetingInformation';
 import ControlBar from '../components/ControlBar';
 import MeetingPictureInPicture, { type MeetingPictureInPictureHandle } from '../components/MeetingPictureInPicture';
 import MeetingChat from '../components/MeetingChat';
-import MeetingToast from '../components/MeetingToast';
+import MeetingToast, { ConnectionNotice } from '../components/MeetingToast';
 import MultiCameraPanel from '../components/MultiCameraPanel';
 import ConnectionQualityPanel from '../components/ConnectionQualityPanel';
 import type { ConnectionQualitySample } from '../lib/connection-quality';
@@ -274,8 +274,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const getQualityStats = useCallback(() => media.getTransportStats(), []);
     const reportQualitySample = useCallback(async (sample: ConnectionQualitySample) => {
         const next = nextNetworkProfile(sample.status, profileRef.current, audioOnlyRef.current, qualityStreak.current);
-        if (sample.status === 'poor') setMeasuredPoorConnection(true);
-        else if (sample.status === 'unknown' || next === 'good') setMeasuredPoorConnection(false);
+        setMeasuredPoorConnection(sample.status === 'poor');
         if (next !== profileRef.current) {
             const revision = profileRevision.current;
             await media.setNetworkProfile(next);
@@ -358,10 +357,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const isManagerNow = () => myRoleRef.current === 'host' || myRoleRef.current === 'co-host';
     const roomSettingsRef = useRef(roomSettings);
     roomSettingsRef.current = roomSettings;
-    const [viewMode, setViewMode] = useState<ViewMode>(() => { try { const v = localStorage.getItem('qsvc:view'); return v === 'tiled' || v === 'spotlight' || v === 'sidebar' ? v : 'auto'; } catch { return 'auto'; } });
-    const [tilesPerPage, setTilesPerPage] = useState<TilesPerPage>(() => { try { const v = Number(localStorage.getItem('qsvc:tiles')); return [4, 9, 16, 25, 49].includes(v) ? v as TilesPerPage : 'auto'; } catch { return 'auto'; } });
-    const changeView = useCallback((view: ViewMode) => { setViewMode(view); try { localStorage.setItem('qsvc:view', view); } catch { /* convenience only */ } }, []);
-    const changeTiles = useCallback((value: TilesPerPage) => { setTilesPerPage(value); try { localStorage.setItem('qsvc:tiles', String(value)); } catch { /* convenience only */ } }, []);
+    const [viewMode, setViewMode] = useState<ViewMode>(() => { try { const v = (sessionStorage.getItem('qsvc:view') ?? localStorage.getItem('qsvc:view')); return v === 'tiled' || v === 'spotlight' || v === 'sidebar' ? v : 'auto'; } catch { return 'auto'; } });
+    const [tilesPerPage, setTilesPerPage] = useState<TilesPerPage>(() => { try { const v = Number((sessionStorage.getItem('qsvc:tiles') ?? localStorage.getItem('qsvc:tiles'))); return [4, 9, 16, 25, 49].includes(v) ? v as TilesPerPage : 'auto'; } catch { return 'auto'; } });
+    const changeView = useCallback((view: ViewMode) => { setViewMode(view); try { sessionStorage.setItem('qsvc:view', view); } catch { /* convenience only */ } }, []);
+    const changeTiles = useCallback((value: TilesPerPage) => { setTilesPerPage(value); try { sessionStorage.setItem('qsvc:tiles', String(value)); } catch { /* convenience only */ } }, []);
     const [pinnedId, setPinnedId] = useState<string | null>(null);
     const [spotlightId, setSpotlightId] = useState<string | null>(null);
     const [roomDevicesEnabled, setRoomDevicesEnabled] = useState(false);
@@ -434,7 +433,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const recordingRef = useRef(false);
     const joinedRef = useRef(false);
     const busyRef = useRef<{ screen?: boolean; record?: boolean; camera?: boolean; mic?: boolean }>({});
-    const [noticeRevision, setNoticeRevision] = useState(0);
     const lastChatSound = useRef(-Infinity);
     const seenChatMessages = useRef(new Set<string>());
     const peersRef = useRef<Map<string, PeerData>>(new Map());
@@ -454,11 +452,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     useEffect(() => { peersRef.current = peers; }, [peers]);
 
     const dismissChatFlash = useCallback(() => setIncomingChatMessage(null), []);
-    const dismissNotice = useCallback(() => { setNotice(null); setCameraNotice(''); }, []);
+    const dismissNotice = useCallback(() => setNotice(null), []);
+    const dismissCameraNotice = useCallback(() => setCameraNotice(''), []);
     const dismissRecordingStatus = useCallback(() => setRecordingStatus(''), []);
     const showNotice = useCallback((text: string) => {
         setNotice(text);
-        setNoticeRevision(value => value + 1);
     }, []);
 
     const audioOutputSupported = typeof HTMLAudioElement !== 'undefined'
@@ -793,6 +791,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         const consumingProducers = new Set<string>();
         const departedPeers = departedPeerIds.current;
         departedPeers.clear();
+        setMediaRecovery(null);
+        qualityStreak.current = { good: 0, poor: 0 };
         setMeasuredPoorConnection(false);
         const consumerRoutes = new Map<string, { peerId: string; kind: MediaKind; source: string; track: MediaStreamTrack }>();
         const presenterUpdates = new Map<string, boolean>();
@@ -1956,8 +1956,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         else navigate('/app', { replace: true });
     }, [finishRecording, navigate, stopLocalMedia, showNotice, meetingCode, meetingInviteToken, connected, duration, chatMessages.length]);
     const handleSendChat = useCallback(async (content: string) => {
-        if (roomTransitionBusy.current) { showNotice('Wait for the room change to finish.'); return; }
-        if (!roomSettings.allowChat && myRole !== 'host' && myRole !== 'co-host') { showNotice('Chat is disabled by the host.'); return; }
+        if (roomTransitionBusy.current) { showNotice('Wait for the room change to finish.'); return false; }
+        if (!roomSettings.allowChat && myRole !== 'host' && myRole !== 'co-host') { showNotice('Chat is disabled by the host.'); return false; }
         try {
             if (requiredE2eeRef.current) {
                 const manager = e2eeRef.current;
@@ -1969,7 +1969,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 if (!joinedRef.current || !connected) throw new Error('Wait for your room connection before sending chat.');
                 await signaling.request('chatMessage', { content, type: 'text' });
             }
-        } catch (error) { showNotice(error instanceof Error ? error.message : 'Your message could not be sent.'); }
+            return true;
+        } catch (error) { showNotice(error instanceof Error ? error.message : 'Your message could not be sent.'); return false; }
     }, [roomSettings.allowChat, myRole, e2eeEnabled, connected, showNotice]);
     const closeChat = useCallback(() => {
         setChatOpen(false);
@@ -2194,6 +2195,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         };
     }, [connected, restoring, myRole, peers.size, webinar, screenSharing, captionsOn, effect, effectStatus, notice, cameraNotice]);
 
+    const connectionMessage = mediaRecovery === 'failed' ? 'Media recovery failed. Rejoin if audio is unavailable.'
+        : mediaRecovery === 'recovering' ? 'Restoring your media connection…'
+        : audioOnly || !measuredPoorConnection || networkProfile === 'good' ? ''
+        : networkProfile === 'audio-only' ? 'Video is paused to keep audio clear.' : 'Video quality is reduced because of a weak connection.';
+
     const secureActivities = requiredE2eeRef.current;
     const activityOnStage = activitiesOpen && (!secureActivities || !!e2eeRef.current);
     const sidePanelOpen = chatOpen || participantsOpen || hostToolsOpen || effectsOpen;
@@ -2295,14 +2301,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 })}
             </div>}
             <div className="meeting-notices">
-            {connected && (mediaRecovery === 'recovering' || mediaRecovery === 'failed' || (measuredPoorConnection && !audioOnly && networkProfile !== 'good')) &&
-                <div className="meeting-notice meeting-quality-notice">
-                    <span role="status">{mediaRecovery === 'recovering' ? 'Restoring your media connection…' : mediaRecovery === 'failed' ? 'Media recovery failed. Rejoin if audio is unavailable.' : networkProfile === 'audio-only' ? 'Video is paused to keep audio clear.' : 'Video quality is reduced because of a weak connection.'}</span>
-                    <button type="button" onClick={() => setQualityOpen(true)}>Connection quality</button>
-                </div>}
+            {connected && connectionMessage && <ConnectionNotice key={connectionMessage} message={connectionMessage}
+                onOpenQuality={() => { closePanels(); setQualityOpen(true); }} />}
             {roomTransitioning && <div className="meeting-notice" role="status">Moving rooms and setting up your secure media…</div>}
             {currentBreakoutName && !roomTransitioning && <div className="meeting-notice">Breakout room: {currentBreakoutName} <button type="button" onClick={() => { void moveToBreakout(null).catch(error => showNotice(error instanceof Error ? error.message : 'The main meeting could not be opened.')); }}>Return to main meeting</button></div>}
-            {recordingStatus && (recordingStatus.startsWith('Recording saved') || recordingStatus.startsWith('Unsaved copy discarded.')
+            {recordingStatus && (recordingStatus.startsWith('Recording saved') || recordingStatus.startsWith('Unsaved copy discarded.') || recordingStatus === 'Recording could not be saved.'
                 ? <MeetingToast key={recordingStatus} onDismiss={dismissRecordingStatus}><span>{recordingStatus}</span>{recordingStatus === 'Recording saved.' && <a href={`/recordings/${encodeURIComponent(meetingCode || '')}`}>Manage recordings</a>}</MeetingToast>
                 : <div className="meeting-recording-status" role="status">{recordingStatus}
                 {pendingRecording.current ? <details><summary>Recording actions</summary><button type="button" onClick={() => void savePendingRecording()}>Retry saving</button><button type="button" onClick={() => { const pending = pendingRecording.current; if (pending) recordingManager.downloadLocally(pending.blob, `QS-VC-${meetingCode}.${pending.format}`); }}>Download unsaved copy</button><button type="button" onClick={() => { if (window.confirm('Discard the unsaved recording? This copy cannot be recovered.')) { pendingRecording.current = null; recordingManager.pending = null; setRecordingStatus('Unsaved copy discarded. You can leave the meeting.'); } }}>Discard unsaved copy</button></details> : <a href={`/recordings/${encodeURIComponent(meetingCode || '')}`}>Manage recordings</a>}
@@ -2320,7 +2323,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     <button type="button" className="btn-outline" onClick={() => answerKnock(knocks[0].peerId, true)}>Admit</button>
                 </> : <button type="button" className="btn-outline" onClick={() => { closePanels(); setHostToolsOpen(true); }}>View all</button>}
             </div>}
-            {(cameraNotice || notice) && <MeetingToast key={`${cameraNotice || notice}:${noticeRevision}`} onDismiss={dismissNotice}>
+            {(cameraNotice || notice) && <MeetingToast key={notice || cameraNotice} onDismiss={notice ? dismissNotice : dismissCameraNotice}>
                 <span>{notice || cameraNotice}</span>
                 {!notice && cameraNotice && videoOff && sessionActive.current && <button type="button" className="btn-text" onClick={handleToggleVideo}>Start camera</button>}
             </MeetingToast>}
@@ -2381,7 +2384,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 </div>
 
                 {breakoutsOpen && <MeetingBreakouts connected={connected} isHost={myRole === 'host'} currentRoomId={currentRoomId} transitioning={roomTransitioning} participants={[{ peerId: myPeerIdRef.current || 'self', displayName: `${displayName} (You)` }, ...Array.from(peers.values()).map(peer => ({ peerId: peer.peerId, displayName: peer.displayName }))]} onJoin={moveToBreakout} onClose={() => { setBreakoutsOpen(false); restoreFormatFocus(); }} />}
-                {chatOpen && <MeetingChat messages={chatMessages} onSend={handleSendChat} onClose={closeChat} />}
+                {chatOpen && <MeetingChat myPeerId={myPeerIdRef.current} messages={chatMessages} onSend={handleSendChat} onClose={closeChat} />}
 
                 {participantsOpen && (
                     <ParticipantsPanel peers={peers} displayName={displayName} myPeerId={myPeerIdRef.current || 'self'} myRole={myRole} myOnStage={myOnStage} audioMuted={audioMuted} videoOff={videoOff} handRaised={handRaised} presenting={screenSharing}
@@ -2401,7 +2404,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             </div>
 
             <MeetingSessionReport open={sessionReportOpen} meetingCode={meetingCode || ''} connected={connected} onClose={() => setSessionReportOpen(false)} />
-            <ConnectionQualityPanel audioOnly={audioOnly} networkProfile={networkProfile} onAudioOnlyChange={async enabled => {
+            <ConnectionQualityPanel connectionMessage={connectionMessage} audioOnly={audioOnly} networkProfile={networkProfile} onAudioOnlyChange={async enabled => {
                 profileRevision.current++;
                 await media.setNetworkProfile(enabled ? 'audio-only' : 'poor');
                 audioOnlyRef.current = enabled; setAudioOnly(enabled);

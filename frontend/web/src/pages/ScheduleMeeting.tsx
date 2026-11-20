@@ -51,7 +51,7 @@ const ScheduleMeeting: React.FC = () => {
     const navigate = useNavigate();
     const { pathname, search } = useLocation();
     const requestedKind = new URLSearchParams(search).get('meetingKind') || new URLSearchParams(search).get('type');
-    const schedulingKind: MeetingKind = requestedKind === 'webinar' || requestedKind === 'town_hall' || requestedKind === 'team' ? requestedKind : 'conference';
+    const schedulingKind: MeetingKind = requestedKind === 'instant' || requestedKind === 'webinar' || requestedKind === 'town_hall' || requestedKind === 'team' ? requestedKind : 'conference';
     const pending = useRef(false);
     const confirmation = useRef<HTMLElement>(null);
     const [submitting, setSubmitting] = useState(false);
@@ -65,7 +65,7 @@ const ScheduleMeeting: React.FC = () => {
     const guest = !ON_PREM && session.status === 'anonymous';
     const storageId = userId ?? (guest ? 'guest' : undefined);
     const limitedDates = guest || ON_PREM;
-    const allowedKind = guest && (schedulingKind === 'town_hall' || schedulingKind === 'webinar') ? 'conference' : schedulingKind;
+    const allowedKind = guest && schedulingKind !== 'team' ? 'instant' : schedulingKind;
     useEffect(() => {
         setMeetings([]);
         setNewMeetingIds([]);
@@ -132,7 +132,7 @@ const ScheduleMeeting: React.FC = () => {
                     recurrence: form.repeat === 'none' ? undefined : { frequency: form.repeat, count },
                     settings: {
                         maxParticipants: form.maxParticipants,
-                        meetingKind: guest && form.meetingKind === 'conference' ? undefined : form.meetingKind,
+                        meetingKind: form.meetingKind,
                         e2eeRequired: form.enableE2EE,
                     },
                 }),
@@ -240,11 +240,12 @@ const ScheduleMeeting: React.FC = () => {
                         <fieldset className="schedule-kind-options">
                             <legend>Meeting type</legend>
                             {([
-                                ['conference', guest ? 'Instant meeting' : 'Conferencing', 'A standard room for a conversation or collaboration.'],
+                                ['instant', 'Instant meeting', 'A simple room for a quick call.'],
+                                ['conference', 'Conferencing', 'A speaker-focused room with breakout rooms.'],
                                 ['team', 'Team meeting', 'A working session for your team.'],
                                 ['town_hall', 'Town hall', 'Leadership updates and moderated questions.'],
                                 ['webinar', 'Webinar', 'A presentation with Q&A and polls.'],
-                            ] as const).filter(([kind]) => !guest || kind === 'conference' || kind === 'team').map(([kind, label, detail]) => <label key={kind} className="schedule-kind-option" data-selected={form.meetingKind === kind}>
+                            ] as const).filter(([kind]) => !guest || kind === 'instant' || kind === 'team').map(([kind, label, detail]) => <label key={kind} className="schedule-kind-option" data-selected={form.meetingKind === kind}>
                                 <SelectionInput type="radio" name="schedule-meeting-kind" value={kind} checked={form.meetingKind === kind} onChange={() => updateField('meetingKind', kind)} />
                                 <span><strong>{label}</strong><small>{detail}</small></span>
                             </label>)}
@@ -355,7 +356,7 @@ const ScheduleMeeting: React.FC = () => {
                                     weekday: 'long', month: 'long', day: 'numeric'
                                 }) : 'Select date'}</span>
                                 <span><span className="mi mi-sm" aria-hidden="true">schedule</span> {form.time} ({form.duration} min)</span>
-                                <span><span className="mi mi-sm" aria-hidden="true">groups</span> {form.meetingKind === 'webinar' ? 'Webinar' : form.meetingKind === 'town_hall' ? 'Town hall' : form.meetingKind === 'team' ? 'Team meeting' : guest ? 'Instant meeting' : 'Conferencing'}</span>
+                                <span><span className="mi mi-sm" aria-hidden="true">groups</span> {form.meetingKind === 'webinar' ? 'Webinar' : form.meetingKind === 'town_hall' ? 'Town hall' : form.meetingKind === 'team' ? 'Team meeting' : form.meetingKind === 'instant' ? 'Instant meeting' : 'Conferencing'}</span>
                                 {form.enableE2EE && <span><span className="mi mi-sm" aria-hidden="true">lock</span> E2EE</span>}
                                 {form.enableWaitingRoom && <span>Waiting room enabled</span>}
                             </div>
@@ -381,7 +382,7 @@ const ScheduleMeeting: React.FC = () => {
                         const expired = Date.now() >= Date.parse(meeting.start) + 86_400_000;
                         return <article className="preview-card" data-new={newMeetingIds.includes(meeting.id)} key={meeting.id}>
                             <h3>{meeting.title}</h3>
-                            <p><time dateTime={meeting.start}>{new Date(meeting.start).toLocaleString()}</time> · {meeting.duration} minutes · {meeting.meetingKind === 'webinar' ? 'Webinar' : meeting.meetingKind === 'town_hall' ? 'Town hall' : meeting.meetingKind === 'team' ? 'Team meeting' : guest ? 'Instant meeting' : 'Conferencing'}</p>
+                            <p><time dateTime={meeting.start}>{new Date(meeting.start).toLocaleString()}</time> · {meeting.duration} minutes · {meeting.meetingKind === 'webinar' ? 'Webinar' : meeting.meetingKind === 'town_hall' ? 'Town hall' : meeting.meetingKind === 'team' ? 'Team meeting' : form.meetingKind === 'instant' ? 'Instant meeting' : 'Conferencing'}</p>
                             <div className="success-actions">
                                 {expired ? <span>Invitation expired</span> : <>
                                     <Link state={{ title: meeting.title }} to={meeting.previewPath} className="public-primary qsvc-action"><ActionContents>Open meeting</ActionContents></Link>

@@ -56,7 +56,7 @@ const createMeetingBody = z.object({
         maxParticipants: z.number().int().min(2).max(500).default(100),
         waitingRoom: z.boolean().default(true),
         webinar: z.boolean().default(false),
-        meetingKind: z.enum(['conference', 'team', 'town_hall', 'webinar']).optional(),
+        meetingKind: z.enum(['instant', 'conference', 'team', 'town_hall', 'webinar']).optional(),
         e2eeRequired: z.boolean().default(true),
         recordingAllowed: z.boolean().default(true),
         chatEnabled: z.boolean().default(true),
@@ -198,7 +198,7 @@ function issueSessionMeeting(start: number, user: AuthPayload | undefined, setti
     const inviteToken = meetingInvitation.createSessionMeetingInvite(meetingCode, {
         hostId: user?.sub ?? `guest:${meetingCode}`,
         expiresAt: start + 86_400_000,
-        meetingKind: settings?.meetingKind ?? (settings?.webinar ? 'town_hall' : 'conference'),
+        meetingKind: settings?.meetingKind ?? (settings?.webinar ? 'town_hall' : user ? 'conference' : 'instant'),
         e2eeRequired: settings?.e2eeRequired ?? true,
         maxParticipants: settings?.maxParticipants ?? 100,
     });
@@ -206,7 +206,7 @@ function issueSessionMeeting(start: number, user: AuthPayload | undefined, setti
 }
 
 function allowedGuestKind(settings: z.infer<typeof createMeetingBody>['settings']): boolean {
-    return !settings?.webinar && (!settings?.meetingKind || settings.meetingKind === 'team');
+    return !settings?.webinar && (!settings?.meetingKind || settings.meetingKind === 'instant' || settings.meetingKind === 'team');
 }
 
 // Quick meeting creation (no auth required — for demo/guest access)

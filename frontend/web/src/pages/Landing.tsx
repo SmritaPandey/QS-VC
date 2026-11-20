@@ -92,7 +92,7 @@ export default function Landing() {
         try {
             const response = await fetch(`${MEETINGS_ENDPOINT}/create`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title: setup.title, settings: { meetingKind: setup.meetingKind === 'conference' ? undefined : setup.meetingKind } }),
+                body: JSON.stringify({ title: setup.title, settings: { meetingKind: setup.meetingKind } }),
             });
             if (!response.ok) throw new Error('Could not start a guest meeting.');
             const { meetingCode, inviteToken, guestHostToken } = await response.json();
@@ -172,7 +172,7 @@ export default function Landing() {
 
             <main className="landing-container" id="main-content">
                 {sessionError && <p role="alert">{sessionError}</p>}
-                {session.status === 'unavailable' && <p role="status">Account unavailable. <button type="button" onClick={() => void refreshSession()}>Try again</button></p>}
+                {session.status === 'unavailable' && <div className="launcher-account-retry"><span role="status">We couldn’t check your account.</span><button className="btn-outline qsvc-action qsvc-action--secondary" type="button" onClick={() => void refreshSession()}><ActionContents>Try again</ActionContents></button></div>}
                 <div className="landing-hero">
                     <h1>Guest meetings</h1>
                     <p className="landing-subtitle">Join a meeting, or host an instant or team meeting as a guest.</p>

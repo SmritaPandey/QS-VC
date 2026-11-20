@@ -1036,6 +1036,21 @@ it.each(['direct', 'before host'])('checks the current password at registration 
     await handlePeerDisconnect(hostState);
 });
 
+it('isolates two meetings opened by the same signed-in account', async () => {
+    const tabs = [socket(), socket()];
+    const states = tabs.map(() => ({ authUser: { sub: 'owner' } } as any));
+    const codes = tabs.map(() => crypto.randomUUID().slice(0, 12));
+    for (const [index, tab] of tabs.entries()) {
+        await rpc(tab, states[index], 'joinRoom', { meetingCode: codes[index], displayName: 'Owner' });
+    }
+    await rpc(tabs[0], states[0], 'updateSettings', { settings: { locked: true } });
+    expect(roomManager.getRoom(states[0].roomId)?.settings.locked).toBe(true);
+    expect(roomManager.getRoom(states[1].roomId)?.settings.locked).toBe(false);
+    await handlePeerDisconnect(states[0]);
+    expect(roomManager.getRoom(states[1].roomId)?.peers.has(states[1].peerId)).toBe(true);
+    await handlePeerDisconnect(states[1]);
+});
+
 it('removes the previous session from its breakout when the same account rejoins the main meeting', async () => {
     const code = `breakout-rejoin-${crypto.randomUUID().slice(0, 10)}`;
     const host = socket(), attendee = socket(), back = socket();

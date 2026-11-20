@@ -84,7 +84,7 @@ export interface RoomSettings {
     webinar?: boolean;
     /** When true, media production is blocked until the required E2EE key setup succeeds. */
     e2eeRequired?: boolean;
-    meetingKind: 'conference' | 'team' | 'town_hall' | 'webinar';
+    meetingKind: 'instant' | 'conference' | 'team' | 'town_hall' | 'webinar';
     maxParticipants: number;       // default 25
     waitingRoomEnabled: boolean;   // browser guests require host approval
     locked: boolean;               // no new joins

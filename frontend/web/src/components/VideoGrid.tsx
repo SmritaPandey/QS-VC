@@ -89,8 +89,8 @@ export default function VideoGrid({ localStream, localCameraTracks = {}, siteLoc
         }),
     ];
     const presentationIds = [
-        ...(sharing && localScreenTrack?.readyState === 'live' ? [selfId] : []),
-        ...Array.from(peers.values()).filter(peer => peer.screenVideoTrack?.readyState === 'live').map(peer => peer.peerId),
+        ...(sharing && localScreenTrack?.readyState === 'live' && (!webinar || isOnStage({ role: myRole, onStage: myOnStage })) ? [selfId] : []),
+        ...Array.from(peers.values()).filter(peer => peer.screenVideoTrack?.readyState === 'live' && (!webinar || isOnStage(peer))).map(peer => peer.peerId),
     ];
 
     // "Spotlight" and "Sidebar" views always show one large tile: the focus, else whoever is speaking.
@@ -151,16 +151,22 @@ export default function VideoGrid({ localStream, localCameraTracks = {}, siteLoc
     const audience = null; // the audience count is shown in the top bar
 
     if (presentationIds.length) {
-        const cameraLayout = computeLayout({ people, webinar, pinnedId: null, spotlightId: null, activeSpeaker, pageSize: tilesPerPage === 'auto' ? Math.max(4, autoPageSize(box.width, Math.max(180, box.height / 3), false)) : tilesPerPage, page });
-        const cameraShape = gridShape(Math.max(cameraLayout.tiles.length, 1), box.width, Math.max(160, box.height / 3));
-        return <div ref={areaRef} className="qs-video-root qs-multi-content-stage">
+        // Size the gallery from the available stage, including when chat takes up a column.
+        const sideGallery = box.width >= 720 && box.width > box.height * 1.1;
+        const galleryWidth = sideGallery ? box.width * 0.34 : box.width;
+        const galleryHeight = sideGallery ? box.height : box.height * 0.36;
+        const autoCapacity = Math.max(1, Math.floor(galleryWidth / 148)) * Math.max(1, Math.floor(galleryHeight / 120));
+        const cameraLayout = computeLayout({ people, webinar, pinnedId: null, spotlightId: null, activeSpeaker,
+            pageSize: tilesPerPage === 'auto' ? Math.min(8, autoCapacity) : tilesPerPage, page });
+        const cameraShape = gridShape(Math.max(cameraLayout.tiles.length, 1), galleryWidth, galleryHeight - (cameraLayout.pages > 1 ? 52 : 0));
+        return <div ref={areaRef} className="qs-video-root qs-multi-content-stage" data-gallery-position={sideGallery ? 'beside' : 'below'}>
             <section className="qs-content-area" aria-label="Shared content">
                 <h2 className="sr-only">Shared content</h2>
                 <div className="qs-content-grid" data-count={presentationIds.length}>{presentationIds.map(peerId => tileFor(screenTileId(peerId), 'stage'))}</div>
             </section>
             <section className="qs-camera-area" aria-label="Participant cameras">
                 <h2 className="sr-only">Participant cameras</h2>
-                <div className="qs-camera-gallery" style={{ gridTemplateColumns: `repeat(${cameraShape.cols}, minmax(0, 1fr))` }}>
+                <div className="qs-camera-gallery" style={{ gridTemplateColumns: `repeat(${cameraShape.cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${cameraShape.rows}, minmax(96px, 1fr))` }}>
                     {cameraLayout.tiles.map(id => tileFor(id, 'grid'))}
                 </div>
                 {cameraLayout.pages > 1 && <nav className="qs-pager" aria-label="Pages of cameras"><button type="button" disabled={!cameraLayout.page} onClick={() => setPage(cameraLayout.page - 1)} aria-label="Previous cameras"><span className="mi" aria-hidden="true">chevron_left</span></button><span aria-live="polite">{cameraLayout.page + 1} / {cameraLayout.pages}</span><button type="button" disabled={cameraLayout.page >= cameraLayout.pages - 1} onClick={() => setPage(cameraLayout.page + 1)} aria-label="Next cameras"><span className="mi" aria-hidden="true">chevron_right</span></button></nav>}

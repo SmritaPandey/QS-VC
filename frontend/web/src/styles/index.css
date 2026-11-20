@@ -4855,6 +4855,42 @@ label {
   background: #203748;
   box-shadow: 0 4px 12px rgba(3, 8, 15, 0.2);
 }
+.meeting-chat-overlay .chat-delivery-error { margin: 0; padding: 8px 16px; color: #ffccd4; }
+.meeting-chat-overlay .chat-feed-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.meeting-chat-overlay .chat-msg {
+  max-width: 94%;
+  min-width: 0;
+}
+.meeting-room .meeting-chat-overlay .chat-msg[data-own] {
+  align-self: flex-end;
+  border-radius: 14px 4px 14px 14px;
+  background: #184447;
+}
+.meeting-chat-overlay .chat-message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  overflow-wrap: anywhere;
+}
+.meeting-chat-overlay time {
+  font-size: 0.8125rem;
+  color: #c6d5df;
+}
+.meeting-room .chat-new-messages {
+  align-self: center;
+  min-height: 44px;
+  padding-inline: 16px;
+  background: #203b46;
+  border: 1px solid #658891;
+  color: #edf5fa;
+  border-radius: 22px;
+}
 .meeting-chat-overlay .chat-sender {
   margin-bottom: 4px;
   color: #75ecd7;
@@ -5027,3 +5063,5 @@ label {
   .schedule-composer { grid-template-columns:minmax(0, 1fr); }
   .schedule-review { position:static; }
 }
+
+.launcher-account-retry { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-block: 12px; color: var(--text-primary); }

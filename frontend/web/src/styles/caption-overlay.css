@@ -1,4 +1,18 @@
-/* Captions stay inside the video stage; side panels keep their own layout space. */
+/* Keep captions beneath the picture, in the same column when a side panel opens. */
+.meeting-room .meeting-content:not([data-activity-stage]) > .video-area:has(> .meeting-live-captions) {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+.meeting-room .meeting-content:not([data-activity-stage]) > .video-area:has(> .meeting-live-captions) > .qs-video-root {
+    flex: 1;
+    height: auto;
+}
+.meeting-room .meeting-content:not([data-activity-stage]) .meeting-live-captions.caption-overlay {
+    position: static;
+    flex: 0 0 auto;
+}
+
 .meeting-room .meeting-live-captions.caption-overlay {
     inset-inline: 16px;
     bottom: var(--meeting-overlay-bottom, 16px);

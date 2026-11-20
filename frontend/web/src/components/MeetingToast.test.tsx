@@ -29,3 +29,19 @@ it.each([[true, false], [false, true]])('keeps a notification available while ho
     vi.useFakeTimers(); const toast = mountToast(hovered, focused);
     vi.advanceTimersByTime(12000); expect(toast.dismiss).not.toHaveBeenCalled();
 });
+
+it('keeps a dismissed connection notice hidden for the same episode, including when opening details', () => {
+    const declaration = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'ConnectionNotice')!;
+    const body = ts.transpileModule(declaration.getText(source).replace('export ', '') + '\nreturn ConnectionNotice;', { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2020 } }).outputText;
+    let dismissed = false;
+    const render = new Function('React', 'MeetingToast', 'useState', 'useCallback', body)(
+        React, 'toast', () => [dismissed, (value: boolean) => { dismissed = value; }], (callback: Function) => callback,
+    );
+    const props = { message: 'Video quality is reduced because of a weak connection.', onOpenQuality: vi.fn() };
+    render(props).props.onDismiss();
+    expect(render(props)).toBeNull();
+    dismissed = false; // A new episode mounts under a new key.
+    render(props).props.children[1].props.onClick();
+    expect(props.onOpenQuality).toHaveBeenCalledOnce();
+    expect(render(props)).toBeNull();
+});

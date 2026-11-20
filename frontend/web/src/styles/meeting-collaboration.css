@@ -164,3 +164,22 @@
   }
   .meeting-content[data-activity-dock] > .meeting-collaboration { grid-area: 2 / 1; }
 }
+
+.meeting-collaboration [hidden] { display: none; }
+.meeting-collaboration input[type=file] { box-sizing: border-box; width: 100%; }
+.meeting-collaboration input[type=file]::file-selector-button {
+  min-height: 44px;
+  margin-inline-end: 10px;
+  padding-inline: 14px;
+  border: 1px solid #577183;
+  border-radius: 8px;
+  background: #203b46;
+  color: #a6f2e4;
+  font: inherit;
+  cursor: pointer;
+}
+.meeting-collaboration .collaboration-icon-btn { width: 44px; height: 44px; }
+@media (max-width: 600px) {
+  .collaboration-form .collaboration-files li { flex-wrap: wrap; }
+  .collaboration-form .collaboration-files li > div { flex-basis: 100%; }
+}

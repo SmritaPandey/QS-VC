@@ -1,8 +1,8 @@
-export type MeetingKind = 'conference' | 'team' | 'town_hall' | 'webinar';
+export type MeetingKind = 'instant' | 'conference' | 'team' | 'town_hall' | 'webinar';
 
 export function normalizeMeetingSettings(settings?: object) {
     const value = (settings || {}) as Record<string, unknown>;
-    const meetingKind: MeetingKind = value.meetingKind === 'team' || value.meetingKind === 'town_hall' || value.meetingKind === 'webinar'
+    const meetingKind: MeetingKind = value.meetingKind === 'instant' || value.meetingKind === 'team' || value.meetingKind === 'town_hall' || value.meetingKind === 'webinar'
         ? value.meetingKind
         : value.meetingKind === 'conference' ? 'conference' : value.webinar === true ? 'town_hall' : 'conference';
 

@@ -120,6 +120,7 @@ export default function VideoTile({ displayName, siteLocation, userId, mediaLabe
             )}
 
             <div className="qs-tile-flags">
+                {speaking && micOn && <span className="qs-flag qs-flag--speaker"><span className="mi" aria-hidden="true">graphic_eq</span>Speaking</span>}
                 {sharing && <span className="qs-flag qs-flag--present"><span className="mi" aria-hidden="true">present_to_all</span>Presenting</span>}
                 {spotlighted && <span className="qs-flag"><span className="mi" aria-hidden="true">star</span>Spotlight</span>}
                 {pinned && <span className="qs-flag"><span className="mi" aria-hidden="true">push_pin</span>Pinned</span>}

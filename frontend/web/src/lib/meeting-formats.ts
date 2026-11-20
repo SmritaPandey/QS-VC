@@ -4,6 +4,7 @@ import type { ViewMode } from '../components/VideoGrid';
 export type FormatAction = 'breakouts' | 'notes' | 'board' | 'questions' | 'polls' | 'captions' | 'host';
 
 export const MEETING_FORMATS = {
+    instant: { label: 'Instant meeting', icon: 'video_call', layout: 'auto', actions: [] },
     conference: { label: 'Conference', icon: 'groups', layout: 'sidebar', actions: ['breakouts'] },
     team: { label: 'Team meeting', icon: 'workspaces', layout: 'tiled', actions: ['notes', 'board'] },
     webinar: { label: 'Webinar', icon: 'cast_for_education', layout: 'spotlight', actions: ['questions', 'polls'] },
@@ -22,7 +23,7 @@ export const FORMAT_ACTIONS: Record<FormatAction, { label: string; icon: string 
 
 export function roomFormat(settings?: { meetingKind?: string; webinar?: boolean }): MeetingKind {
     const kind = settings?.meetingKind;
-    return kind === 'conference' || kind === 'team' || kind === 'webinar' || kind === 'town_hall'
+    return kind === 'instant' || kind === 'conference' || kind === 'team' || kind === 'webinar' || kind === 'town_hall'
         ? kind
         : settings?.webinar ? 'town_hall' : 'conference';
 }

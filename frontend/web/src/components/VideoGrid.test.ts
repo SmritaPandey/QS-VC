@@ -67,3 +67,17 @@ it('preserves each camera source as its own tile with supplied site and user ide
     expect(markup).toContain('Remote · Camera 2'); expect(markup).toContain('Site: Delhi branch'); expect(markup).toContain('User ID: remote-456');
     expect(markup).toContain('Site: Lucknow HQ');
 });
+
+it('removes an offstage share immediately when a presenter returns to the audience', () => {
+    const peer: GridPeer = {
+        peerId: 'former-presenter', displayName: 'Former presenter', role: 'member', onStage: false,
+        screenVideoTrack: { readyState: 'live' } as MediaStreamTrack,
+    };
+    const markup = renderToStaticMarkup(createElement(VideoGrid, {
+        localStream: null, myPeerId: 'self', myRole: 'host', displayName: 'Host', videoOff: true,
+        peers: new Map([[peer.peerId, peer]]), webinar: true, speaking: new Set<string>(),
+        activeSpeaker: null, spotlightId: null, pinnedId: null, onPin: vi.fn(),
+    }));
+    expect(markup).not.toContain('Shared content');
+    expect(markup).not.toContain('Former presenter');
+});

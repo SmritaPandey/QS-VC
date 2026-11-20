@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import '../styles/meeting-notifications.css';
 
 /** Short-lived feedback pauses while someone reads or uses its controls. */
@@ -16,4 +16,15 @@ export default function MeetingToast({ children, onDismiss, duration = 6000, cla
         <div className="meeting-feedback-content">{children}</div>
         <button type="button" className="meeting-feedback-dismiss" aria-label="Dismiss notification" onClick={onDismiss}><span className="mi" aria-hidden="true">close</span></button>
     </div>;
+}
+
+/** One timed notice per uninterrupted connection state, even as new stats arrive. */
+export function ConnectionNotice({ message, onOpenQuality }: { message: string; onOpenQuality: () => void }) {
+    const [dismissed, setDismissed] = useState(false);
+    const dismiss = useCallback(() => setDismissed(true), []);
+    if (dismissed) return null;
+    return <MeetingToast onDismiss={dismiss}>
+        <span>{message}</span>
+        <button type="button" className="btn-text" onClick={() => { dismiss(); onOpenQuality(); }}>Connection quality</button>
+    </MeetingToast>;
 }

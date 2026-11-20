@@ -222,6 +222,7 @@ export default function ControlBar({
                 <div className="controls-more" ref={moreRef}>
                     <button ref={moreButtonRef} type="button" className={`ctrl-btn ${moreOpen ? 'active' : ''}`} aria-label={moreTitle} aria-expanded={moreOpen} aria-controls="meeting-more-controls" data-tip="More controls" onClick={() => { haptic('tap'); setMoreOpen(open => !open); }}>
                         <span className="ctrl-icon mi" aria-hidden="true">more_horiz</span>
+                        <span className="ctrl-label">More</span>
                         {permissionCount > 0 && <span className="meeting-unread-badge" aria-hidden="true"><AnimatedNumber value={permissionCount} /></span>}
                         {!permissionCount && unreadChat > 0 && <span className="meeting-unread-badge meeting-overflow-chat-badge" aria-hidden="true"><AnimatedNumber value={Math.min(unreadChat, 99)} />{unreadChat > 99 ? '+' : ''}</span>}
                     </button>

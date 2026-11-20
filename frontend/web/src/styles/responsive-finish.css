@@ -1,5 +1,28 @@
 .meeting-more-mobile-actions { display: none; }
 
+/* Show the control names whenever the full meeting toolbar fits. */
+@media (min-width: 1100px) {
+  .meeting-room .control-bar .ctrl-btn {
+    width: auto;
+    min-width: 60px;
+    height: 52px;
+    padding-inline: 10px;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .meeting-room .control-bar .ctrl-label {
+    display: block;
+    position: static;
+    width: auto;
+    height: auto;
+    clip: auto;
+    clip-path: none;
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.15;
+  }
+}
+
 /* Responsive meeting room layout: sleek header, non-overflowing controls, clear modals and side panels. */
 @media(max-width:767px) {
   .meeting-room { height:100dvh; min-height:0; overflow:hidden; }

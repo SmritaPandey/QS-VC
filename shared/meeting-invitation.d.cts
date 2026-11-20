@@ -1,7 +1,7 @@
 interface SessionMeetingClaims {
     hostId: string;
     expiresAt: number;
-    meetingKind: 'conference' | 'team' | 'town_hall' | 'webinar';
+    meetingKind: 'instant' | 'conference' | 'team' | 'town_hall' | 'webinar';
     e2eeRequired: boolean;
     maxParticipants: number;
 }
