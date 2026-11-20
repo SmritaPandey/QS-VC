@@ -138,7 +138,7 @@ export class SignalingClient {
                     this.pendingRequests.delete(id);
                     reject(new Error(`Request timeout: ${method}`));
                 }
-            }, method === 'joinRoom' ? 30000 : 15000);
+            }, method === 'askMeetingAssistant' ? 50000 : method === 'joinRoom' ? 30000 : 15000);
         });
     }
 

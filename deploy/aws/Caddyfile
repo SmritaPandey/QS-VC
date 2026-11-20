@@ -29,7 +29,7 @@
     handle @recording {
         reverse_proxy 127.0.0.1:4004
     }
-    @signaling path /ws /api/ice-servers /api/signaling-ticket /api/admin/rooms /api/admin/rooms/*
+    @signaling path /ws /api/ice-servers /api/signaling-ticket /api/product-guide /api/admin/rooms /api/admin/rooms/*
     handle @signaling {
         reverse_proxy 127.0.0.1:4001 {
             header_up X-QSVC-Client-IP {http.request.remote.host}

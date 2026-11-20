@@ -67,3 +67,39 @@
 .meeting-room .meeting-feedback.meeting-caption-diagnostic { position: absolute; top: calc(56px + 10px); right: 12px; z-index: 36; width: min(320px, calc(100% - 24px)); }
 .meeting-room .transcript-indicator { box-sizing: border-box; max-width: calc(100% - 24px); padding: 5px 10px; border-radius: 8px; font-size: 13px; font-weight: 400; line-height: 1.4; overflow-wrap: anywhere; }
 @media (max-width: 767px) { .meeting-room .meeting-feedback.meeting-caption-diagnostic { top: calc(52px + 8px); } }
+
+.meeting-room .meeting-language-settings {
+    box-sizing: border-box;
+    overscroll-behavior: contain;
+    scroll-padding-block: 72px 16px;
+}
+.meeting-language-settings .caption-settings-head {
+    position: sticky;
+    top: -1px;
+    z-index: 2;
+    padding-block: 6px;
+    background: #162331;
+}
+.meeting-language-settings .caption-settings-subhead {
+    margin: 8px 0 0;
+    padding-top: 12px;
+    border-top: 1px solid #385063;
+    font-size: 1rem;
+}
+.meeting-language-settings .caption-toggle { min-height: 44px; }
+
+.caption-settings-group { border-top: 1px solid #385063; }
+.caption-settings-group summary {
+    padding-block: 12px;
+    min-height: 44px;
+    box-sizing: border-box;
+    cursor: pointer;
+    color: #edf5fa;
+    font-weight: 500;
+}
+.caption-settings-group[open] > :not(summary) { margin-block: 6px; }
+.caption-settings-group > label:not(.caption-toggle) { display: block; }
+.caption-settings-group .caption-privacy summary { color: #99decf; font-size: 14px; }
+.caption-settings-group summary:focus-visible { outline: 2px solid #75ecd7; outline-offset: 2px; }
+
+.meeting-language-settings .caption-settings-head h2 { font-weight: 500; }

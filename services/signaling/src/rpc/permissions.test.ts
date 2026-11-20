@@ -25,6 +25,9 @@ import { admittedPeerIceServers } from '../turn.js';
 import meetingInvitation from '../../../../shared/meeting-invitation.cjs';
 import { loadMeetingPolicy, endHostedMeetingStatus, verifySignalingAccess } from '../meeting-policy.js';
 
+vi.mock('../openrouter.js', () => ({ askOpenRouter: vi.fn(), openRouterConfigured: vi.fn(() => true) }));
+import { askOpenRouter } from '../openrouter.js';
+
 const socket = () => ({ readyState: 1, send: vi.fn(), close: vi.fn() });
 // Test browsers support encrypted media unless a test says otherwise (end-to-end encryption is on by default).
 const rpc = (ws: any, state: any, method: string, params: any = {}) =>
@@ -1176,4 +1179,23 @@ it('rejects a persisted ended meeting code before creating a signaling room', as
     vi.mocked(loadMeetingPolicy).mockResolvedValueOnce({ hostId: 'owner', status: 'ended', settings: {} } as any);
     expect((await rpc(socket(), { authUser: { sub: 'owner' } }, 'joinRoom', { meetingCode, displayName: 'Owner' }))?.error?.code).toBe(-32004);
     expect(roomManager.getRoomByCode(meetingCode)).toBeUndefined();
+});
+
+it('scopes assistant requests to admitted signed-in accounts and limits repeated questions', async () => {
+    const ws = socket(), other = socket();
+    const state: any = { authUser: { sub: crypto.randomUUID() } };
+    const question = { question: 'Where is the camera control?' };
+    expect((await rpc(ws, state, 'askMeetingAssistant', question))?.error).toBeDefined();
+    await rpc(ws, state, 'joinRoom', { meetingCode: crypto.randomUUID().slice(0, 12), displayName: 'Host' });
+    expect((await rpc(other, state, 'askMeetingAssistant', question))?.error).toBeDefined();
+    expect((await rpc(ws, { ...state, authUser: null }, 'askMeetingAssistant', question))?.error).toBeDefined();
+    expect((await rpc(ws, state, 'askMeetingAssistant', { ...question, transcript: 'private data' }))?.error).toBeDefined();
+    vi.mocked(askOpenRouter).mockResolvedValue('Use Camera.');
+    for (let call = 0; call < 6; call++) {
+        expect((await rpc(ws, state, 'askMeetingAssistant', question))?.result).toEqual({ answer: 'Use Camera.' });
+    }
+    expect((await rpc(ws, state, 'askMeetingAssistant', question))?.error?.code).toBe(-32003);
+    expect(askOpenRouter).toHaveBeenCalledTimes(6);
+    expect(askOpenRouter).toHaveBeenCalledWith(expect.any(String), question.question);
+    await handlePeerDisconnect(state);
 });

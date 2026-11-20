@@ -22,7 +22,9 @@ import { can, getPrivateConversationLimitMs } from '../../../../shared/entitleme
 import meetingInvitation from '../../../../shared/meeting-invitation.cjs';
 import { publishCaption, publishInterim, subscribeCaptions, translationCapabilities, translateCaption, clearEmptyRoomCaptions, forgetPeerCaptions, setTranscriptSaving, transcriptEntries } from '../captions.js';
 import { asrParticipants, asrCapabilities, pushAsrAudio, startAsr, stopAsr, stopAsrForPeer } from '../asr-relay.js';
+import { askOpenRouter, openRouterConfigured } from '../openrouter.js';
 import { generateMinutes, minutesConfigured } from '../minutes.js';
+import { generateMeetingSummary } from '../ai-meeting-summary.js';
 import { saveTranscript } from '../transcript-store.js';
 
 const { createMeetingInviteToken, verifyMeetingInviteToken, isSessionMeetingCode, verifySessionMeetingInvite, verifyGuestHostToken } = meetingInvitation;
@@ -33,8 +35,12 @@ const cancelledRooms = new WeakSet<object>();
 const endedCodes = new Map<string, number>();
 const startedSessionCodes = new Map<string, number>();
 const sessionInviteExpirations = new WeakMap<RoomState, number>();
+const assistantBudgets = new Map<string, { until: number; count: number; pending: boolean }>();
 const endedCodeCleanup = setInterval(() => {
     const now = Date.now();
+    for (const [account, budget] of assistantBudgets) {
+        if (!budget.pending && budget.until <= now) assistantBudgets.delete(account);
+    }
     for (const codes of [endedCodes, startedSessionCodes]) {
         for (const [code, expiry] of codes) if (expiry <= now) codes.delete(code);
     }
@@ -615,6 +621,63 @@ export async function handleRpcMessage(
             }
             case 'getTranscript':
                 return { jsonrpc: '2.0', id: id!, result: transcriptEntries(connectionState.roomId!) };
+            case 'askMeetingAssistant': {
+                const account = connectionState.authUser?.sub;
+                if (!account) throw createError(-32005, 'Sign in to use the meeting assistant.');
+                const request = z.object({
+                    question: z.string().trim().min(1).max(2000),
+                    context: z.object({
+                        isHost: z.boolean().optional(),
+                        e2eeActive: z.boolean().optional(),
+                        participantsCount: z.number().int().min(0).max(1000).optional(),
+                        webinar: z.boolean().optional(),
+                    }).optional(),
+                }).strict().safeParse(params);
+                if (!request.success) throw createError(-32602, 'Enter a question of up to 2,000 characters.');
+                if (!openRouterConfigured()) throw createError(-32000, 'The online assistant is unavailable for this deployment.');
+                const now = Date.now();
+                let budget = assistantBudgets.get(account);
+                if (budget?.pending) throw createError(-32003, 'Wait for your previous question to finish.');
+                if (!budget || budget.until <= now) {
+                    budget = { until: now + 60_000, count: 0, pending: false };
+                    assistantBudgets.set(account, budget);
+                }
+                if (budget.count >= 6) throw createError(-32003, 'Please wait a minute before asking another question.');
+                budget.count++;
+                budget.pending = true;
+                try {
+                    let systemMsg = 'You are the QS-VC meeting help assistant. Explain microphone, camera, presenting, captions, chat, and host controls concisely. Availability depends on role, deployment and plan. You cannot see the room, transcript, account or files, or perform actions. Say when you are unsure.';
+                    if (request.data.context) {
+                        const { isHost, e2eeActive, participantsCount, webinar } = request.data.context;
+                        systemMsg += ` Current Meeting State: User is ${isHost ? 'Meeting Host' : 'Participant'}. Post-Quantum E2EE is ${e2eeActive ? 'ACTIVE (ML-KEM-1024)' : 'Standard'}. Meeting type is ${webinar ? 'Webinar' : 'Conference'}. Participant count is ${participantsCount ?? 'unknown'}.`;
+                    }
+                    const answer = await askOpenRouter(systemMsg, request.data.question);
+                    return { jsonrpc: '2.0', id: id!, result: { answer } };
+                } finally { budget.pending = false; }
+            }
+            case 'generateMeetingSummary': {
+                const parsed = z.object({
+                    language: z.string().max(40).optional(),
+                }).strict().safeParse(params || {});
+                if (!parsed.success) throw createError(-32602, 'Invalid meeting summary request');
+                const roomId = connectionState.roomId!;
+                if (!roomManager.isHostOrCoHost(roomId, connectionState.peerId!)) throw createError(-32005, 'Only hosts can create meeting summaries');
+                const transcript = transcriptEntries(roomId);
+                if (!transcript.saving) throw createError(-32005, 'Turn on “Save transcript” first');
+                const room = roomManager.getRoom(roomId);
+                if (process.env.QSVC_DEPLOYMENT === 'onprem' && (!room || room.settings.e2eeRequired)) {
+                    throw createError(-32005, 'AI summary is unavailable for this protected meeting');
+                }
+                const participantNames = room ? [...room.peers.values()].map(p => p.displayName) : [];
+                const durationMs = transcript.since ? Date.now() - transcript.since : 0;
+                const summary = await generateMeetingSummary(transcript.entries, {
+                    meetingCode: room?.meetingCode || 'QS-VC',
+                    participants: participantNames,
+                    durationMs,
+                    language: parsed.data.language,
+                });
+                return { jsonrpc: '2.0', id: id!, result: { summary } };
+            }
             case 'generateMinutes': {
                 const parsed = z.object({ language: z.string().max(40).optional() }).strict().safeParse(params || {});
                 if (!parsed.success) throw createError(-32602, 'Invalid minutes request');

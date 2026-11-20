@@ -34,7 +34,7 @@ export default {
         const signaling = url.pathname === '/ws' || url.pathname.startsWith('/ws/');
         const api = url.pathname === '/api' || url.pathname.startsWith('/api/');
         if (!api && !signaling) return withSecurityHeaders(await env.ASSETS.fetch(request));
-        if (api && !publicApi.test(url.pathname) && url.pathname !== '/api/ice-servers' && url.pathname !== '/api/signaling-ticket') return error('API route not found.', 404);
+        if (api && !publicApi.test(url.pathname) && url.pathname !== '/api/ice-servers' && url.pathname !== '/api/signaling-ticket' && url.pathname !== '/api/product-guide' && url.pathname !== '/api/contact-ai') return error('API route not found.', 404);
 
         let backend;
         try {

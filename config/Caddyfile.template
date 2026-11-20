@@ -74,7 +74,8 @@
     }
 
     # Signed-in users swap their login for a single-use WebSocket ticket here.
-    handle /api/signaling-ticket {
+    @signalingHttp path /api/signaling-ticket /api/product-guide
+    handle @signalingHttp {
         reverse_proxy signaling:4001 {
             header_up X-QSVC-Client-IP {http.request.remote.host}
         }

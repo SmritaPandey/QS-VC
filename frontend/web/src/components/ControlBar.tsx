@@ -35,9 +35,7 @@ interface Props {
     reactionsOpen?: boolean;
     languageOpen?: boolean;
     /** short name of the speaking language, e.g. "Hindi" */
-    languageLabel?: string;
     /** short code shown on the language button, e.g. "HI" */
-    languageCode?: string;
     onToggleAudio: () => void;
     onToggleVideo: () => void;
     onToggleScreen: () => void;
@@ -134,7 +132,7 @@ export default function ControlBar({
     onChangeNoiseMode, onRequirePlanFeature, onSignInForExtras, onExplainAccess, featureMinimumPlans = {},
     activitiesOpen = false, hostToolsOpen = false, onToggleActivities, onToggleHostTools,
     audioMuted, videoOff, screenSharing,
-    chatOpen, unreadChat = 0, permissions = [], onReviewPermission, participantsOpen, handRaised, reactionsOpen = false, languageOpen = false, languageLabel, languageCode,
+    chatOpen, unreadChat = 0, permissions = [], onReviewPermission, participantsOpen, handRaised, reactionsOpen = false, languageOpen = false,
     onToggleAudio, onToggleVideo, onToggleScreen, onOpenInvite,
     onToggleChat, onToggleParticipants, onRaiseHand, onToggleReactions, onToggleLanguage,
     captionsOn = false, onToggleCaptions, pictureInPicture = false, onTogglePictureInPicture, fullscreen = false, onToggleFullscreen, effectsOn = false, onOpenEffects, onReportProblem, onOpenBreakouts, onOpenQuality, onOpenMultiCamera, onRecordLocally,
@@ -185,8 +183,8 @@ export default function ControlBar({
                 <ToggleControl on={!videoOff} label="Camera" title={videoOff ? 'Start video' : 'Stop video'}
                     iconOn="videocam" iconOff="videocam_off" stateClass={videoOff ? 'active-muted' : ''} onToggle={onToggleVideo} />
                 {onToggleCaptions && (
-                    <ToggleControl on={captionsOn} label="Captions" locked={captionsLocked} title={captionsLocked ? `AI captions require ${minimumPlan('ai_captions', 'starter')}` : captionsOn ? 'Turn off captions' : `Turn on captions${languageLabel ? ` (${languageLabel})` : ''}`}
-                        iconOn="closed_caption" iconOff="closed_caption_disabled" stateClass={`control-extra-inline ${captionsOn ? 'active' : ''}`} onToggle={() => { setMoreOpen(false); if (captionsLocked) onRequirePlanFeature?.('ai_captions'); else onToggleCaptions(); }} badge={captionsOn ? languageCode : undefined} />
+                    <ToggleControl on={captionsOn} label="Captions" locked={captionsLocked} title={captionsLocked ? `AI captions require ${minimumPlan('ai_captions', 'starter')}` : captionsOn ? 'Turn off captions' : 'Turn on captions'}
+                        iconOn="closed_caption" iconOff="closed_caption_disabled" stateClass={`control-extra-inline ${captionsOn ? 'active' : ''}`} onToggle={() => { setMoreOpen(false); if (captionsLocked) onRequirePlanFeature?.('ai_captions'); else onToggleCaptions(); }} />
                 )}
             </div>
 

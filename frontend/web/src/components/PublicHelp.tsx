@@ -9,6 +9,9 @@ export default function PublicHelp({ navigationOpen = false }: { navigationOpen?
     const [open, setOpen] = useState(false);
     const [input, setInput] = useState('');
     const [messages, setMessages] = useState<GuideMessage[]>([{ id: 0, role: 'assistant', text: 'Ask me about QS-VC. I can help with joining, languages, plans and hosting.' }]);
+    const [busy, setBusy] = useState(false);
+    const pending = useRef(false);
+    const online = import.meta.env.VITE_DEPLOYMENT !== 'onprem';
     const nextId = useRef(1);
     const trigger = useRef<HTMLButtonElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
@@ -20,27 +23,53 @@ export default function PublicHelp({ navigationOpen = false }: { navigationOpen?
     useEffect(() => { if (open) inputRef.current?.focus(); }, [open]);
     useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [messages, open]);
 
-    const send = (question: string) => {
+    const send = async (question: string) => {
         const text = question.trim().slice(0, 500);
-        if (!text) return;
+        if (!text || pending.current) return;
         const user: GuideMessage = { id: nextId.current++, role: 'user', text };
-        const reply: GuideMessage = { id: nextId.current++, role: 'assistant', ...productReply(text) };
-        setMessages(previous => [...previous, user, reply].slice(-40));
+        setMessages(previous => [...previous, user].slice(-40));
         setInput('');
         inputRef.current?.focus();
+        const reply = productReply(text);
+        pending.current = true;
+        setBusy(true);
+        try {
+            if (online) {
+                const endpoint = new URL('/api/product-guide', import.meta.env.VITE_SIGNALING_URL || window.location.origin);
+                if (endpoint.protocol === 'wss:') endpoint.protocol = 'https:';
+                if (endpoint.protocol === 'ws:') endpoint.protocol = 'http:';
+                const response = await fetch(endpoint, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    credentials: 'omit', redirect: 'error', cache: 'no-store',
+                    body: JSON.stringify({ question: text }), signal: AbortSignal.timeout(35_000),
+                });
+                if (!response.ok) throw new Error();
+                const result = await response.json();
+                if (typeof result.answer !== 'string' || !result.answer.trim()) throw new Error();
+                reply.text = result.answer;
+            }
+        } catch {
+            reply.text = 'From the local guide: ' + reply.text;
+        } finally {
+            const message: GuideMessage = { ...reply, id: nextId.current++, role: 'assistant' };
+            setMessages(previous => [...previous, message].slice(-40));
+            pending.current = false;
+            setBusy(false);
+        }
     };
     const submit = (event: FormEvent) => { event.preventDefault(); send(input); };
 
     return <div className="public-help" hidden={navigationOpen} onKeyDown={event => { if (event.key === 'Escape' && open) { event.stopPropagation(); close(); } }}>
         {open && <section id={panelId} className="public-help-panel" role="dialog" aria-labelledby={titleId}>
-            <div className="public-help-heading"><div><h2 id={titleId}>QS-VC assistant</h2><p>Product guide</p></div><button type="button" className="public-help-close" aria-label="Close help" onClick={close}><span className="mi" aria-hidden="true">close</span></button></div>
+            <div className="public-help-heading"><div><h2 id={titleId}>QS-VC assistant</h2><p>{online ? 'Sends your question to OpenRouter and its model provider.' : 'Local product guide'}</p></div><button type="button" className="public-help-close" aria-label="Close help" onClick={close}><span className="mi" aria-hidden="true">close</span></button></div>
             <div ref={logRef} className="public-help-messages" role="log" aria-label="Product guide conversation" aria-live="polite" aria-relevant="additions">
                 {messages.map(message => <div className={`public-help-message public-help-message--${message.role}`} key={message.id}><span className="sr-only">{message.role === 'user' ? 'You: ' : 'QS-VC guide: '}</span><p>{message.text}</p>{message.link && <Link to={message.link.to}>{message.link.label}<span aria-hidden="true"> →</span></Link>}</div>)}
             </div>
-            <div className="public-help-suggestions" aria-label="Suggested questions">{['Join a meeting', 'Language options', 'Plans and pricing'].map(question => <button type="button" key={question} onClick={() => send(question)}>{question}</button>)}</div>
+            {busy && <p role="status">Looking up your question…</p>}
+            <div className="public-help-suggestions" aria-label="Suggested questions">{['Join a meeting', 'Language options', 'Plans and pricing'].map(question => <button type="button" key={question} disabled={busy} onClick={() => send(question)}>{question}</button>)}</div>
             <form className="public-help-composer" onSubmit={submit}>
                 <input ref={inputRef} type="text" maxLength={500} value={input} onChange={event => setInput(event.target.value)} aria-label="Ask the QS-VC product guide" placeholder="Ask about QS-VC…" />
-                <button type="submit" aria-label="Send question" disabled={!input.trim()}><span className="mi" aria-hidden="true">arrow_upward</span></button>
+                <button type="submit" aria-label="Send question" disabled={busy || !input.trim()}><span className="mi" aria-hidden="true">arrow_upward</span></button>
             </form>
         </section>}
         <button ref={trigger} type="button" className="public-help-launcher" aria-label={open ? 'Close QS-VC help' : 'Open QS-VC help'} aria-expanded={open} aria-controls={open ? panelId : undefined} onClick={() => open ? close() : setOpen(true)}>

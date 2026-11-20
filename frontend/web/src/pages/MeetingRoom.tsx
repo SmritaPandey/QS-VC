@@ -21,11 +21,8 @@ import { createMeetingComposite, type MeetingComposite } from '../lib/meeting-re
 import VideoGrid, { RemoteAudio, type ViewMode, type TilesPerPage } from '../components/VideoGrid';
 import BackgroundEffects from '../components/BackgroundEffects';
 import ReportProblem from '../components/ReportProblem';
-import { hasCaptionConsent } from '../components/MeetingCaptions';
 import { useSpeaking } from '../lib/speaking';
 import { BackgroundProcessor, savedEffect, saveEffect, effectLabel, type BackgroundEffect } from '../lib/virtual-background';
-import { SpeechToTextEngine } from '../lib/speech-to-text';
-import { ServerSpeechEngine } from '../lib/server-speech';
 import '../styles/meeting-stage.css';
 import TenantBrand from '../components/TenantBrand';
 import { useMeetingBranding } from '../lib/branding';
@@ -49,7 +46,7 @@ import MeetingCollaboration from '../components/MeetingCollaboration';
 import HostMeetingTools, { type RoomHostSettings } from '../components/HostMeetingTools';
 import { WaitingAdmission, type WaitingMode } from '../components/WaitingRoom';
 import { openMicrophone, startCameraWithFallback, microphoneMessage, deviceLabel } from '../lib/device-access';
-import { initialMeetingLanguage, detectLanguage, setMeetingLanguage, clearSavedLanguage, findLanguage, LANGUAGE_EVENT, type MeetingLanguage } from '../lib/meeting-language';
+import { initialMeetingLanguage, detectLanguage, setMeetingLanguage, clearSavedLanguage, LANGUAGE_EVENT, type MeetingLanguage } from '../lib/meeting-language';
 import type { EncryptedChatEnvelope } from '../lib/e2ee-data';
 import { E2EEManager, encodedTransformsSupported, type E2EEKeyBundle, type E2EEKeyEnvelope } from '../lib/e2ee';
 import { meetingSecurityCode } from '../lib/e2ee-safety';
@@ -2119,20 +2116,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         setInformationOpen(false);
     }, []);
     // ── Captions (CC button) ──
+    const captionsLocked = signedIn && !isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_captions'));
     const toggleCaptions = useCallback(() => {
-        if (captionsOn) { setCaptionsOn(false); setShareSpeech(false); stopSpeechRecognition.current(); return; }
-        setCaptionsOn(true);
-        if (!signedIn) {
-            showNotice(`Captions are on in ${findLanguage(guestCaptionLanguage)?.name || 'your language'}, chosen from your location. Sign in to change the language or hear translated speech.`);
-            return;
-        }
-        // Server recognition (any modern browser) or the browser's own recognizer.
-        const supported = SpeechToTextEngine.isSupported() || ServerSpeechEngine.isSupported();
-        if (!canPublishRef.current) { showNotice('Captions are on. You’ll see what the speakers say.'); return; }
-        if (supported && hasCaptionConsent() && !ServerSpeechEngine.isSupported()) { setShareSpeech(true); showNotice('Captions are on, including your own speech.'); }
-        else if (supported) { closePanels(); setLanguageOpen(true); showNotice('Captions are on. To let others read what you say, turn on “Share my speech as captions”.'); }
-        else showNotice('Captions are on. This browser can’t caption your own speech, but you’ll see what others say.');
-    }, [captionsOn, showNotice, signedIn, guestCaptionLanguage, e2eeActive, closePanels]);
+        if (!captionsOn && captionsLocked) { requestPlanFeature('ai_captions'); return; }
+        setCaptionsOn(on => !on);
+    }, [captionsOn, captionsLocked, requestPlanFeature]);
     const openInformation = useCallback(() => {
         closePanels(); setInformationOpen(true);
     }, [closePanels]);
@@ -2380,7 +2368,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     <MeetingCaptions translatedSpeaking={translatedSpeaking} e2eeActive={e2eeActive} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
                         showCaptions={captionsOn} onShowCaptionsChange={setCaptionsOn} shareSpeech={shareSpeech} onShareSpeechChange={setShareSpeech}
                         getMicTrack={getCaptionMicTrack} isHost={manager} meetingCode={meetingCode}
-                        viewOnly={!signedIn} viewerLanguage={guestCaptionLanguage} />
+                        canShareSpeech={signedIn && !captionsLocked && canPublishRef.current} viewOnly={!signedIn || captionsLocked} viewerLanguage={guestCaptionLanguage} />
                 </div>
 
                 {breakoutsOpen && <MeetingBreakouts connected={connected} isHost={myRole === 'host'} currentRoomId={currentRoomId} transitioning={roomTransitioning} participants={[{ peerId: myPeerIdRef.current || 'self', displayName: `${displayName} (You)` }, ...Array.from(peers.values()).map(peer => ({ peerId: peer.peerId, displayName: peer.displayName }))]} onJoin={moveToBreakout} onClose={() => { setBreakoutsOpen(false); restoreFormatFocus(); }} />}
@@ -2422,9 +2410,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 onOpenQuality={() => { closePanels(); setQualityOpen(true); }} onOpenMultiCamera={() => { closePanels(); setMultiCameraOpen(true); }} onRecordLocally={() => { void handleToggleRecording('local'); }}
                 featureMinimumPlans={entitlements.featureMinimumPlans} onExplainAccess={showNotice}
                 pictureInPicture={pictureInPictureOpen} onTogglePictureInPicture={() => { void pictureInPictureRef.current?.toggle(); }}
-                assistant={signedIn ? <AIChatBot onOpen={closePanels} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen || informationOpen || languageOpen || reactionsOpen || effectsOpen || breakoutsOpen} /> : undefined}
+                assistant={signedIn ? <AIChatBot onOpen={closePanels} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen || informationOpen || languageOpen || reactionsOpen || effectsOpen || breakoutsOpen} isHost={myRole === 'host'} e2eeActive={e2eeEnabled} participantsCount={peers.size + 1} /> : undefined}
                 signedIn={signedIn}
-                captionsLocked={signedIn && !isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_captions'))}
+                captionsLocked={captionsLocked}
                 effectsLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'background_effects'))}
                 noiseMode={noiseMode}
                 aiNoiseSuppressionLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_noise_suppression'))}
@@ -2451,8 +2439,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 onReviewPermission={key => setUnreadPermissions(current => current.filter(permission => permission !== key))}
                 handRaised={handRaised} reactionsOpen={reactionsOpen}
                 onToggleReactions={() => { closePanels(); setReactionsOpen(!reactionsOpen); }}
-                languageOpen={languageOpen} languageLabel={findLanguage(signedIn ? speechLanguage.code : guestCaptionLanguage)?.name} languageCode={(signedIn ? speechLanguage.code : guestCaptionLanguage).split('-')[0].toUpperCase()}
-                onToggleLanguage={signedIn ? () => { closePanels(); setLanguageOpen(!languageOpen); } : undefined}
+                languageOpen={languageOpen}
+                onToggleLanguage={signedIn ? () => { if (captionsLocked) { requestPlanFeature('ai_captions'); return; } closePanels(); setLanguageOpen(!languageOpen); } : undefined}
                 onToggleAudio={handleToggleAudio} onToggleVideo={handleToggleVideo}
                 onToggleScreen={handleScreenShare} onOpenInvite={() => setInviteModalOpen(true)} onToggleRecording={handleToggleRecording}
                 onToggleChat={() => { if (!roomSettings.allowChat && !manager) { showNotice('Chat is disabled by the host.'); return; } setIncomingChatMessage(null); closePanels(); setChatOpen(!chatOpen); }}
