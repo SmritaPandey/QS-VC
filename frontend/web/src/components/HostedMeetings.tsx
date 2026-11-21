@@ -52,7 +52,7 @@ export function HostedMeetingRow({ meeting, label, onCancelled, onExpired }: { m
                 <span className="mi mi-sm" aria-hidden="true">{copied ? 'check' : 'link'}</span>{copied ? 'Copied' : 'Copy link'}
             </button>}
             {meeting.status !== 'expired' && (ended
-                ? <Link className="workspace-row-join workspace-row-secondary" to={`/recordings/${encodeURIComponent(meeting.meetingCode)}`}>Recordings</Link>
+                ? <Link className="workspace-row-join workspace-row-secondary" to={`/recordings/${encodeURIComponent(meeting.meetingCode)}`}>Recordings and summary</Link>
                 : <Link className="workspace-row-join qsvc-action" state={meeting.previewPath ? { title: meeting.title } : undefined} to={preview}><ActionContents>{meeting.status === 'active' ? 'Rejoin' : 'Start'}</ActionContents></Link>)}
         </div>
     </article>;

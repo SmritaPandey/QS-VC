@@ -12,6 +12,11 @@ describe('transcript export', () => {
     it('writes valid SRT cues', () => {
         expect(transcriptAsSrt(rows)).toBe('1\n00:00:00,000 --> 00:00:02,500\nAsha: नमस्ते\n\n2\n00:00:02,500 --> 00:00:06,500\nRavi: Budget approved\n');
     });
+    it('preserves an executive summary sent without minutes or caption segments', () => {
+        const input = { startedAt: '2026-11-06T10:00:00.000Z', segments: [], summary: 'Budget approved.' };
+        expect(transcriptBody.parse(input)).toEqual(input);
+        expect(transcriptBody.safeParse({ ...input, summary: ' ' }).success).toBe(false);
+    });
     it('validates stored segments', () => {
         expect(transcriptBody.safeParse({ startedAt: '2026-11-06T10:00:00.000Z', segments: [{ id: 'x', speaker: 'A', language: 'hi', text: 'ok', timestamp: 1 }] }).success).toBe(true);
         expect(transcriptBody.safeParse({ startedAt: 'now', segments: [] }).success).toBe(false);

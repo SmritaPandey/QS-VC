@@ -246,8 +246,8 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     const createSummary = async () => {
         setSummaryBusy(true); setStatus('Writing executive AI summary…');
         try {
-            const result = await signaling.request('generateMeetingSummary', {}) as { summary: string };
-            setSummary(result.summary); setStatus('Executive summary is ready.');
+            const result = await signaling.request('generateMeetingSummary', {}) as { summary: string; saved?: boolean };
+            setSummary(result.summary); setStatus(result.saved ? 'Summary saved. Open Recordings and summary in your workspace to read it later.' : 'Summary ready in this meeting only. Download a copy before leaving.');
         } catch { setStatus('AI summary temporarily unavailable.'); }
         finally { setSummaryBusy(false); }
     };
@@ -319,7 +319,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
                 <button type="button" className="btn-outline" onClick={() => download('txt')}>Download .txt</button>
                 <button type="button" className="btn-outline" onClick={() => download('srt')}>Download .srt</button>
                 {isHost && capabilities.minutes?.configured && <>
-                    <p className="caption-settings-note">Generate structured AI minutes or executive summaries using quantum-safe OpenRouter intelligence.</p>
+                    <p className="caption-settings-note">Generating a summary sends saved caption text to the AI provider. For workspace meetings, the summary is saved with the transcript for 90 days.</p>
                     <button type="button" className="btn-outline" disabled={minutesBusy} onClick={createMinutes}>{minutesBusy ? 'Writing minutes…' : 'Create AI minutes'}</button>
                     <button type="button" className="btn-outline" disabled={summaryBusy} onClick={createSummary} style={{ marginLeft: '6px' }}>{summaryBusy ? 'Summarizing…' : 'Executive AI summary'}</button>
                 </>}

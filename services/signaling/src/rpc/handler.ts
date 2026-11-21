@@ -685,7 +685,9 @@ export async function handleRpcMessage(
                     durationMs,
                     language: parsed.data.language,
                 });
-                return { jsonrpc: '2.0', id: id!, result: { summary } };
+                const saved = Boolean(room && transcript.since && !isSessionMeetingCode(room.meetingCode))
+                    && await saveTranscript(room!.meetingCode, [], transcript.since!, undefined, summary);
+                return { jsonrpc: '2.0', id: id!, result: { summary, saved } };
             }
             case 'generateMinutes': {
                 const parsed = z.object({ language: z.string().max(40).optional() }).strict().safeParse(params || {});

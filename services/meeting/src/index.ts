@@ -459,15 +459,15 @@ app.post('/api/internal/meetings/:code/transcript', express.json({ limit: '2mb' 
     const parsed = transcriptBody.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: 'Invalid transcript' });
     const code = String(req.params.code).toUpperCase().slice(0, 30);
-    const { startedAt, segments, minutes } = parsed.data;
+    const { startedAt, segments, minutes, summary } = parsed.data;
     try {
         const tenant = await rawPool.query('SELECT public.qsvc_tenant_id_by_meeting_code($1) AS tenant_id', [code]);
         if (!tenant.rows[0]?.tenant_id) return res.status(404).json({ error: 'Meeting not found' });
         await pool.runWithTenant(tenant.rows[0].tenant_id, async () => {
             await pool.query(
-                `INSERT INTO meeting_transcripts (meeting_code, started_at, minutes) VALUES ($1, $2, $3)
-                 ON CONFLICT (meeting_code, started_at) DO UPDATE SET minutes = COALESCE(EXCLUDED.minutes, meeting_transcripts.minutes), updated_at = NOW()`,
-                [code, startedAt, minutes ?? null],
+                `INSERT INTO meeting_transcripts (meeting_code, started_at, minutes, executive_summary) VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (meeting_code, started_at) DO UPDATE SET minutes = COALESCE(EXCLUDED.minutes, meeting_transcripts.minutes), executive_summary = COALESCE(EXCLUDED.executive_summary, meeting_transcripts.executive_summary), updated_at = NOW()`,
+                [code, startedAt, minutes ?? null, summary ?? null],
             );
             if (segments.length) await pool.query(
                     `INSERT INTO meeting_transcript_segments (meeting_code, segment_id, started_at, speaker, language, text, spoken_at)
@@ -492,6 +492,14 @@ app.get('/api/meetings/code/:code/transcript', meetingCodeLookupLimit, authMiddl
         const meeting = await pool.query('SELECT host_id FROM public.qsvc_meeting_by_code($1)', [code]);
         if (!meeting.rows.length) return res.status(404).json({ error: 'Meeting not found' });
         if (meeting.rows[0].host_id !== user.sub && user.role !== 'admin') return res.status(403).json({ error: 'Only the meeting host can open its transcript' });
+        if (req.query.format === 'summary') {
+            const saved = await pool.query(
+                "SELECT executive_summary FROM meeting_transcripts WHERE meeting_code = $1 AND executive_summary IS NOT NULL AND started_at >= NOW() - INTERVAL '90 days' ORDER BY started_at DESC LIMIT 1",
+                [code],
+            );
+            res.setHeader('Cache-Control', 'no-store');
+            return res.json({ summary: saved.rows[0]?.executive_summary ?? null });
+        }
         const limitValue = Number(req.query.limit);
         const limit = Number.isInteger(limitValue) && limitValue > 0 ? Math.min(limitValue, 1000) : 500;
         let cursor: { at: string; id: string } | null = null;

@@ -1,8 +1,34 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { getToken } from '../lib/session';
+import { downloadText } from '../lib/caption-stream';
 import SiteNav from '../components/SiteNav';
 import { recordingManager, recordingRequest, type CloudRecording } from '../lib/recording';
 import '../styles/recordings.css';
+
+function CloudSummary({ code }: { code: string }) {
+    const [summary, setSummary] = useState('');
+    const [message, setMessage] = useState('Loading summary…');
+    useEffect(() => {
+        const controller = new AbortController();
+        const base = import.meta.env.VITE_MEETING_URL || import.meta.env.VITE_API_URL || '';
+        fetch(`${base}/api/meetings/code/${encodeURIComponent(code)}/transcript?format=summary`, {
+            headers: { Authorization: `Bearer ${getToken()}` }, signal: controller.signal, cache: 'no-store',
+        }).then(async response => {
+            if (!response.ok) throw new Error();
+            const { summary } = await response.json();
+            if (controller.signal.aborted) return;
+            setSummary(summary || '');
+            setMessage(summary ? '' : 'No saved summary for this meeting.');
+        }).catch(() => { if (!controller.signal.aborted) setMessage('Could not load the meeting summary.'); });
+        return () => controller.abort();
+    }, [code]);
+    return <section className="recordings-message"><h2>Meeting summary</h2>
+        {message && <p role="status">{message}</p>}
+        {summary && <><p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{summary}</p>
+            <button type="button" onClick={() => downloadText(`${code}-summary.md`, summary)}>Download summary</button></>}
+    </section>;
+}
 
 export default function RecordingPlayback() {
     const { meetingId = '', shareToken } = useParams();
@@ -75,6 +101,7 @@ export default function RecordingPlayback() {
     return <div className="public-site recordings-page"><SiteNav /><main id="main-content" className="recordings-shell">
         <Link className="recordings-back" to="/app">← Back to meetings</Link>
         <header><div><h1 id="recordings-title" tabIndex={-1}>{shareToken ? 'Shared recording' : meetingId ? 'Meeting recordings' : 'My recordings'}</h1><p>{shareToken ? 'This recording was shared by its host.' : 'Saved privately until you delete them. Downloads start only when you choose.'}</p></div>{meetingId && !shareToken && <span className="recordings-code">{meetingId}</span>}</header>
+        {meetingId && !shareToken && <CloudSummary key={meetingId} code={meetingId} />}
         {pending && <section className="recordings-message" aria-label="Unsaved recording"><h2>Recording waiting to save</h2><p>Keep this tab open. This copy is only in memory until upload succeeds.</p><details className="recordings-actions"><summary aria-label="Unsaved recording actions"><span className="mi" aria-hidden="true">more_horiz</span></summary><div className="recordings-menu"><button type="button" disabled={!!busy} onClick={async () => {
             setBusy('pending'); setError('');
             try { await recordingManager.uploadRecording(pending.meetingCode, pending.blob, pending.id); recordingManager.pending = null; setPending(null); setNotice('Recording saved. Reload to refresh the list.'); }

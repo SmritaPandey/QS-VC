@@ -10,6 +10,7 @@ export const transcriptBody = z.object({
         text: z.string().trim().min(1).max(2000),
         timestamp: z.number().int().positive(),
     })).max(2000),
+    summary: z.string().trim().min(1).max(25000).optional(),
     minutes: z.string().max(20000).optional(),
 });
 export type TranscriptRow = { segment_id: string; speaker: string; language: string; text: string; spoken_at: Date | string };
