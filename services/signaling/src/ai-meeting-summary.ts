@@ -43,11 +43,7 @@ export async function generateMeetingSummary(
     }
 
     const durationMin = Math.round(options.durationMs / 60_000);
-    const participantList = options.participants.length
-        ? options.participants.slice(0, 50).join(', ')
-        : 'Unknown participants';
-
-    const metadataHeader = `Meeting Code: ${options.meetingCode}\nDuration: ~${durationMin} minute(s)\nParticipants: ${participantList}\nLanguage: ${options.language || 'English'}`;
+    const metadataHeader = `Duration: ~${durationMin} minute(s)\nLanguage: ${options.language || 'English'}`;
     const transcript = transcriptText(entries, 60_000);
 
     const prompt = `${metadataHeader}\n\nTranscript Data:\n${transcript}\n\nPlease generate the executive meeting summary in ${options.language || 'English'}.`;

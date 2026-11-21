@@ -1,3 +1,4 @@
+import { scrubSensitiveData } from './ai/ai-sanitizer.js';
 import { request } from 'node:https';
 import { aiService, AIFeature, AIOptions } from './ai/index.js';
 
@@ -14,10 +15,20 @@ export function openRouterConfigured(): boolean {
  * Maintained for high-performance direct paths and exact backward compatibility.
  */
 export async function askOpenRouter(system: string, prompt: string, modelOverride?: string): Promise<string> {
-    if (!openRouterConfigured() || pending >= 16 || !prompt.trim() || prompt.length > 65_536) throw unavailable();
+    return requestCompletion(system, prompt, process.env.OPENROUTER_API_KEY, modelOverride);
+}
+
+/** Support older minutes-only credentials without enabling other website features. */
+export function askLegacyOpenRouterMinutes(system: string, prompt: string): Promise<string> {
+    return requestCompletion(system, prompt, process.env.MINUTES_LLM_API_KEY, process.env.MINUTES_LLM_MODEL);
+}
+
+async function requestCompletion(system: string, prompt: string, credential?: string, modelOverride?: string): Promise<string> {
+    const key = credential?.trim();
+    if (process.env.QSVC_DEPLOYMENT === 'onprem' || !key || pending >= 16 || !prompt.trim() || prompt.length > 65_536) throw unavailable();
     const payload = JSON.stringify({
         model: modelOverride?.trim() || process.env.OPENROUTER_MODEL?.trim() || 'openai/gpt-4o-mini',
-        messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
+        messages: [{ role: 'system', content: system }, { role: 'user', content: scrubSensitiveData(prompt) }],
         max_tokens: 2000,
         provider: { data_collection: 'deny', zdr: true },
         stream: false,
@@ -30,7 +41,7 @@ export async function askOpenRouter(system: string, prompt: string, modelOverrid
                 method: 'POST', agent: false, minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3',
                 ecdhCurve: 'X25519MLKEM768', rejectUnauthorized: true,
                 signal: AbortSignal.timeout(45_000),
-                headers: { Authorization: 'Bearer ' + process.env.OPENROUTER_API_KEY!.trim(), 'Content-Type': 'application/json' },
+                headers: { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' },
             }, res => {
                 res.on('error', fail);
                 res.on('aborted', fail);

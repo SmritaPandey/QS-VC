@@ -19,12 +19,13 @@ it('uses the server credential and requires private routing and hybrid TLS', asy
             res.emit('end');
         } });
     }) as typeof request);
-    await expect(askOpenRouter('Guide', 'question')).resolves.toBe('answer');
+    await expect(askOpenRouter('Guide', 'question sk-123456789012345678901234')).resolves.toBe('answer');
     expect(request).toHaveBeenCalledWith('https://openrouter.ai/api/v1/chat/completions', expect.objectContaining({
         minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', ecdhCurve: 'X25519MLKEM768', rejectUnauthorized: true,
     }), expect.any(Function));
     expect(JSON.parse(payload).provider).toEqual({ data_collection: 'deny', zdr: true });
     expect(payload).not.toContain('test-key');
+    expect(JSON.parse(payload).messages[1].content).toBe('question [REDACTED_SECRET]');
 });
 
 it('blocks public relay calls for on-premise deployments, even with a key', async () => {

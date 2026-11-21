@@ -1,4 +1,4 @@
-import { askOpenRouter, openRouterConfigured } from './openrouter.js';
+import { askLegacyOpenRouterMinutes, askOpenRouter, openRouterConfigured } from './openrouter.js';
 import type { TranscriptEntry } from './captions.js';
 
 /**
@@ -6,15 +6,26 @@ import type { TranscriptEntry } from './captions.js';
  * (vLLM, Ollama, llama.cpp server, Azure OpenAI, or a hosted provider).
  * Configure: MINUTES_LLM_URL (base, e.g. http://llm:8000/v1), MINUTES_LLM_MODEL, MINUTES_LLM_API_KEY (optional).
  */
+function legacyRouterConfigured() {
+    return process.env.QSVC_DEPLOYMENT !== 'onprem'
+        && process.env.MINUTES_LLM_URL?.trim().replace(/\/$/, '') === 'https://openrouter.ai/api/v1'
+        && Boolean(process.env.MINUTES_LLM_API_KEY?.trim() && process.env.MINUTES_LLM_MODEL?.trim());
+}
+
 function minutesBase() {
     if (process.env.QSVC_DEPLOYMENT === 'onprem') {
         return process.env.QSVC_AI_GATEWAY_ENABLED === 'true' ? 'http://ai-gateway:4011/v1' : '';
     }
-    return process.env.MINUTES_LLM_URL?.trim() || '';
+    const base = process.env.MINUTES_LLM_URL?.trim();
+    if (!base) return '';
+    try {
+        // OpenRouter requests must use the hybrid TLS client.
+        return new URL(base).hostname.toLowerCase().replace(/\.$/, '') === 'openrouter.ai' ? '' : base;
+    } catch { return ''; }
 }
 
 export function minutesConfigured() {
-    return (process.env.QSVC_DEPLOYMENT !== 'onprem' && openRouterConfigured()) || Boolean(minutesBase() && process.env.MINUTES_LLM_MODEL?.trim());
+    return (process.env.QSVC_DEPLOYMENT !== 'onprem' && openRouterConfigured()) || legacyRouterConfigured() || Boolean(minutesBase() && process.env.MINUTES_LLM_MODEL?.trim());
 }
 
 const SYSTEM = `You write meeting minutes from a live-caption transcript. The transcript may contain recognition errors and several languages.
@@ -40,6 +51,7 @@ export async function generateMinutes(entries: TranscriptEntry[], language = 'En
     if (process.env.QSVC_DEPLOYMENT !== 'onprem' && openRouterConfigured()) {
         return (await askOpenRouter(SYSTEM, prompt)).slice(0, 20_000);
     }
+    if (legacyRouterConfigured()) return askLegacyOpenRouterMinutes(SYSTEM, prompt);
     const base = minutesBase().replace(/\/$/, '');
     const key = process.env.MINUTES_LLM_API_KEY?.trim();
     let response: Response;

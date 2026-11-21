@@ -15,12 +15,8 @@ type Dependencies = {
 };
 const actionBody = z.object({ kind: z.enum(['audio', 'video']), muted: z.literal(true) }).strict();
 
-/** Platform operators can stop current public media; participants retain control of enabling it. */
-export function adminControlsRouter({ rooms, verify, pause, audit, authUrl }: Dependencies) {
-    const router = Router();
-    router.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
-    router.use(rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: true, legacyHeaders: false }));
-    router.use(async (req, res, next) => {
+export function requirePlatformAdmin(verify: Dependencies['verify'], authUrl: string): import('express').RequestHandler {
+    return async (req, res, next) => {
         const authorization = req.headers.authorization;
         if (!authorization?.startsWith('Bearer ') || !authorization.slice(7)) return res.status(401).json({ error: 'Sign in as a platform administrator.' });
         try {
@@ -40,7 +36,15 @@ export function adminControlsRouter({ rooms, verify, pause, audit, authUrl }: De
         } catch (error) {
             return res.status(error instanceof InvalidAuthentication ? 401 : 503).json({ error: error instanceof InvalidAuthentication ? 'Your session expired. Sign in again.' : 'Administrator verification is temporarily unavailable.' });
         }
-    });
+    };
+}
+
+/** Platform operators can stop current public media; participants retain control of enabling it. */
+export function adminControlsRouter({ rooms, verify, pause, audit, authUrl }: Dependencies) {
+    const router = Router();
+    router.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
+    router.use(rateLimit({ windowMs: 60_000, limit: 60, standardHeaders: true, legacyHeaders: false }));
+    router.use(requirePlatformAdmin(verify, authUrl));
     router.get('/', (_req, res) => res.json({ rooms: rooms.getRooms().filter(room => room.peers.size > 0).map(room => ({
         id: room.id, meetingCode: room.meetingCode, startedAt: room.createdAt.toISOString(),
         participants: [...room.peers.values()].map(peer => ({ id: peer.id, displayName: peer.displayName, role: peer.role, audioMuted: peer.audioMuted, videoOff: peer.videoOff })),

@@ -108,22 +108,21 @@ export default function AdminAnalytics({ onManageAccess, hosted = true }: { onMa
                 },
                 body: JSON.stringify({
                     stats: {
-                        activeRooms: data.totals.activeMeetingRecords,
-                        totalParticipants: data.totals.activeUsers,
-                        e2eeRoomsCount: data.totals.activeMeetingRecords,
-                        averageLatencyMs: 45,
-                        captionUsersCount: Math.round(data.totals.activeUsers * 0.4),
-                        recordingSessionsCount: data.totals.activeMeetingRecords,
+                        activeUsers: data.totals.activeUsers,
+                        activeMeetingRecords: data.totals.activeMeetingRecords,
+                        scheduledMeetings: data.totals.scheduledMeetings,
+                        endedMeetings: data.totals.endedMeetings,
                     },
                 }),
-                signal: AbortSignal.timeout(20000),
+                signal: AbortSignal.timeout(50000),
             });
-            if (response.ok) {
+            if (!response.ok) throw new Error();
+            {
                 const resData = await response.json();
                 if (resData.insights) setAiInsights(resData.insights);
             }
         } catch {
-            // best-effort
+            setAiInsights('Insights are unavailable. Try again later.');
         } finally {
             setAiInsightsBusy(false);
         }
@@ -213,7 +212,7 @@ export default function AdminAnalytics({ onManageAccess, hosted = true }: { onMa
                 <div style={{ margin: '16px 0', padding: '16px', background: 'rgba(0, 120, 121, 0.06)', border: '1px solid rgba(0, 120, 121, 0.2)', borderRadius: '10px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: aiInsights ? '10px' : '0' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: '#007879' }}>
-                            <span className="mi">auto_awesome</span> Quantum-Safe AI Telemetry Insights (OpenRouter)
+                            <span className="mi">auto_awesome</span> Meeting counts · OpenRouter insights
                         </div>
                         <button type="button" disabled={aiInsightsBusy} onClick={generateAiInsights} style={{ fontSize: '0.85rem', padding: '6px 12px', borderRadius: '6px', border: '1px solid #007879', background: '#007879', color: '#fff', cursor: 'pointer' }}>
                             {aiInsightsBusy ? 'Analyzing…' : aiInsights ? 'Regenerate Insights' : 'Generate AI Insights'}

@@ -6,6 +6,7 @@
  */
 
 import { Router } from 'express';
+import { z } from 'zod';
 import rateLimit from 'express-rate-limit';
 import { askOpenRouter, openRouterConfigured } from './openrouter.js';
 import { sanitizeInput, detectPromptInjection } from './ai/ai-sanitizer.js';
@@ -40,9 +41,6 @@ export function contactRouterMiddleware(): Router {
             res.setHeader('Cache-Control', 'no-store');
 
             const message = sanitizeInput(req.body?.message, 1500);
-            const name = sanitizeInput(req.body?.name, 100);
-            const email = sanitizeInput(req.body?.email, 150);
-
             if (!message || message.length < 5) {
                 res.status(400).json({ error: 'Please provide a message with at least 5 characters.' });
                 return;
@@ -59,32 +57,15 @@ export function contactRouterMiddleware(): Router {
             }
 
             try {
-                const userPrompt = `Visitor: ${name || 'Anonymous'}\nEmail: ${email ? '[Provided]' : '[None]'}\nInquiry: ${message}`;
-                const rawResponse = await askOpenRouter(CONTACT_SYSTEM, userPrompt);
-
-                // Parse structured JSON response
-                let parsed: any;
-                try {
-                    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
-                    parsed = jsonMatch ? JSON.parse(jsonMatch[0]) : null;
-                } catch {
-                    parsed = null;
-                }
-
-                if (!parsed) {
-                    parsed = {
-                        category: 'general',
-                        priority: 'medium',
-                        summary: message.slice(0, 100),
-                        suggestedAnswer: 'Thank you for reaching out to the QS-VC team. We will review your message promptly.',
-                        recommendedAction: 'Direct to sales or support team',
-                    };
-                }
-
-                res.json({
-                    success: true,
-                    result: parsed,
-                });
+                const rawResponse = await askOpenRouter(CONTACT_SYSTEM, message);
+                const result = z.object({
+                    category: z.enum(['sales', 'support', 'security', 'general']),
+                    priority: z.enum(['low', 'medium', 'high']),
+                    summary: z.string().max(1000),
+                    suggestedAnswer: z.string().trim().min(1).max(3000),
+                    recommendedAction: z.string().max(1000),
+                }).parse(JSON.parse(rawResponse));
+                res.json({ success: true, result });
             } catch {
                 res.status(503).json({ error: 'Could not process contact query at this time.' });
             }

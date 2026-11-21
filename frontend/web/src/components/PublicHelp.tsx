@@ -41,7 +41,7 @@ export default function PublicHelp({ navigationOpen = false }: { navigationOpen?
                 const response = await fetch(endpoint, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     credentials: 'omit', redirect: 'error', cache: 'no-store',
-                    body: JSON.stringify({ question: text }), signal: AbortSignal.timeout(35_000),
+                    body: JSON.stringify({ question: text }), signal: AbortSignal.timeout(50_000),
                 });
                 if (!response.ok) throw new Error();
                 const result = await response.json();
