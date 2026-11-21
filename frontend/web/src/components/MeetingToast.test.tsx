@@ -10,8 +10,8 @@ const js = ts.transpileModule(declaration.getText(source).replace('export defaul
 function mountToast(hovered = false, focused = false) {
     const states = [hovered, focused];
     let cleanup: (() => void) | undefined;
-    const component = new Function('React', 'useState', 'useEffect', 'window', js)(React,
-        () => [states.shift(), vi.fn()], (effect: () => (() => void) | undefined) => { cleanup = effect(); }, globalThis);
+    const component = new Function('React', 'useState', 'useRef', 'useEffect', 'window', js)(React,
+        () => [states.shift(), vi.fn()], (initial: unknown) => ({ current: initial }), (effect: () => (() => void) | undefined) => { cleanup = effect(); }, globalThis);
     const dismiss = vi.fn();
     component({ children: 'Camera is off', onDismiss: dismiss, duration: 6000 });
     return { dismiss, unmount: () => cleanup?.() };
@@ -34,8 +34,8 @@ it('keeps a dismissed connection notice hidden for the same episode, including w
     const declaration = source.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === 'ConnectionNotice')!;
     const body = ts.transpileModule(declaration.getText(source).replace('export ', '') + '\nreturn ConnectionNotice;', { compilerOptions: { jsx: ts.JsxEmit.React, target: ts.ScriptTarget.ES2020 } }).outputText;
     let dismissed = false;
-    const render = new Function('React', 'MeetingToast', 'useState', 'useCallback', body)(
-        React, 'toast', () => [dismissed, (value: boolean) => { dismissed = value; }], (callback: Function) => callback,
+    const render = new Function('React', 'MeetingToast', 'useState', body)(
+        React, 'toast', () => [dismissed, (value: boolean) => { dismissed = value; }],
     );
     const props = { message: 'Video quality is reduced because of a weak connection.', onOpenQuality: vi.fn() };
     render(props).props.onDismiss();
