@@ -4,9 +4,9 @@
 @media (min-width: 1100px) {
   .meeting-room .control-bar .ctrl-btn {
     width: auto;
-    min-width: 60px;
-    height: 52px;
-    padding-inline: 10px;
+    min-width: clamp(44px, 4.2vw, 64px);
+    height: clamp(44px, 3.6vw, 52px);
+    padding-inline: clamp(4px, .6vw, 10px);
     flex-direction: column;
     gap: 2px;
   }
@@ -17,7 +17,7 @@
     height: auto;
     clip: auto;
     clip-path: none;
-    font-size: 13px;
+    font-size: clamp(.75rem, .88vw, .875rem);
     font-weight: 500;
     line-height: 1.15;
   }
@@ -114,7 +114,7 @@
     max-height:none;
     border-radius:18px;
     z-index:50;
-    box-shadow:0 16px 48px rgba(0,0,0,0.6);
+    box-shadow:none;
   }
   .meeting-room .meeting-language-settings {
     position:fixed;
@@ -207,27 +207,63 @@
  .public-site .public-contact-details { gap:20px; }
 }
 
-/* Use one surface and consistent states across the meeting dock. */
+/* Keep the call controls on one surface. Color identifies active, muted and end-call actions. */
+.meeting-room .control-bar {
+  border-inline:0;
+  border-bottom:0;
+  border-radius:0;
+  box-shadow:none;
+}
+.meeting-room .meeting-top-bar :is(.meeting-local-clock, .meeting-info-trigger) {
+  border:0;
+  background:transparent;
+  box-shadow:none;
+}
+.meeting-room .meeting-top-bar .meeting-info-trigger {
+  inline-size:44px;
+  block-size:44px;
+  flex-basis:44px;
+}
+.meeting-room .meeting-top-bar .qs-e2ee-chip {
+  min-inline-size:44px;
+  min-block-size:44px;
+  justify-content:center;
+  border:0;
+  background:transparent;
+}
+.meeting-room .meeting-top-bar :is(.meeting-info-trigger, .qs-e2ee-chip):hover {
+  background:#203542;
+}
+.meeting-room .meeting-top-bar .meeting-summary-label,
+.meeting-room .meeting-top-bar .meeting-summary-switch { min-height:44px; }
+.meeting-room .meeting-top-bar .meeting-summary-switch { min-width:44px; }
+.meeting-room .meeting-top-bar .meeting-summary-switch span { width:28px; justify-self:center; }
+.meeting-room .meeting-top-bar .meeting-summary-label { white-space:nowrap; }
+.meeting-room .control-bar .ctrl-btn .ctrl-icon { font-size:clamp(1.125rem, 1rem + .35vw, 1.5rem); }
+@media (min-width:768px) {
+  .meeting-room .control-bar {
+    gap:clamp(6px, 1vw, 14px);
+    padding:6px max(12px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+  }
+  .meeting-room .control-bar :is(.controls-left,.controls-center,.controls-right) { gap:clamp(4px, .65vw, 10px); }
+}
 .meeting-room .control-bar .ctrl-btn {
   box-shadow:none;
-  border:1px solid #3b5062;
-  background:#1a2938;
+  border:0;
+  background:transparent;
   color:#deebf3;
 }
 .meeting-room .control-bar .ctrl-btn:hover { background:#23384b; }
 .meeting-room .control-bar .ctrl-btn:is(.is-on,.active,.active-sharing) {
   background:#16473f;
-  border-color:#4c877d;
   color:#c1fff3;
 }
 .meeting-room .control-bar .ctrl-btn.active-muted {
   background:#422735;
-  border-color:#815565;
   color:#ffd0da;
 }
 .meeting-room .control-bar .ctrl-btn.leave-btn {
   background:#ae3048;
-  border-color:#d76579;
   color:#fff;
 }
 .meeting-room .control-bar .ctrl-btn.leave-btn:hover { background:#c03851; }
@@ -260,3 +296,84 @@
 .meeting-room .meeting-summary-panel { margin: 0; z-index: 40; white-space: normal; }
 .meeting-summary-panel header { display: flex; align-items: center; justify-content: space-between; }
 @media (max-width: 640px) { .meeting-summary-label .mi { display: none; } .meeting-summary-label { font-size: .8rem; } }
+
+/* Allow the title to have its own line when the host also has summary controls. */
+@media (max-width: 480px) {
+  .meeting-room .meeting-top-bar {
+    height:auto;
+    min-height:0;
+    display:grid;
+    grid-template-columns:auto minmax(0,1fr);
+    grid-template-areas:"identity actions" "context context";
+    gap:0 4px;
+    padding:2px max(8px,env(safe-area-inset-right)) 4px max(8px,env(safe-area-inset-left));
+  }
+  .meeting-room .top-bar-left { grid-area:identity; }
+  .meeting-room .top-bar-center {
+    grid-area:context;
+    justify-content:flex-start;
+    min-height:18px;
+    gap:6px;
+    font-size:.8rem;
+  }
+  .meeting-room .top-bar-right {
+    grid-area:actions;
+    flex-wrap:wrap;
+    gap:2px;
+  }
+  .meeting-room .meeting-summary-label,
+  .meeting-room .meeting-summary-switch,
+  .meeting-room .qs-e2ee-chip { min-width:44px; min-height:44px; }
+  .meeting-room .meeting-summary-switch span { width:28px; justify-self:center; }
+  .meeting-room .qs-e2ee-panel {
+    position:fixed;
+    inset:52px 8px auto;
+    width:auto;
+    max-height:calc(100dvh - 124px);
+  }
+  .meeting-room .control-bar { overflow:visible; }
+  .meeting-room .control-bar .controls-left,
+  .meeting-room .control-bar .controls-right { flex:0 0 auto; }
+}
+@media (orientation:landscape) and (max-height:500px) and (min-width:768px) {
+  .meeting-room .control-bar { padding:4px max(10px,env(safe-area-inset-right)) max(4px,env(safe-area-inset-bottom)) max(10px,env(safe-area-inset-left)); }
+  .meeting-room .control-bar .control-extra-inline { display:none; }
+  .meeting-room .meeting-more-mobile-actions { display:grid; gap:4px; }
+  .meeting-room .meeting-more-mobile-actions .control-chat-overflow { display:none; }
+  .meeting-room .control-bar .meeting-more-panel {
+    position:fixed;
+    inset:auto max(10px,env(safe-area-inset-right)) calc(56px + env(safe-area-inset-bottom)) auto;
+    max-height:calc(100dvh - 68px - env(safe-area-inset-bottom));
+    overflow:auto;
+    overscroll-behavior:contain;
+  }
+  .meeting-room .meeting-local-clock { display:none; }
+}
+@media (max-width:480px) {
+  .meeting-room .top-bar-right { min-width:0; justify-content:flex-end; }
+  .meeting-room .meeting-summary-control {
+    display:grid; grid-template-columns:auto auto; width:max-content;
+    align-items:center; justify-items:center; gap:0;
+  }
+  .meeting-room .meeting-summary-state:not(:empty) {
+    grid-column:1 / -1; font-size:11px; line-height:1.25; padding-bottom:2px;
+  }
+}
+@media (min-width:641px) and (max-width:960px) {
+  .meeting-room .meeting-top-bar {
+    display:grid;
+    grid-template-columns:auto minmax(0,1fr) auto;
+    gap:8px;
+  }
+  .meeting-room .meeting-top-bar .meeting-local-clock,
+  .meeting-room .qs-e2ee-label { display:none; }
+  .meeting-room .meeting-top-bar .top-bar-center {
+    min-width:0;
+    justify-content:flex-start;
+  }
+  .meeting-room .meeting-room-title { flex:1 1 auto; min-width:9ch; }
+  .meeting-room .top-bar-chips { min-width:0; max-width:16ch; }
+}
+@media (max-width:360px) {
+  .meeting-room .meeting-processor-disclosure .processor-chevron { display:none; }
+}

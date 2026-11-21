@@ -65,3 +65,15 @@ def test_api_key_and_language_allow_list(tmp_path):
     assert c.post("/translate", json={"q": "a", "source": "en", "target": "hi"}).status_code == 403
     assert c.post("/translate", json={"q": "a", "source": "en", "target": "hi", "api_key": "k"}).status_code == 200
     assert [item["code"] for item in c.get("/languages").json()] == ["en", "hi", "ta"]
+
+
+def test_all_advertised_language_pairs_reach_the_backend():
+    c, backend = client()
+    languages = c.get("/languages").json()
+    for source in languages:
+        for target in source["targets"]:
+            if target == source["code"]:
+                continue
+            response = c.post("/translate", json={"q": "Test", "source": source["code"], "target": target})
+            assert response.status_code == 200, (source["code"], target)
+            assert backend.calls[-1][1:] == (source["code"], target)

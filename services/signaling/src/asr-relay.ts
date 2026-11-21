@@ -14,10 +14,10 @@ import { logger } from './logger.js';
  *       JSON {type:'partial'|'final', segment, text, language} out.
  *   GET {ASR_URL}/v1/languages → {languages:[{code,name}], autoDetect, engine, model}
  */
-const startSchema = z.object({ processorConsent: z.literal(true), language: z.union([z.literal('auto'), z.string().regex(/^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/)]) }).strict();
+const startSchema = z.object({ processorConsent: z.literal(true), language: z.union([z.literal('auto'), z.string().regex(/^[a-z]{2,3}(?:-[A-Za-z]{4})?(?:-(?:[A-Za-z]{2}|[0-9]{3}))?$/)]) }).strict();
 const audioSchema = z.object({ seq: z.number().int().min(0), pcm: z.string().min(4).max(48_000) }).strict();
 const resultSchema = z.object({ type: z.enum(['partial', 'final', 'error', 'ready']), segment: z.number().int().min(0).optional(), text: z.string().max(4000).optional(), language: z.string().max(20).optional(), message: z.string().max(300).optional() });
-const capabilitySchema = z.object({ languages: z.array(z.object({ code: z.string().regex(/^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/), name: z.string().max(100) })).max(300), autoDetect: z.boolean().optional(), engine: z.string().max(60).optional(), model: z.string().max(120).optional() });
+const capabilitySchema = z.object({ languages: z.array(z.object({ code: z.string().regex(/^[a-z]{2,3}(?:-[A-Za-z]{4})?(?:-(?:[A-Za-z]{2}|[0-9]{3}))?$/), name: z.string().max(100) })).max(300), whisperFallback: z.boolean().optional(), autoDetect: z.boolean().optional(), engine: z.string().max(60).optional(), model: z.string().max(120).optional() });
 
 type Session = { upstream: WebSocket; roomId: string; peerId: string; language: string; seq: number; id: number; ready: Promise<void>; closed: boolean; stopping: boolean };
 const sessions = new Map<string, Session>();
@@ -51,7 +51,7 @@ export async function asrCapabilities() {
     }
     const value = capabilityCache.value;
     if (!value) return { configured: true as const, available: false as const };
-    return { configured: true as const, available: true as const, languages: value.languages, autoDetect: value.autoDetect !== false, engine: value.engine, model: value.model };
+    return { configured: true as const, available: true as const, languages: value.languages, whisperFallback: value.whisperFallback, autoDetect: value.autoDetect !== false, engine: value.engine, model: value.model };
 }
 export function resetAsrCapabilities() { capabilityCache = undefined; }
 
@@ -83,7 +83,7 @@ export async function startAsr(ws: object, roomId: string, peerId: string, param
         if (isBinary || session.closed) return; // results still arrive while a stopped session flushes
         let message: z.infer<typeof resultSchema>;
         try { const parsedResult = resultSchema.safeParse(JSON.parse(data.toString())); if (!parsedResult.success) return; message = parsedResult.data; } catch { return; }
-        const language = message.language && /^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/.test(message.language) ? message.language : (session.language === 'auto' ? 'en' : session.language);
+        const language = message.language && /^[a-z]{2,3}(?:-[A-Za-z]{4})?(?:-(?:[A-Za-z]{2}|[0-9]{3}))?$/.test(message.language) ? message.language : (session.language === 'auto' ? 'en' : session.language);
         const segment = { id: `asr${session.id}-${message.segment ?? 0}`, text: message.text || '', language };
         try {
             if (message.type === 'partial') publishServerInterim(roomId, peerId, segment);

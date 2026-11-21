@@ -8,8 +8,8 @@ CPU-only instance, because Free-plan accounts cannot launch GPU instances. Good 
 | People speaking at once | about 1 (2 at most) | 8–20 |
 | Caption delay after a sentence | about 3–5 s (estimate) | about 1–1.5 s |
 | Live grey text | slower (every 2.5 s) | every 0.7 s |
-| Languages spoken | English, Hindi (others possible, weaker) | 22 Indian languages + English |
-| Translation | IndicTrans2, English ↔ 11 Indian languages | same, faster |
+| Languages spoken | Languages advertised by the loaded Whisper model | 22 Indian languages + English |
+| Translation | IndicTrans2, English and 22 scheduled Indian languages | same, faster |
 
 Users never connect to this instance. Browsers talk to signaling on the backend; signaling calls this host
 over the VPC private network.
@@ -105,7 +105,7 @@ qsvc_ai up -d asr mt
 ## 4. Check (on the AI instance)
 ```sh
 curl -s localhost:8000/health             # {"ok":true}
-curl -s localhost:8000/v1/languages       # English, Hindi; "engine":"faster-whisper", "model":"small"
+curl -s localhost:8000/v1/languages       # Loaded language list; "engine":"faster-whisper", "model":"small"
 curl -s localhost:5000/health             # {"ok":true} once the models are loaded
 curl -s -X POST localhost:5000/translate -H 'Content-Type: application/json' \
   -d "{\"q\":\"The meeting is tomorrow\",\"source\":\"en\",\"target\":\"hi\",\"api_key\":\"$(grep ^MT_API_KEY deploy/aws/cpu/.env | cut -d= -f2)\"}"
@@ -134,7 +134,7 @@ Expect the Hindi line, then the English line a few seconds after each pause.
 
 ## Tuning
 - Faster but less accurate: stage a reviewed multilingual base bundle at a separate path inside the model volume, set `ASR_MODEL` to that path, then recreate `asr`.
-- More spoken languages: `ASR_LANGUAGES=en,hi,bn,ta,te,mr` (Whisper `small` is weak on these; prefer a GPU host).
+- The default exposes every language supported by the loaded models. Existing deployments with explicit ASR_LANGUAGES or MT_LANGUAGES lists keep those limits. To restrict spoken languages: `ASR_LANGUAGES=en,hi,bn,ta,te,mr` (Whisper `small` is weak on these; prefer a GPU host).
 - Fewer live updates (more CPU for final lines): raise `ASR_PARTIAL_INTERVAL_MS` (default 2500).
 - `m7i-flex` instances can slow down under long sustained load; captions get slower, not wrong.
 

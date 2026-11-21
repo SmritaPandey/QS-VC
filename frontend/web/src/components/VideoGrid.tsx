@@ -44,6 +44,7 @@ interface Props {
     handRaised?: boolean;
     sharing?: boolean;
     viewMode?: ViewMode;
+    defaultLayout?: ViewMode;
     tilesPerPage?: TilesPerPage;
     webinar?: boolean;
     speaking: Set<string>;
@@ -61,14 +62,21 @@ interface Props {
  * with a paged strip, and a stage-only view for webinars. Audio is played separately (RemoteAudio),
  * so people on other pages are still heard.
  */
-export default function VideoGrid({ localStream, localCameraTracks = {}, siteLocation, userId, localScreenTrack, myPeerId, myRole, myOnStage, peers, displayName, videoOff, audioMuted = false, handRaised = false, sharing = false, viewMode = 'auto', tilesPerPage = 'auto', webinar = false, speaking, activeSpeaker, spotlightId, pinnedId, canManage = false, onPin, onSpotlight, onToggleStage }: Props) {
+export default function VideoGrid({ localStream, localCameraTracks = {}, siteLocation, userId, localScreenTrack, myPeerId, myRole, myOnStage, peers, displayName, videoOff, audioMuted = false, handRaised = false, sharing = false, viewMode: preferredView = 'auto', defaultLayout = 'auto', tilesPerPage = 'auto', webinar = false, speaking, activeSpeaker, spotlightId, pinnedId, canManage = false, onPin, onSpotlight, onToggleStage }: Props) {
     const areaRef = useRef<HTMLDivElement>(null);
     const [box, setBox] = useState({ width: 1200, height: 700 });
+    const viewMode = preferredView === 'auto'
+        ? (box.width <= 600 && box.height > box.width ? 'spotlight' : defaultLayout)
+        : preferredView;
     const [page, setPage] = useState(0);
     useLayoutEffect(() => {
         const el = areaRef.current;
         if (!el || typeof ResizeObserver === 'undefined') return;
-        const observer = new ResizeObserver(([entry]) => setBox({ width: entry.contentRect.width, height: entry.contentRect.height }));
+        const observer = new ResizeObserver(([entry]) => {
+            // Phone activities cover the grid locally. Keep its camera page intact for recording.
+            if (getComputedStyle(el).visibility === 'hidden') return;
+            setBox({ width: entry.contentRect.width, height: entry.contentRect.height });
+        });
         observer.observe(el);
         return () => observer.disconnect();
     }, []);

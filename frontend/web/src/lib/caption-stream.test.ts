@@ -30,6 +30,8 @@ describe('caption stream', () => {
         expect(captionLanguageOptions(languages, 'en-GB').map(item => item.code)).toEqual(['en-US', 'en-GB', 'hi-IN']);
     });
     it('keeps distinct regional translations separate and respects original output', () => {
+        expect(needsCaptionTranslation('sr-Cyrl', 'sr-Latn')).toBe(true);
+        expect(needsCaptionTranslation('zh', 'zh-TW')).toBe(true);
         expect(needsCaptionTranslation('zh-CN', 'zh-TW')).toBe(true);
         expect(needsCaptionTranslation('zh-Hant', 'zh-Hans')).toBe(true);
         expect(needsCaptionTranslation('en-US', 'en-GB')).toBe(false);

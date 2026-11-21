@@ -35,6 +35,7 @@ export default function MeetingSummaryPanel({ open, onClose, code, canManage = f
         try {
             const result = await signaling.request('liveSummaryState', { refresh: triggerUpdate });
             if (result) {
+                setSummaryError('');
                 setState(prev => ({
                     ...prev,
                     active: result.active ?? prev.active,
@@ -45,7 +46,7 @@ export default function MeetingSummaryPanel({ open, onClose, code, canManage = f
                 }));
             }
         } catch {
-            // best-effort
+            setSummaryError('Could not load the recap. Use Update to try again.');
         }
     };
 
@@ -117,14 +118,16 @@ export default function MeetingSummaryPanel({ open, onClose, code, canManage = f
         let currentSection: 'overview' | 'actions' | 'decisions' | 'other' = 'overview';
 
         for (const line of lines) {
-            const lower = line.toLowerCase();
-            if (lower.includes('action item') || lower.includes('actions') || lower.includes('next step')) {
+            const heading = line.trim().replace(/^#{1,6}\s+/, '').replace(/\*\*/g, '').replace(/:$/, '').toLowerCase();
+            if (['action items', 'actions', 'next steps'].includes(heading)) {
                 currentSection = 'actions';
                 continue;
-            } else if (lower.includes('decision') || lower.includes('agreed') || lower.includes('conclusions')) {
+            }
+            if (['decisions', 'key decisions', 'conclusions'].includes(heading)) {
                 currentSection = 'decisions';
                 continue;
-            } else if (lower.startsWith('## ') || lower.startsWith('### ')) {
+            }
+            if (/^#{1,6}\s/.test(line.trim()) || heading === 'overview') {
                 currentSection = 'overview';
             }
 
@@ -175,142 +178,38 @@ export default function MeetingSummaryPanel({ open, onClose, code, canManage = f
                 }
             }}
         >
-            {/* Clean Header */}
             <div className="panel-header">
-                <div className="summary-header-brand">
-                    <span className="mi summary-brand-icon" aria-hidden="true">auto_awesome</span>
-                    <div>
-                        <h3 className="summary-title">AI Meeting Summary</h3>
-                        <span className="summary-subtitle">Live Quantum-Safe Intelligence</span>
-                    </div>
-                </div>
-                <button
-                    type="button"
-                    className="panel-close"
-                    aria-label="Close summary panel"
-                    onClick={onClose}
-                >
-                    <span className="mi mi-sm" aria-hidden="true">close</span>
+                <h3 className="summary-title">AI summary</h3>
+                <button type="button" className="panel-close" aria-label="Close summary panel" onClick={onClose}>
+                    <span className="mi" aria-hidden="true">close</span>
                 </button>
             </div>
-
-            {/* Speech Status Indicator Strip */}
-            <div
-                className={`summary-speech-bar ${state.hasSpeech ? 'status-speaking' : 'status-waiting'}`}
-                role="status"
-            >
-                {state.hasSpeech ? (
-                    <>
-                        <span className="speech-pulse-dot" aria-hidden="true" />
-                        <span className="speech-status-label">Meeting speech active · AI summarizing live</span>
-                    </>
-                ) : (
-                    <>
-                        <span className="mi mi-sm speech-idle-icon" aria-hidden="true">hourglass_empty</span>
-                        <span className="speech-status-label">Waiting for speech · AI will summarize as participants speak</span>
-                    </>
-                )}
-            </div>
-
-            {/* Slideable Navigation Tabs */}
-            <nav className="summary-tabs-nav" aria-label="Summary Sections">
-                <button
-                    type="button"
-                    className={`summary-tab-btn ${activeTab === 'overview' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('overview')}
-                >
-                    <span className="mi mi-sm" aria-hidden="true">subject</span> Overview
-                </button>
-                <button
-                    type="button"
-                    className={`summary-tab-btn ${activeTab === 'actions' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('actions')}
-                >
-                    <span className="mi mi-sm" aria-hidden="true">task_alt</span> Action Items
-                </button>
-                <button
-                    type="button"
-                    className={`summary-tab-btn ${activeTab === 'decisions' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('decisions')}
-                >
-                    <span className="mi mi-sm" aria-hidden="true">gavel</span> Decisions
-                </button>
-                <button
-                    type="button"
-                    className={`summary-tab-btn ${activeTab === 'full' ? 'active' : ''}`}
-                    onClick={() => setActiveTab('full')}
-                >
-                    <span className="mi mi-sm" aria-hidden="true">article</span> Full Recap
-                </button>
-            </nav>
-
-            {/* Tab Body with Smooth Slides */}
-            <div className="summary-body" role="region" aria-live="polite">
-                {refreshing && (
-                    <div className="summary-refresh-banner" role="status">
-                        <span className="summary-spinner" aria-hidden="true" />
-                        <span>Updating summary with AI…</span>
-                    </div>
-                )}
-
+            <p className="summary-speech-bar" role="status">
+                {refreshing ? 'Updating recap…' : state.message || (!state.active ? 'Live summary is off' :
+                    state.hasSpeech ? 'Live summary on · Speech received' : 'Waiting for speech')}
+            </p>
+            {currentText && (
+                <nav className="summary-tabs-nav" aria-label="Summary sections">
+                    {([['overview', 'Overview'], ['actions', 'Actions'], ['decisions', 'Decisions'], ['full', 'Full recap']] as const)
+                        .map(([tab, label]) => (
+                            <button type="button" key={tab} aria-pressed={activeTab === tab}
+                                onClick={() => setActiveTab(tab)}>{label}</button>
+                        ))}
+                </nav>
+            )}
+            <div className="summary-body">
                 {summaryError && <p className="summary-error" role="alert">{summaryError}</p>}
-
-                {!currentText && !refreshing ? (
-                    <div className="summary-empty-state">
-                        <span className="mi summary-empty-icon" aria-hidden="true">mic_none</span>
-                        <h4>Waiting for speech</h4>
-                        <p>
-                            {canManage ? 'The recap updates from speech participants share as captions.' : 'The host or co-host manages the meeting recap.'}
-                        </p>
-                        <button
-                            type="button"
-                            className="summary-btn summary-btn-primary"
-                            disabled={refreshing}
-                            onClick={generateOnDemandSummary}
-                        >
-                            <span className="mi mi-sm" aria-hidden="true">refresh</span> Check for Updates
-                        </button>
+                {currentText ? (
+                    <div className="summary-prose" key={activeTab}>
+                        {activeTab === 'full' ? currentText :
+                            activeTab === 'overview' ? parsed.overview.trim() || currentText :
+                            parsed[activeTab].trim() || (activeTab === 'actions' ? 'No action items yet.' : 'No decisions yet.')}
                     </div>
                 ) : (
-                    <div className="summary-content-card">
-                        {activeTab === 'overview' && (
-                            <div className="summary-tab-pane slide-fade">
-                                <h4 className="summary-section-heading">Executive Overview</h4>
-                                <div className="summary-prose">
-                                    {parsed.overview.trim() ? parsed.overview : currentText}
-                                </div>
-                            </div>
-                        )}
-
-                        {activeTab === 'actions' && (
-                            <div className="summary-tab-pane slide-fade">
-                                <h4 className="summary-section-heading">Action Items & Deliverables</h4>
-                                {parsed.actions.trim() ? (
-                                    <div className="summary-prose">{parsed.actions}</div>
-                                ) : (
-                                    <p className="summary-placeholder">No action items detected in current discussion yet.</p>
-                                )}
-                            </div>
-                        )}
-
-                        {activeTab === 'decisions' && (
-                            <div className="summary-tab-pane slide-fade">
-                                <h4 className="summary-section-heading">Decisions & Agreements</h4>
-                                {parsed.decisions.trim() ? (
-                                    <div className="summary-prose">{parsed.decisions}</div>
-                                ) : (
-                                    <p className="summary-placeholder">No formal decisions recorded in current discussion yet.</p>
-                                )}
-                            </div>
-                        )}
-
-                        {activeTab === 'full' && (
-                            <div className="summary-tab-pane slide-fade">
-                                <h4 className="summary-section-heading">Complete Meeting Record</h4>
-                                <pre className="summary-raw-pre">{currentText}</pre>
-                            </div>
-                        )}
-                    </div>
+                    <p className="summary-placeholder">
+                        {state.active ? 'The recap appears here once participants share speech as captions.' :
+                            canManage ? 'Start live notes to build a recap from shared captions.' : 'The host or co-host can start live notes.'}
+                    </p>
                 )}
             </div>
 
@@ -326,13 +225,13 @@ export default function MeetingSummaryPanel({ open, onClose, code, canManage = f
                     <span className={`mi mi-sm ${refreshing ? 'spinning' : ''}`} aria-hidden="true">
                         refresh
                     </span>
-                    <span>{refreshing ? 'Summarizing…' : 'Update'}</span>
+                    <span>{refreshing ? 'Updating…' : 'Update'}</span>
                 </button>
 
                 <button
                     type="button"
                     className="summary-action-btn"
-                    disabled={!currentText}
+                    hidden={!currentText}
                     title="Copy summary text"
                     onClick={handleCopy}
                 >
@@ -343,7 +242,7 @@ export default function MeetingSummaryPanel({ open, onClose, code, canManage = f
                 <button
                     type="button"
                     className="summary-action-btn"
-                    disabled={!currentText}
+                    hidden={!currentText}
                     title="Download summary as markdown"
                     onClick={handleDownload}
                 >
@@ -362,7 +261,7 @@ export default function MeetingSummaryPanel({ open, onClose, code, canManage = f
                         <span className="mi mi-sm" aria-hidden="true">
                             {state.active ? 'stop_circle' : 'play_arrow'}
                         </span>
-                        <span>{busy ? '…' : state.active ? 'Active' : 'Start Live'}</span>
+                        <span>{busy ? '…' : state.active ? 'Stop notes' : 'Start notes'}</span>
                     </button>
                 )}
             </div>

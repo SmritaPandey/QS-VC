@@ -1,6 +1,6 @@
 import { addSummaryCaption, finishLiveSummary } from './live-summary.js';
 import { z } from 'zod';
-import { googleLanguages, translateText, translationLanguage } from './translation.js';
+import { googleLanguages, translateText } from './translation.js';
 import { roomManager } from './room-manager.js';
 import { saveTranscript } from './transcript-store.js';
 
@@ -9,7 +9,7 @@ import { saveTranscript } from './transcript-store.js';
  * in the room has chosen, and pushed to those listeners (`captionTranslated`). Interim text is
  * relayed live but never stored or translated. Limits come from the environment.
  */
-const language = z.string().regex(/^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/);
+const language = z.string().regex(/^[a-z]{2,3}(?:-[A-Za-z]{4})?(?:-(?:[A-Za-z]{2}|[0-9]{3}))?$/);
 const segmentId = z.string().regex(/^[A-Za-z0-9_-]{1,80}$/);
 const publishSchema = z.object({ id: segmentId, text: z.string().trim().min(1).max(2000), language, isFinal: z.literal(true), allowGoogleTranslation: z.boolean().optional() });
 const interimSchema = z.object({ id: segmentId, text: z.string().trim().min(1).max(500), language });
@@ -136,7 +136,6 @@ async function translateStored(state: RoomCaptions, caption: StoredCaption, targ
     if (!pending) {
         pending = (async () => {
             if (google) {
-                if (translationLanguage(caption.language) === translationLanguage(target)) return caption.text;
                 return (await translateText(caption.text, caption.language, target, languages)).translatedText;
             }
             const normalize = (code: string) => languages.find(item => item.code === code) || languages.find(item => item.code === code.split('-')[0]);
@@ -162,9 +161,11 @@ async function translateStored(state: RoomCaptions, caption: StoredCaption, targ
 }
 
 function sameLanguage(a: string, b: string) {
-    if (a === b) return true;
-    if (a.startsWith('zh') || b.startsWith('zh')) return false;
-    return a.split('-')[0] === b.split('-')[0];
+    const [source, ...from] = a.toLowerCase().split('-');
+    const [target, ...to] = b.toLowerCase().split('-');
+    if (source !== target) return false;
+    if (source === 'zh' || [...from, ...to].some(part => part.length === 4)) return from.join('-') === to.join('-');
+    return true;
 }
 
 /** Push translations to everyone who chose a language. Bounded by room/global concurrency. */
@@ -256,7 +257,7 @@ export function publishInterim(ws: object, roomId: string, peerId: string, param
 export function publishServerInterim(roomId: string, peerId: string, segment: { id: string; text: string; language: string }) {
     const peer = roomManager.getRoom(roomId)?.peers.get(peerId);
     if (!peer || peer.audioMuted || !segment.text.trim()) return;
-    roomManager.broadcast(roomId, 'captionInterim', { id: `${peerId}:${segment.id}`, peerId, displayName: peer.displayName, text: segment.text.trim().slice(0, 500), language: segment.language }, peerId);
+    roomManager.broadcast(roomId, 'captionInterim', { id: `${peerId}:${segment.id}`, peerId, displayName: peer.displayName, text: segment.text.trim().slice(0, 500), language: segment.language });
 }
 
 /** A listener chooses up to two output languages (captions + spoken). */

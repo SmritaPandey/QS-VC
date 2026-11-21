@@ -1,6 +1,6 @@
 /** Official Cloud Translation Basic v2; credentials and requests stay on the server. */
 const ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
-const CODE = /^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/;
+const CODE = /^[a-z]{2,3}(?:-[A-Za-z]{4})?(?:-(?:[A-Za-z]{2}|[0-9]{3}))?$/;
 /** Google keeps the region/script for these; everything else uses the base language. */
 const KEEP_REGION = new Set(['zh-CN', 'zh-TW', 'mni-Mtei', 'pt-PT']);
 const GOOGLE_ALIASES: Record<string, string> = { 'mni-IN': 'mni-Mtei', 'kok-IN': 'gom', kok: 'gom', 'fil-PH': 'tl', fil: 'tl', 'he-IL': 'iw', he: 'iw' };
@@ -40,8 +40,8 @@ export async function googleLanguages(): Promise<GoogleLanguage[]> {
             if (!response.ok) throw new Error();
             const body = await response.json() as { data?: { languages?: { language?: unknown; name?: unknown }[] } };
             const languages = (body?.data?.languages || [])
-                .filter(item => typeof item.language === 'string' && CODE.test(item.language) || item.language === 'mni-Mtei')
-                .slice(0, 250)
+                .filter(item => typeof item.language === 'string' && CODE.test(item.language))
+                .slice(0, 1000)
                 .map(item => ({ code: String(item.language), name: typeof item.name === 'string' ? item.name.slice(0, 100) : String(item.language) }));
             if (!languages.length) throw new Error();
             languageCache = { expires: Date.now() + 6 * 3600_000, languages };
@@ -60,8 +60,8 @@ export async function translateText(text: string, sourceLanguage: string, target
     translatedText: string; sourceLanguage: string; targetLanguage: string;
 }> {
     if (typeof text !== 'string' || !text.trim() || text.length > 2000) throw new Error('Text must contain 1–2000 characters');
-    const source = translationLanguage(sourceLanguage);
-    const target = translationLanguage(targetLanguage);
+    const source = supported?.find(item => item.code === sourceLanguage && CODE.test(sourceLanguage))?.code ?? translationLanguage(sourceLanguage);
+    const target = supported?.find(item => item.code === targetLanguage && CODE.test(targetLanguage))?.code ?? translationLanguage(targetLanguage);
     if (source === target) return { translatedText: text, sourceLanguage, targetLanguage };
     if (supported && (!supported.some(item => item.code === source) || !supported.some(item => item.code === target))) throw new Error('Unsupported translation language');
     const key = apiKey();

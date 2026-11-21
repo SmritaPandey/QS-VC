@@ -169,6 +169,8 @@ def test_hybrid_falls_back_to_whisper_when_indicconformer_cannot_load():
     assert engine.indic is None and engine.engine_for("ta") == "faster-whisper"
     engine.transcribe(np.zeros(16000, dtype=np.float32), "ta", True, None)
     assert whisper.calls == [("ta", True)] and "HF_TOKEN" in logs[0]
+    with TestClient(asr.create_app(lambda: engine)) as client:
+        assert client.get("/v1/languages").json()["whisperFallback"] is True
 
 
 def test_indic_route_list_and_indic_only_mode():
@@ -260,3 +262,12 @@ def test_failed_segment_does_not_end_the_session():
                 if message["type"] == "final":
                     break
             assert message["segment"] == 1 and message["text"] == "नमस्ते सबको"
+
+
+def test_whisper_advertises_loaded_model_languages_and_keeps_tibetan_distinct():
+    from types import SimpleNamespace
+    engine = object.__new__(asr.WhisperEngine)
+    engine.whisper = SimpleNamespace(supported_languages=["bo", "is", "sw", "ja", "ar"])
+    assert set(engine.languages()) == {"bo", "is", "sw", "ja", "ar"}
+    assert asr.normalise_language("bo-CN") == "bo"
+    assert asr.normalise_language("brx-IN") == "brx"

@@ -16,10 +16,11 @@ export function upsertCaption(list: CaptionEntry[], entry: CaptionEntry): Captio
 
 export function needsCaptionTranslation(source: string, target: string): boolean {
     if (target === 'original') return false;
-    const from = source.toLowerCase();
-    const to = target.toLowerCase();
-    if (from.split('-')[0] !== to.split('-')[0]) return true;
-    return from.startsWith('zh-') && to.startsWith('zh-') && from !== to;
+    const [src, ...from] = source.toLowerCase().split('-');
+    const [dst, ...to] = target.toLowerCase().split('-');
+    if (src !== dst) return true;
+    if (src === 'zh' || [...from, ...to].some(part => part.length === 4)) return from.join('-') !== to.join('-');
+    return false;
 }
 
 export function supportedSpeechLanguage(languages: { code: string }[], selected: string): string | undefined {
@@ -35,7 +36,7 @@ export function supportedSpeechLanguage(languages: { code: string }[], selected:
 export function captionLanguageOptions(serverLanguages: { code: string; name: string }[] | null, current: string): { code: string; label: string }[] {
     const label = (code: string, fallback: string) => {
         const info = LANGUAGES.find(item => item.code === code) || LANGUAGES.find(item => item.code.split('-')[0] === code.split('-')[0]);
-        return info ? `${info.nativeName} · ${info.name}` : fallback;
+        return info ? `${info.nativeName} · ${info.name}` : fallback !== code ? fallback : new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code;
     };
     let options: { code: string; label: string }[];
     if (serverLanguages) {

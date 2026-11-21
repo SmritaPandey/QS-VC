@@ -91,6 +91,7 @@ describe('server speech relay', () => {
             expect(pushAsrAudio(speaker.ws, speaker.roomId, speaker.id, { seq: 1, pcm })).toEqual({ accepted: false }); // duplicate
             await vi.waitFor(() => expect(sent(listener.ws, 'captionInterim')).toHaveLength(1));
             expect(sent(listener.ws, 'captionInterim')[0]).toMatchObject({ displayName: 'Asha', text: 'नमस्ते सब', language: 'hi' });
+            expect(sent(speaker.ws, 'captionInterim')).toEqual(sent(listener.ws, 'captionInterim'));
             stopAsr(speaker.ws, speaker.roomId, speaker.id);
             await vi.waitFor(() => expect(sent(listener.ws, 'captionReceived')).toHaveLength(1));
             expect(sent(listener.ws, 'captionReceived')[0]).toMatchObject({ displayName: 'Asha', text: 'नमस्ते सबको', language: 'hi', source: 'server' });

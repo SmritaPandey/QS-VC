@@ -385,6 +385,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [isFullscreen, setIsFullscreen] = useState(false);
     const roomRef = useRef<HTMLDivElement>(null);
     const [connected, setConnected] = useState(false);
+    const [captionStatusHost, setCaptionStatusHost] = useState<HTMLDivElement | null>(null);
     const [sharedTab, setSharedTab] = useState<CollaborationTab | null>(null);
     useEffect(() => {
         setSharedTab(null);
@@ -2291,8 +2292,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         {liveStreaming?.active && <span className="recording-indicator" role="status"><span className="mi" aria-hidden="true">live_tv</span>Streaming to {liveStreaming.provider}</span>}
                         {roomRecording && <span className="recording-indicator" role="status"><span className="mi mi-sm" aria-hidden="true">fiber_manual_record</span> {roomRecording.displayName} is recording</span>}
                         {(() => {
-                            const presenters = [...(screenSharing ? ['You'] : []), ...Array.from(peers.values()).filter(p => p.presenting).map(p => p.displayName)];
-                            return presenters.length > 0 && <span className="qs-topchip" role="status"><span className="mi" aria-hidden="true">present_to_all</span>{presenters.length === 1 ? (presenters[0] === 'You' ? 'You are presenting' : `${presenters[0]} is presenting`) : `${presenters.join(', ')} are presenting`}</span>;
+                            const presenters = Array.from(peers.values()).filter(p => p.presenting).map(p => p.displayName);
+                            return presenters.length > 0 && <span className="qs-topchip" role="status"><span className="mi" aria-hidden="true">present_to_all</span>{presenters.length === 1 ? `${presenters[0]} is presenting` : `${presenters.join(', ')} are presenting`}</span>;
                         })()}
                         {spotlightId && <span className="qs-topchip qs-topchip--spot"><span className="mi" aria-hidden="true">star</span>Spotlight: {spotlightId === myPeerIdRef.current ? 'You' : peers.get(spotlightId)?.displayName || 'participant'}{manager && <button type="button" onClick={() => setSpotlightFor(null)}>Remove</button>}</span>}
                         {webinar && (() => {
@@ -2327,6 +2328,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
             <div className="meeting-room-status">
             {connected && <div className="meeting-format-tools" role="group" aria-label={`${format.label} tools`}>
+                <div className="meeting-format-shortcuts">
                 <span className="meeting-format-label"><span className="mi" aria-hidden="true">{format.icon}</span>{format.label}</span>
                 {format.actions.filter(action => action !== 'host' || manager).map(action => {
                     const item = FORMAT_ACTIONS[action];
@@ -2339,6 +2341,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         <span className="mi" aria-hidden="true">{item.icon}</span>{item.label}
                     </button>;
                 })}
+                </div>
+                <div className="meeting-processor-slot" ref={setCaptionStatusHost} />
             </div>}
             <div className="meeting-notices">
 
@@ -2377,29 +2381,30 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             </div>
             </div>
 
-            {screenSharing && (
-                <div className="presenting-banner" role="status" aria-live="polite">
-                    <span className="mi presenting-banner-icon" aria-hidden="true">screen_share</span>
-                    <span className="presenting-banner-text">{screenShareReady ? `You are presenting to everyone${screenPaused ? ' (Paused)' : ''}` : 'Starting screen sharing…'}</span>
-                    <div className="presenting-banner-actions">
-                        <button type="button" className="btn-banner-action" onClick={togglePauseScreenShare} disabled={!screenShareReady} title={!screenShareReady ? 'Screen sharing is starting' : screenPaused ? 'Resume screen sharing' : 'Pause screen sharing'}>
-                            <span className="mi" aria-hidden="true">{screenPaused ? 'play_arrow' : 'pause'}</span>
-                            {screenPaused ? 'Resume' : 'Pause'}
-                        </button>
-                        <button type="button" className="btn-banner-stop" onClick={() => void stopScreenShare()} title="Stop presenting your screen">
-                            <span className="mi" aria-hidden="true">stop_screen_share</span>
-                            Stop presenting
-                        </button>
+            {(sharedTab || screenSharing) && <div className="meeting-stage-toolbar">
+                {sharedTab && <nav className="shared-stage-tabs" aria-label="Meeting views">
+                    <button type="button" aria-pressed={!activitiesOpen} onClick={() => setActivitiesOpen(false)}>Camera &amp; screen</button>
+                    <button type="button" aria-pressed={activitiesOpen && tabRequest?.tab === sharedTab} onClick={() => { setTabRequest({ tab: sharedTab }); setActivitiesOpen(true); }}>
+                        Shared {({board:'whiteboard', polls:'polls', questions:'Q&A', notes:'notes', files:'files'})[sharedTab]}
+                    </button>
+                </nav>}
+                {screenSharing && (
+                    <div className="presenting-banner" role="group" aria-label="Screen sharing controls">
+                        <span className="mi presenting-banner-icon" aria-hidden="true">screen_share</span>
+                        <span className="presenting-banner-text" role="status"><span className="presenting-full">{screenShareReady ? `You are presenting to everyone${screenPaused ? ' (Paused)' : ''}` : 'Starting screen sharing…'}</span><span className="presenting-short">{screenShareReady ? (screenPaused ? 'Paused' : 'Presenting') : 'Starting…'}</span></span>
+                        <div className="presenting-banner-actions">
+                            <button type="button" className="btn-banner-action" onClick={togglePauseScreenShare} disabled={!screenShareReady} title={!screenShareReady ? 'Screen sharing is starting' : screenPaused ? 'Resume screen sharing' : 'Pause screen sharing'}>
+                                <span className="mi" aria-hidden="true">{screenPaused ? 'play_arrow' : 'pause'}</span>
+                                {screenPaused ? 'Resume' : 'Pause'}
+                            </button>
+                            <button type="button" className="btn-banner-stop" onClick={() => void stopScreenShare()} title="Stop presenting your screen">
+                                <span className="mi" aria-hidden="true">stop_screen_share</span>
+                                Stop presenting
+                            </button>
+                        </div>
                     </div>
-                </div>
-            )}
-
-            {sharedTab && <nav className="shared-stage-tabs" aria-label="Meeting views">
-                <button type="button" aria-pressed={!activitiesOpen} onClick={() => setActivitiesOpen(false)}>Camera &amp; screen</button>
-                <button type="button" aria-pressed={activitiesOpen && tabRequest?.tab === sharedTab} onClick={() => { setTabRequest({ tab: sharedTab }); setActivitiesOpen(true); }}>
-                    Shared {({board:'whiteboard', polls:'polls', questions:'Q&A', notes:'notes', files:'files'})[sharedTab]}
-                </button>
-            </nav>}
+                )}
+            </div>}
             <div className="meeting-content" data-activity-stage={activityOnStage || undefined} data-activity-dock={activityOnStage && (webinar || screenOnStage) || undefined}>
                 {(!secureActivities || encryptedNotes) && <MeetingCollaboration sharedTab={sharedTab} key={`${meetingCode}:${roomJoinEpoch}:${secureActivities}`} open={activitiesOpen} tabRequest={tabRequest}
                     connected={connected && (!secureActivities || e2eeActive)} role={myRole} myPeerId={myPeerIdRef.current}
@@ -2416,7 +2421,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         </MeetingToast>
                     </div>}
                     <VideoGrid localStream={displayedLocalStream} localCameraTracks={Object.fromEntries(additionalCameras.map(camera => [camera.source, camera.track]))} siteLocation={state.siteLocation} userId={session.profile?.id} localScreenTrack={screenStream?.getVideoTracks()[0]} myPeerId={myPeerIdRef.current} myRole={myRole} myOnStage={myOnStage} peers={peers} displayName={displayName} videoOff={videoOff} audioMuted={audioMuted} handRaised={handRaised} sharing={screenSharing}
-                        viewMode={activityOnStage && !webinar && !screenOnStage ? 'tiled' : viewMode === 'auto' ? format.layout : viewMode} tilesPerPage={activityOnStage && !webinar && !screenOnStage ? 4 : tilesPerPage} webinar={webinar} speaking={speaking} activeSpeaker={activeSpeaker} spotlightId={spotlightId} pinnedId={pinnedId}
+                        defaultLayout={format.layout} viewMode={viewMode} tilesPerPage={tilesPerPage} webinar={webinar} speaking={speaking} activeSpeaker={activeSpeaker} spotlightId={spotlightId} pinnedId={pinnedId}
                         canManage={manager} onPin={setPinnedId} onSpotlight={setSpotlightFor} onToggleStage={setStageFor} />
                     <RemoteAudio peers={peers} volume={privateConversation ? focusPrivateAudio ? 0 : 0.24 : translatedSpeaking ? 0.2 : 1} outputDeviceId={audioOutputId} onOutputError={reportAudioOutputError} />
                     {privateAudioTrack && <PrivateAudioPlayback track={privateAudioTrack} outputDeviceId={audioOutputId} onOutputError={reportAudioOutputError} />}
@@ -2424,7 +2429,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         onAccept={acceptPrivateConversation} onDecline={declinePrivateConversation} onCancel={cancelPrivateConversationInvite}
                         onEnd={endPrivateConversation} onToggleMicrophone={() => void togglePrivateMicrophone()} onToggleFocusAudio={togglePrivateFocusAudio} />
                     <ReactionsOverlay reactions={reactions} pickerOpen={reactionsOpen} onSendReaction={handleSendReaction} onClosePicker={closeReactions} onExpire={expireReaction} />
-                    <MeetingCaptions summaryActive={summaryActive} translatedSpeaking={translatedSpeaking} e2eeActive={e2eeActive} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
+                    <MeetingCaptions statusHost={captionStatusHost} summaryActive={summaryActive} translatedSpeaking={translatedSpeaking} e2eeActive={e2eeActive} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
                         showCaptions={captionsOn} onShowCaptionsChange={setCaptionsOn} shareSpeech={shareSpeech} onShareSpeechChange={setShareSpeech}
                         getMicTrack={getCaptionMicTrack} isHost={manager} meetingCode={meetingCode}
                         canShareSpeech={signedIn && !captionsLocked && canPublishRef.current} viewOnly={!signedIn || captionsLocked} viewerLanguage={guestCaptionLanguage} />
@@ -2451,7 +2456,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 {summaryOpen && (
                     <MeetingSummaryPanel
                         open={summaryOpen}
-                        onClose={() => setSummaryOpen(false)}
+                        onClose={() => {
+                            setSummaryOpen(false);
+                            document.querySelector<HTMLButtonElement>('[aria-controls="meeting-summary-panel"]')?.focus();
+                        }}
                         code={meetingCode || ''}
                         isHost={manager}
                         canManage={manager && hasFeature(entitlements, 'ai_meeting_summary')}

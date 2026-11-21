@@ -50,7 +50,7 @@ INDIC_NAMES = {
 }
 # Hindi stays on Whisper by default because meetings mix Hindi and English (Hinglish); add "hi" for pure Hindi.
 DEFAULT_INDIC_ROUTE = ",".join(code for code in INDIC_NAMES if code != "hi")
-CODE_ALIASES = {"bo": "brx", "gom": "kok", "mni-mtei": "mni", "np": "ne", "od": "or"}
+CODE_ALIASES = {"gom": "kok", "mni-mtei": "mni", "np": "ne", "od": "or"}
 # Common Whisper hallucinations on silence / noise.
 HALLUCINATIONS = re.compile(r"^(thank you( for watching)?|thanks for watching|subtitles? by.*|please subscribe.*|you|\.+|ॐ|धन्यवाद।?)$", re.IGNORECASE)
 
@@ -106,7 +106,7 @@ class WhisperEngine:
             return None, 0.0
 
     def languages(self) -> dict[str, str]:
-        return dict(LANGUAGE_NAMES)
+        return {code: LANGUAGE_NAMES.get(code, code) for code in self.whisper.supported_languages}
 
 
 class IndicConformerEngine:
@@ -189,7 +189,7 @@ class HybridEngine:
         if self.whisper is not None:
             names.update(self.whisper.languages())  # type: ignore[attr-defined]
         if self.indic is not None:
-            names.update(self.indic.languages())  # type: ignore[attr-defined]
+            names.update({code: name for code, name in self.indic.languages().items() if code in self.route})  # type: ignore[attr-defined]
         return names
 
     def engine_for(self, code: str) -> str:
@@ -223,7 +223,9 @@ def build_engine(whisper_factory: Callable[[], object] = lambda: WhisperEngine()
         route = set(INDIC_NAMES)
     if mode not in ("hybrid", "whisper", "indicconformer"):
         raise ValueError(f"Unknown ASR_ENGINE {mode!r}")
-    return HybridEngine(whisper, indic, route, env_float("ASR_DETECT_MIN_CONFIDENCE", 0.5))
+    engine = HybridEngine(whisper, indic, route, env_float("ASR_DETECT_MIN_CONFIDENCE", 0.5))
+    engine.whisper_fallback = mode == "hybrid" and indic is None
+    return engine
 
 
 def _cuda_available() -> bool:
@@ -343,7 +345,7 @@ def create_app(engine_factory: Optional[Callable[[], Engine]] = None) -> FastAPI
         route = getattr(engine, "engine_for", None)
         auto = getattr(engine, "whisper", True) is not None
         return {"languages": [{"code": code, "name": name, **({"engine": route(code)} if route else {})} for code, name in allowed_languages(engine).items()],
-                "autoDetect": auto, "engine": getattr(engine, "name", None), "model": getattr(engine, "model", None)}
+                "whisperFallback": getattr(engine, "whisper_fallback", False), "autoDetect": auto, "engine": getattr(engine, "name", None), "model": getattr(engine, "model", None)}
 
     @app.websocket("/v1/stream")
     async def stream(ws: WebSocket):

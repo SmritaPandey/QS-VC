@@ -31,7 +31,7 @@ services:
       ASR_PARTIAL_INTERVAL_MS: ${ASR_PARTIAL_INTERVAL_MS:-2500}   # fewer live-text updates on CPU
       ASR_END_SILENCE_MS: ${ASR_END_SILENCE_MS:-600}
       ASR_MAX_UTTERANCE_S: ${ASR_MAX_UTTERANCE_S:-8}
-      ASR_LANGUAGES: ${ASR_LANGUAGES:-en,hi}
+      ASR_LANGUAGES: ${ASR_LANGUAGES:-}
       ASR_PROMPT: ${ASR_PROMPT:-QS-VC, UPSWAN, UPDESCO}
       ASR_API_KEY: ${ASR_API_KEY:?Set the same ASR_API_KEY as the backend}
     ports: ["8000:8000"]
@@ -52,7 +52,7 @@ services:
       MT_MODEL_INDIC_EN: ${MT_MODEL_INDIC_EN:-/models/indic-en}
       HF_MODULES_CACHE: /tmp/hf-modules
       MT_DEVICE: cpu
-      MT_LANGUAGES: ${MT_LANGUAGES:-en,hi,bn,ta,te,mr,gu,kn,ml,pa,or,ur}
+      MT_LANGUAGES: ${MT_LANGUAGES:-}
       MT_API_KEY: ${MT_API_KEY:?Set the same value as LIBRETRANSLATE_API_KEY on the backend}
       MT_GLOSSARY_FILE: /app/glossary.example.json
       MT_BEAMS: ${MT_BEAMS:-2}

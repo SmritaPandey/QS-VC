@@ -55,7 +55,7 @@ LANGUAGES: dict[str, tuple[str, str]] = {
     "te": ("tel_Telu", "Telugu"),
     "ur": ("urd_Arab", "Urdu"),
 }
-ALIASES = {"bo": "brx", "gom": "kok", "np": "ne", "od": "or"}
+ALIASES = {"gom": "kok", "np": "ne", "od": "or"}
 
 
 def env_list(name: str) -> Optional[set[str]]:
