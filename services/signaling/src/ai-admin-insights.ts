@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { OpenRouterRateLimitError, askOpenRouter, openRouterConfigured } from './openrouter.js';
+import { AICache } from './ai/ai-cache.js';
 import { z } from 'zod';
 
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -23,6 +24,9 @@ Guidelines:
 
 export function adminInsightsRouter(authorize: import('express').RequestHandler): Router {
     const router = Router();
+    const cache = new AICache(100);
+    const pending = new Map<string, Promise<string>>();
+    let nextProviderAttempt = 0;
 
     router.post(
         '/',
@@ -39,17 +43,42 @@ export function adminInsightsRouter(authorize: import('express').RequestHandler)
             const stats = telemetry.safeParse(req.body?.stats);
             if (!stats.success) { res.status(400).json({ error: 'Invalid analytics counts.' }); return; }
 
+            const key = JSON.stringify(stats.data);
+            const cached = cache.get(key);
+            if (cached) {
+                res.json({ insights: cached, source: 'openrouter', timestamp: Date.now() });
+                return;
+            }
+            const localSnapshot = () => {
+                const { activeMeetingRecords, scheduledMeetings, endedMeetings } = stats.data;
+                return {
+                    insights: `Local analysis · OpenRouter is rate-limited. The dashboard reports ${activeMeetingRecords} active meeting records, ${scheduledMeetings} scheduled meetings and ${endedMeetings} ended meetings. This snapshot alone cannot show a trend.`,
+                    source: 'local', timestamp: Date.now(),
+                };
+            };
+            if (Date.now() < nextProviderAttempt) {
+                res.json(localSnapshot());
+                return;
+            }
             try {
                 const prompt = `Current System Telemetry:\n${JSON.stringify(stats.data)}\n\nPlease generate 3-4 bullet point executive insights:`;
-                const insights = await askOpenRouter(ADMIN_SYSTEM, prompt);
+                let analysis = pending.get(key);
+                if (!analysis) {
+                    analysis = askOpenRouter(ADMIN_SYSTEM, prompt)
+                        .then(answer => { cache.set(key, answer, 10 * 60_000); return answer; })
+                        .finally(() => pending.delete(key));
+                    pending.set(key, analysis);
+                }
+                const insights = await analysis;
 
                 res.json({
-                    insights,
+                    insights, source: 'openrouter',
                     timestamp: Date.now(),
                 });
             } catch (error) {
                 if (error instanceof OpenRouterRateLimitError) {
-                    res.status(429).json({ error: 'AI request limit reached. Try again later.' });
+                    nextProviderAttempt = Date.now() + 60_000;
+                    res.json(localSnapshot());
                     return;
                 }
                 res.status(503).json({ error: 'Failed to generate AI insights.' });
