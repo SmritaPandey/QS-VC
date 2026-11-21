@@ -1,3 +1,4 @@
+import { downloadReport, pollReport, questionReport } from '../lib/activity-reports';
 import SelectionInput from './SelectionInput';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type PointerEvent } from 'react';
 import { signaling } from '../lib/signaling';
@@ -9,10 +10,11 @@ import EncryptedQuestions from './EncryptedQuestions';
 import AnimatedNumber from './AnimatedNumber';
 import { readEncryptedBoard, actEncryptedBoard, type EncryptedBoardState } from '../lib/encrypted-board';
 import EncryptedMeetingFiles from './EncryptedMeetingFiles';
+import { downloadWhiteboard } from '../lib/whiteboard-export';
 import WhiteboardStickyNotes from './WhiteboardStickyNotes';
 import '../styles/meeting-collaboration.css';
 
-interface Props { tabRequest?: { tab: CollaborationTab }; open: boolean; connected: boolean; role: string; myPeerId: string; onClose: () => void; encryptedNotes?: EncryptedNotesAccess; canShareFiles?: boolean; canEditBoard?: boolean }
+interface Props { sharedTab?: CollaborationTab | null; tabRequest?: { tab: CollaborationTab }; open: boolean; connected: boolean; role: string; myPeerId: string; onClose: () => void; encryptedNotes?: EncryptedNotesAccess; canShareFiles?: boolean; canEditBoard?: boolean }
 const TABS = [['board', 'draw', 'Whiteboard'], ['polls', 'poll', 'Polls'], ['questions', 'help', 'Q&A'], ['notes', 'description', 'Notes'], ['files', 'attach_file', 'Files']] as const;
 export type CollaborationTab = typeof TABS[number][0];
 type Tab = CollaborationTab;
@@ -20,14 +22,14 @@ const PALETTE = ['#102a43', '#006d77', '#c9364f', '#5141be'];
 const FILE_ICONS: Record<string, string> = { 'image/png': 'image', 'image/jpeg': 'image', 'application/pdf': 'picture_as_pdf', 'text/plain': 'description' };
 const fileSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : `${Math.ceil(bytes / 1024)} KB`;
 
-export default function MeetingCollaboration({ tabRequest, open, connected, role, myPeerId, onClose, encryptedNotes, canShareFiles = true, canEditBoard = true }: Props) {
+export default function MeetingCollaboration({ sharedTab, tabRequest, open, connected, role, myPeerId, onClose, encryptedNotes, canShareFiles = true, canEditBoard = true }: Props) {
     const [snapshot, setSnapshot] = useState<CollaborationState>(EMPTY_COLLABORATION);
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [tab, setTab] = useState<Tab>(tabRequest?.tab ?? 'board');
     const tabs = TABS;
-    useEffect(() => { if (tabRequest) { setTab(tabRequest.tab); setError(''); } }, [tabRequest]);
+    useEffect(() => { if (tabRequest) { setPrivateView(false); setTab(tabRequest.tab); setError(''); } }, [tabRequest]);
     const [board, setBoard] = useState<EncryptedBoardState>({revision:0,strokes:[],stickyNotes:[],records:new Map()});
     const [boardError, setBoardError] = useState('');
     const boardRefresh = useRef<() => void>(() => {});
@@ -39,6 +41,10 @@ export default function MeetingCollaboration({ tabRequest, open, connected, role
     const draftStroke = useRef<BoardPoint[]>([]);
     const pointer = useRef<number | null>(null);
     const [notes, setNotes] = useState('');
+    const [personalNotes, setPersonalNotes] = useState('');
+    const [privateView, setPrivateView] = useState(false);
+    const [shareStatus, setShareStatus] = useState('');
+    const [inviteStatus, setInviteStatus] = useState('');
     const [notesVersion, setNotesVersion] = useState(0);
     const [notesDirty, setNotesDirty] = useState(false);
     const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -201,11 +207,26 @@ export default function MeetingCollaboration({ tabRequest, open, connected, role
         } catch { if (active.current) setError('Could not download this file. Try again.'); }
         finally { pending.current = false; if (active.current) setBusy(false); }
     };
-    const changeTab = (next: Tab) => { cancelStroke(); setTab(next); setError(''); };
-    const exportNotes = () => {
-        const url = URL.createObjectURL(new Blob([notes], { type: 'text/plain;charset=utf-8' }));
-        const link = document.createElement('a'); link.href = url; link.download = 'QS-VC-meeting-notes.txt'; document.body.append(link); link.click(); link.remove();
+    const changeTab = (next: Tab) => { cancelStroke(); setInviteStatus(''); setTab(next); setError(''); };
+    const exportNotes = (text: string, filename: string) => {
+        const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+        const link = document.createElement('a'); link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove();
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    };
+    const shareNotes = async (text: string) => {
+        setShareStatus('');
+        try {
+            if (typeof navigator.share === 'function') {
+                await navigator.share({ title: 'Meeting notes', text });
+            } else {
+                await navigator.clipboard.writeText(text);
+                setShareStatus('Notes copied. Paste them where you want to share them.');
+            }
+        } catch (error) {
+            if (!(error instanceof DOMException && error.name === 'AbortError')) {
+                setShareStatus('Sharing is unavailable. Download a copy to share.');
+            }
+        }
     };
     const notesConflict = notesDirty && snapshot.notes.version !== notesVersion;
     const myLastStroke = [...snapshot.strokes].reverse().find(stroke => stroke.authorId === myPeerId);
@@ -227,6 +248,13 @@ export default function MeetingCollaboration({ tabRequest, open, connected, role
             </button>)}
         </nav>
         <div className="collaboration-content" id="activity-workspace" role="tabpanel" aria-labelledby={`activity-tab-${tab}`} aria-busy={busy}>
+            {manager && !(tab === 'notes' && privateView) && <button type="button" className="btn-text" disabled={!connected || loading || busy} onClick={async () => {
+                try {
+                    await signaling.request('setSharedActivity', { tab: sharedTab === tab ? null : tab });
+                    setInviteStatus('');
+                } catch { setInviteStatus('Could not update the shared tab. Try again.'); }
+            }}>{sharedTab === tab ? 'Stop sharing' : 'Share tab with everyone ·'} {tabs.find(([key]) => key === tab)?.[2]}</button>}
+            {inviteStatus && <p role="status">{inviteStatus}</p>}
             {(!connected || loading) && <p role="status">{connected ? 'Loading shared activities…' : 'Activities are offline. Reconnect to continue.'}</p>}
             {failedStroke && <p role="status">Your last stroke could not be saved.
                 <button type="button" disabled={!canEditBoard || busy || !connected} onClick={() => { void act(failedStroke).then(saved=>{if(saved)setFailedStroke(null);}); }}>Retry stroke</button>
@@ -237,6 +265,10 @@ export default function MeetingCollaboration({ tabRequest, open, connected, role
             {tab === 'board' && <div className="whiteboard-modes" role="group" aria-label="Whiteboard tools">
                 <button type="button" aria-pressed={boardTool === 'notes'} onClick={() => { cancelStroke(); setBoardTool('notes'); }}><span className="mi" aria-hidden="true">sticky_note_2</span>Sticky notes</button>
                 <button type="button" aria-pressed={boardTool === 'draw'} onClick={() => setBoardTool('draw')}><span className="mi" aria-hidden="true">draw</span>Draw</button>
+                <button type="button" disabled={!connected || loading || !!boardError || (!snapshot.strokes.length && !snapshot.stickyNotes?.length)} onClick={() => {
+                    try { downloadWhiteboard(snapshot.strokes, snapshot.stickyNotes ?? []); }
+                    catch { setError('Could not download the whiteboard image. Try again.'); }
+                }}><span className="mi" aria-hidden="true">download</span>Download board image</button>
             </div>}
             <div hidden={tab !== 'board' || boardTool !== 'notes'}>
                 <WhiteboardStickyNotes notes={snapshot.stickyNotes ?? []} myPeerId={myPeerId}
@@ -245,9 +277,26 @@ export default function MeetingCollaboration({ tabRequest, open, connected, role
             <fieldset className="collaboration-workspace" disabled={tab !== 'notes' && (!connected || busy || loading)}>
             {tab === 'board' && !canEditBoard && <p>The host can allow you to contribute to this whiteboard.</p>}
             {tab === 'board' && boardTool === 'draw' && <><div className="collaboration-board-tools"><div role="group" aria-label="Pen colour">{PALETTE.map(value => <button key={value} type="button" aria-label={`Pen ${value}`} aria-pressed={color === value} onClick={() => setColor(value)} style={{ color: value }}><span aria-hidden="true">●</span></button>)}</div><label>Pen width<select value={width} onChange={event => setWidth(Number(event.target.value))}><option value={3}>Fine</option><option value={6}>Medium</option><option value={10}>Broad</option></select></label><button type="button" disabled={!myLastStroke} onClick={() => { if (myLastStroke) void act({ type: 'stroke:undo', id: myLastStroke.id }); }}>Undo mine</button>{manager && <button type="button" disabled={!snapshot.strokes.length} onClick={() => { if (window.confirm('Clear the shared whiteboard for everyone?')) void act({ type: 'board:clear' }); }}>Clear board</button>}</div><p className="collaboration-hint">Draw with a pointer or touch. Use shared notes for keyboard contributions.</p><svg className="collaboration-board" viewBox="0 0 1000 650" role="img" aria-label={`Shared whiteboard, ${snapshot.strokes.length} strokes`} onPointerDown={beginStroke} onPointerMove={moveStroke} onPointerUp={finishStroke} onPointerCancel={cancelStroke} onLostPointerCapture={cancelStroke}>{snapshot.strokes.map(stroke => <polyline key={stroke.id} points={stroke.points.map(point => `${point.x * 1000},${point.y * 650}`).join(' ')} fill="none" stroke={stroke.color} strokeWidth={stroke.width} strokeLinecap="round" strokeLinejoin="round" />)}<polyline points={drawing.map(point => `${point.x * 1000},${point.y * 650}`).join(' ')} fill="none" stroke={color} strokeWidth={width} strokeLinecap="round" strokeLinejoin="round" /></svg></>}
-            {tab === 'polls' && !encryptedNotes && <>{manager && <form className="collaboration-form" onSubmit={async (event: FormEvent) => { event.preventDefault(); const options = pollOptions.split('\n').map(value => value.trim()).filter(Boolean); if (options.length < 2 || options.length > 6 || options.some(value => value.length > 100)) { setError('Add 2 to 6 options, each up to 100 characters.'); return; } if (await act({ type: 'poll:create', question: pollQuestion.trim(), options, results: pollResults })) { setPollQuestion(''); setPollOptions(''); } }}><h3>Create a poll</h3><label>Question<input value={pollQuestion} onChange={event => setPollQuestion(event.target.value)} maxLength={300} required /></label><label>Options, one per line<textarea value={pollOptions} onChange={event => setPollOptions(event.target.value)} maxLength={606} rows={3} required /></label><label>Who can see results<select value={pollResults} onChange={event => setPollResults(event.target.value as PollResults)}>{(Object.keys(POLL_RESULT_LABELS) as PollResults[]).map(key => <option key={key} value={key}>{POLL_RESULT_LABELS[key]}</option>)}</select></label><button type="submit">Launch poll</button></form>}{!snapshot.polls.length && <p>No polls yet. Hosts can start one.</p>}{snapshot.polls.map(poll => { const counts = pollCounts(poll); const totalVotes = poll.total ?? Object.keys(poll.votes).length; return <section className="collaboration-card" key={poll.id}><h3>{poll.question}</h3><p>{poll.closed ? 'Poll closed' : 'Choose one answer'} · <AnimatedNumber value={totalVotes} /> {totalVotes === 1 ? 'vote' : 'votes'}</p>{(manager || poll.resultsHidden) && poll.results && poll.results !== 'live' && <p className="collaboration-poll-visibility"><span className="mi" aria-hidden="true">visibility_off</span>{poll.resultsHidden ? (poll.results === 'afterClose' ? 'Results appear when the host closes the poll.' : 'Only hosts can see the results.') : `Results visible to: ${POLL_RESULT_LABELS[poll.results]}`}</p>}<fieldset disabled={poll.closed}><legend className="collaboration-sr">{poll.question}</legend>{poll.options.map((option, index) => <label className="collaboration-poll-choice" key={index}><SelectionInput type="radio" name={`poll-${poll.id}`} checked={poll.votes[myPeerId] === index} onChange={() => { void act({ type: 'poll:vote', id: poll.id, option: index }); }} /><span>{option}</span>{!poll.resultsHidden && <span><AnimatedNumber value={counts[index]} /> {counts[index] === 1 ? 'vote' : 'votes'}</span>}</label>)}</fieldset>{manager && !poll.closed && <button type="button" onClick={() => { void act({ type: 'poll:close', id: poll.id }); }}>Close poll</button>}</section>; })}</>}
-            {tab === 'questions' && !encryptedNotes && <><form className="collaboration-form" onSubmit={async event => { event.preventDefault(); if (await act({ type: 'question:ask', text: question.trim() })) setQuestion(''); }}><label>Your question<textarea value={question} onChange={event => setQuestion(event.target.value)} maxLength={1000} rows={2} required /></label><button type="submit">Ask question</button></form>{!snapshot.questions.length && <p>No questions yet.</p>}{snapshot.questions.map(item => <section className="collaboration-card" key={item.id}><p className="collaboration-author">{item.authorName}</p><h3>{item.text}</h3><button type="button" aria-pressed={item.voters.includes(myPeerId)} onClick={() => { void act({ type: 'question:vote', id: item.id }); }}>Helpful · {item.voters.length}</button>{item.answer && <p className="collaboration-answer">Host answer: {item.answer}</p>}{manager && <form className="collaboration-form" onSubmit={async event => { event.preventDefault(); if (await act({ type: 'question:answer', id: item.id, answer: answers[item.id]?.trim() })) setAnswers(current => ({ ...current, [item.id]: '' })); }}><label>Answer<textarea value={answers[item.id] || ''} onChange={event => setAnswers(current => ({ ...current, [item.id]: event.target.value }))} maxLength={2000} rows={2} required /></label><button type="submit">{item.answer ? 'Update answer' : 'Answer question'}</button></form>}</section>)}</>}
-            {tab === 'notes' && <div className="collaboration-form"><label>Shared notes<textarea disabled={busy || loading} value={notes} onChange={event => { setNotes(event.target.value); setNotesDirty(true); }} rows={12} maxLength={20000} /></label><p className="collaboration-hint">{notesDirty ? 'Your draft has unsaved changes.' : 'Notes are shared when you save.'} Notes last for this meeting. Download a copy before leaving.</p>{notesConflict && <div className="collaboration-conflict" role="status"><p>Shared notes changed. Your draft is safe above. Copy any changes you need before replacing it.</p><label>Latest shared version<textarea readOnly value={snapshot.notes.text} rows={5} /></label><button type="button" onClick={() => { setNotes(snapshot.notes.text); setNotesVersion(snapshot.notes.version); setNotesDirty(false); }}>Replace my draft with latest</button></div>}<button type="button" disabled={!connected || busy || loading || !notesDirty || notesConflict} onClick={() => { void saveNotes(); }}>Save shared notes</button><button type="button" disabled={!notes.length} onClick={exportNotes}>Download my notes</button></div>}
+            {manager && !encryptedNotes && tab === 'polls' && snapshot.polls.length > 0 &&
+                <button type="button" disabled={snapshot.polls.some(poll => poll.resultsHidden)} onClick={() =>
+                    downloadReport('QS-VC-polls.csv', pollReport(snapshot.polls.map(poll => ({ ...poll, counts: pollCounts(poll) }))))}>Download poll report (CSV)</button>}
+            {manager && !encryptedNotes && tab === 'questions' && snapshot.questions.length > 0 &&
+                <button type="button" onClick={() => downloadReport('QS-VC-questions.csv', questionReport(snapshot.questions))}>Download Q&amp;A report (CSV)</button>}
+            {tab === 'polls' && !encryptedNotes && <>{manager && <form className="collaboration-form" onSubmit={async (event: FormEvent) => { event.preventDefault(); const options = pollOptions.split('\n').map(value => value.trim()).filter(Boolean); if (options.length < 2 || options.length > 6 || options.some(value => value.length > 100)) { setError('Add 2 to 6 options, each up to 100 characters.'); return; } if (await act({ type: 'poll:create', question: pollQuestion.trim(), options, results: pollResults })) { setPollQuestion(''); setPollOptions(''); } }}><h3>Create a poll</h3><label>Question<input value={pollQuestion} onChange={event => setPollQuestion(event.target.value)} maxLength={300} required /></label><label>Options, one per line<textarea value={pollOptions} onChange={event => setPollOptions(event.target.value)} maxLength={606} rows={3} required /></label><label>Who can see results<select value={pollResults} onChange={event => setPollResults(event.target.value as PollResults)}>{(Object.keys(POLL_RESULT_LABELS) as PollResults[]).map(key => <option key={key} value={key}>{POLL_RESULT_LABELS[key]}</option>)}</select></label><button type="submit">Launch poll</button></form>}{!snapshot.polls.length && <p>No polls yet. Hosts can start one.</p>}{snapshot.polls.map(poll => { const counts = pollCounts(poll); const totalVotes = poll.total ?? Object.keys(poll.votes).length; return <section className="collaboration-card" key={poll.id}><h3>{poll.question}</h3><p>{poll.closed ? 'Poll closed' : 'Choose one answer'} · <AnimatedNumber value={totalVotes} /> {totalVotes === 1 ? 'vote' : 'votes'}</p>{(manager || poll.resultsHidden) && poll.results && poll.results !== 'live' && <p className="collaboration-poll-visibility"><span className="mi" aria-hidden="true">visibility_off</span>{poll.resultsHidden ? (poll.results === 'afterClose' ? 'Results appear when the host closes the poll.' : 'Only hosts can see the results.') : `Results visible to: ${POLL_RESULT_LABELS[poll.results]}`}</p>}<fieldset disabled={poll.closed}><legend className="collaboration-sr">{poll.question}</legend>{poll.options.map((option, index) => <label className="collaboration-poll-choice" key={index}><SelectionInput type="radio" name={`poll-${poll.id}`} checked={poll.votes[myPeerId] === index} onChange={() => { void act({ type: 'poll:vote', id: poll.id, option: index }); }} /><span>{option}</span>{!poll.resultsHidden && <span><AnimatedNumber value={counts[index]} /> {counts[index] === 1 ? 'vote' : 'votes'}</span>}</label>)}</fieldset>{manager && !poll.closed && <button type="button" onClick={() => { void act({ type: 'poll:close', id: poll.id }); }}>Close poll</button>}{manager && poll.closed && poll.results === 'hosts' && <button type="button" disabled={busy || !connected} onClick={() => void act({type:'poll:publish',id:poll.id})}>Share results with everyone</button>}</section>; })}</>}
+            {tab === 'questions' && !encryptedNotes && <><form className="collaboration-form" onSubmit={async event => { event.preventDefault(); if (await act({ type: 'question:ask', text: question.trim() })) setQuestion(''); }}><label>Your question<textarea value={question} onChange={event => setQuestion(event.target.value)} maxLength={1000} rows={2} required /></label><button type="submit">Ask question</button></form>{!snapshot.questions.length && <p>No questions yet.</p>}{snapshot.questions.map(item => <section className="collaboration-card" key={item.id}><p className="collaboration-author">{item.authorName}</p><h3>{item.text}</h3><button type="button" aria-pressed={item.voters.includes(myPeerId)} onClick={() => { void act({ type: 'question:vote', id: item.id }); }}>Helpful · {item.voters.length}</button>{item.answer && <p className="collaboration-answer">Host answer: {item.answer}</p>}{manager && <form className="collaboration-form" onSubmit={async event => { event.preventDefault(); if (await act({ type: 'question:answer', id: item.id, answer: answers[item.id]?.trim() })) setAnswers(current => ({ ...current, [item.id]: '' })); }}>{!item.answer && <button type="button" disabled={busy || !connected} onClick={() => void act({type:'question:answer',id:item.id,answer:'Answered live'})}>Mark answered live</button>}<label>Answer<textarea value={answers[item.id] || ''} onChange={event => setAnswers(current => ({ ...current, [item.id]: event.target.value }))} maxLength={2000} rows={2} required /></label><button type="submit">{item.answer ? 'Update answer' : 'Answer question'}</button></form>}</section>)}</>}
+            {tab === 'notes' && <div className="collaboration-form">
+                <label>Notebook<select value={privateView ? 'private' : 'shared'} onChange={event => { setPrivateView(event.target.value === 'private'); setShareStatus(''); }}>
+                    <option value="shared">Shared with the meeting</option><option value="private">My private notes</option>
+                </select></label>
+                {privateView ? <><label>My private notes<textarea rows={12} maxLength={20000} value={personalNotes} onChange={event => setPersonalNotes(event.target.value)} /></label>
+                    <p className="collaboration-hint">Only you can see these notes. Download a copy before leaving.</p>
+                    <button type="button" disabled={!personalNotes.trim()} onClick={() => exportNotes(personalNotes, 'QS-VC-private-notes.txt')}>Download private notes</button>
+                </> : <><label>Shared notes<textarea disabled={busy || loading} value={notes} onChange={event => { setNotes(event.target.value); setNotesDirty(true); }} rows={12} maxLength={20000} /></label><p className="collaboration-hint">{notesDirty ? 'Your draft has unsaved changes.' : 'Notes are shared when you save.'} Notes last for this meeting. Download a copy before leaving.</p>{notesConflict && <div className="collaboration-conflict" role="status"><p>Shared notes changed. Your draft is safe above. Copy any changes you need before replacing it.</p><label>Latest shared version<textarea readOnly value={snapshot.notes.text} rows={5} /></label><button type="button" onClick={() => { setNotes(snapshot.notes.text); setNotesVersion(snapshot.notes.version); setNotesDirty(false); }}>Replace my draft with latest</button></div>}<button type="button" disabled={!connected || busy || loading || !notesDirty || notesConflict} onClick={() => { void saveNotes(); }}>Save shared notes</button><button type="button" disabled={!notes.length} onClick={() => exportNotes(notes, 'QS-VC-meeting-notes.txt')}>Download my notes</button></>}
+                <button type="button" disabled={!(privateView ? personalNotes : snapshot.notes.text).trim()} onClick={() => void shareNotes(privateView ? personalNotes : snapshot.notes.text)}>
+                    {typeof navigator !== 'undefined' && typeof navigator.share === 'function' ? 'Share' : 'Copy'} {privateView ? 'private notes' : 'saved shared notes'}
+                </button>
+                {shareStatus && <p role="status">{shareStatus}</p>}
+            </div>}
             {tab === 'files' && !encryptedNotes && <>
                 {!canShareFiles && <p className="collaboration-hint">The host can allow you to share files.</p>}
                 {canShareFiles && <div className="collaboration-dropzone" data-dragging={dragging || undefined} data-busy={uploading ? true : undefined}

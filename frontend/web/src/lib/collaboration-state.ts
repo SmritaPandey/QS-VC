@@ -1,7 +1,7 @@
 export interface BoardPoint { x: number; y: number }
 export interface BoardStroke { id: string; authorId: string; points: BoardPoint[]; color: string; width: number }
 export type PollResults = 'live' | 'afterClose' | 'hosts';
-export interface MeetingPoll { id: string; question: string; options: string[]; votes: Record<string, number>; closed: boolean; results?: PollResults; resultsHidden?: boolean; total?: number }
+export interface MeetingPoll { id: string; question: string; options: string[]; votes: Record<string, number>; closed: boolean; results?: PollResults; resultsHidden?: boolean; counts?: number[]; total?: number }
 export const POLL_RESULT_LABELS: Record<PollResults, string> = { live: 'Everyone, as votes come in', afterClose: 'Everyone, after the poll closes', hosts: 'Only hosts and co-hosts' };
 export interface MeetingQuestion { id: string; text: string; authorId: string; authorName: string; voters: string[]; answer?: string }
 export interface MeetingFile { id: string; name: string; mime: string; size: number; authorId: string; authorName: string }
@@ -21,6 +21,7 @@ export function boardPoint(clientX: number, clientY: number, rect: { left: numbe
     return { x: Math.max(0, Math.min(1, (clientX - rect.left) / rect.width)), y: Math.max(0, Math.min(1, (clientY - rect.top) / rect.height)) };
 }
 export function pollCounts(poll: MeetingPoll): number[] {
+    if (poll.counts) return poll.counts;
     const counts = poll.options.map(() => 0);
     for (const choice of Object.values(poll.votes)) if (Number.isInteger(choice) && choice >= 0 && choice < counts.length) counts[choice]++;
     return counts;

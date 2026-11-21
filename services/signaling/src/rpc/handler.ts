@@ -567,6 +567,8 @@ export async function handleRpcMessage(
             case 'publishEncryptedPoll':
             case 'rewrapEncryptedPoll':
                 return { jsonrpc:'2.0', id:id!, result:encryptedPollRpc(ws,connectionState.roomId!,connectionState.peerId!,method,params) };
+            case 'getSharedActivity':
+            case 'setSharedActivity':
             case 'getEncryptedNotes':
             case 'putEncryptedNotes':
             case 'getEncryptedFiles':

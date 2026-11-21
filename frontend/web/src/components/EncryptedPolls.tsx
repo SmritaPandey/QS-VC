@@ -1,3 +1,4 @@
+import { downloadReport, pollReport } from '../lib/activity-reports';
 import SelectionInput from './SelectionInput';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { signaling } from '../lib/signaling';
@@ -221,6 +222,8 @@ export default function EncryptedPolls({ access, peerId, manager, connected, vis
             <button type="submit" disabled={busy || !connected}>Launch poll</button>
         </form>}
         {!polls.length && !error && <p>No encrypted polls yet.</p>}
+        {manager && polls.length > 0 && <button type="button" disabled={Boolean(error) || polls.some(poll => poll.incomplete || !poll.counts)} onClick={() =>
+            downloadReport('QS-VC-polls.csv', pollReport(polls.map(poll => ({ ...poll.definition, closed: poll.closed, counts: poll.counts! }))))}>Download poll report (CSV)</button>}
         {polls.map(poll => <section className="collaboration-card" key={poll.id}>
             <h3>{poll.definition.question}</h3><p>{poll.closed ? 'Closed' : 'Open'} · <AnimatedNumber value={poll.total} /> votes</p>
             <fieldset disabled={busy || !connected || poll.closed}><legend className="collaboration-sr">{poll.definition.question}</legend>

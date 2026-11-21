@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import { useLayoutEffect, useRef, useState, type Dispatch, type FormEvent, type SetStateAction } from 'react';
+import { downloadText } from '../lib/caption-stream';
 
 interface Message {
     id: string;
@@ -10,12 +11,15 @@ interface Message {
 
 interface Props {
     messages: Message[];
+    draft: string;
+    setDraft: Dispatch<SetStateAction<string>>;
     myPeerId: string;
     onSend: (content: string) => Promise<boolean>;
     onClose: () => void;
+    onOpenFiles: () => void;
 }
 
-export default function MeetingChat({ messages, myPeerId, onSend, onClose }: Props) {
+export default function MeetingChat({ messages, myPeerId, onSend, onClose, onOpenFiles, draft, setDraft }: Props) {
     const logRef = useRef<HTMLDivElement>(null);
     const listRef = useRef<HTMLDivElement>(null);
     const nearBottom = useRef(true);
@@ -25,7 +29,6 @@ export default function MeetingChat({ messages, myPeerId, onSend, onClose }: Pro
     const [deliveryFailed, setDeliveryFailed] = useState(false);
     const [sending, setSending] = useState(false);
     const [hasNewMessages, setHasNewMessages] = useState(false);
-    const [draft, setDraft] = useState('');
 
     const jumpToLatest = () => {
         const log = logRef.current;
@@ -77,6 +80,7 @@ export default function MeetingChat({ messages, myPeerId, onSend, onClose }: Pro
     }}>
         <div className="panel-header">
             <h3>In-call messages</h3>
+            {messages.length > 0 && <button type="button" className="panel-close" aria-label="Download meeting chat" title="Download meeting chat" onClick={() => downloadText('QS-VC-meeting-chat.txt', messages.map(message => `[${message.timestamp}] ${message.displayName}: ${message.content}`).join('\n'))}><span className="mi mi-sm" aria-hidden="true">download</span></button>}
             <button ref={closeRef} type="button" className="panel-close" aria-label="Close chat" onClick={onClose}><span className="mi mi-sm" aria-hidden="true">close</span></button>
         </div>
         <div ref={logRef} className="chat-messages" role="log" tabIndex={0} aria-label="Meeting chat history" aria-live="polite" aria-relevant="additions text"
@@ -99,6 +103,7 @@ export default function MeetingChat({ messages, myPeerId, onSend, onClose }: Pro
         {hasNewMessages && <button type="button" className="chat-new-messages" onClick={jumpToLatest}>New messages <span className="mi mi-sm" aria-hidden="true">south</span></button>}
         {deliveryFailed && <p className="chat-delivery-error" role="status">Message could not be sent. Your draft is ready to retry.</p>}
         <form className="chat-input-area" onSubmit={send}>
+            <button type="button" className="chat-send-btn" onClick={onOpenFiles} aria-label="Open shared meeting files" title="Shared meeting files"><span className="mi mi-sm" aria-hidden="true">attach_file</span></button>
             <input type="text" aria-label="Chat message" placeholder="Message everyone…" className="chat-input" value={draft} onChange={event => setDraft(event.target.value)} />
             <button type="submit" className="chat-send-btn" aria-label="Send message" disabled={sending || !draft.trim()}><span className="mi mi-sm" aria-hidden="true">send</span></button>
         </form>

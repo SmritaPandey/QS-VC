@@ -8,6 +8,7 @@ export interface GridPeer {
     peerId: string;
     displayName: string;
     audioTrack?: MediaStreamTrack;
+    screenAudioTrack?: MediaStreamTrack;
     videoTrack?: MediaStreamTrack;
     cameraTracks?: Record<string, MediaStreamTrack>;
     siteLocation?: string;
@@ -199,6 +200,7 @@ export default function VideoGrid({ localStream, localCameraTracks = {}, siteLoc
 export function RemoteAudio({ peers, volume = 1, outputDeviceId, onOutputError }: { peers: Map<string, GridPeer>; volume?: number; outputDeviceId?: string; onOutputError?: () => void }) {
     return <div className="qs-remote-audio" aria-hidden="true">
         {Array.from(peers.values()).filter(p => p.audioTrack).map(p => <PeerAudio key={p.peerId} track={p.audioTrack!} volume={volume} outputDeviceId={outputDeviceId} onOutputError={onOutputError} />)}
+        {Array.from(peers.values()).filter(p => p.screenAudioTrack).map(p => <PeerAudio key={p.peerId + ':screen'} track={p.screenAudioTrack!} volume={volume} outputDeviceId={outputDeviceId} onOutputError={onOutputError} />)}
     </div>;
 }
 

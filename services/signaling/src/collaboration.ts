@@ -20,7 +20,8 @@ const encryptedNotesSchema = z.object({
 const encryptedFileSchema = encryptedNotesSchema.extend({fileId:z.string().uuid(),noteVersion:z.literal(1)});
 interface SecureNotesRecord { encrypted:z.infer<typeof encryptedNotesSchema>; signingPublicKey:string }
 interface SecureFileRecord { encrypted:z.infer<typeof encryptedFileSchema>; signingPublicKey:string; authorId:string; authorName:string; authorSigningKey:string }
-interface State { secureFiles:Map<string,SecureFileRecord>; secureNotes?:SecureNotesRecord; revision:number; strokes:Stroke[]; stickyNotes:StickyNote[]; notes:{text:string;version:number}; polls:Poll[]; questions:Question[]; files:FileEntry[]; rates:Map<string,{at:number;count:number}> }
+const activityTab = z.enum(['board', 'polls', 'questions', 'notes', 'files']);
+interface State { sharedTab?: z.infer<typeof activityTab>; secureFiles:Map<string,SecureFileRecord>; secureNotes?:SecureNotesRecord; revision:number; strokes:Stroke[]; stickyNotes:StickyNote[]; notes:{text:string;version:number}; polls:Poll[]; questions:Question[]; files:FileEntry[]; rates:Map<string,{at:number;count:number}> }
 const states = new WeakMap<RoomState,State>();
 const idSchema=z.string().uuid();
 const text=(max:number)=>z.string().trim().min(1).max(max);
@@ -32,7 +33,7 @@ const schemas = z.discriminatedUnion('type',[
  z.object({type:z.literal('sticky:remove'),id:idSchema,version:z.number().int().nonnegative()}),
  z.object({type:z.literal('notes:update'),text:z.string().max(20000),version:z.number().int().nonnegative()}),
  z.object({type:z.literal('poll:create'),question:text(300),options:z.array(text(120)).min(2).max(6),results:z.enum(['live','afterClose','hosts']).default('live')}),
- z.object({type:z.literal('poll:vote'),id:idSchema,option:z.number().int().nonnegative()}),z.object({type:z.literal('poll:close'),id:idSchema}),
+ z.object({type:z.literal('poll:vote'),id:idSchema,option:z.number().int().nonnegative()}),z.object({type:z.literal('poll:close'),id:idSchema}),z.object({type:z.literal('poll:publish'),id:idSchema}),
  z.object({type:z.literal('question:ask'),text:text(1000)}),z.object({type:z.literal('question:vote'),id:idSchema}),z.object({type:z.literal('question:answer'),id:idSchema,answer:text(2000)}),
  z.object({type:z.literal('file:add'),name:text(120).regex(/^[^/\\\x00-\x1f]+$/),mime:z.enum(['image/png','image/jpeg','text/plain','application/pdf']),data:z.string().max(43692).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/)}),
  z.object({type:z.literal('file:remove'),id:idSchema}),
@@ -50,9 +51,12 @@ const isManager=(peer?:PeerState)=>peer?.role==='host'||peer?.role==='co-host';
 function pollFor(poll:Poll,viewer?:PeerState){
  const visible=isManager(viewer)||poll.results==='live'||(poll.results==='afterClose'&&poll.closed);
  const total=Object.keys(poll.votes).length;
- if(visible)return {...poll,total,resultsHidden:false};
+ if(isManager(viewer))return {...poll,total,resultsHidden:false};
  const own=viewer&&viewer.id in poll.votes?{[viewer.id]:poll.votes[viewer.id]}:{};
- return {...poll,votes:own,total,resultsHidden:true};
+ if (!visible) return {...poll,votes:own,total,resultsHidden:true};
+ const counts = poll.options.map(() => 0);
+ for (const choice of Object.values(poll.votes)) counts[choice]++;
+ return {...poll,votes:own,counts,total,resultsHidden:false};
 }
 function snapshot(state:State,viewer?:PeerState){return {revision:state.revision,strokes:state.strokes,stickyNotes:state.stickyNotes,notes:state.notes,polls:state.polls.map(poll=>pollFor(poll,viewer)),questions:state.questions,files:state.files.map(({data,...file})=>file)};}
 function checkVoteCapacity(state:State){if(state.polls.reduce((n,p)=>n+Object.keys(p.votes).length,0)+state.questions.reduce((n,q)=>n+q.voters.length,0)>=1000)fail('Room vote limit reached');}
@@ -65,6 +69,14 @@ export function collaborationRpc(ws:any,roomId:string,peerId:string,method:strin
  const now=Date.now();let rate=state.rates.get(peerId);
  if(!rate||now-rate.at>=1000){rate={at:now,count:0};state.rates.set(peerId,rate);}
  if(++rate.count>20)fail('Please slow down');
+ if (method === 'getSharedActivity') return {tab:state.sharedTab ?? null};
+ if (method === 'setSharedActivity') {
+  host(peer);
+  const {tab} = z.object({tab:activityTab.nullable()}).strict().parse(params);
+  state.sharedTab = tab ?? undefined;
+  roomManager.broadcast(room.id, 'sharedActivityChanged', {tab});
+  return {tab};
+ }
  if(method==='getEncryptedNotes'||method==='putEncryptedNotes'){
   if(!room.settings.e2eeRequired||!peer.e2eeKeyBundle)fail('Encrypted notes require a registered secure room member');
   if(method==='getEncryptedNotes')return state.secureNotes ?? null;
@@ -112,6 +124,9 @@ export function collaborationRpc(ws:any,roomId:string,peerId:string,method:strin
   const {id}=z.object({id:idSchema}).parse(params); const file=state.files.find(f=>f.id===id);if(!file)fail('File not found');return {...file};
  }
  const action=schemas.parse(params);
+ if (/^(stroke:|sticky:|board:)/.test(action.type) && peer.role !== 'host' && !room.settings.allowScreenShare) {
+  fail('The host must grant screen sharing permission before you can edit the whiteboard.');
+ }
  switch(action.type){
  case 'stroke:add':
   if(state.strokes.length>=500||state.strokes.reduce((n,s)=>n+s.points.length,0)+action.points.length>20000)fail('Whiteboard is full');
@@ -136,6 +151,7 @@ export function collaborationRpc(ws:any,roomId:string,peerId:string,method:strin
  case 'notes:update':if(action.version!==state.notes.version)fail('Notes changed. Refresh before saving.');state.notes={text:action.text,version:state.notes.version+1};break;
  case 'poll:create':host(peer);if(state.polls.length>=20)fail('Poll limit reached');if(new Set(action.options).size!==action.options.length)fail('Use distinct poll options');state.polls.push({id:randomUUID(),question:action.question,options:action.options,votes:{},closed:false,results:action.results,anonymous:true});break;
  case 'poll:vote':{const poll=state.polls.find(p=>p.id===action.id);if(!poll||poll.closed||action.option>=poll.options.length)fail('Poll is unavailable');if(!(peerId in poll.votes))checkVoteCapacity(state);poll.votes[peerId]=action.option;break;}
+ case 'poll:publish':{host(peer);const poll=state.polls.find(p=>p.id===action.id);if(!poll?.closed)fail('Close the poll before sharing results');poll.results='afterClose';break;}
  case 'poll:close':{host(peer);const poll=state.polls.find(p=>p.id===action.id);if(!poll)fail('Poll not found');poll.closed=true;break;}
  case 'question:ask':if(state.questions.length>=100)fail('Question limit reached');state.questions.push({id:randomUUID(),text:action.text,authorId:peerId,authorName:peer.displayName,voters:[],answer:''});break;
  case 'question:vote':{const q=state.questions.find(q=>q.id===action.id);if(!q)fail('Question not found');if(!q.voters.includes(peerId)){checkVoteCapacity(state);q.voters.push(peerId);}break;}

@@ -1,7 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import VideoGrid, { type GridPeer } from './VideoGrid';
+import VideoGrid, { RemoteAudio, type GridPeer } from './VideoGrid';
 
 vi.mock('react', async importOriginal => {
     const react = await importOriginal<typeof import('react')>();
@@ -80,4 +80,10 @@ it('removes an offstage share immediately when a presenter returns to the audien
     }));
     expect(markup).not.toContain('Shared content');
     expect(markup).not.toContain('Former presenter');
+});
+
+it('plays microphone and shared display sound independently', () => {
+    const peer: GridPeer = { peerId: 'presenter', displayName: 'Presenter', audioTrack: {} as MediaStreamTrack, screenAudioTrack: {} as MediaStreamTrack };
+    const markup = renderToStaticMarkup(createElement(RemoteAudio, { peers: new Map([[peer.peerId, peer]]) }));
+    expect(markup.match(/<audio /g)).toHaveLength(2);
 });

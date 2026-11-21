@@ -4,18 +4,18 @@ Scope added November 3, 2026: shared whiteboard, polls, Q&A, shared notes, small
 
 ## User entry points
 
-Open **More → Activities** for Whiteboard, Polls, Q&A, Notes and Files. Hosts and co-hosts also have host controls. The server determines roles; a participant cannot grant themselves privileges.
+Open **More → Activities** for Whiteboard, Polls, Q&A, Notes and Files. Hosts and co-hosts can select **Share tab with everyone** on an activity. It opens for current participants and late joiners. Each participant can switch between the shared activity and **Camera & screen**. Stopping activity sharing leaves media running. Chat also links to meeting files. The server determines roles; a participant cannot grant themselves privileges.
 
-- Whiteboard: normalized pointer/touch strokes, pen colours and widths, undo own strokes; hosts can clear the board.
-- Polls: hosts create/close polls; participants select one answer, with shared counts.
-- Q&A: participants ask/upvote; hosts answer.
-- Notes: explicit shared save with version checking. A conflicting save retains the local draft for manual reconciliation.
+- Whiteboard: normalized pointer/touch strokes, pen colours and widths, undo own strokes; hosts can clear the board. Download the board as an SVG image including drawings and sticky notes.
+- Polls: hosts create/close polls; participants select one answer, with host-controlled results visibility. Hosts and co-hosts can export vote totals as CSV.
+- Q&A: participants ask/upvote; hosts answer in writing or mark a question answered live. Hosts and co-hosts can export the Q&A as CSV.
+- Notes: explicit shared save with version checking. A conflicting save retains the local draft for manual reconciliation. **My private notes** stay in the current meeting view until you download or explicitly share a copy.
 - Files: authenticated room-member uploads/downloads, PNG/JPEG/PDF/TXT, maximum 32 KB per file, 20 files and 512 KB total per room. This fits the existing signaling transport. Format validation is not malware scanning.
 - Host controls: waiting-room admissions, participant moderation, room locking, chat/screen-sharing settings and host-controlled roles.
 
 ## Persistence and deployment limits
 
-Collaboration data lives in the signaling process for the room lifetime. It is not a database archive, does not survive process restarts, and requires the same room owner for all participants. Save necessary notes/files before leaving. No claim of multi-region synchronization or large-webinar capacity is made.
+Collaboration data lives in the signaling process for the room lifetime. It is not a database archive, does not survive process restarts, and requires the same room owner for all participants. Download notes, board images, reports and needed files before leaving. These exports can be shared afterward. No claim of multi-region synchronization or large-webinar capacity is made.
 
 Poll/Q&A voting uses participant connection IDs, not durable account identity; reconnecting is not an election-grade identity guarantee. Do not market anonymous voting: the server retains per-participant choices.
 

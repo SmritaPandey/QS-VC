@@ -5,7 +5,7 @@ export type ScreenShareSurface = 'browser' | 'window' | 'monitor';
 interface Props {
     open: boolean;
     onClose: () => void;
-    onSelect: (surface: ScreenShareSurface) => void;
+    onSelect: (surface: ScreenShareSurface, shareSound: boolean) => void;
 }
 
 interface ShareOption {
@@ -44,6 +44,8 @@ export default function ShareScreenModal({ open, onClose, onSelect }: Props) {
     const dialogRef = useRef<HTMLDialogElement>(null);
     const [selected, setSelected] = useState<ScreenShareSurface>('browser');
 
+    const [shareSound, setShareSound] = useState(false);
+
     useEffect(() => {
         const dialog = dialogRef.current;
         if (!dialog) return;
@@ -57,7 +59,7 @@ export default function ShareScreenModal({ open, onClose, onSelect }: Props) {
     if (!open) return null;
 
     const handleConfirm = () => {
-        onSelect(selected);
+        onSelect(selected, shareSound);
         onClose();
     };
 
@@ -127,6 +129,7 @@ export default function ShareScreenModal({ open, onClose, onSelect }: Props) {
                     ))}
                 </div>
 
+                <label><input type="checkbox" checked={shareSound} onChange={event => setShareSound(event.target.checked)} /> Share sound when available</label>
                 <div className="share-screen-footer">
                     <p className="share-screen-privacy-note">
                         <span className="mi" aria-hidden="true">lock</span>

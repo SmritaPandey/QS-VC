@@ -75,6 +75,7 @@ interface PeerData {
     peerId: string;
     displayName: string;
     audioTrack?: MediaStreamTrack;
+    screenAudioTrack?: MediaStreamTrack;
     videoTrack?: MediaStreamTrack;
     screenVideoTrack?: MediaStreamTrack;
     cameraTracks?: Record<string, MediaStreamTrack>;
@@ -297,6 +298,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const pendingRecording = useRef(recordingManager.pending);
     const finalizingRecording = useRef<Promise<boolean> | null>(null);
     const finishRecordingRef = useRef<() => Promise<boolean>>(async () => true);
+    const [chatDraft, setChatDraft] = useState('');
     const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
     const [privateInvite, setPrivateInvite] = useState<PrivateConversationInvite | null>(null);
     const [privateConversation, setPrivateConversation] = useState<ActivePrivateConversation | null>(null);
@@ -383,6 +385,23 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [isFullscreen, setIsFullscreen] = useState(false);
     const roomRef = useRef<HTMLDivElement>(null);
     const [connected, setConnected] = useState(false);
+    const [sharedTab, setSharedTab] = useState<CollaborationTab | null>(null);
+    useEffect(() => {
+        setSharedTab(null);
+        if (!connected) return;
+        let current = true;
+        let received = false;
+        const apply = ({ tab }: { tab: CollaborationTab | null }) => {
+            setSharedTab(tab);
+            if (tab) { setTabRequest({ tab }); setActivitiesOpen(true); }
+            else setActivitiesOpen(false);
+        };
+        const off = signaling.on('sharedActivityChanged', state => { received = true; apply(state); });
+        void signaling.request('getSharedActivity').then(state => {
+            if (current && !received && state?.tab) apply(state);
+        }).catch(() => {});
+        return () => { current = false; off(); };
+    }, [connected, meetingCode, roomJoinEpoch]);
     const [pageVisible, setPageVisible] = useState(!document.hidden);
     const [mutedSpeechNotice, setMutedSpeechNotice] = useState(false);
     const mutedSpeechTimer = useRef<number>();
@@ -1254,6 +1273,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                                 if (source === 'private-audio' && info.kind === 'audio') {
                                     privateConsumerIdRef.current = info.id;
                                     setPrivateAudioTrack(info.track);
+                                } else if (info.kind === 'audio' && source === 'screen') {
+                                    if (info.peerId !== myPeerIdRef.current) patchPeer(info.peerId, { screenAudioTrack: info.track });
                                 } else if (info.kind === 'video' && (source === 'screen' || info.appData?.type === 'screen')) {
                                     if (info.peerId !== myPeerIdRef.current) patchPeer(info.peerId, { screenVideoTrack: info.track, presenting: true });
                                 } else if (info.kind === 'video' && /^camera:[234]$/.test(source) && info.peerId !== myPeerIdRef.current) {
@@ -1271,7 +1292,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                                 } else if (/^camera:[234]$/.test(route.source)) {
                                     setPeers(previous => { const peer = previous.get(route.peerId); if (peer?.cameraTracks?.[route.source] !== route.track) return previous; const tracks = { ...peer.cameraTracks }; delete tracks[route.source]; const next = new Map(previous); next.set(route.peerId, { ...peer, cameraTracks: tracks }); return next; });
                                 } else if (route.peerId !== myPeerIdRef.current) {
-                                    const field = route.kind === 'video' ? route.source === 'screen' ? 'screenVideoTrack' : 'videoTrack' : 'audioTrack';
+                                    const field = route.kind === 'video' ? route.source === 'screen' ? 'screenVideoTrack' : 'videoTrack' : route.source === 'screen' ? 'screenAudioTrack' : 'audioTrack';
                                     setPeers(previous => {
                                         const peer = previous.get(route.peerId);
                                         if (!peer || peer[field] !== route.track) return previous;
@@ -1454,7 +1475,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             retainedSocketJoin.current = result;
             finishPrivateConversationLocally();
             setPrivateAudioTrack(null); setPrivateConversation(null); setPrivateInvite(null);
-            setPeers(new Map()); setChatMessages([]); setIncomingChatMessage(null); setUnreadChat(0); setUnreadPermissions([]); setKnocks([]);
+            setPeers(new Map()); setChatMessages([]); setChatDraft(''); setIncomingChatMessage(null); setUnreadChat(0); setUnreadPermissions([]); setKnocks([]);
             notifiedKnocks.current.clear(); setReactions([]); setHandRaised(false);
             handRaisedRef.current = false; setCaptionsOn(false); setShareSpeech(false);
             setScreenSharing(false); setScreenStream(null); setScreenPaused(false);
@@ -1738,10 +1759,11 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         const next = !screenPaused;
         setScreenPaused(next);
         media.setPaused('video', next, 'screen');
+        media.setPaused('audio', next, 'screen');
         showNotice(next ? 'Screen sharing paused' : 'Screen sharing resumed');
     }, [screenPaused, screenShareReady, showNotice]);
 
-    const startScreenShare = useCallback(async (surface?: ScreenShareSurface) => {
+    const startScreenShare = useCallback(async (surface?: ScreenShareSurface, shareSound = false) => {
         if (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare) { showNotice('Only the host can share until they allow screen sharing.'); return; }
         if (!sessionActive.current || sharingRef.current || busyRef.current.screen) return;
         if (initializingRef.current || !joinedRef.current || !media.canSend) { showNotice('Screen sharing is unavailable. Rejoin the meeting and try again.'); return; }
@@ -1758,8 +1780,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             }
             const display = await navigator.mediaDevices.getDisplayMedia({
                 video: videoConstraints,
-                audio: true,
-                ...({ selfBrowserSurface: 'include', systemAudio: 'include', surfaceSwitching: 'include' } as any),
+                audio: shareSound,
+                ...({ selfBrowserSurface: 'include', systemAudio: shareSound ? 'include' : 'exclude', surfaceSwitching: 'include' } as any),
             });
             if (!sessionActive.current || revision !== sessionRevision.current || (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare)) { display.getTracks().forEach(t => t.stop()); return; }
             const screenTrack = display.getVideoTracks()[0];
@@ -1771,6 +1793,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             setScreenShareReady(false);
             setScreenPaused(false);
             await media.produce(screenTrack, { source: 'screen', type: 'screen' });
+            const sound = display.getAudioTracks()[0];
+            if (shareSound && sound?.readyState === 'live' && screenTrack.readyState === 'live' && sharingRef.current && revision === sessionRevision.current) {
+                await media.produce(sound, { source: 'screen', type: 'screen' });
+            }
             if (!sessionActive.current || revision !== sessionRevision.current || !sharingRef.current || (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare) || screenTrack.readyState !== 'live') {
                 display.getTracks().forEach(t => t.stop());
                 // Stop can run before produce registers the screen producer.
@@ -1875,7 +1901,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             const composite = createMeetingComposite(() => videoAreaRef.current, () => [
                 ...(privateConversationRef.current ? [] : localStreamRef.current?.getAudioTracks() || []),
                 ...(screenStreamRef.current?.getAudioTracks() || []),
-                ...Array.from(peersRef.current.values()).flatMap(peer => peer.audioTrack ? [peer.audioTrack] : []),
+                ...Array.from(peersRef.current.values()).flatMap(peer => [peer.audioTrack, peer.screenAudioTrack].filter((track): track is MediaStreamTrack => !!track)),
             ], `QS-VC ${meetingCode}`);
             compositeRef.current = composite;
             await recordingManager.startRecording(composite.stream, () => {
@@ -2197,6 +2223,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         : networkProfile === 'audio-only' ? 'Video is paused to keep audio clear.' : 'Video quality is reduced because of a weak connection.';
 
     const secureActivities = requiredE2eeRef.current;
+    const screenOnStage = screenSharing || Array.from(peers.values()).some(peer => peer.screenVideoTrack?.readyState === 'live');
     const activityOnStage = activitiesOpen && (!secureActivities || !!e2eeRef.current);
     const sidePanelOpen = chatOpen || participantsOpen || hostToolsOpen || effectsOpen || summaryOpen;
     const manager = myRole === 'host' || myRole === 'co-host';
@@ -2314,6 +2341,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 })}
             </div>}
             <div className="meeting-notices">
+
             {connected && connectionMessage && <ConnectionNotice key={connectionMessage} message={connectionMessage}
                 onOpenQuality={() => { closePanels(); setQualityOpen(true); }} />}
             {roomTransitioning && <div className="meeting-notice" role="status">Moving rooms and setting up your secure media…</div>}
@@ -2366,8 +2394,14 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 </div>
             )}
 
-            <div className="meeting-content" data-activity-stage={activityOnStage || undefined} data-activity-dock={activityOnStage && webinar || undefined}>
-                {(!secureActivities || encryptedNotes) && <MeetingCollaboration key={`${meetingCode}:${roomJoinEpoch}:${secureActivities}`} open={activitiesOpen} tabRequest={tabRequest}
+            {sharedTab && <nav className="shared-stage-tabs" aria-label="Meeting views">
+                <button type="button" aria-pressed={!activitiesOpen} onClick={() => setActivitiesOpen(false)}>Camera &amp; screen</button>
+                <button type="button" aria-pressed={activitiesOpen && tabRequest?.tab === sharedTab} onClick={() => { setTabRequest({ tab: sharedTab }); setActivitiesOpen(true); }}>
+                    Shared {({board:'whiteboard', polls:'polls', questions:'Q&A', notes:'notes', files:'files'})[sharedTab]}
+                </button>
+            </nav>}
+            <div className="meeting-content" data-activity-stage={activityOnStage || undefined} data-activity-dock={activityOnStage && (webinar || screenOnStage) || undefined}>
+                {(!secureActivities || encryptedNotes) && <MeetingCollaboration sharedTab={sharedTab} key={`${meetingCode}:${roomJoinEpoch}:${secureActivities}`} open={activitiesOpen} tabRequest={tabRequest}
                     connected={connected && (!secureActivities || e2eeActive)} role={myRole} myPeerId={myPeerIdRef.current}
                     onClose={closeActivityPanel} encryptedNotes={secureActivities ? encryptedNotes : undefined} canShareFiles={myRole === 'host' || roomSettings.allowFileShare === true} canEditBoard={myRole === 'host' || roomSettings.allowScreenShare === true} />}
                 <div ref={videoAreaRef} className={`video-area ${sidePanelOpen ? 'with-panel' : ''}`}>
@@ -2382,7 +2416,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         </MeetingToast>
                     </div>}
                     <VideoGrid localStream={displayedLocalStream} localCameraTracks={Object.fromEntries(additionalCameras.map(camera => [camera.source, camera.track]))} siteLocation={state.siteLocation} userId={session.profile?.id} localScreenTrack={screenStream?.getVideoTracks()[0]} myPeerId={myPeerIdRef.current} myRole={myRole} myOnStage={myOnStage} peers={peers} displayName={displayName} videoOff={videoOff} audioMuted={audioMuted} handRaised={handRaised} sharing={screenSharing}
-                        viewMode={activityOnStage && !webinar ? 'tiled' : viewMode === 'auto' ? format.layout : viewMode} tilesPerPage={activityOnStage && !webinar ? 4 : tilesPerPage} webinar={webinar} speaking={speaking} activeSpeaker={activeSpeaker} spotlightId={spotlightId} pinnedId={pinnedId}
+                        viewMode={activityOnStage && !webinar && !screenOnStage ? 'tiled' : viewMode === 'auto' ? format.layout : viewMode} tilesPerPage={activityOnStage && !webinar && !screenOnStage ? 4 : tilesPerPage} webinar={webinar} speaking={speaking} activeSpeaker={activeSpeaker} spotlightId={spotlightId} pinnedId={pinnedId}
                         canManage={manager} onPin={setPinnedId} onSpotlight={setSpotlightFor} onToggleStage={setStageFor} />
                     <RemoteAudio peers={peers} volume={privateConversation ? focusPrivateAudio ? 0 : 0.24 : translatedSpeaking ? 0.2 : 1} outputDeviceId={audioOutputId} onOutputError={reportAudioOutputError} />
                     {privateAudioTrack && <PrivateAudioPlayback track={privateAudioTrack} outputDeviceId={audioOutputId} onOutputError={reportAudioOutputError} />}
@@ -2397,7 +2431,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 </div>
 
                 {breakoutsOpen && <MeetingBreakouts connected={connected} isHost={myRole === 'host'} currentRoomId={currentRoomId} transitioning={roomTransitioning} participants={[{ peerId: myPeerIdRef.current || 'self', displayName: `${displayName} (You)` }, ...Array.from(peers.values()).map(peer => ({ peerId: peer.peerId, displayName: peer.displayName }))]} onJoin={moveToBreakout} onClose={() => { setBreakoutsOpen(false); restoreFormatFocus(); }} />}
-                {chatOpen && <MeetingChat myPeerId={myPeerIdRef.current} messages={chatMessages} onSend={handleSendChat} onClose={closeChat} />}
+                {chatOpen && <MeetingChat myPeerId={myPeerIdRef.current} messages={chatMessages} draft={chatDraft} setDraft={setChatDraft} onSend={handleSendChat} onClose={closeChat} onOpenFiles={() => { closePanels(); setTabRequest({ tab: 'files' }); setActivitiesOpen(true); }} />}
 
                 {participantsOpen && (
                     <ParticipantsPanel peers={peers} displayName={displayName} myPeerId={myPeerIdRef.current || 'self'} myRole={myRole} myOnStage={myOnStage} audioMuted={audioMuted} videoOff={videoOff} handRaised={handRaised} presenting={screenSharing}
@@ -2437,7 +2471,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 else showNotice('Audio-only is off. Start your camera when ready.');
             }} onOpenReport={signedIn ? () => setSessionReportOpen(true) : undefined} open={qualityOpen} connected={connected} getStats={getQualityStats} onSample={reportQualitySample} onClose={() => setQualityOpen(false)} />
             <MultiCameraPanel open={multiCameraOpen} onClose={() => setMultiCameraOpen(false)} cameras={additionalCameras} primaryDeviceId={localStream?.getVideoTracks()[0]?.getSettings().deviceId} canStart={connected && !roomTransitioning && !videoOff && pageVisible && canPublishRef.current && roomSettings.allowCamera} onStart={async deviceId => { if (roomTransitionBusy.current || !connected || videoOff || document.hidden || !canPublishRef.current || !roomSettingsRef.current.allowCamera) throw new Error('Start your main camera and check host camera permissions first.'); await multiCameraRef.current!.startCamera(deviceId, localStreamRef.current?.getVideoTracks()[0]?.getSettings().deviceId); }} onStop={source => multiCameraRef.current!.stopCamera(source)} />
-            <MeetingLiveStreaming container={broadcastSlot} onClosePanel={closeActivityPanel} meetingCode={meetingCode || ''} isHost={myRole === 'host'} connected={connected} e2eeRequired={e2eeEnabled} onNotice={showNotice} onStreamingChange={async value => { await signaling.request('liveStreamState', value); setLiveStreaming(value.active ? value : null); }} createComposite={() => createMeetingComposite(() => videoAreaRef.current, () => [...(privateConversationRef.current ? [] : localStreamRef.current?.getAudioTracks() || []), ...Array.from(peersRef.current.values()).flatMap(peer => peer.audioTrack ? [peer.audioTrack] : [])], `QS-VC ${meetingCode}`)} />
+            <MeetingLiveStreaming container={broadcastSlot} onClosePanel={closeActivityPanel} meetingCode={meetingCode || ''} isHost={myRole === 'host'} connected={connected} e2eeRequired={e2eeEnabled} onNotice={showNotice} onStreamingChange={async value => { await signaling.request('liveStreamState', value); setLiveStreaming(value.active ? value : null); }} createComposite={() => createMeetingComposite(() => videoAreaRef.current, () => [...(privateConversationRef.current ? [] : localStreamRef.current?.getAudioTracks() || []), ...(screenStreamRef.current?.getAudioTracks() || []), ...Array.from(peersRef.current.values()).flatMap(peer => [peer.audioTrack, peer.screenAudioTrack].filter((track): track is MediaStreamTrack => !!track))], `QS-VC ${meetingCode}`)} />
             <MeetingPictureInPicture ref={pictureInPictureRef} cameraStartAllowed={pageVisible} peers={peers} localStream={displayedLocalStream} localScreenTrack={screenStream?.getVideoTracks()[0]} sharing={screenSharing} displayName={displayName} videoOff={videoOff} audioMuted={audioMuted} activeSpeaker={activeSpeaker} onToggleAudio={handleToggleAudio} onToggleVideo={handleToggleVideo} onNotice={showNotice} onOpenChange={setPictureInPictureOpen} />
             <ControlBar
                 onOpenBreakouts={() => { closePanels(); setBreakoutsOpen(true); }}
@@ -2485,7 +2519,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             <ShareScreenModal
                 open={shareScreenModalOpen}
                 onClose={() => setShareScreenModalOpen(false)}
-                onSelect={(surface) => void startScreenShare(surface)}
+                onSelect={(surface, shareSound) => void startScreenShare(surface, shareSound)}
             />
             <InviteModal
                 open={inviteModalOpen}

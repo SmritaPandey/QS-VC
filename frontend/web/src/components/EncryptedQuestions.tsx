@@ -1,3 +1,4 @@
+import { downloadReport, questionReport } from '../lib/activity-reports';
 import { useEffect, useRef, useState } from 'react';
 import { signaling } from '../lib/signaling';
 import type { EncryptedNotesAccess } from '../lib/encrypted-notes';
@@ -118,6 +119,12 @@ export default function EncryptedQuestions({ access, connected, peerId, manager,
             <label>Your question<textarea value={question} maxLength={1000} rows={3} required onChange={event => setQuestion(event.currentTarget.value)} /></label>
             <button type="submit" disabled={!connected || busy || loading || !question.trim()}>Ask question</button>
         </form>
+        {manager && records.some(item => item.kind === 'question') && <button type="button" disabled={loading || Boolean(error)} onClick={() => {
+            const questions = records.filter(item => item.kind === 'question').map(item => ({
+                ...item, answer: records.find(reply => reply.kind === 'answer' && reply.encrypted.fileId === item.encrypted.fileId)?.text,
+            }));
+            downloadReport('QS-VC-questions.csv', questionReport(questions));
+        }}>Download Q&amp;A report (CSV)</button>}
         {!loading && !records.some(record => record.kind === 'question') && <p>No questions yet.</p>}
         {records.filter(record => record.kind === 'question').map(record => {
             const id = record.encrypted.fileId!;
@@ -127,6 +134,7 @@ export default function EncryptedQuestions({ access, connected, peerId, manager,
                 <button type="button" aria-pressed={record.voters.includes(peerId)} disabled={!connected || busy || record.voters.includes(peerId)} onClick={() => { void vote(id); }}>Helpful · <AnimatedNumber value={record.voters.length} /></button>
                 {answer && <p className="collaboration-answer">Host answer · {answer.authorName}: {answer.text}</p>}
                 {manager && <form className="collaboration-form" onSubmit={event => { event.preventDefault(); void submit('answer', answers[id] ?? '', id); }}>
+                    {!answer && <button type="button" disabled={!connected || busy || loading} onClick={() => void submit('answer', 'Answered live', id)}>Mark answered live</button>}
                     <label>Answer<textarea rows={2} maxLength={2000} required value={answers[id] ?? ''} onChange={event => { const value = event.currentTarget.value; setAnswers(current => ({ ...current, [id]: value })); }} /></label>
                     <button type="submit" disabled={!connected || busy || !answers[id]?.trim()}>{answer ? 'Update answer' : 'Answer question'}</button>
                 </form>}

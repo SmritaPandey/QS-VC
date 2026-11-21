@@ -37,7 +37,7 @@ function deferredCapture() {
     const screen = { paused: false, closed: true };
     let registered = false;
     const track = { readyState: 'live', stop: vi.fn(() => { track.readyState = 'ended'; }) };
-    const stream = { getTracks: () => [track], getVideoTracks: () => [track] };
+    const stream = { getTracks: () => [track], getVideoTracks: () => [track], getAudioTracks: () => [] };
     const context: any = {
         useCallback: (callback: unknown) => callback,
         sharingRef: { current: false }, sessionRevision: { current: 1 }, sessionActive: { current: true },
@@ -71,6 +71,21 @@ describe('presenting controls during screen-share startup', () => {
         share.finishProduce();
         await startup;
         expect(share.context.screenShareReady).toBe(true);
+    });
+
+    it('publishes selected display sound alongside video', async () => {
+        const share = deferredCapture();
+        const sound = { readyState: 'live', stop: vi.fn() };
+        share.context.navigator.mediaDevices.getDisplayMedia.mockResolvedValue({
+            getVideoTracks: () => [share.track], getAudioTracks: () => [sound], getTracks: () => [share.track, sound],
+        });
+        share.finishProduce();
+        await share.actions().startScreenShare('browser', true);
+        expect(share.context.navigator.mediaDevices.getDisplayMedia).toHaveBeenCalledWith(expect.objectContaining({ audio: true }));
+        expect(share.context.media.produce.mock.calls.map(([track]: [unknown]) => track)).toEqual([share.track, sound]);
+        expect(share.context.screenShareReady).toBe(true);
+        await share.actions().stopScreenShare();
+        expect(sound.stop).toHaveBeenCalledOnce();
     });
 
     it('announces stop immediately even while closing the SFU producer is delayed', async () => {

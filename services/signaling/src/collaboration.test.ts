@@ -1,7 +1,7 @@
 import { describe,it,expect,vi } from 'vitest';
 import { collaborationRpc } from './collaboration.js';
 import { roomManager,type PeerState } from './room-manager.js';
-function setup(){const room=roomManager.getOrCreateRoom(`collab-${crypto.randomUUID()}`); const a={readyState:1,send:vi.fn()},b={readyState:1,send:vi.fn()};for(const [id,ws,role] of [['host',a,'host'],['member',b,'member']] as const)room.peers.set(id,{id,ws,role,displayName:id} as unknown as PeerState);const rpc=(id:string,method:string,params:any={})=>collaborationRpc(id==='host'?a:b,room.id,id,method,params) as any;return {room,a,b,rpc};}
+function setup(){const room=roomManager.getOrCreateRoom(`collab-${crypto.randomUUID()}`); room.settings.allowScreenShare=true; const a={readyState:1,send:vi.fn()},b={readyState:1,send:vi.fn()};for(const [id,ws,role] of [['host',a,'host'],['member',b,'member']] as const)room.peers.set(id,{id,ws,role,displayName:id} as unknown as PeerState);const rpc=(id:string,method:string,params:any={})=>collaborationRpc(id==='host'?a:b,room.id,id,method,params) as any;return {room,a,b,rpc};}
 describe('room collaboration',()=>{
  it('enforces active membership, host actions and late-join state',()=>{const {room,rpc}=setup();expect(()=>collaborationRpc({},room.id,'member','getCollaborationState',{})).toThrow('Not joined');expect(()=>rpc('member','collaborationAction',{type:'poll:create',question:'Ready?',options:['Yes','No']})).toThrow('Host');let state=rpc('host','collaborationAction',{type:'poll:create',question:'Ready?',options:['Yes','No']});const id=state.polls[0].id;rpc('member','collaborationAction',{type:'poll:vote',id,option:0});state=rpc('member','collaborationAction',{type:'poll:vote',id,option:1});expect(Object.values(state.polls[0].votes)).toEqual([1]);expect(rpc('host','getCollaborationState').revision).toBe(3);rpc('host','collaborationAction',{type:'poll:close',id});expect(()=>rpc('member','collaborationAction',{type:'poll:vote',id,option:0})).toThrow('unavailable');});
  it('prevents lost notes and unauthorised stroke deletion',()=>{const {rpc}=setup();rpc('member','collaborationAction',{type:'notes:update',text:'Agreed',version:0});expect(()=>rpc('host','collaborationAction',{type:'notes:update',text:'Stale',version:0})).toThrow('Notes changed');const state=rpc('host','collaborationAction',{type:'stroke:add',points:[{x:0,y:0},{x:1,y:1}],color:'#006d77',width:3});expect(()=>rpc('member','collaborationAction',{type:'stroke:undo',id:state.strokes[0].id})).toThrow('Host');expect(()=>rpc('member','collaborationAction',{type:'stroke:add',points:[{x:2,y:0},{x:0,y:1}],color:'#006d77',width:3})).toThrow();});
@@ -54,5 +54,33 @@ describe('room collaboration',()=>{
   state=rpc('host','collaborationAction',{type:'poll:create',question:'Private?',options:['Yes','No'],results:'hosts'});
   const hidden=state.polls[1].id;rpc('host','collaborationAction',{type:'poll:close',id:hidden});
   expect(rpc('member','getCollaborationState').polls[1].resultsHidden).toBe(true);
+  expect(()=>rpc('member','collaborationAction',{type:'poll:publish',id:hidden})).toThrow('Host');
+  rpc('host','collaborationAction',{type:'poll:publish',id:hidden});
+  expect(rpc('member','getCollaborationState').polls[1]).toMatchObject({resultsHidden:false,counts:[0,0]});
+  expect(rpc('member','getCollaborationState').polls[0]).toMatchObject({counts:[1,1],votes:{member:1}});
  });
+});
+
+it('shares the active tab with current and later room members until a moderator stops sharing', () => {
+ const {rpc,room,b}=setup();
+ const other=setup();
+ expect(()=>rpc('member','setSharedActivity',{tab:'notes'})).toThrow('Host');
+ expect(()=>rpc('host','setSharedActivity',{tab:'arbitrary'})).toThrow();
+ for(const encrypted of [false,true]){
+  room.settings.e2eeRequired=encrypted;
+  rpc('host','setSharedActivity',{tab:'board'});
+  expect(JSON.parse(b.send.mock.lastCall![0])).toMatchObject({method:'sharedActivityChanged',params:{tab:'board'}});
+  expect(rpc('member','getSharedActivity')).toEqual({tab:'board'});
+  rpc('host','setSharedActivity',{tab:null});
+  expect(rpc('member','getSharedActivity')).toEqual({tab:null});
+ }
+ expect(other.b.send).not.toHaveBeenCalled();
+});
+
+it('keeps the ordinary whiteboard readable when editing is restricted', () => {
+ const {rpc,room}=setup();
+ room.settings.allowScreenShare=false;
+ expect(()=>rpc('member','collaborationAction',{type:'sticky:add',color:'yellow',text:'Idea'})).toThrow('permission');
+ rpc('host','collaborationAction',{type:'sticky:add',color:'yellow',text:'Agenda'});
+ expect(rpc('member','getCollaborationState').stickyNotes[0].text).toBe('Agenda');
 });

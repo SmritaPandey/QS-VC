@@ -183,3 +183,7 @@
   .collaboration-form .collaboration-files li { flex-wrap: wrap; }
   .collaboration-form .collaboration-files li > div { flex-basis: 100%; }
 }
+.shared-stage-tabs { display:flex; flex-wrap:wrap; gap:6px; padding:4px 12px; }
+.shared-stage-tabs button { min-height:44px; padding:4px 12px; color:#edf5fa; background:#162331; border:1px solid #577183; border-radius:8px; cursor:pointer; }
+.shared-stage-tabs button[aria-pressed=true] { background:#185451; border-color:#75ecd7; }
+.shared-stage-tabs button:focus-visible { outline:3px solid #75ecd7; outline-offset:2px; }
