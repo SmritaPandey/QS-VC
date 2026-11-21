@@ -1,3 +1,4 @@
+import LiveMeetingSummary from '../components/LiveMeetingSummary';
 import { FORMAT_ACTIONS, MEETING_FORMATS, roomFormat, type FormatAction } from '../lib/meeting-formats';
 import type { MeetingKind } from '../components/MeetingSetupDialog';
 import type { CollaborationTab } from '../components/MeetingCollaboration';
@@ -2240,6 +2241,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             <div className="meeting-top-bar">
                 <div className="top-bar-left">
                     <TenantBrand branding={organisationBranding} meeting />
+                    {connected && <LiveMeetingSummary key={currentRoomId || meetingCode} manager={manager && hasFeature(entitlements, 'ai_meeting_summary')} code={meetingCode || ''} />}
                     <button type="button" className="meeting-info-trigger" onClick={openInformation} aria-label="Meeting information" aria-haspopup="dialog" aria-expanded={informationOpen} title="Meeting information">
                         <span className="mi" aria-hidden="true">info</span>
                     </button>

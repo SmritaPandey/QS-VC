@@ -1,3 +1,4 @@
+import { finishLiveSummary, startLiveSummary, stopLiveSummary, liveSummaryState } from '../live-summary.js';
 import { bharatVcDial, disconnectBharatVc } from '../bharat-vc.js';
 import { recordMeetingAttendance } from '../meeting-attendance.js';
 import { meetingObservability } from '../meeting-observability.js';
@@ -310,6 +311,7 @@ async function endRoomForEveryone(roomId: string, by: string, peerId?: string, a
     const reason = action === 'cancel' ? 'Host cancelled the meeting' : 'Host ended the meeting';
     const closeReason = action === 'cancel' ? 'Meeting cancelled' : 'Meeting ended';
     const teardown = (async () => {
+        void finishLiveSummary(roomId, room.meetingCode);
         roomManager.updateRecording(roomId, null);
         if (process.env.POLY_BRIDGE_ENABLED === 'true') {
             await sfuClient.stopPolyRoom(roomId).catch(error => logger.warn(error, 'Poly bridge stop failed'));
@@ -663,6 +665,22 @@ export async function handleRpcMessage(
                     const answer = await askOpenRouter(systemMsg, request.data.question);
                     return { jsonrpc: '2.0', id: id!, result: { answer } };
                 } finally { budget.pending = false; }
+            }
+            case 'liveSummaryState':
+            case 'startLiveSummary':
+            case 'stopLiveSummary': {
+                const roomId = connectionState.roomId!;
+                const room = roomManager.getRoom(roomId);
+                if (!room || room.peers.get(connectionState.peerId!)?.ws !== ws) throw createError(-32005, 'Join the room first.');
+                const manager = roomManager.isHostOrCoHost(roomId, connectionState.peerId!) && can(connectionState.authUser, 'ai_meeting_summary');
+                if (method !== 'liveSummaryState') {
+                    if (!manager) throw createError(-32005, 'A Pro host or co-host is required.');
+                    if (method === 'startLiveSummary') {
+                        if (!openRouterConfigured()) throw createError(-32000, 'The summary service is unavailable.');
+                        startLiveSummary(roomId);
+                    } else await stopLiveSummary(roomId, room.meetingCode);
+                }
+                return { jsonrpc: '2.0', id: id!, result: liveSummaryState(roomId, manager) };
             }
             case 'generateMeetingSummary': {
                 if (!can(connectionState.authUser, 'ai_meeting_summary')) throw createError(-32005, 'Meeting summaries require Pro or higher.');

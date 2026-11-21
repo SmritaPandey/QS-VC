@@ -288,7 +288,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
             {!serverAsr && <button type="button" className="btn-text" onClick={onUseDetectedLanguage}>Use browser or region suggestion</button>}
             <details className="caption-privacy"><summary>How transcription uses audio</summary><p>{serverAsr
                 ? 'The configured transcription processor receives a copy of your microphone audio. The meeting service can read shared captions and translation text.'
-                : 'Browser speech recognition may send audio to your browser’s provider. It uses the browser’s microphone, which may differ from your selected meeting device. Only enable it if you agree.'} Captions are shared with this meeting{transcriptSaving ? ' and the host is saving a transcript.' : ' and aren’t saved by QS-VC.'}</p>
+                : 'Browser speech recognition may send audio to your browser’s provider. It uses the browser’s microphone, which may differ from your selected meeting device. Only enable it if you agree.'} Captions are shared with this meeting{transcriptSaving ? ' and the host is saving a transcript.' : '. When AI summary is on, shared captions are used to create the recap.'}</p>
             {serverAsr && <p>{e2eeActive ? 'Meeting audio, video and screen sharing remain end-to-end encrypted. Transcription separately shares your microphone audio with the processor.' : 'Transcription shares your microphone audio with the configured processor.'} Turning this permission off stops further audio sharing and discards pending results. Previously shared captions remain visible.</p>}
             </details>
             {serverAsr && <>
