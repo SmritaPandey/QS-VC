@@ -50,7 +50,7 @@ export default function PublicHelp({ navigationOpen = false }: { navigationOpen?
                 if (!response.ok) throw new Error();
                 const result = await response.json();
                 if (typeof result.answer !== 'string' || !result.answer.trim()) throw new Error();
-                reply.text = result.answer;
+                reply.text = result.source === 'local' ? 'From the built-in guide: ' + reply.text : result.answer;
             }
         } catch {
             reply.text = 'From the local guide: ' + reply.text;

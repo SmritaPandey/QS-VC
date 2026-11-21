@@ -14,6 +14,11 @@ const productInstructions = [
 export function productGuideRouter() {
     const router = Router();
     let active = 0;
+    let retryProviderAt = 0;
+    const localReply = {
+        source: 'local',
+        answer: 'From the built-in QS-VC guide: open Meetings to join with a code, check Plans for recording access, or use Contact for help with your workspace.',
+    };
     router.post('/', rateLimit({ windowMs: 60_000, max: 5, standardHeaders: true, legacyHeaders: false }),
         rateLimit({ windowMs: 3_600_000, max: 100, keyGenerator: () => 'product-guide', standardHeaders: true, legacyHeaders: false }),
         async (req, res) => {
@@ -21,6 +26,10 @@ export function productGuideRouter() {
             const question = req.body?.question;
             if (typeof question !== 'string' || !question.trim() || question.length > 500) {
                 res.status(400).json({ error: 'Enter a question of up to 500 characters.' });
+                return;
+            }
+            if (Date.now() < retryProviderAt) {
+                res.json(localReply);
                 return;
             }
             if (!openRouterConfigured() || active >= 4) {
@@ -33,7 +42,8 @@ export function productGuideRouter() {
                 res.json({ answer });
             } catch (error) {
                 if (error instanceof OpenRouterRateLimitError) {
-                    res.status(429).json({ error: 'AI request limit reached. Please try again later.' });
+                    retryProviderAt = Date.now() + 60_000;
+                    res.json(localReply);
                     return;
                 }
                 res.status(503).json({ error: 'AI product guidance is unavailable.' });
