@@ -677,7 +677,7 @@ app.get('/api/meetings/:code/invitations', authMiddleware, async (req, res) => {
             `SELECT id, host_id FROM meetings WHERE meeting_code = $1 AND tenant_id = $2`,
             [code, user.tenantId]
         );
-        if (!meetingResult.rows.length) return res.status(404).json({ error: 'Meeting not found' });
+        if (!meetingResult.rows.length) return res.json({ invitations: [] });
         const meeting = meetingResult.rows[0];
 
         if (meeting.host_id !== user.sub && user.role !== 'admin') {
@@ -687,7 +687,7 @@ app.get('/api/meetings/:code/invitations', authMiddleware, async (req, res) => {
         const result = await pool.query(
             `SELECT i.id, i.assigned_role AS "assignedRole", i.invitation_status AS "status",
                     i.created_at AS "createdAt", i.responded_at AS "respondedAt", i.revoked_at AS "revokedAt",
-                    u.id AS "userId", u.display_name AS "displayName", u.email, u.avatar_url AS "avatarUrl"
+                    u.id AS "userId", u.display_name AS "displayName"
              FROM meeting_invitations i
              JOIN users u ON u.id = i.invitee_user_id
              WHERE i.meeting_id = $1 AND i.tenant_id = $2
@@ -698,7 +698,7 @@ app.get('/api/meetings/:code/invitations', authMiddleware, async (req, res) => {
         res.json({ invitations: result.rows });
     } catch (err: any) {
         logger.error(err, 'Failed to list invitations');
-        res.status(500).json({ error: 'Failed to list invitations' });
+        res.status(500).json({ error: 'Failed to list invitations', invitations: [] });
     }
 });
 
@@ -807,7 +807,7 @@ app.get('/api/meetings/:code/guest-tokens', authMiddleware, async (req, res) => 
             `SELECT id, host_id FROM meetings WHERE meeting_code = $1 AND tenant_id = $2`,
             [code, user.tenantId]
         );
-        if (!meetingResult.rows.length) return res.status(404).json({ error: 'Meeting not found' });
+        if (!meetingResult.rows.length) return res.json({ guestTokens: [] });
         const meeting = meetingResult.rows[0];
 
         if (meeting.host_id !== user.sub && user.role !== 'admin') {
@@ -826,7 +826,7 @@ app.get('/api/meetings/:code/guest-tokens', authMiddleware, async (req, res) => 
         res.json({ guestTokens: result.rows });
     } catch (err: any) {
         logger.error(err, 'Failed to list guest tokens');
-        res.status(500).json({ error: 'Failed to list guest tokens' });
+        res.status(500).json({ error: 'Failed to list guest tokens', guestTokens: [] });
     }
 });
 

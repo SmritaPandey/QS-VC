@@ -21,13 +21,12 @@ interface Props {
 
 type TabType = 'overview' | 'actions' | 'decisions' | 'full';
 
-export default function MeetingSummaryPanel({ open, onClose, code, isHost = false, canManage = false }: Props) {
+export default function MeetingSummaryPanel({ open, onClose, code, canManage = false }: Props) {
     const [state, setState] = useState<SummaryState>({ active: false });
     const [busy, setBusy] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState<TabType>('overview');
     const [copied, setCopied] = useState(false);
-    const [manualSummary, setManualSummary] = useState<string | null>(null);
     const [summaryError, setSummaryError] = useState('');
     const panelRef = useRef<HTMLDivElement>(null);
 
@@ -40,7 +39,7 @@ export default function MeetingSummaryPanel({ open, onClose, code, isHost = fals
                     ...prev,
                     active: result.active ?? prev.active,
                     hasSpeech: result.hasSpeech,
-                    text: result.text || prev.text,
+                    text: result.text,
                     saved: result.saved,
                     message: result.message,
                 }));
@@ -52,22 +51,10 @@ export default function MeetingSummaryPanel({ open, onClose, code, isHost = fals
 
     // Trigger on-demand AI summary generation from transcript if available
     const generateOnDemandSummary = async () => {
-        if (busy) return;
+        if (busy || refreshing) return;
         setRefreshing(true);
-        setSummaryError('');
         try {
-            // First refresh live summary session
-            await fetchSummary(true);
-
-            // Also request comprehensive meeting summary via AI RPC
-            const res = (await signaling.request('generateMeetingSummary', {})) as { summary?: string };
-            if (res?.summary) {
-                setManualSummary(res.summary);
-                setState(prev => ({ ...prev, text: res.summary || prev.text }));
-            }
-        } catch (err) {
-            // Fall back to live summary state message
-            await fetchSummary(false);
+            await fetchSummary(canManage);
         } finally {
             setRefreshing(false);
         }
@@ -80,16 +67,12 @@ export default function MeetingSummaryPanel({ open, onClose, code, isHost = fals
         // Auto-focus panel
         panelRef.current?.focus();
 
-        // 1. Fetch current status & trigger immediate AI update
-        fetchSummary(true);
-
-        // 2. Generate on-demand summary so user sees up-to-the-second AI summary
-        generateOnDemandSummary();
+        void fetchSummary(canManage);
 
         // 3. Listen for live summary updates
         const off = signaling.on('liveSummaryChanged', (event: { active: boolean; hasSpeech?: boolean }) => {
             setState(prev => ({ ...prev, active: event.active, hasSpeech: event.hasSpeech }));
-            fetchSummary(false);
+            fetchSummary(canManage && event.hasSpeech === true);
         });
 
         // Periodic light refresh while open
@@ -101,7 +84,7 @@ export default function MeetingSummaryPanel({ open, onClose, code, isHost = fals
             off();
             window.clearInterval(interval);
         };
-    }, [open, code]);
+    }, [open, code, canManage]);
 
     // Host control: Start or stop live summary
     const toggleLiveSummary = async () => {
@@ -118,7 +101,7 @@ export default function MeetingSummaryPanel({ open, onClose, code, isHost = fals
         }
     };
 
-    const currentText = manualSummary || state.text || '';
+    const currentText = state.text || '';
 
     // Parse sections from summary markdown
     const parseSections = (text: string) => {
@@ -277,8 +260,7 @@ export default function MeetingSummaryPanel({ open, onClose, code, isHost = fals
                         <span className="mi summary-empty-icon" aria-hidden="true">mic_none</span>
                         <h4>Waiting for speech</h4>
                         <p>
-                            Unmute your microphone and start speaking. The quantum-safe AI summarizes all
-                            discussion points, decisions, and action items in real time.
+                            {canManage ? 'The recap updates from speech participants share as captions.' : 'The host or co-host manages the meeting recap.'}
                         </p>
                         <button
                             type="button"
@@ -369,7 +351,7 @@ export default function MeetingSummaryPanel({ open, onClose, code, isHost = fals
                     <span>Download</span>
                 </button>
 
-                {(isHost || canManage) && (
+                {canManage && (
                     <button
                         type="button"
                         className={`summary-action-btn summary-live-toggle ${state.active ? 'active-recording' : ''}`}

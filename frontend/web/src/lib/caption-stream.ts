@@ -14,6 +14,20 @@ export function upsertCaption(list: CaptionEntry[], entry: CaptionEntry): Captio
     return next;
 }
 
+export function needsCaptionTranslation(source: string, target: string): boolean {
+    if (target === 'original') return false;
+    const from = source.toLowerCase();
+    const to = target.toLowerCase();
+    if (from.split('-')[0] !== to.split('-')[0]) return true;
+    return from.startsWith('zh-') && to.startsWith('zh-') && from !== to;
+}
+
+export function supportedSpeechLanguage(languages: { code: string }[], selected: string): string | undefined {
+    const code = selected.toLowerCase();
+    return (languages.find(item => item.code.toLowerCase() === code)
+        ?? languages.find(item => item.code.toLowerCase() === code.split('-')[0]))?.code;
+}
+
 /**
  * Options for "I speak". With server recognition, only languages the speech service reports;
  * otherwise the browser-recognition languages. The current choice is always kept selectable.
@@ -26,6 +40,7 @@ export function captionLanguageOptions(serverLanguages: { code: string; name: st
     let options: { code: string; label: string }[];
     if (serverLanguages) {
         options = serverLanguages.map(language => {
+            if (language.code.includes('-')) return { code: language.code, label: label(language.code, language.name) };
             const regional = LANGUAGES.find(item => item.code.split('-')[0] === language.code && item.code.endsWith('-IN'))
                 || LANGUAGES.find(item => item.code.split('-')[0] === language.code);
             return { code: regional?.code || language.code, label: label(language.code, language.name) };
@@ -35,7 +50,10 @@ export function captionLanguageOptions(serverLanguages: { code: string; name: st
     }
     const seen = new Set<string>();
     options = options.filter(option => !seen.has(option.code) && seen.add(option.code));
-    if (!options.some(option => option.code === current)) options.unshift({ code: current, label: label(current, current) });
+    if (!options.some(option => option.code === current)) {
+        const unavailable = serverLanguages && !supportedSpeechLanguage(serverLanguages, current);
+        options.unshift({ code: current, label: label(current, current) + (unavailable ? ' (unavailable)' : '') });
+    }
     return options;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { captionLanguageOptions, transcriptToSrt, transcriptToText, upsertCaption } from './caption-stream';
+import { captionLanguageOptions, needsCaptionTranslation, supportedSpeechLanguage, transcriptToSrt, transcriptToText, upsertCaption } from './caption-stream';
 import { floatToPcm16Base64, resampleTo16k } from './pcm';
 
 const line = (id: string, text: string, isFinal: boolean) => ({ id, speakerName: 'Asha', text, isFinal, timestamp: 1 });
@@ -21,6 +21,22 @@ describe('caption stream', () => {
         const browser = captionLanguageOptions(null, 'as-IN');
         expect(browser[0].code).toBe('as-IN'); // unsupported in browsers but still selectable
         expect(browser.some(option => option.code === 'mai-IN')).toBe(false);
+    });
+    it('honors the exact recognition locale and falls back only to an advertised base language', () => {
+        const languages = [{ code: 'en-US', name: 'English (US)' }, { code: 'en-GB', name: 'English (UK)' }, { code: 'hi', name: 'Hindi' }];
+        expect(supportedSpeechLanguage(languages, 'en-GB')).toBe('en-GB');
+        expect(supportedSpeechLanguage(languages, 'hi-IN')).toBe('hi');
+        expect(supportedSpeechLanguage(languages, 'ta-IN')).toBeUndefined();
+        expect(captionLanguageOptions(languages, 'en-GB').map(item => item.code)).toEqual(['en-US', 'en-GB', 'hi-IN']);
+    });
+    it('keeps distinct regional translations separate and respects original output', () => {
+        expect(needsCaptionTranslation('zh-CN', 'zh-TW')).toBe(true);
+        expect(needsCaptionTranslation('zh-Hant', 'zh-Hans')).toBe(true);
+        expect(needsCaptionTranslation('en-US', 'en-GB')).toBe(false);
+        expect(needsCaptionTranslation('en-US', 'en')).toBe(false);
+        expect(needsCaptionTranslation('hi', 'hi-IN')).toBe(false);
+        expect(needsCaptionTranslation('zh-TW', 'original')).toBe(false);
+        expect(needsCaptionTranslation('bn-IN', 'hi-IN')).toBe(true);
     });
     it('exports text and SRT', () => {
         const entries = [{ id: '1', speaker: 'Asha', language: 'hi', text: 'नमस्ते', timestamp: 0 }, { id: '2', speaker: 'Ravi', language: 'en', text: 'Hello', timestamp: 2500 }];

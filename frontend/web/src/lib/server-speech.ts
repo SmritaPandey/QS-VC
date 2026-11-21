@@ -45,14 +45,29 @@ export class ServerSpeechEngine {
         if (!live || live.readyState !== 'live') { this.options.onError?.('No microphone is available for captions.'); return; }
         this.active = true;
         try {
+            const onStopped = () => {
+                if (!this.active) return;
+                this.stop();
+                this.options.onError?.('Speech recognition stopped. Turn captions on again to retry.');
+            };
+            this.unsubscribe.push(signaling.on('asrStopped', onStopped), signaling.on('asrError', onStopped));
             await signaling.request('asrStart', { language: this.options.language, processorConsent: true });
-            if (!this.active) { signaling.notify('asrStop'); return; }
+            if (!this.active) return;
             // Clone so captions never change the track the meeting sends.
             this.track = live.clone();
             let context: AudioContext;
             try { context = new AudioContext({ sampleRate: TARGET_RATE }); } catch { context = new AudioContext(); }
             this.context = context;
-            await context.audioWorklet.addModule(captureWorkletUrl);
+            try {
+                await context.audioWorklet.addModule(captureWorkletUrl);
+            } catch {
+                const WORKLET = `class QsvcCapture extends AudioWorkletProcessor {
+  process(inputs) { const channel = inputs[0] && inputs[0][0]; if (channel && channel.length) this.port.postMessage(channel.slice(0)); return true; }
+}
+registerProcessor('qsvc-capture', QsvcCapture);`;
+                const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+                try { await context.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+            }
             if (!this.active) return;
             this.source = context.createMediaStreamSource(new MediaStream([this.track]));
             this.node = new AudioWorkletNode(context, 'qsvc-capture');
@@ -60,12 +75,11 @@ export class ServerSpeechEngine {
             this.source.connect(this.node);
             // Keep the graph pulled without playing anything.
             const silent = context.createGain(); silent.gain.value = 0; this.node.connect(silent).connect(context.destination);
-            if (context.state === 'suspended') await context.resume().catch(() => {});
-            this.unsubscribe.push(
-                signaling.on('asrStopped', () => { if (this.active) { this.stop(); this.options.onError?.('Speech recognition stopped. Turn captions on again to retry.'); } }),
-                signaling.on('asrError', () => { if (this.active) { this.stop(); this.options.onError?.('Speech recognition stopped. Turn captions on again to retry.'); } }),
-            );
+            if (context.state === 'suspended') await context.resume();
+            if (!this.active) return;
+
         } catch {
+            if (!this.active) return;
             this.stop();
             this.options.onError?.('Speech recognition is unavailable. Turn captions on again to retry.');
         }

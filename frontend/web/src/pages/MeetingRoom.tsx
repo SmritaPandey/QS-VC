@@ -2123,8 +2123,12 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     // ── Captions (CC button) ──
     const captionsLocked = signedIn && !isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_captions'));
     const toggleCaptions = useCallback(() => {
-        setCaptionsOn(on => !on);
-    }, [captionsOn, captionsLocked, requestPlanFeature]);
+        setCaptionsOn(on => {
+            const next = !on;
+            if (next) setShareSpeech(true);
+            return next;
+        });
+    }, []);
     const openInformation = useCallback(() => {
         closePanels(); setInformationOpen(true);
     }, [closePanels]);

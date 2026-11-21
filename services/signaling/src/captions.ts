@@ -161,7 +161,11 @@ async function translateStored(state: RoomCaptions, caption: StoredCaption, targ
     return pending;
 }
 
-const sameLanguage = (a: string, b: string) => a === b || a.split('-')[0] === b.split('-')[0];
+function sameLanguage(a: string, b: string) {
+    if (a === b) return true;
+    if (a.startsWith('zh') || b.startsWith('zh')) return false;
+    return a.split('-')[0] === b.split('-')[0];
+}
 
 /** Push translations to everyone who chose a language. Bounded by room/global concurrency. */
 async function fanOut(roomId: string, state: RoomCaptions, caption: StoredCaption) {

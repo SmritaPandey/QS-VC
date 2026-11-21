@@ -86,7 +86,10 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
     // Load existing invitations
     const loadInvitations = useCallback(async () => {
         const token = getToken();
-        if (!token || !meetingCode) return;
+        if (!token || !meetingCode) {
+            setInvitations([]);
+            return;
+        }
         setLoadingInvitations(true);
         try {
             const res = await fetch(`${MEETING_API}/api/meetings/${encodeURIComponent(meetingCode)}/invitations`, {
@@ -95,15 +98,23 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
             if (res.ok) {
                 const data = await res.json();
                 setInvitations(data.invitations || []);
+            } else {
+                setInvitations([]);
             }
-        } catch { }
-        finally { setLoadingInvitations(false); }
+        } catch {
+            setInvitations([]);
+        } finally {
+            setLoadingInvitations(false);
+        }
     }, [meetingCode]);
 
     // Load existing guest tokens
     const loadGuestTokens = useCallback(async () => {
         const token = getToken();
-        if (!token || !meetingCode) return;
+        if (!token || !meetingCode) {
+            setGuestTokens([]);
+            return;
+        }
         setLoadingGuestTokens(true);
         try {
             const res = await fetch(`${MEETING_API}/api/meetings/${encodeURIComponent(meetingCode)}/guest-tokens`, {
@@ -112,13 +123,23 @@ export default function InviteModal({ open, meetingCode, meetingTitle, inviteTok
             if (res.ok) {
                 const data = await res.json();
                 setGuestTokens(data.guestTokens || []);
+            } else {
+                setGuestTokens([]);
             }
-        } catch { }
-        finally { setLoadingGuestTokens(false); }
+        } catch {
+            setGuestTokens([]);
+        } finally {
+            setLoadingGuestTokens(false);
+        }
     }, [meetingCode]);
 
     useEffect(() => {
         if (!open) return;
+        const token = getToken();
+        if (!token) {
+            setActiveTab('copy');
+            return;
+        }
         if (activeTab === 'members') void loadInvitations();
         else if (activeTab === 'guest') void loadGuestTokens();
     }, [open, activeTab, loadInvitations, loadGuestTokens]);

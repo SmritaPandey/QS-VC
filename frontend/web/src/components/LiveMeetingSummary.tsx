@@ -49,6 +49,7 @@ export default function LiveMeetingSummary({ manager, code, onActiveChange, open
     const toggle = async (event: React.MouseEvent) => {
         event.stopPropagation();
         if (busy) return;
+        if (!state.active && !open) onToggle?.();
         setBusy(true);
         try {
             const next = await signaling.request(state.active ? 'stopLiveSummary' : 'startLiveSummary');
