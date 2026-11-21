@@ -1,3 +1,4 @@
+import { hasFeature, useEntitlements } from '../lib/entitlements';
 import SelectionInput from './SelectionInput';
 import { playbackFailure, type SpeechDiagnostic } from '../lib/translated-speech-status';
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
@@ -59,6 +60,7 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
     const [captions, setCaptions] = useState<CaptionEntry[]>([]);
     const [autoDetect, setAutoDetect] = useState(false);
     const [transcriptSaving, setTranscriptSaving] = useState(false);
+    const summaryAvailable = hasFeature(useEntitlements(), 'ai_meeting_summary');
     const [minutes, setMinutes] = useState('');
     const [minutesBusy, setMinutesBusy] = useState(false);
     /** False when the meeting server is an older build without transcripts / pushed translations. */
@@ -319,9 +321,9 @@ export default function MeetingCaptions({ open, onClose, connected, audioMuted, 
                 <button type="button" className="btn-outline" onClick={() => download('txt')}>Download .txt</button>
                 <button type="button" className="btn-outline" onClick={() => download('srt')}>Download .srt</button>
                 {isHost && capabilities.minutes?.configured && <>
-                    <p className="caption-settings-note">Generating a summary sends saved caption text to the AI provider. For workspace meetings, the summary is saved with the transcript for 90 days.</p>
+                    {summaryAvailable && <p className="caption-settings-note">Generating a summary sends saved caption text to the AI provider. For workspace meetings, the summary is saved with the transcript for 90 days.</p>}
                     <button type="button" className="btn-outline" disabled={minutesBusy} onClick={createMinutes}>{minutesBusy ? 'Writing minutes…' : 'Create AI minutes'}</button>
-                    <button type="button" className="btn-outline" disabled={summaryBusy} onClick={createSummary} style={{ marginLeft: '6px' }}>{summaryBusy ? 'Summarizing…' : 'Executive AI summary'}</button>
+                    {summaryAvailable && <button type="button" className="btn-outline" disabled={summaryBusy} onClick={createSummary} style={{ marginLeft: '6px' }}>{summaryBusy ? 'Summarizing…' : 'Executive AI summary'}</button>}
                 </>}
             </div>}
             {minutes && <div className="caption-minutes"><pre>{minutes}</pre><button type="button" className="btn-text" onClick={() => downloadText(`${meetingCode}-minutes.md`, minutes)}>Download minutes</button></div>}

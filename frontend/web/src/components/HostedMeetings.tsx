@@ -1,3 +1,4 @@
+import { hasFeature, useEntitlements } from '../lib/entitlements';
 import { sessionMeetingRows } from '../lib/session-schedule';
 import CancelScheduledMeeting from './CancelScheduledMeeting';
 import { useEffect, useState } from 'react';
@@ -33,6 +34,7 @@ export function groupHosted(meetings: HostedMeeting[], now = Date.now()) {
 }
 
 export function HostedMeetingRow({ meeting, label, onCancelled, onExpired }: { meeting: HostedMeeting; label: string; onCancelled: () => void; onExpired: () => void }) {
+    const entitlements = useEntitlements();
     const [copied, setCopied] = useState(false);
     const start = when(meeting);
     const preview = meeting.previewPath || `/meeting/${encodeURIComponent(meeting.meetingCode)}/preview${meeting.inviteToken ? `?invite=${encodeURIComponent(meeting.inviteToken)}` : ''}`;
@@ -52,7 +54,7 @@ export function HostedMeetingRow({ meeting, label, onCancelled, onExpired }: { m
                 <span className="mi mi-sm" aria-hidden="true">{copied ? 'check' : 'link'}</span>{copied ? 'Copied' : 'Copy link'}
             </button>}
             {meeting.status !== 'expired' && (ended
-                ? <Link className="workspace-row-join workspace-row-secondary" to={`/recordings/${encodeURIComponent(meeting.meetingCode)}`}>Recordings and summary</Link>
+                ? <Link className="workspace-row-join workspace-row-secondary" to={`/recordings/${encodeURIComponent(meeting.meetingCode)}`}>{hasFeature(entitlements, 'ai_meeting_summary') ? 'Recordings and summary' : 'Recordings'}</Link>
                 : <Link className="workspace-row-join qsvc-action" state={meeting.previewPath ? { title: meeting.title } : undefined} to={preview}><ActionContents>{meeting.status === 'active' ? 'Rejoin' : 'Start'}</ActionContents></Link>)}
         </div>
     </article>;

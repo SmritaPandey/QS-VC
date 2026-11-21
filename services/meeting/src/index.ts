@@ -163,6 +163,7 @@ rawPool.on('error', () => logger.warn('Database connection lost; the pool will r
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const authMiddleware = meetingAuth(AUTH_URL, (tenantId, next) => pool.runWithTenant(tenantId, next));
+const summaryFeature = requireFeature(AUTH_URL, 'ai_meeting_summary');
 const scheduleFeature = requireFeature(AUTH_URL, 'meeting_scheduling');
 registerSessionReportRoutes(app, pool, rawPool, authMiddleware);
 registerBrandingRoutes(app, pool, rawPool, authMiddleware);
@@ -485,7 +486,7 @@ app.post('/api/internal/meetings/:code/transcript', express.json({ limit: '2mb' 
 });
 
 // The meeting's host downloads saved transcripts and minutes: ?format=json (default) | txt | srt
-app.get('/api/meetings/code/:code/transcript', meetingCodeLookupLimit, authMiddleware, async (req, res) => {
+app.get('/api/meetings/code/:code/transcript', meetingCodeLookupLimit, authMiddleware, (req, res, next) => req.query.format === 'summary' ? summaryFeature(req, res, next) : next(), async (req, res) => {
     const user = (req as any).user as AuthPayload;
     const code = String(req.params.code).toUpperCase().slice(0, 30);
     try {

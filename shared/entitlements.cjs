@@ -30,6 +30,7 @@ const FEATURE_MIN_PLAN = Object.freeze({
     background_effects: 'basic',
     ai_noise_suppression: 'basic',
     cloud_recording: 'basic',
+    ai_meeting_summary: 'pro',
 });
 
 function can(user, feature) {

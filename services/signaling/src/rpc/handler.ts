@@ -665,6 +665,7 @@ export async function handleRpcMessage(
                 } finally { budget.pending = false; }
             }
             case 'generateMeetingSummary': {
+                if (!can(connectionState.authUser, 'ai_meeting_summary')) throw createError(-32005, 'Meeting summaries require Pro or higher.');
                 const parsed = z.object({
                     language: z.string().max(40).optional(),
                 }).strict().safeParse(params || {});

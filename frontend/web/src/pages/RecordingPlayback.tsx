@@ -1,3 +1,4 @@
+import { hasFeature, useEntitlements } from '../lib/entitlements';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { getToken } from '../lib/session';
@@ -31,6 +32,7 @@ function CloudSummary({ code }: { code: string }) {
 }
 
 export default function RecordingPlayback() {
+    const summaryAvailable = hasFeature(useEntitlements(), 'ai_meeting_summary');
     const { meetingId = '', shareToken } = useParams();
     const [recordings, setRecordings] = useState<CloudRecording[]>([]);
     const [loading, setLoading] = useState(true);
@@ -101,7 +103,7 @@ export default function RecordingPlayback() {
     return <div className="public-site recordings-page"><SiteNav /><main id="main-content" className="recordings-shell">
         <Link className="recordings-back" to="/app">← Back to meetings</Link>
         <header><div><h1 id="recordings-title" tabIndex={-1}>{shareToken ? 'Shared recording' : meetingId ? 'Meeting recordings' : 'My recordings'}</h1><p>{shareToken ? 'This recording was shared by its host.' : 'Saved privately until you delete them. Downloads start only when you choose.'}</p></div>{meetingId && !shareToken && <span className="recordings-code">{meetingId}</span>}</header>
-        {meetingId && !shareToken && <CloudSummary key={meetingId} code={meetingId} />}
+        {summaryAvailable && meetingId && !shareToken && <CloudSummary key={meetingId} code={meetingId} />}
         {pending && <section className="recordings-message" aria-label="Unsaved recording"><h2>Recording waiting to save</h2><p>Keep this tab open. This copy is only in memory until upload succeeds.</p><details className="recordings-actions"><summary aria-label="Unsaved recording actions"><span className="mi" aria-hidden="true">more_horiz</span></summary><div className="recordings-menu"><button type="button" disabled={!!busy} onClick={async () => {
             setBusy('pending'); setError('');
             try { await recordingManager.uploadRecording(pending.meetingCode, pending.blob, pending.id); recordingManager.pending = null; setPending(null); setNotice('Recording saved. Reload to refresh the list.'); }
