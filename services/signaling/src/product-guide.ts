@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { askOpenRouter, openRouterConfigured } from './openrouter.js';
+import { OpenRouterRateLimitError, askOpenRouter, openRouterConfigured } from './openrouter.js';
 
 const productInstructions = [
     'You are the QS-VC public product guide. Answer product questions briefly in the visitor’s language.',
@@ -31,7 +31,11 @@ export function productGuideRouter() {
             try {
                 const answer = await askOpenRouter(productInstructions, question.trim());
                 res.json({ answer });
-            } catch {
+            } catch (error) {
+                if (error instanceof OpenRouterRateLimitError) {
+                    res.status(429).json({ error: 'AI request limit reached. Please try again later.' });
+                    return;
+                }
                 res.status(503).json({ error: 'AI product guidance is unavailable.' });
             } finally {
                 active--;

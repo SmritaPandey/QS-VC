@@ -4,6 +4,7 @@ import { aiService, AIFeature, AIOptions } from './ai/index.js';
 
 const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
 const unavailable = () => new Error('AI service is unavailable');
+export class OpenRouterRateLimitError extends Error {}
 let pending = 0;
 
 export function openRouterConfigured(): boolean {
@@ -27,7 +28,7 @@ async function requestCompletion(system: string, prompt: string, credential?: st
     const key = credential?.trim();
     if (process.env.QSVC_DEPLOYMENT === 'onprem' || !key || pending >= 16 || !prompt.trim() || prompt.length > 65_536) throw unavailable();
     const payload = JSON.stringify({
-        model: modelOverride?.trim() || process.env.OPENROUTER_MODEL?.trim() || 'openai/gpt-4o-mini',
+        model: modelOverride?.trim() || process.env.OPENROUTER_MODEL?.trim() || 'openrouter/free',
         messages: [{ role: 'system', content: system }, { role: 'user', content: scrubSensitiveData(prompt) }],
         max_tokens: 2000,
         provider: { data_collection: 'deny', zdr: true },
@@ -45,6 +46,11 @@ async function requestCompletion(system: string, prompt: string, credential?: st
             }, res => {
                 res.on('error', fail);
                 res.on('aborted', fail);
+                if (res.statusCode === 429) {
+                    reject(new OpenRouterRateLimitError('AI request limit reached'));
+                    res.destroy();
+                    return;
+                }
                 if (res.statusCode !== 200) { res.destroy(); fail(); return; }
                 const chunks: Buffer[] = [];
                 let bytes = 0;
@@ -64,7 +70,10 @@ async function requestCompletion(system: string, prompt: string, credential?: st
             req.on('error', fail);
             req.end(payload);
         });
-    } catch { throw unavailable(); }
+    } catch (error) {
+        if (error instanceof OpenRouterRateLimitError) throw error;
+        throw unavailable();
+    }
     finally { pending--; }
 }
 

@@ -58,7 +58,7 @@ export class AIService {
         return (
             process.env[featureEnv]?.trim() ||
             process.env.OPENROUTER_MODEL?.trim() ||
-            'openai/gpt-4o-mini'
+            'openrouter/free'
         );
     }
 

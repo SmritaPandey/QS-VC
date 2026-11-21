@@ -43,6 +43,10 @@ export default function PublicHelp({ navigationOpen = false }: { navigationOpen?
                     credentials: 'omit', redirect: 'error', cache: 'no-store',
                     body: JSON.stringify({ question: text }), signal: AbortSignal.timeout(50_000),
                 });
+                if (response.status === 429) {
+                    reply.text = 'AI request limit reached. Try again later. From the local guide: ' + reply.text;
+                    return;
+                }
                 if (!response.ok) throw new Error();
                 const result = await response.json();
                 if (typeof result.answer !== 'string' || !result.answer.trim()) throw new Error();

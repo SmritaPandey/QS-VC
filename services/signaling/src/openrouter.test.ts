@@ -34,3 +34,14 @@ it('blocks public relay calls for on-premise deployments, even with a key', asyn
     await expect(askOpenRouter('Guide', 'question')).rejects.toThrow('unavailable');
     expect(request).not.toHaveBeenCalled();
 });
+
+it('preserves an upstream rate limit for the product guide', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'test-key');
+    vi.stubEnv('QSVC_DEPLOYMENT', 'online');
+    vi.mocked(request).mockImplementation(((_url: unknown, _options: unknown, receive: Function) => {
+        return Object.assign(new EventEmitter(), { end() {
+            receive(Object.assign(new EventEmitter(), { statusCode: 429, destroy: vi.fn() }));
+        } });
+    }) as typeof request);
+    await expect(askOpenRouter('Guide', 'question')).rejects.toThrow('AI request limit reached');
+});
