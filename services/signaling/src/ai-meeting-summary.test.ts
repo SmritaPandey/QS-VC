@@ -27,6 +27,16 @@ describe('Meeting Summary Generator', () => {
         expect(openrouterModule.askOpenRouter).toHaveBeenCalled();
     });
 
+    it('labels speaker-attributed excerpts when OpenRouter is throttled', async () => {
+        vi.spyOn(openrouterModule, 'openRouterConfigured').mockReturnValue(true);
+        vi.spyOn(openrouterModule, 'askOpenRouter').mockRejectedValue(new openrouterModule.OpenRouterRateLimitError());
+        const result = await generateMeetingSummary([
+            { id: '1', peerId: 'p', speaker: 'Asha', language: 'en', text: 'Review the release.', timestamp: 0 },
+        ], { meetingCode: 'QS-TEST', participants: [], durationMs: 1000 });
+        expect(result).toContain('AI analysis is rate-limited');
+        expect(result).toContain('Asha: Review the release.');
+    });
+
     it('rejects when transcript is empty', async () => {
         vi.spyOn(openrouterModule, 'openRouterConfigured').mockReturnValue(true);
         await expect(generateMeetingSummary([], {

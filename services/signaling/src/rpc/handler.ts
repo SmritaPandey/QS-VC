@@ -21,7 +21,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { can, getPrivateConversationLimitMs } from '../../../../shared/entitlements.cjs';
 import meetingInvitation from '../../../../shared/meeting-invitation.cjs';
-import { publishCaption, publishInterim, subscribeCaptions, translationCapabilities, translateCaption, clearEmptyRoomCaptions, forgetPeerCaptions, setTranscriptSaving, transcriptEntries } from '../captions.js';
+import { publishCaption, publishInterim, subscribeCaptions, translationCapabilities, translateCaption, clearEmptyRoomCaptions, forgetPeerCaptions, setTranscriptSaving, transcriptEntries, transcriptSaving } from '../captions.js';
 import { asrParticipants, asrCapabilities, pushAsrAudio, startAsr, stopAsr, stopAsrForPeer } from '../asr-relay.js';
 import { askOpenRouter, openRouterConfigured } from '../openrouter.js';
 import { generateMinutes, minutesConfigured } from '../minutes.js';
@@ -612,7 +612,9 @@ export async function handleRpcMessage(
                 return { jsonrpc: '2.0', id: id!, result: subscribeCaptions(ws, connectionState.roomId!, connectionState.peerId!, params) };
             }
             case 'translationCapabilities': {
-                const [captions, asr] = await Promise.all([translationCapabilities(ws, connectionState.roomId!, connectionState.peerId!), asrCapabilities()]);
+                const [captions, asr] = await Promise.all([translationCapabilities(ws, connectionState.roomId!, connectionState.peerId!).catch(() => ({
+                    configured: false, languages: [], transcript: { saving: transcriptSaving(connectionState.roomId!) },
+                })), asrCapabilities()]);
                 return { jsonrpc: '2.0', id: id!, result: { ...captions, asr: { ...asr, participants: asrParticipants(connectionState.roomId!) }, minutes: { configured: minutesConfigured() } } };
             }
             case 'setTranscriptSaving': {
@@ -622,7 +624,7 @@ export async function handleRpcMessage(
                 return { jsonrpc: '2.0', id: id!, result: setTranscriptSaving(connectionState.roomId!, parsed.data.enabled) };
             }
             case 'getTranscript':
-                return { jsonrpc: '2.0', id: id!, result: transcriptEntries(connectionState.roomId!) };
+                return { jsonrpc: '2.0', id: id!, result: transcriptEntries(connectionState.roomId!, true) };
             case 'askMeetingAssistant': {
                 const account = connectionState.authUser?.sub;
                 if (!account) throw createError(-32005, 'Sign in to use the meeting assistant.');
@@ -678,6 +680,7 @@ export async function handleRpcMessage(
                     if (method === 'startLiveSummary') {
                         if (!openRouterConfigured()) throw createError(-32000, 'The summary service is unavailable.');
                         startLiveSummary(roomId);
+                        if (!transcriptSaving(roomId)) setTranscriptSaving(roomId, true);
                     } else await stopLiveSummary(roomId, room.meetingCode);
                 }
                 return { jsonrpc: '2.0', id: id!, result: liveSummaryState(roomId, manager) };

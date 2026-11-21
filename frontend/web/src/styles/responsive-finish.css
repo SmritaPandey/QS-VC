@@ -232,3 +232,18 @@
 }
 .meeting-room .control-bar .ctrl-btn.leave-btn:hover { background:#c03851; }
 .meeting-room .meeting-more-panel :is(button, select):focus-visible { outline-offset:-3px; }
+
+.meeting-ai-dialog {
+  width: min(30rem, 92vw);
+  max-height: 82dvh;
+  overflow: auto;
+  padding: 1.25rem;
+  border: 1px solid currentColor;
+  border-radius: 1rem;
+  color: var(--text-primary, #edf5fa);
+  background: var(--bg-secondary, #182c3a);
+}
+.meeting-ai-dialog::backdrop { background: rgb(0 0 0 / 55%); }
+.meeting-ai-dialog p { margin-block: .65rem; line-height: 1.5; }
+.meeting-ai-dialog button { margin: .25rem .4rem .25rem 0; min-height: 40px; }
+.live-summary-badge:empty { display: none; }

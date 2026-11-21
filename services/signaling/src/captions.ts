@@ -25,7 +25,7 @@ type RoomCaptions = {
     captions: Map<string, StoredCaption>; translations: Map<string, string>; pending: Map<string, Promise<string>>;
     subscriptions: Map<string, Set<string>>; googleConsent: Set<string>;
     active: number; updated: number;
-    transcript: TranscriptEntry[] | null; transcriptSince?: number;
+    transcript: TranscriptEntry[] | null; transcriptSince?: number; stoppedTranscript?: TranscriptEntry[];
 };
 
 function envInt(name: string, fallback: number, min: number, max: number) {
@@ -314,14 +314,16 @@ export async function translateCaption(ws: object, roomId: string, peerId: strin
 
 export function setTranscriptSaving(roomId: string, enabled: boolean) {
     const state = roomState(roomId);
-    if (enabled && !state.transcript) { state.transcript = []; state.transcriptSince = Date.now(); }
-    if (!enabled && state.transcript) { void saveTranscript(state.meetingCode, state.transcript, state.transcriptSince!); state.transcript = null; }
+    if (enabled && !state.transcript) { state.stoppedTranscript = undefined; state.transcript = []; state.transcriptSince = Date.now(); }
+    if (!enabled && state.transcript) { void saveTranscript(state.meetingCode, state.transcript, state.transcriptSince!); state.stoppedTranscript = state.transcript; state.transcript = null; }
     roomManager.broadcast(roomId, 'transcriptStateChanged', { saving: enabled });
     return { saving: enabled };
 }
-export function transcriptEntries(roomId: string): { saving: boolean; since?: number; entries: TranscriptEntry[] } {
+export function transcriptSaving(roomId: string) { return Boolean(rooms.get(roomId)?.transcript); }
+
+export function transcriptEntries(roomId: string, includeStopped = false): { saving: boolean; since?: number; entries: TranscriptEntry[] } {
     const state = rooms.get(roomId);
-    if (!state?.transcript) return { saving: false, entries: [] };
+    if (!state?.transcript) return { saving: false, entries: includeStopped ? state?.stoppedTranscript?.slice() || [] : [] };
     return { saving: true, since: state.transcriptSince, entries: state.transcript.slice() };
 }
 

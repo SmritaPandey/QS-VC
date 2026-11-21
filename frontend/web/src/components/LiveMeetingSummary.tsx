@@ -4,11 +4,15 @@ import { downloadText } from '../lib/caption-stream';
 
 interface SummaryState { active: boolean; text?: string; saved?: boolean; message?: string }
 
-export default function LiveMeetingSummary({ manager, code }: { manager: boolean; code: string }) {
+export default function LiveMeetingSummary({ manager, code, onActiveChange, onSettings, controlsRef }: { manager: boolean; code: string; onActiveChange: (active: boolean) => void; onSettings?: () => void; controlsRef: (node: HTMLDivElement | null) => void }) {
     const [state, setState] = useState<SummaryState>({ active: false });
     const [open, setOpen] = useState(false);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
+    useEffect(() => {
+        onActiveChange(state.active);
+        return () => onActiveChange(false);
+    }, [state.active, onActiveChange]);
     const dialog = useRef<HTMLDialogElement>(null);
     useEffect(() => {
         let current = true;
@@ -29,7 +33,7 @@ export default function LiveMeetingSummary({ manager, code }: { manager: boolean
         return () => { current = false; off(); window.clearInterval(interval); };
     }, [manager, open, code]);
     useEffect(() => {
-        if (open && manager) dialog.current?.showModal();
+        if (open) dialog.current?.showModal();
         else dialog.current?.close();
     }, [open, manager]);
     const toggle = async () => {
@@ -41,17 +45,23 @@ export default function LiveMeetingSummary({ manager, code }: { manager: boolean
         finally { setBusy(false); }
     };
     return <>
-        <span role="status" aria-live="polite">{state.active && 'AI summary is on · using shared captions'}</span>
-        {manager && <>
-            <button type="button" className="btn-outline" aria-haspopup="dialog" onClick={() => setOpen(true)}>AI summary</button>
-            <dialog ref={dialog} aria-labelledby="live-summary-title" onClose={() => setOpen(false)} style={{ maxWidth: 'min(32rem, 94vw)', maxHeight: '80dvh', overflow: 'auto' }}>
-                <h2 id="live-summary-title">AI meeting summary</h2>
-                <p>Everyone is notified when you start. Shared captions from that point are sent to the AI provider. Speakers choose whether to share captions. Workspace summaries are saved for 90 days.</p>
+        <span className="live-summary-badge" role="status" aria-live="polite">{state.active && 'AI summary on'}</span>
+
+        <>
+            <button type="button" className="btn-outline meeting-ai-entry" aria-haspopup="dialog" onClick={() => setOpen(true)}>Captions & AI</button>
+            <dialog ref={dialog} className="meeting-ai-dialog" aria-labelledby="live-summary-title" onClose={() => setOpen(false)}>
+                <h2 id="live-summary-title">Captions, transcript & AI summary</h2>
+                <div ref={controlsRef} />
+                {manager ? <>
+                <p>Starting AI summary also starts transcript saving and notifies everyone. You can stop saving the transcript separately. Shared captions from that point are sent to the AI provider. Speakers choose whether to share captions. Workspace summaries are saved for 90 days.</p>
                 <button type="button" className="btn-outline" onClick={toggle} disabled={busy}>{busy ? 'Updating…' : state.active ? 'Stop summary' : 'Start summary'}</button>
-                <button type="button" className="btn-text" onClick={() => dialog.current?.close()}>Close</button>
+
                 <p role="status">{error || state.message}</p>
                 {state.text && <><p style={{ whiteSpace: 'pre-wrap' }}>{state.text}</p><button type="button" onClick={() => downloadText(code + '-summary.md', state.text!)}>Download summary</button></>}
+                </> : <p>A host or co-host with Pro or higher can start AI summary.</p>}
+                {onSettings && <button type="button" className="btn-text" onClick={() => { dialog.current?.close(); onSettings(); }}>Captions & language settings</button>}
+                <button type="button" className="btn-text" onClick={() => dialog.current?.close()}>Close</button>
             </dialog>
-        </>}
+        </>
     </>;
 }

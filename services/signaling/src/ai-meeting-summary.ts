@@ -5,7 +5,7 @@
  * Includes attendee recap, duration, key decisions, action items with owners, and next steps.
  */
 
-import { askOpenRouter, openRouterConfigured } from './openrouter.js';
+import { OpenRouterRateLimitError, askOpenRouter, openRouterConfigured } from './openrouter.js';
 import type { TranscriptEntry } from './captions.js';
 import { greetingOnlyRecap, transcriptText } from './minutes.js';
 
@@ -50,6 +50,12 @@ export async function generateMeetingSummary(
 
     const prompt = `${metadataHeader}\n\nTranscript Data:\n${transcript}\n\nPlease generate the executive meeting summary in ${options.language || 'English'}.`;
 
-    const summary = await askOpenRouter(SUMMARY_SYSTEM, prompt);
-    return summary.slice(0, 25_000);
+    try {
+        const summary = await askOpenRouter(SUMMARY_SYSTEM, prompt);
+        return summary.slice(0, 25_000);
+    } catch (error) {
+        if (!(error instanceof OpenRouterRateLimitError)) throw error;
+        const excerpt = entries.slice(-5).map(entry => `${entry.speaker}: ${entry.text}`).join('\n');
+        return 'Recent shared captions (AI analysis is rate-limited)\n\n' + excerpt;
+    }
 }

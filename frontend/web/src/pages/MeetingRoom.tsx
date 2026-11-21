@@ -405,6 +405,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         if (processed?.readyState === 'live') return processed;
         return localStreamRef.current?.getAudioTracks().find(track => track.readyState === 'live') || null;
     }, []);
+    const [captionControls, setCaptionControls] = useState<HTMLDivElement | null>(null);
+    const [summaryActive, setSummaryActive] = useState(false);
     const [languageOpen, setLanguageOpen] = useState(false);
 
     // Refs mirror live state so async handlers and signaling callbacks never act on stale values.
@@ -2119,7 +2121,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     // ── Captions (CC button) ──
     const captionsLocked = signedIn && !isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_captions'));
     const toggleCaptions = useCallback(() => {
-        if (!captionsOn && captionsLocked) { requestPlanFeature('ai_captions'); return; }
         setCaptionsOn(on => !on);
     }, [captionsOn, captionsLocked, requestPlanFeature]);
     const openInformation = useCallback(() => {
@@ -2241,7 +2242,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             <div className="meeting-top-bar">
                 <div className="top-bar-left">
                     <TenantBrand branding={organisationBranding} meeting />
-                    {connected && <LiveMeetingSummary key={currentRoomId || meetingCode} manager={manager && hasFeature(entitlements, 'ai_meeting_summary')} code={meetingCode || ''} />}
+                    {connected && <LiveMeetingSummary controlsRef={setCaptionControls} onActiveChange={setSummaryActive} onSettings={signedIn && !captionsLocked ? () => { closePanels(); setLanguageOpen(true); } : undefined} key={currentRoomId || meetingCode} manager={manager && hasFeature(entitlements, 'ai_meeting_summary')} code={meetingCode || ''} />}
                     <button type="button" className="meeting-info-trigger" onClick={openInformation} aria-label="Meeting information" aria-haspopup="dialog" aria-expanded={informationOpen} title="Meeting information">
                         <span className="mi" aria-hidden="true">info</span>
                     </button>
@@ -2367,7 +2368,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         onAccept={acceptPrivateConversation} onDecline={declinePrivateConversation} onCancel={cancelPrivateConversationInvite}
                         onEnd={endPrivateConversation} onToggleMicrophone={() => void togglePrivateMicrophone()} onToggleFocusAudio={togglePrivateFocusAudio} />
                     <ReactionsOverlay reactions={reactions} pickerOpen={reactionsOpen} onSendReaction={handleSendReaction} onClosePicker={closeReactions} onExpire={expireReaction} />
-                    <MeetingCaptions translatedSpeaking={translatedSpeaking} e2eeActive={e2eeActive} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
+                    <MeetingCaptions controls={captionControls} summaryActive={summaryActive} translatedSpeaking={translatedSpeaking} e2eeActive={e2eeActive} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
                         showCaptions={captionsOn} onShowCaptionsChange={setCaptionsOn} shareSpeech={shareSpeech} onShareSpeechChange={setShareSpeech}
                         getMicTrack={getCaptionMicTrack} isHost={manager} meetingCode={meetingCode}
                         canShareSpeech={signedIn && !captionsLocked && canPublishRef.current} viewOnly={!signedIn || captionsLocked} viewerLanguage={guestCaptionLanguage} />
@@ -2414,7 +2415,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 pictureInPicture={pictureInPictureOpen} onTogglePictureInPicture={() => { void pictureInPictureRef.current?.toggle(); }}
                 assistant={signedIn ? <AIChatBot onOpen={closePanels} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen || informationOpen || languageOpen || reactionsOpen || effectsOpen || breakoutsOpen} isHost={myRole === 'host'} e2eeActive={e2eeEnabled} participantsCount={peers.size + 1} /> : undefined}
                 signedIn={signedIn}
-                captionsLocked={captionsLocked}
+                captionsLocked={false}
                 effectsLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'background_effects'))}
                 noiseMode={noiseMode}
                 aiNoiseSuppressionLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_noise_suppression'))}

@@ -118,6 +118,7 @@ describe('server speech captions and transcript', () => {
         expect(transcript.entries.map(entry => entry.text)).toEqual(['Saved line']);
         setTranscriptSaving(speaker.roomId, false);
         expect(transcriptEntries(speaker.roomId)).toEqual({ saving: false, entries: [] });
+        expect(transcriptEntries(speaker.roomId, true).entries).toEqual(transcript.entries);
     });
 });
 
