@@ -22,3 +22,8 @@ it('keeps direct online routing disabled on-prem even when router credentials ex
     await expect(generateMinutes(transcript)).rejects.toThrow('not configured');
     expect(askOpenRouter).not.toHaveBeenCalled();
 });
+
+it('answers a greeting-only transcript locally and escalates substantive transcripts', async () => {
+    await expect(generateMinutes([{ ...transcript[0], text: 'Hello!' }])).resolves.toContain('only greetings');
+    expect(askOpenRouter).not.toHaveBeenCalled();
+});

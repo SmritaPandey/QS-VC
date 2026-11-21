@@ -12,3 +12,9 @@ export function productReply(question: string): ProductReply {
     if (/\b(join|meeting|invitation|invite|code|start|schedule)\b/.test(text)) return { text: 'Open an invitation link or enter your meeting code in the app. Check your display name, camera and microphone before joining.', link: { to: '/app', label: 'Open meeting app' } };
     return { text: 'I can help with joining, languages, plans and organisation hosting. For anything else, send the team your question through the contact form.', link: { to: '/contact', label: 'Contact the team' } };
 }
+
+/** JEV handles known intents locally. More specific questions go to CDM. */
+export function canAnswerProductQuestionLocally(question: string): boolean {
+    const intent = question.trim().toLowerCase().replace(/[?!.]+$/, '').trim();
+    return /^(?:(?:how (?:do|can) i |how to )?join (?:a |the )?meeting|language options|plans and pricing|pricing|available plans|where (?:do i|can i) find captions)$/.test(intent);
+}

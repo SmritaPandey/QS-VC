@@ -7,7 +7,7 @@
 
 import { askOpenRouter, openRouterConfigured } from './openrouter.js';
 import type { TranscriptEntry } from './captions.js';
-import { transcriptText } from './minutes.js';
+import { greetingOnlyRecap, transcriptText } from './minutes.js';
 
 export interface MeetingSummaryOptions {
     meetingCode: string;
@@ -42,6 +42,8 @@ export async function generateMeetingSummary(
         throw new Error('No transcript available for summary. Captions must be enabled and active during the meeting.');
     }
 
+    const quickRecap = greetingOnlyRecap(entries, options.language || 'English');
+    if (quickRecap) return quickRecap;
     const durationMin = Math.round(options.durationMs / 60_000);
     const metadataHeader = `Duration: ~${durationMin} minute(s)\nLanguage: ${options.language || 'English'}`;
     const transcript = transcriptText(entries, 60_000);

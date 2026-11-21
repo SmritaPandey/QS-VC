@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
-import { productReply, type ProductReply } from '../lib/public-help-replies';
+import { canAnswerProductQuestionLocally, productReply, type ProductReply } from '../lib/public-help-replies';
 import '../styles/public-help.css';
 
 interface GuideMessage extends ProductReply { id: number; role: 'user' | 'assistant' }
@@ -34,7 +34,7 @@ export default function PublicHelp({ navigationOpen = false }: { navigationOpen?
         pending.current = true;
         setBusy(true);
         try {
-            if (online) {
+            if (online && !canAnswerProductQuestionLocally(text)) {
                 const endpoint = new URL('/api/product-guide', import.meta.env.VITE_SIGNALING_URL || window.location.origin);
                 if (endpoint.protocol === 'wss:') endpoint.protocol = 'https:';
                 if (endpoint.protocol === 'ws:') endpoint.protocol = 'http:';
@@ -65,7 +65,7 @@ export default function PublicHelp({ navigationOpen = false }: { navigationOpen?
 
     return <div className="public-help" hidden={navigationOpen} onKeyDown={event => { if (event.key === 'Escape' && open) { event.stopPropagation(); close(); } }}>
         {open && <section id={panelId} className="public-help-panel" role="dialog" aria-labelledby={titleId}>
-            <div className="public-help-heading"><div><h2 id={titleId}>QS-VC assistant</h2><p>{online ? 'Sends your question to OpenRouter and its model provider.' : 'Local product guide'}</p></div><button type="button" className="public-help-close" aria-label="Close help" onClick={close}><span className="mi" aria-hidden="true">close</span></button></div>
+            <div className="public-help-heading"><div><h2 id={titleId}>QS-VC assistant</h2><p>{online ? 'Common questions are answered here. Other questions are sent to OpenRouter and its model provider.' : 'Local product guide'}</p></div><button type="button" className="public-help-close" aria-label="Close help" onClick={close}><span className="mi" aria-hidden="true">close</span></button></div>
             <div ref={logRef} className="public-help-messages" role="log" aria-label="Product guide conversation" aria-live="polite" aria-relevant="additions">
                 {messages.map(message => <div className={`public-help-message public-help-message--${message.role}`} key={message.id}><span className="sr-only">{message.role === 'user' ? 'You: ' : 'QS-VC guide: '}</span><p>{message.text}</p>{message.link && <Link to={message.link.to}>{message.link.label}<span aria-hidden="true"> →</span></Link>}</div>)}
             </div>

@@ -44,9 +44,19 @@ export function transcriptText(entries: TranscriptEntry[], maxChars = 60_000): s
     return text;
 }
 
+/** A transcript consisting solely of greetings needs no external analysis. */
+export function greetingOnlyRecap(entries: TranscriptEntry[], language: string): string | undefined {
+    if (!/^(en|en-US|en-GB|English)$/i.test(language) || !entries.length) return;
+    if (entries.every(entry => /^(?:hi|hello|hey|good morning|good afternoon|good evening)[.! ]*$/i.test(entry.text.trim()))) {
+        return 'The transcript contains only greetings. No decisions or action items were recorded.';
+    }
+}
+
 export async function generateMinutes(entries: TranscriptEntry[], language = 'English'): Promise<string> {
     if (!minutesConfigured()) throw new Error('Meeting minutes are not configured on this server');
     if (!entries.length) throw new Error('There is no transcript yet. Turn on captions and speak first.');
+    const quickRecap = greetingOnlyRecap(entries, language);
+    if (quickRecap) return quickRecap;
     const prompt = `Write the minutes in ${language.replace(/[^\p{L} ()-]/gu, '').slice(0, 40) || 'English'}.\n\nTranscript:\n${transcriptText(entries)}`;
     if (process.env.QSVC_DEPLOYMENT !== 'onprem' && openRouterConfigured()) {
         return (await askOpenRouter(SYSTEM, prompt)).slice(0, 20_000);

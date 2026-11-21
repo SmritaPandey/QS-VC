@@ -1,3 +1,4 @@
+import { canAnswerProductQuestionLocally, productReply } from '../lib/public-help-replies';
 import ActionContents from '../components/ActionContents';
 import { useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -24,6 +25,11 @@ export default function Contact({ demo = false }: { demo?: boolean }) {
     async function handleAskAi(messageText: string) {
         if (!messageText.trim() || aiBusy) return;
         setAiError('');
+        setAiAdvice(null);
+        if (canAnswerProductQuestionLocally(messageText)) {
+            setAiAdvice({ suggestedAnswer: productReply(messageText).text, category: 'Product guide' });
+            return;
+        }
         setAiBusy(true);
         try {
             const signalingUrl = import.meta.env.VITE_SIGNALING_URL || window.location.origin;

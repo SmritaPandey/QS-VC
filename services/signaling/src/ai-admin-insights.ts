@@ -6,7 +6,7 @@
 
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { askOpenRouter, openRouterConfigured } from './openrouter.js';
+import { OpenRouterRateLimitError, askOpenRouter, openRouterConfigured } from './openrouter.js';
 import { z } from 'zod';
 
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
@@ -17,7 +17,7 @@ You review conferencing metrics and generate concise, data-driven executive insi
 
 Guidelines:
 1. Describe the supplied account and meeting counts. A snapshot alone cannot establish a trend.
-2. Highlight any potential bottlenecks (e.g. high latency, low encryption adoption in high-compliance settings).
+2. Limit observations to these counts. Do not infer latency, adoption, causes or trends.
 3. Keep the insight under 4 bullet points.
 4. Never invent statistics not provided in the input data.`;
 
@@ -47,7 +47,11 @@ export function adminInsightsRouter(authorize: import('express').RequestHandler)
                     insights,
                     timestamp: Date.now(),
                 });
-            } catch {
+            } catch (error) {
+                if (error instanceof OpenRouterRateLimitError) {
+                    res.status(429).json({ error: 'AI request limit reached. Try again later.' });
+                    return;
+                }
                 res.status(503).json({ error: 'Failed to generate AI insights.' });
             }
         }

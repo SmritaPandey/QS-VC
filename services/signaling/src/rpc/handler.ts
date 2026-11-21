@@ -634,7 +634,7 @@ export async function handleRpcMessage(
                     }).optional(),
                 }).strict().safeParse(params);
                 if (!request.success) throw createError(-32602, 'Enter a question of up to 2,000 characters.');
-                if (!openRouterConfigured()) throw createError(-32000, 'The online assistant is unavailable for this deployment.');
+
                 const now = Date.now();
                 let budget = assistantBudgets.get(account);
                 if (budget?.pending) throw createError(-32003, 'Wait for your previous question to finish.');
@@ -646,6 +646,15 @@ export async function handleRpcMessage(
                 budget.count++;
                 budget.pending = true;
                 try {
+                    const quickAnswers = new Map([
+                        ['how do i share my screen', 'Select Present in the meeting toolbar, then choose the tab, window or screen you want to share.'],
+                        ['verify post-quantum encryption', 'Open the meeting security badge to check the encryption status and compare the verification code with another participant.'],
+                        ['how to record this meeting', 'Open More and check the recording options. Availability depends on your role, plan and meeting settings.'],
+                        ['troubleshoot microphone / camera', 'Check your browser permissions for this site, then select the intended microphone and camera in meeting settings.'],
+                    ]);
+                    const quickAnswer = quickAnswers.get(request.data.question.toLowerCase().replace(/[?!.]+$/, '').trim());
+                    if (quickAnswer) return { jsonrpc: '2.0', id: id!, result: { answer: quickAnswer } };
+                    if (!openRouterConfigured()) throw createError(-32000, 'The online assistant is unavailable for this deployment.');
                     let systemMsg = 'You are the QS-VC meeting help assistant. Explain microphone, camera, presenting, captions, chat, and host controls concisely. Availability depends on role, deployment and plan. You cannot see the room, transcript, account or files, or perform actions. Say when you are unsure.';
                     if (request.data.context) {
                         const { isHost, e2eeActive, participantsCount, webinar } = request.data.context;

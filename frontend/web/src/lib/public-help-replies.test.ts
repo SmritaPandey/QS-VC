@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { productReply } from './public-help-replies';
+import { canAnswerProductQuestionLocally, productReply } from './public-help-replies';
 
 describe('public product guide', () => {
+    it('answers common prompts locally and escalates specific questions', () => {
+        for (const prompt of ['Join a meeting', 'Language options', 'Plans and pricing', 'How do I join a meeting?']) {
+            expect(canAnswerProductQuestionLocally(prompt)).toBe(true);
+        }
+        expect(canAnswerProductQuestionLocally('How do I join a meeting after my invitation expires?')).toBe(false);
+    });
     it('prioritises recording availability over generic meeting words', () => {
         const answer = productReply('Can I record a meeting?');
         expect(answer.text).toContain('where their workspace and meeting allow it');

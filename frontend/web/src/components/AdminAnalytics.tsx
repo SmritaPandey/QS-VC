@@ -116,6 +116,10 @@ export default function AdminAnalytics({ onManageAccess, hosted = true }: { onMa
                 }),
                 signal: AbortSignal.timeout(50000),
             });
+            if (response.status === 429) {
+                setAiInsights('Detailed analysis is rate-limited. Try again later.');
+                return;
+            }
             if (!response.ok) throw new Error();
             {
                 const resData = await response.json();
@@ -212,14 +216,15 @@ export default function AdminAnalytics({ onManageAccess, hosted = true }: { onMa
                 <div style={{ margin: '16px 0', padding: '16px', background: 'rgba(0, 120, 121, 0.06)', border: '1px solid rgba(0, 120, 121, 0.2)', borderRadius: '10px' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: aiInsights ? '10px' : '0' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 600, color: '#007879' }}>
-                            <span className="mi">auto_awesome</span> Meeting counts · OpenRouter insights
+                            <span className="mi">auto_awesome</span> Meeting activity
                         </div>
-                        <button type="button" disabled={aiInsightsBusy} onClick={generateAiInsights} style={{ fontSize: '0.85rem', padding: '6px 12px', borderRadius: '6px', border: '1px solid #007879', background: '#007879', color: '#fff', cursor: 'pointer' }}>
-                            {aiInsightsBusy ? 'Analyzing…' : aiInsights ? 'Regenerate Insights' : 'Generate AI Insights'}
-                        </button>
+                        {hosted && import.meta.env.VITE_DEPLOYMENT !== 'onprem' && <button type="button" disabled={aiInsightsBusy} onClick={generateAiInsights} style={{ fontSize: '0.85rem', padding: '6px 12px', borderRadius: '6px', border: '1px solid #007879', background: '#007879', color: '#fff', cursor: 'pointer' }}>
+                            {aiInsightsBusy ? 'Analyzing…' : 'Analyze with OpenRouter'}
+                        </button>}
                     </div>
+                    <p>{data.totals.activeUsers} active user accounts. Meeting records include {data.totals.activeMeetingRecords} active, {data.totals.scheduledMeetings} scheduled and {data.totals.endedMeetings} ended.</p>
                     {aiInsights && (
-                        <div style={{ fontSize: '0.9rem', lineHeight: 1.5, whiteSpace: 'pre-line', marginTop: '10px' }}>
+                        <div role="status" style={{ fontSize: '0.9rem', lineHeight: 1.5, whiteSpace: 'pre-line', marginTop: '10px' }}>
                             {aiInsights}
                         </div>
                     )}
