@@ -1,5 +1,5 @@
 FROM node:22-bookworm-slim AS build
-RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends python3 make g++ ca-certificates espeak-ng && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/qsvc
 ENV PUPPETEER_SKIP_DOWNLOAD=true
 # Dependency manifests first: `npm ci` (including the mediasoup worker) is reused from the

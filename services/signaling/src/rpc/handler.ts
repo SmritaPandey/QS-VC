@@ -615,7 +615,7 @@ export async function handleRpcMessage(
             }
             case 'translationCapabilities': {
                 const [captions, asr] = await Promise.all([translationCapabilities(ws, connectionState.roomId!, connectionState.peerId!).catch(() => ({
-                    configured: false, languages: [], transcript: { saving: transcriptSaving(connectionState.roomId!) },
+                    configured: false, temporarilyUnavailable: true, languages: [], transcript: { saving: transcriptSaving(connectionState.roomId!) },
                 })), asrCapabilities()]);
                 return { jsonrpc: '2.0', id: id!, result: { ...captions, asr: { ...asr, participants: asrParticipants(connectionState.roomId!) }, minutes: { configured: minutesConfigured() } } };
             }
@@ -730,6 +730,9 @@ export async function handleRpcMessage(
                 if (room) void saveTranscript(room.meetingCode, [], transcript.since || Date.now(), minutes);
                 return { jsonrpc: '2.0', id: id!, result: { minutes } };
             }
+            case 'captionVoice':
+                if (!can(connectionState.authUser, 'ai_captions')) throw createError(-32005, CAPTION_SPEAKER_PLAN_MESSAGE);
+                return { jsonrpc: '2.0', id: id!, result: await translateCaption(ws, connectionState.roomId!, connectionState.peerId!, params, true) };
             case 'translateCaption':
                 return { jsonrpc: '2.0', id: id!, result: await translateCaption(ws, connectionState.roomId!, connectionState.peerId!, params) };
 

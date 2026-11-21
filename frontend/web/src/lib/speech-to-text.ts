@@ -80,6 +80,7 @@ export class SpeechToTextEngine {
                 this.stop();
                 if (event.error !== 'aborted') this.options.onError?.(event.error === 'not-allowed' || event.error === 'service-not-allowed'
                     ? 'Allow microphone access to share captions.'
+                    : event.error === 'language-not-supported' ? 'This browser cannot recognize the selected language. Choose another spoken language or use meeting transcription.'
                     : 'Speech recognition stopped. Turn captions on again to retry.');
             };
             recognition.onend = () => {

@@ -46,9 +46,9 @@ export function MeetingPipControls({ audioMuted, videoOff, cameraStartAllowed = 
     const cameraLabel = cameraBlocked ? 'Return to meeting to start camera' : videoOff ? 'Turn camera on' : 'Turn camera off';
     return <>
         <div className="meeting-pip-controls">
-            <button type="button" aria-pressed={!audioMuted} aria-label={audioMuted ? 'Unmute microphone' : 'Mute microphone'} onClick={onToggleAudio}><span className="mi" aria-hidden="true">{audioMuted ? 'mic_off' : 'mic'}</span></button>
-            <button type="button" disabled={cameraBlocked} title={cameraLabel} aria-pressed={!videoOff} aria-label={cameraLabel} onClick={onToggleVideo}><span className="mi" aria-hidden="true">{videoOff ? 'videocam_off' : 'videocam'}</span></button>
-            <button type="button" className="meeting-pip-return" onClick={onReturn}>Back to meeting</button>
+            <button type="button" className={`meeting-pip-btn ${audioMuted ? 'is-muted' : 'is-active'}`} aria-pressed={!audioMuted} aria-label={audioMuted ? 'Unmute microphone' : 'Mute microphone'} onClick={onToggleAudio}><span className="mi" aria-hidden="true">{audioMuted ? 'mic_off' : 'mic'}</span></button>
+            <button type="button" className={`meeting-pip-btn ${videoOff ? 'is-off' : 'is-active'}`} disabled={cameraBlocked} title={cameraLabel} aria-pressed={!videoOff} aria-label={cameraLabel} onClick={onToggleVideo}><span className="mi" aria-hidden="true">{videoOff ? 'videocam_off' : 'videocam'}</span></button>
+            <button type="button" className="meeting-pip-return" onClick={onReturn}><span className="mi mi-sm" aria-hidden="true">open_in_full</span><span>Back to meeting</span></button>
         </div>
         {cameraBlocked && <p className="meeting-pip-camera-hint">Return to meeting to start camera.</p>}
     </>;
@@ -122,10 +122,22 @@ const MeetingPictureInPicture = forwardRef<MeetingPictureInPictureHandle, Props>
     }, [preview.track, open, pipWindow]);
     if (!open) return null;
     const panel = <section className={`meeting-pip ${inline ? 'meeting-pip-inline' : ''}`} aria-label="Floating meeting">
-        <header><span>QS-VC{sharing ? ' · You are presenting' : ''}</span><button type="button" onClick={close} aria-label="Close floating view"><span className="mi" aria-hidden="true">close</span></button></header>
+        <header className="meeting-pip-header">
+            <div className="meeting-pip-brand">
+                <span className="mi meeting-pip-logo-icon" aria-hidden="true">videocam</span>
+                <span>QS-VC{sharing ? ' · Presenting' : ''}</span>
+            </div>
+            <button type="button" className="meeting-pip-close" onClick={close} aria-label="Close floating view">
+                <span className="mi" aria-hidden="true">close</span>
+            </button>
+        </header>
         <div className="meeting-pip-preview">
-            {preview.track ? <video ref={videoRef} autoPlay playsInline muted aria-label={preview.name} /> : <span className="meeting-pip-avatar" aria-hidden="true">{initialsOf(preview.name)}</span>}
-            <p>{preview.name}</p>
+            {preview.track ? <video ref={videoRef} autoPlay playsInline muted aria-label={preview.name} /> : (
+                <div className="meeting-pip-avatar-wrap">
+                    <span className="meeting-pip-avatar" aria-hidden="true">{initialsOf(preview.name)}</span>
+                </div>
+            )}
+            <p className="meeting-pip-name">{preview.name}</p>
         </div>
         <MeetingPipControls audioMuted={audioMuted} videoOff={videoOff} cameraStartAllowed={cameraStartAllowed}
             onToggleAudio={onToggleAudio} onToggleVideo={onToggleVideo} onReturn={() => { window.focus(); close(); }} />

@@ -189,25 +189,100 @@
 }
 /* Keep stage navigation and screen controls in layout even on short screens. */
 .meeting-stage-toolbar {
-  display:flex; flex:none; align-items:center; justify-content:space-between; flex-wrap:wrap;
-  gap:4px 16px; padding:4px clamp(8px, 1.6vw, 24px); background:#101d29;
-  border-bottom:1px solid #304657;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: nowrap;
+  gap: 4px 16px;
+  padding: 4px clamp(8px, 1.5vw, 16px);
+  min-height: 38px;
+  background: #101d29;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
-.shared-stage-tabs { display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+.shared-stage-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
 .shared-stage-tabs button {
-  min-height:44px; padding:4px 12px; color:#bbced7; background:transparent;
-  border:0; border-bottom:2px solid transparent; border-radius:0; cursor:pointer;
+  min-height: 32px;
+  padding: 3px 10px;
+  color: #bbced7;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: all 140ms ease;
 }
-.shared-stage-tabs button[aria-pressed=true] { background:transparent; border-bottom-color:#75ecd7; color:#adf5e7; }
+.shared-stage-tabs button[aria-pressed=true] {
+  background: rgba(67, 217, 194, 0.14);
+  border-color: rgba(67, 217, 194, 0.3);
+  color: #adf5e7;
+}
 .meeting-stage-toolbar .presenting-banner {
-  position:static; transform:none; animation:none; z-index:auto; flex-wrap:wrap;
-  width:auto; max-width:100%; justify-content:flex-start; gap:4px 8px;
-  margin-inline-start:auto; padding:0; border:0; background:transparent; box-shadow:none; backdrop-filter:none;
+  position: static;
+  transform: none;
+  animation: none;
+  z-index: auto;
+  flex-wrap: nowrap;
+  width: auto;
+  max-width: 100%;
+  justify-content: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-inline-start: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  font-size: 13px;
+  white-space: nowrap;
 }
-.meeting-stage-toolbar .presenting-banner-icon { animation:none; color:#78ddca; }
-.meeting-stage-toolbar .presenting-banner-actions { margin-inline-start:auto; }
-.meeting-stage-toolbar .btn-banner-stop { font-weight:500; color:#ffd9dd; background:#532b37; }
-.meeting-stage-toolbar button:focus-visible { outline:2px solid #75ecd7; outline-offset:1px; }
+.meeting-stage-toolbar .presenting-banner-icon { animation: none; color: #78ddca; font-size: 17px; }
+.meeting-stage-toolbar .presenting-banner-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+}
+.meeting-stage-toolbar .btn-banner-action {
+  min-height: 32px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.08);
+  color: #edf5fa;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.meeting-stage-toolbar .btn-banner-stop {
+  min-height: 32px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(225, 29, 72, 0.4);
+  background: rgba(225, 29, 72, 0.2);
+  color: #ffd9dd;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.meeting-stage-toolbar button:focus-visible { outline: 2px solid #75ecd7; outline-offset: 1px; }
 .meeting-collaboration { container-type:inline-size; }
 .meeting-collaboration .whiteboard-modes { display:flex; flex-wrap:wrap; gap:2px 4px; margin-block:4px 8px; }
 @container (max-width: 510px) {

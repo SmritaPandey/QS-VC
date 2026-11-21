@@ -68,25 +68,25 @@ async function ensureAIServices() {
     // 1. Check/auto-start MT (Translation)
     const mtPort = 5005;
     const mtListening = await canConnect('127.0.0.1', mtPort, 500);
-    if (!mtListening) {
+    if (!process.env.LIBRETRANSLATE_URL && !process.env.MT_URL && !mtListening) {
         const librePython = fs.existsSync('/tmp/qsvc-libretranslate/bin/libretranslate')
             ? '/tmp/qsvc-libretranslate/bin/libretranslate'
             : null;
         if (librePython) {
             log('MT', `Auto-starting local LibreTranslate on port ${mtPort}...`);
             procs.push(startService('LibreTranslate', librePython, [
-                '--host', '127.0.0.1', '--port', String(mtPort), '--load-only', 'en,hi', '--disable-files-translation', '--disable-web-ui'
+                '--host', '127.0.0.1', '--port', String(mtPort), ...(process.env.MT_LANGUAGES?.trim() ? ['--load-only', process.env.MT_LANGUAGES.trim()] : []), '--disable-files-translation', '--disable-web-ui'
             ], ROOT, {
                 XDG_DATA_HOME: '/tmp/qsvc-libretranslate-data',
                 XDG_CACHE_HOME: '/tmp/qsvc-libretranslate-cache',
                 XDG_CONFIG_HOME: '/tmp/qsvc-libretranslate-config',
             }));
+            process.env.LIBRETRANSLATE_URL = `http://127.0.0.1:${mtPort}`;
             await waitForPort(mtPort, 8000).then(() => {
                 log('MT', '✓ Local translation service is ready');
-                process.env.LIBRETRANSLATE_URL = `http://127.0.0.1:${mtPort}`;
             }).catch(() => log('MT', '⚠ Local translation start timed out (will retry in background)'));
         }
-    } else {
+    } else if (!process.env.LIBRETRANSLATE_URL && !process.env.MT_URL) {
         log('MT', `✓ Local translation service detected on port ${mtPort}`);
         process.env.LIBRETRANSLATE_URL = `http://127.0.0.1:${mtPort}`;
     }
@@ -94,7 +94,7 @@ async function ensureAIServices() {
     // 2. Check/auto-start ASR (Speech Recognition)
     const asrPort = 8000;
     const asrListening = await canConnect('127.0.0.1', asrPort, 500);
-    if (asrListening) {
+    if (asrListening && !process.env.ASR_URL) {
         log('ASR', `✓ Local speech recognition service detected on port ${asrPort}`);
         process.env.ASR_URL = `http://127.0.0.1:${asrPort}`;
     }

@@ -1,3 +1,4 @@
+import { renderCaptionVoice } from './caption-voice.js';
 import { addSummaryCaption, finishLiveSummary } from './live-summary.js';
 import { z } from 'zod';
 import { googleLanguages, translateText } from './translation.js';
@@ -290,13 +291,14 @@ export async function translationCapabilities(ws: object, roomId: string, peerId
 }
 
 /** Pull API kept for older clients; new clients receive `captionTranslated` pushes. */
-export async function translateCaption(ws: object, roomId: string, peerId: string, params: unknown) {
+export async function translateCaption(ws: object, roomId: string, peerId: string, params: unknown, audio = false) {
     member(ws, roomId, peerId);
     const parsed = translateSchema.safeParse(params);
     if (!parsed.success) throw new Error('Invalid translation request');
     const state = roomState(roomId);
     const caption = state.captions.get(parsed.data.id);
     if (!caption) throw new Error('Final caption not found in this room');
+    if (audio && !state.subscriptions.get(peerId)?.has(parsed.data.target)) throw new Error('Subscribe to this caption language first');
     if (googleEnabled() && !caption.allowGoogleTranslation) throw new Error('The speaker has not enabled Google Cloud translation');
     if (!googleEnabled() && !configuredUrl()) throw new Error('Translation unavailable: no configured server');
     const { roomConcurrency, globalConcurrency, peerPerMinute } = captionLimits();
@@ -309,6 +311,11 @@ export async function translateCaption(ws: object, roomId: string, peerId: strin
     try {
         const translatedText = await translateStored(state, caption, parsed.data.target);
         member(ws, roomId, peerId);
+        if (audio) {
+            const wav = await renderCaptionVoice(translatedText, parsed.data.target);
+            member(ws, roomId, peerId);
+            return { wav };
+        }
         return { translatedText, sourceLanguage: caption.language, targetLanguage: parsed.data.target };
     } finally {
         rate.active.delete(key); state.active--; activeRequests--;

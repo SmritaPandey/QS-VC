@@ -33,7 +33,7 @@ export function supportedSpeechLanguage(languages: { code: string }[], selected:
  * Options for "I speak". With server recognition, only languages the speech service reports;
  * otherwise the browser-recognition languages. The current choice is always kept selectable.
  */
-export function captionLanguageOptions(serverLanguages: { code: string; name: string }[] | null, current: string): { code: string; label: string }[] {
+export function captionLanguageOptions(serverLanguages: { code: string; name: string }[] | null, current: string, providerLanguages: { code: string; name: string }[] = []): { code: string; label: string }[] {
     const label = (code: string, fallback: string) => {
         const info = LANGUAGES.find(item => item.code === code) || LANGUAGES.find(item => item.code.split('-')[0] === code.split('-')[0]);
         return info ? `${info.nativeName} · ${info.name}` : fallback !== code ? fallback : new Intl.DisplayNames(['en'], { type: 'language' }).of(code) || code;
@@ -48,6 +48,11 @@ export function captionLanguageOptions(serverLanguages: { code: string; name: st
         });
     } else {
         options = LANGUAGES.filter(item => item.sttSupported).map(item => ({ code: item.code, label: `${item.nativeName} · ${item.name}` }));
+        for (const { code, name } of providerLanguages) {
+            if (!options.some(option => option.code === code || option.code.split('-')[0] === code)) {
+                options.push({ code, label: label(code, name) });
+            }
+        }
     }
     const seen = new Set<string>();
     options = options.filter(option => !seen.has(option.code) && seen.add(option.code));

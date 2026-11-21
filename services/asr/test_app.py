@@ -267,7 +267,9 @@ def test_failed_segment_does_not_end_the_session():
 def test_whisper_advertises_loaded_model_languages_and_keeps_tibetan_distinct():
     from types import SimpleNamespace
     engine = object.__new__(asr.WhisperEngine)
-    engine.whisper = SimpleNamespace(supported_languages=["bo", "is", "sw", "ja", "ar"])
-    assert set(engine.languages()) == {"bo", "is", "sw", "ja", "ar"}
+    engine.whisper = SimpleNamespace(supported_languages=["bo", "is", "sw", "ja", "zh", "ar"])
+    assert set(engine.languages()) == {"bo", "is", "sw", "ja", "zh", "ar"}
     assert asr.normalise_language("bo-CN") == "bo"
     assert asr.normalise_language("brx-IN") == "brx"
+
+    assert engine.languages()["zh"] == "Chinese" and engine.languages()["ja"] == "Japanese"

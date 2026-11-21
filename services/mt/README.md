@@ -5,6 +5,19 @@ signaling server uses it through the existing `LIBRETRANSLATE_URL` setting. Engl
 22 scheduled Indian languages; Indic↔Indic pivots through English unless the optional
 indic-indic model is set. Caption text never leaves your network.
 
+## International meeting captions
+
+Use a multilingual Whisper bundle for original-language captions. For caption translation,
+mount a reviewed local [M2M100 418M](https://huggingface.co/facebook/m2m100_418M)
+bundle at `/models/m2m100` and set `MT_MODEL_INTERNATIONAL=/models/m2m100`.
+Prepare the bundle on a trusted build machine from a pinned revision. Export the tokenizer
+with `save_pretrained` and the model with `save_pretrained(..., safe_serialization=True)`
+to the same directory, then run `scripts/pin-model.py` on that directory. Include it in
+the MT model volume alongside the Indic models. Allow memory for all loaded models.
+Recreate the MT service and check its `/languages` endpoint for `ja` and `zh`.
+Check ASR's `/v1/languages` for the same codes. Explicit MT or ASR allowlists must include them.
+Chinese uses the model's single `zh` target. Script-specific output is not guaranteed.
+
 ## Run
 Production loading requires reviewed local model bundles and SHA-256 manifests.
 See [security deployment steps](../../docs/SECURITY_REMEDIATION_2026-11.md#ai-models).

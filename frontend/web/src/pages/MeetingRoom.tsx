@@ -2150,11 +2150,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     // ── Captions (CC button) ──
     const captionsLocked = signedIn && !isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_captions'));
     const toggleCaptions = useCallback(() => {
-        setCaptionsOn(on => {
-            const next = !on;
-            if (next) setShareSpeech(true);
-            return next;
-        });
+        setCaptionsOn(on => !on);
     }, []);
     const openInformation = useCallback(() => {
         closePanels(); setInformationOpen(true);
@@ -2327,23 +2323,25 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             </div>
 
             <div className="meeting-room-status">
-            {connected && <div className="meeting-format-tools" role="group" aria-label={`${format.label} tools`}>
-                <div className="meeting-format-shortcuts">
-                <span className="meeting-format-label"><span className="mi" aria-hidden="true">{format.icon}</span>{format.label}</span>
-                {format.actions.filter(action => action !== 'host' || manager).map(action => {
-                    const item = FORMAT_ACTIONS[action];
-                    return <button key={action} type="button" aria-pressed={action === 'captions' ? captionsOn : undefined}
-                        aria-expanded={action === 'captions' ? undefined : action === 'breakouts' ? breakoutsOpen :
-                            action === 'host' ? hostToolsOpen : undefined}
-                        aria-controls={action === 'breakouts' && breakoutsOpen ? 'meeting-breakouts' :
-                            action === 'host' && hostToolsOpen ? 'meeting-host-tools' : undefined}
-                        onClick={event => openFormatAction(action, event.currentTarget)}>
-                        <span className="mi" aria-hidden="true">{item.icon}</span>{item.label}
-                    </button>;
-                })}
+            {connected && format.actions.filter(action => action !== 'host' || manager).length > 0 && (
+                <div className="meeting-format-tools" role="group" aria-label={`${format.label} tools`}>
+                    <div className="meeting-format-shortcuts">
+                        <span className="meeting-format-label"><span className="mi" aria-hidden="true">{format.icon}</span>{format.label}</span>
+                        {format.actions.filter(action => action !== 'host' || manager).map(action => {
+                            const item = FORMAT_ACTIONS[action];
+                            return <button key={action} type="button" aria-pressed={action === 'captions' ? captionsOn : undefined}
+                                aria-expanded={action === 'captions' ? undefined : action === 'breakouts' ? breakoutsOpen :
+                                    action === 'host' ? hostToolsOpen : undefined}
+                                aria-controls={action === 'breakouts' && breakoutsOpen ? 'meeting-breakouts' :
+                                    action === 'host' && hostToolsOpen ? 'meeting-host-tools' : undefined}
+                                onClick={event => openFormatAction(action, event.currentTarget)}>
+                                <span className="mi" aria-hidden="true">{item.icon}</span>{item.label}
+                            </button>;
+                        })}
+                    </div>
                 </div>
-                <div className="meeting-processor-slot" ref={setCaptionStatusHost} />
-            </div>}
+            )}
+            <div className="meeting-processor-slot" ref={setCaptionStatusHost} />
             <div className="meeting-notices">
 
             {connected && connectionMessage && <ConnectionNotice key={connectionMessage} message={connectionMessage}
@@ -2374,6 +2372,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             </MeetingToast>}
 
             {mutedSpeechNotice && audioMuted && <div className="muted-speech-notice" role="status">
+                <span className="mi mi-sm" aria-hidden="true">mic_off</span>
                 <span>You’re speaking while muted.</span>
                 <button type="button" className="btn-text" onClick={handleToggleAudio}>Unmute mic</button>
             </div>}

@@ -184,10 +184,13 @@ export default function MeetingSummaryPanel({ open, onClose, code, canManage = f
                     <span className="mi" aria-hidden="true">close</span>
                 </button>
             </div>
-            <p className="summary-speech-bar" role="status">
-                {refreshing ? 'Updating recap…' : state.message || (!state.active ? 'Live summary is off' :
-                    state.hasSpeech ? 'Live summary on · Speech received' : 'Waiting for speech')}
-            </p>
+            <div className="summary-speech-bar" role="status">
+                <span className={`summary-status-dot ${refreshing ? 'is-busy' : state.active ? (state.hasSpeech ? 'is-live' : 'is-waiting') : 'is-off'}`} />
+                <span className="summary-speech-text">
+                    {refreshing ? 'Updating recap…' : state.message || (!state.active ? 'Live summary is off' :
+                        state.hasSpeech ? 'Live summary on · Speech received' : 'Waiting for speech')}
+                </span>
+            </div>
             {currentText && (
                 <nav className="summary-tabs-nav" aria-label="Summary sections">
                     {([['overview', 'Overview'], ['actions', 'Actions'], ['decisions', 'Decisions'], ['full', 'Full recap']] as const)
@@ -206,10 +209,13 @@ export default function MeetingSummaryPanel({ open, onClose, code, canManage = f
                             parsed[activeTab].trim() || (activeTab === 'actions' ? 'No action items yet.' : 'No decisions yet.')}
                     </div>
                 ) : (
-                    <p className="summary-placeholder">
-                        {state.active ? 'The recap appears here once participants share speech as captions.' :
-                            canManage ? 'Start live notes to build a recap from shared captions.' : 'The host or co-host can start live notes.'}
-                    </p>
+                    <div className="summary-placeholder">
+                        <span className="mi summary-placeholder-icon" aria-hidden="true">auto_awesome</span>
+                        <p className="summary-placeholder-text">
+                            {state.active ? 'The recap appears here once participants share speech as captions.' :
+                                canManage ? 'Start live notes to build a recap from shared captions.' : 'The host or co-host can start live notes.'}
+                        </p>
+                    </div>
                 )}
             </div>
 

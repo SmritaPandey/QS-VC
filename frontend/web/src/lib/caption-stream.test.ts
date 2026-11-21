@@ -21,6 +21,8 @@ describe('caption stream', () => {
         const browser = captionLanguageOptions(null, 'as-IN');
         expect(browser[0].code).toBe('as-IN'); // unsupported in browsers but still selectable
         expect(browser.some(option => option.code === 'mai-IN')).toBe(false);
+        const expanded = captionLanguageOptions(null, 'en-US', [{ code: 'haw', name: 'Hawaiian' }]);
+        expect(expanded).toContainEqual({ code: 'haw', label: 'Hawaiian' });
     });
     it('honors the exact recognition locale and falls back only to an advertised base language', () => {
         const languages = [{ code: 'en-US', name: 'English (US)' }, { code: 'en-GB', name: 'English (UK)' }, { code: 'hi', name: 'Hindi' }];

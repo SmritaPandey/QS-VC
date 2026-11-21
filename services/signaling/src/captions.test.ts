@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { handleRpcMessage } from './rpc/handler';
 import { roomManager, type PeerState } from './room-manager';
-import { publishCaption, translationCapabilities, translateCaption, clearEmptyRoomCaptions } from './captions';
+import { publishCaption, subscribeCaptions, translationCapabilities, translateCaption, clearEmptyRoomCaptions } from './captions';
 
 const created: string[] = [];
 function participant(roomId?: string, name = 'Synthetic Demo') {
@@ -183,4 +183,20 @@ it('translates Hindi captions to Japanese only with speaker permission', async (
     expect(request).toHaveBeenCalledWith('https://translation.googleapis.com/language/translate/v2', expect.objectContaining({
         body: JSON.stringify({ q: 'नमस्ते', source: 'hi', target: 'ja', format: 'text' }),
     }));
+});
+
+it('synthesizes only a subscribed translation in the listener’s own room', async () => {
+    const voices = await import('./caption-voice');
+    const render = vi.spyOn(voices, 'renderCaptionVoice').mockResolvedValue('test-audio');
+    try {
+        provider();
+        const speaker = participant(), listener = participant(speaker.roomId), stranger = participant();
+        const { id } = publishCaption(speaker.ws, speaker.roomId, speaker.id, final);
+        const request = { id, target: 'hi' };
+        await expect(translateCaption(listener.ws, listener.roomId, listener.id, request, true)).rejects.toThrow('Subscribe');
+        subscribeCaptions(listener.ws, listener.roomId, listener.id, { targets: ['hi'] });
+        await expect(translateCaption(stranger.ws, stranger.roomId, stranger.id, request, true)).rejects.toThrow('not found');
+        await expect(translateCaption(listener.ws, listener.roomId, listener.id, request, true)).resolves.toEqual({ wav: 'test-audio' });
+        expect(render).toHaveBeenCalledWith('नमस्ते', 'hi');
+    } finally { render.mockRestore(); }
 });

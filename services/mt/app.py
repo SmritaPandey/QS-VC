@@ -55,6 +55,12 @@ LANGUAGES: dict[str, tuple[str, str]] = {
     "te": ("tel_Telu", "Telugu"),
     "ur": ("urd_Arab", "Urdu"),
 }
+INTERNATIONAL = {
+    "ja": "Japanese", "zh": "Chinese", "ko": "Korean", "fr": "French",
+    "de": "German", "es": "Spanish", "pt": "Portuguese", "ru": "Russian",
+    "it": "Italian", "ar": "Arabic", "id": "Indonesian", "th": "Thai",
+    "vi": "Vietnamese", "tr": "Turkish", "nl": "Dutch",
+}
 ALIASES = {"gom": "kok", "np": "ne", "od": "or"}
 
 
@@ -128,6 +134,30 @@ class IndicTrans2Backend:
             if direction.strip() and self.models.get(direction.strip()):
                 self._load(direction.strip())
 
+        self.international_languages = {}
+        if bundle := os.environ.get("MT_MODEL_INTERNATIONAL", "").strip():
+            from transformers import M2M100ForConditionalGeneration, M2M100Tokenizer
+
+            path = model_path(bundle)
+            self.world_tokenizer = M2M100Tokenizer.from_pretrained(path, local_files_only=True)
+            self.world_model = M2M100ForConditionalGeneration.from_pretrained(
+                path, local_files_only=True, use_safetensors=True,
+                torch_dtype=torch.float16 if self.device.startswith("cuda") else torch.float32,
+            ).to(self.device).eval()
+            self.international_languages = {code: name for code, name in INTERNATIONAL.items()
+                                            if code in self.world_tokenizer.lang_code_to_id}
+
+    def _international(self, texts: list[str], src: str, tgt: str) -> list[str]:
+        import torch
+
+        tokenizer = self.world_tokenizer
+        tokenizer.src_lang = src
+        inputs = tokenizer(texts, padding=True, return_tensors="pt").to(self.device)
+        with torch.inference_mode():
+            tokens = self.world_model.generate(**inputs, forced_bos_token_id=tokenizer.get_lang_id(tgt),
+                                               max_new_tokens=256, num_beams=int(os.environ.get("MT_BEAMS", "4")))
+        return tokenizer.batch_decode(tokens, skip_special_tokens=True)
+
     def _load(self, direction: str):
         if direction in self.loaded:
             return self.loaded[direction]
@@ -156,6 +186,15 @@ class IndicTrans2Backend:
 
     def translate_batch(self, texts: list[str], src: str, tgt: str) -> list[str]:
         with self.lock:
+            if src in self.international_languages or tgt in self.international_languages:
+                supported = self.world_tokenizer.lang_code_to_id
+                if src not in supported:
+                    texts = self._run("indic-en", texts, src, "en")
+                    src = "en"
+                if tgt not in supported:
+                    english = self._international(texts, src, "en")
+                    return self._run("en-indic", english, "en", tgt)
+                return self._international(texts, src, tgt)
             if src == "en":
                 return self._run("en-indic", texts, src, tgt)
             if tgt == "en":
@@ -214,9 +253,11 @@ class TranslateBody(BaseModel):
     api_key: Optional[str] = None
 
 
-def supported_codes() -> list[str]:
+def supported_codes(backend) -> dict[str, str]:
     allowed = env_list("MT_LANGUAGES")
-    return [code for code in LANGUAGES if allowed is None or code in allowed or code == "en"]
+    names = {code: name for code, (_, name) in LANGUAGES.items()}
+    names.update(getattr(backend, "international_languages", {}))
+    return {code: name for code, name in names.items() if allowed is None or code in allowed or code == "en"}
 
 
 def create_app(backend_factory: Optional[Callable[[], object]] = None) -> FastAPI:
@@ -238,8 +279,8 @@ def create_app(backend_factory: Optional[Callable[[], object]] = None) -> FastAP
 
     @app.get("/languages")
     async def languages():
-        codes = supported_codes()
-        return [{"code": code, "name": LANGUAGES[code][1], "targets": [other for other in codes if other != code]} for code in codes]
+        codes = supported_codes(translator.backend)
+        return [{"code": code, "name": codes[code], "targets": [other for other in codes if other != code]} for code in codes]
 
     @app.post("/translate")
     async def translate(body: TranslateBody, request: Request):
@@ -247,7 +288,7 @@ def create_app(backend_factory: Optional[Callable[[], object]] = None) -> FastAP
             raise HTTPException(status_code=403, detail="Invalid API key")
         if not translator.ready:
             raise HTTPException(status_code=503, detail="Model is loading")
-        codes = supported_codes()
+        codes = supported_codes(translator.backend)
         src, tgt = normalise(body.source), normalise(body.target)
         if src not in codes or tgt not in codes:
             raise HTTPException(status_code=400, detail="Language pair not supported")

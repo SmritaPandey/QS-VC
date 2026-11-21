@@ -49,6 +49,7 @@ services:
     environment:
       NODE_ENV: production
       MT_MODEL_EN_INDIC: ${MT_MODEL_EN_INDIC:-/models/en-indic}
+      MT_MODEL_INTERNATIONAL: ${MT_MODEL_INTERNATIONAL:-}
       MT_MODEL_INDIC_EN: ${MT_MODEL_INDIC_EN:-/models/indic-en}
       HF_MODULES_CACHE: /tmp/hf-modules
       MT_DEVICE: cpu
@@ -61,7 +62,7 @@ services:
       MKL_NUM_THREADS: '1'
     ports: ["5000:5000"]
     volumes: [mt_models:/models:ro]
-    mem_limit: 4500m
+    mem_limit: ${MT_MEMORY_LIMIT:-4500m}
 volumes:
   asr_models:
   mt_models:

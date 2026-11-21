@@ -77,3 +77,28 @@ def test_all_advertised_language_pairs_reach_the_backend():
             response = c.post("/translate", json={"q": "Test", "source": source["code"], "target": target})
             assert response.status_code == 200, (source["code"], target)
             assert backend.calls[-1][1:] == (source["code"], target)
+
+
+def test_international_routes_and_capabilities():
+    from types import SimpleNamespace
+    import threading
+
+    backend = object.__new__(mt.IndicTrans2Backend)
+    backend.lock = threading.Lock()
+    backend.international_languages = {"ja": "Japanese", "zh": "Chinese"}
+    backend.world_tokenizer = SimpleNamespace(lang_code_to_id={"en", "ja", "zh", "hi"})
+    steps = []
+    def route(name, texts, source, target):
+        steps.append((name, source, target))
+        return texts
+    backend._international = lambda texts, src, tgt: route("international", texts, src, tgt)
+    backend._run = route
+    with TestClient(mt.create_app(lambda: backend)) as c:
+        names = {item["code"]: item for item in c.get("/languages").json()}
+        assert "zh" in names["ja"]["targets"]
+        assert c.post("/translate", json={"q": "こんにちは", "source": "ja-JP", "target": "zh-CN"}).is_success
+        assert steps == [("international", "ja", "zh")]
+        assert c.post("/translate", json={"q": "你好", "source": "zh", "target": "brx"}).is_success
+        assert steps[-2:] == [("international", "zh", "en"), ("en-indic", "en", "brx")]
+        assert c.post("/translate", json={"q": "test", "source": "brx", "target": "ja"}).is_success
+        assert steps[-2:] == [("indic-en", "brx", "en"), ("international", "en", "ja")]

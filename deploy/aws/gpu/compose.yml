@@ -48,6 +48,7 @@ services:
     environment:
       NODE_ENV: production
       MT_MODEL_EN_INDIC: ${MT_MODEL_EN_INDIC:-/models/en-indic}
+      MT_MODEL_INTERNATIONAL: ${MT_MODEL_INTERNATIONAL:-}
       MT_MODEL_INDIC_EN: ${MT_MODEL_INDIC_EN:-/models/indic-en}
       MT_LANGUAGES: ${MT_LANGUAGES:-}
       MT_API_KEY: ${MT_API_KEY:?Set the same value as LIBRETRANSLATE_API_KEY on the backend}
