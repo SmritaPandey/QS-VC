@@ -90,3 +90,7 @@ release/
 /deploy/vc-onprem/appliance/out-*/
 /deploy/vc-onprem/appliance/packer_cache/
 /deploy/vc-onprem/windows-server/output/
+
+# Local nested checkouts of this repository
+/qs-vc/
+/qs-vc-1/
