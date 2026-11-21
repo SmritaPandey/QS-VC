@@ -186,7 +186,7 @@ it('translates Hindi captions to Japanese only with speaker permission', async (
 });
 
 it('synthesizes only a subscribed translation in the listener’s own room', async () => {
-    const voices = await import('./caption-voice');
+    const voices = await import('./caption-voice.js');
     const render = vi.spyOn(voices, 'renderCaptionVoice').mockResolvedValue('test-audio');
     try {
         provider();
