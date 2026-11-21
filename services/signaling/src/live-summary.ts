@@ -12,7 +12,7 @@ class LiveSummary {
     completed = 0;
     text = '';
     saved = false;
-    message = 'Waiting for shared captions.';
+    message = 'Waiting for shared speech. Nothing to summarize yet.';
     timer?: ReturnType<typeof setTimeout>;
     pending?: Promise<void>;
 }
@@ -22,7 +22,7 @@ const notify = (roomId: string, active: boolean) => roomManager.broadcast(roomId
 
 export function liveSummaryState(roomId: string, manager: boolean) {
     const session = sessions.get(roomId);
-    return { active: !!session?.active, ...(manager && session ? { text: session.text, saved: session.saved, message: session.message } : {}) };
+    return { active: !!session?.active, ...(session?.revision ? { hasSpeech: true } : {}), ...(manager && session ? { text: session.text, saved: session.saved, message: session.message } : {}) };
 }
 
 export function startLiveSummary(roomId: string) {
@@ -40,12 +40,16 @@ async function update(roomId: string, code: string, session: LiveSummary) {
     const revision = session.revision;
     session.pending = (async () => {
         try {
-            const text = await generateMeetingSummary(session.entries.slice(), {
+            const batch = session.entries.slice();
+            const text = await generateMeetingSummary(batch, {
                 meetingCode: code, participants: [], durationMs: Date.now() - session.started,
+                meetingKind: roomManager.getRoom(roomId)?.settings.meetingKind, previousSummary: session.text,
             });
             session.text = text;
             session.saved = !meetingInvitation.isSessionMeetingCode(code)
                 && await saveTranscript(code, [], session.started, undefined, text);
+            const consumed = session.entries.findIndex(entry => entry === batch[batch.length - 1]);
+            if (consumed >= 0) session.entries.splice(0, consumed + 1);
             session.completed = revision;
             session.message = session.saved ? 'Summary saved to your workspace.' : 'Summary ready in this meeting.';
         } catch {
@@ -61,6 +65,10 @@ export function addSummaryCaption(roomId: string, code: string, entry: Transcrip
     session.entries.push(entry);
     if (session.entries.length > 2000) session.entries.shift();
     session.revision++;
+    if (session.revision === 1) {
+        session.message = 'Receiving shared speech for the recap.';
+        roomManager.broadcast(roomId, 'liveSummaryChanged', { active: true, hasSpeech: true });
+    }
     if (!session.timer) {
         session.timer = setTimeout(() => {
             session.timer = undefined;
@@ -75,6 +83,7 @@ export async function stopLiveSummary(roomId: string, code: string) {
     if (!session?.active) return;
     session.active = false;
     clearTimeout(session.timer);
+    if (!session.revision) session.message = 'No shared speech was captured. Nothing to summarize.';
     notify(roomId, false);
     await update(roomId, code, session);
     session.entries = [];

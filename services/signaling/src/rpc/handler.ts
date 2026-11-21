@@ -703,6 +703,7 @@ export async function handleRpcMessage(
                 const durationMs = transcript.since ? Date.now() - transcript.since : 0;
                 const summary = await generateMeetingSummary(transcript.entries, {
                     meetingCode: room?.meetingCode || 'QS-VC',
+                    meetingKind: room?.settings.meetingKind,
                     participants: participantNames,
                     durationMs,
                     language: parsed.data.language,

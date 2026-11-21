@@ -2242,7 +2242,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             <div className="meeting-top-bar">
                 <div className="top-bar-left">
                     <TenantBrand branding={organisationBranding} meeting />
-                    {connected && <LiveMeetingSummary controlsRef={setCaptionControls} onActiveChange={setSummaryActive} onSettings={signedIn && !captionsLocked ? () => { closePanels(); setLanguageOpen(true); } : undefined} key={currentRoomId || meetingCode} manager={manager && hasFeature(entitlements, 'ai_meeting_summary')} code={meetingCode || ''} />}
                     <button type="button" className="meeting-info-trigger" onClick={openInformation} aria-label="Meeting information" aria-haspopup="dialog" aria-expanded={informationOpen} title="Meeting information">
                         <span className="mi" aria-hidden="true">info</span>
                     </button>
@@ -2273,6 +2272,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     {externalConference && <span className="qs-topchip" role="status">External conference: Bharat VC{externalConference.status === 'connecting' ? ' · Connecting' : externalConference.status === 'unknown' ? ' · Status uncertain' : ''}</span>}
                     {e2eeEnabled && <EncryptionBadge active={e2eeActive} securityCode={securityCode} participants={peers.size + 1} />}
                     <span className="participant-count"><span className="mi mi-sm">group</span> {peers.size + 1}</span>
+                    {connected && <LiveMeetingSummary controlsRef={setCaptionControls} onActiveChange={setSummaryActive} onSettings={signedIn && !captionsLocked ? () => { closePanels(); setLanguageOpen(true); } : undefined} key={currentRoomId || meetingCode} manager={manager && hasFeature(entitlements, 'ai_meeting_summary')} code={meetingCode || ''} />}
                 </div>
             </div>
 

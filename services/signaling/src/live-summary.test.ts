@@ -4,7 +4,7 @@ import { generateMeetingSummary } from './ai-meeting-summary.js';
 import { saveTranscript } from './transcript-store.js';
 import { roomManager } from './room-manager.js';
 
-vi.mock('./room-manager.js', () => ({roomManager: { broadcast: vi.fn() }}));
+vi.mock('./room-manager.js', () => ({roomManager: { broadcast: vi.fn(), getRoom: vi.fn() }}));
 vi.mock('./ai-meeting-summary.js', () => ({generateMeetingSummary: vi.fn(async () => 'Recap')}));
 vi.mock('./transcript-store.js', () => ({saveTranscript: vi.fn(async () => true)}));
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); });
@@ -25,4 +25,13 @@ it('announces active state, summarizes new shared speech and saves the final upd
     expect(saveTranscript).toHaveBeenCalledTimes(2);
     await finishLiveSummary('room','code');
     expect(liveSummaryState('room',true)).toEqual({active:false});
+});
+
+it('finishes a silent meeting without generating or storing a recap', async () => {
+    startLiveSummary('silent');
+    await stopLiveSummary('silent', 'code');
+    expect(liveSummaryState('silent', true).message).toContain('Nothing to summarize');
+    expect(generateMeetingSummary).not.toHaveBeenCalled();
+    expect(saveTranscript).not.toHaveBeenCalled();
+    await finishLiveSummary('silent', 'code');
 });
