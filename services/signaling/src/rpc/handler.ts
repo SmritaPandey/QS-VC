@@ -1,4 +1,4 @@
-import { finishLiveSummary, startLiveSummary, stopLiveSummary, liveSummaryState } from '../live-summary.js';
+import { refreshLiveSummary, finishLiveSummary, startLiveSummary, stopLiveSummary, liveSummaryState } from '../live-summary.js';
 import { bharatVcDial, disconnectBharatVc } from '../bharat-vc.js';
 import { recordMeetingAttendance } from '../meeting-attendance.js';
 import { meetingObservability } from '../meeting-observability.js';
@@ -675,6 +675,7 @@ export async function handleRpcMessage(
                 const room = roomManager.getRoom(roomId);
                 if (!room || room.peers.get(connectionState.peerId!)?.ws !== ws) throw createError(-32005, 'Join the room first.');
                 const manager = roomManager.isHostOrCoHost(roomId, connectionState.peerId!) && can(connectionState.authUser, 'ai_meeting_summary');
+                if (method === 'liveSummaryState' && (params as { refresh?: boolean } | undefined)?.refresh === true) refreshLiveSummary(roomId, room.meetingCode);
                 if (method !== 'liveSummaryState') {
                     if (!manager) throw createError(-32005, 'A Pro host or co-host is required.');
                     if (method === 'startLiveSummary') {

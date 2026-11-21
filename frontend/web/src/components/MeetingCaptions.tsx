@@ -1,5 +1,3 @@
-import { createPortal } from 'react-dom';
-import { hasFeature, useEntitlements } from '../lib/entitlements';
 import SelectionInput from './SelectionInput';
 import { playbackFailure, type SpeechDiagnostic } from '../lib/translated-speech-status';
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
@@ -18,7 +16,6 @@ interface AsrCapabilities { participants?: { peerId: string; displayName: string
 interface Capabilities { configured: boolean; languages: { code: string; name: string; targets?: string[] }[]; processing?: string; asr?: AsrCapabilities; minutes?: { configured: boolean }; transcript?: { saving: boolean } }
 interface Props {
     open: boolean; onClose: () => void; connected: boolean; audioMuted: boolean; translatedSpeaking: boolean;
-    controls?: HTMLDivElement | null;
     summaryActive?: boolean;
     e2eeActive?: boolean;
     speakingLanguage: string; onSpeakingLanguageChange: (code: string) => void; onUseDetectedLanguage: () => void; displayName: string; myPeerId: () => string;
@@ -43,7 +40,7 @@ interface Props {
 const same = (a: string, b: string) => a === b || a.split('-')[0] === b.split('-')[0];
 
 /** Captions: speech → server (or browser) recognition → room; translations pushed by the server per chosen language. */
-export default function MeetingCaptions({ controls, summaryActive = false, open, onClose, connected, audioMuted, speakingLanguage, displayName, myPeerId, onSpeakingChange, stopRecognition, translatedSpeaking, e2eeActive = false, onSpeakingLanguageChange, onUseDetectedLanguage, showCaptions, onShowCaptionsChange: setShowCaptions, shareSpeech, onShareSpeechChange, getMicTrack, isHost = false, meetingCode = 'meeting', canShareSpeech, viewOnly = false, viewerLanguage = 'en-US' }: Props) {
+export default function MeetingCaptions({ summaryActive = false, open, onClose, connected, audioMuted, speakingLanguage, displayName, myPeerId, onSpeakingChange, stopRecognition, translatedSpeaking, e2eeActive = false, onSpeakingLanguageChange, onUseDetectedLanguage, showCaptions, onShowCaptionsChange: setShowCaptions, shareSpeech, onShareSpeechChange, getMicTrack, isHost = false, meetingCode = 'meeting', canShareSpeech, viewOnly = false, viewerLanguage = 'en-US' }: Props) {
     const [captionLanguage, setCaptionLanguage] = useState('original');
     const [hearLanguage, setHearLanguage] = useState('');
     const [voiceEnabled, setVoiceEnabled] = useState(false);
@@ -65,7 +62,6 @@ export default function MeetingCaptions({ controls, summaryActive = false, open,
     const [hadTranscript, setHadTranscript] = useState(false);
     const [transcriptSaving, setTranscriptSaving] = useState(false);
     useEffect(() => { if (transcriptSaving) setHadTranscript(true); }, [transcriptSaving]);
-    const summaryAvailable = hasFeature(useEntitlements(), 'ai_meeting_summary');
     const [minutes, setMinutes] = useState('');
     const [minutesBusy, setMinutesBusy] = useState(false);
     /** False when the meeting server is an older build without transcripts / pushed translations. */
@@ -269,16 +265,6 @@ export default function MeetingCaptions({ controls, summaryActive = false, open,
         onShareSpeechChange(enabled);
         setStatus('');
     };
-    const [summaryBusy, setSummaryBusy] = useState(false);
-    const [summary, setSummary] = useState('');
-    const createSummary = async () => {
-        setSummaryBusy(true); setStatus('Writing executive AI summary…');
-        try {
-            const result = await signaling.request('generateMeetingSummary', {}) as { summary: string; saved?: boolean };
-            setSummary(result.summary); setStatus(result.saved ? 'Summary saved. Open Recordings and summary in your workspace to read it later.' : 'Summary ready in this meeting only. Download a copy before leaving.');
-        } catch { setStatus('AI summary temporarily unavailable.'); }
-        finally { setSummaryBusy(false); }
-    };
     const createMinutes = async () => {
         setMinutesBusy(true); setStatus('Writing meeting minutes…');
         try {
@@ -293,18 +279,6 @@ export default function MeetingCaptions({ controls, summaryActive = false, open,
     const name = (code: string, fallback: string) => LANGUAGES.find(item => item.code === code)?.name || LANGUAGES.find(item => item.code.split('-')[0] === code)?.name || fallback;
     const speakOptions = captionLanguageOptions(serverAsr ? asrLanguages : null, speakingLanguage);
     return <>
-        {controls && createPortal(<section className="caption-settings-group" aria-label="Live transcription">
-            <label className="caption-toggle"><SelectionInput type="checkbox" checked={showCaptions} onChange={event => setShowCaptions(event.target.checked)} />Show captions with speaker names</label>
-            {canShareSpeech && recognitionSupported ? <label className="caption-toggle"><SelectionInput type="checkbox" checked={shareSpeech} onChange={event => shareMySpeech(event.target.checked)} />
-                {serverAsr ? 'Send my microphone audio to the transcription service and share my captions' : 'Use browser speech recognition to share my captions'}</label>
-                : <p>{canShareSpeech ? 'Speech recognition is unavailable on this device.' : 'You can read captions shared by eligible speakers.'}</p>}
-            {shareSpeech && <p role="status">{audioMuted ? 'Unmute to share your speech.' : 'Listening for your speech.'}</p>}
-            {isHost && <label className="caption-toggle"><SelectionInput type="checkbox" checked={transcriptSaving} onChange={event => toggleTranscript(event.target.checked)} />Save transcript and notify everyone</label>}
-            <p>{transcriptSaving ? 'Saving shared speech with speaker names.' : 'The host can start a transcript to capture shared speech.'}</p>
-            <button type="button" onClick={() => download('txt')}>Download transcript (.txt)</button>
-            <button type="button" onClick={() => download('srt')}>Download subtitles (.srt)</button>
-            {status && <p role="status">{status}</p>}
-        </section>, controls)}
         {voiceEnabled && voiceDiagnostic && !open && !dismissedVoiceDiagnostics.has(voiceDiagnosticKey) && <MeetingToast key={voiceDiagnosticKey} className="meeting-caption-diagnostic" onDismiss={dismissVoiceDiagnostic}>
             <span data-speech-gate={voiceDiagnostic.gate}>{voiceDiagnostic.message} Original meeting audio stays on.</span>
         </MeetingToast>}
@@ -366,13 +340,10 @@ export default function MeetingCaptions({ controls, summaryActive = false, open,
                 <button type="button" className="btn-outline" onClick={() => download('txt')}>Download .txt</button>
                 <button type="button" className="btn-outline" onClick={() => download('srt')}>Download .srt</button>
                 {transcriptSaving && isHost && capabilities.minutes?.configured && <>
-                    {summaryAvailable && <p className="caption-settings-note">Generating a summary sends saved caption text to the AI provider. For workspace meetings, the summary is saved with the transcript for 90 days.</p>}
                     <button type="button" className="btn-outline" disabled={minutesBusy} onClick={createMinutes}>{minutesBusy ? 'Writing minutes…' : 'Create AI minutes'}</button>
-                    {summaryAvailable && <button type="button" className="btn-outline" disabled={summaryBusy} onClick={createSummary} style={{ marginLeft: '6px' }}>{summaryBusy ? 'Summarizing…' : 'Executive AI summary'}</button>}
                 </>}
             </div>}
             {minutes && <div className="caption-minutes"><pre>{minutes}</pre><button type="button" className="btn-text" onClick={() => downloadText(`${meetingCode}-minutes.md`, minutes)}>Download minutes</button></div>}
-            {summary && <div className="caption-minutes" style={{ marginTop: '10px' }}><pre>{summary}</pre><button type="button" className="btn-text" onClick={() => downloadText(`${meetingCode}-executive-summary.md`, summary)}>Download executive summary</button></div>}
             </details>
             <div role="status" className="caption-settings-status">{status || capabilityError}</div>
         </section>}

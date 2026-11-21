@@ -4,16 +4,12 @@
  * to the organisation's speech service. Works in every browser with AudioWorklet (Chrome, Edge,
  * Firefox, Safari, Electron). A separate consented audio copy is readable by signaling and ASR.
  */
+import captureWorkletUrl from './speech-capture.worklet.js?url&no-inline';
 import { signaling } from './signaling';
 
 import { TARGET_RATE, floatToPcm16Base64, resampleTo16k } from './pcm';
 export { TARGET_RATE, floatToPcm16Base64, resampleTo16k };
 const CHUNK_SAMPLES = 4_000; // 250 ms
-
-const WORKLET = `class QsvcCapture extends AudioWorkletProcessor {
-  process(inputs) { const channel = inputs[0] && inputs[0][0]; if (channel && channel.length) this.port.postMessage(channel.slice(0)); return true; }
-}
-registerProcessor('qsvc-capture', QsvcCapture);`;
 
 export interface ServerSpeechOptions {
     processorConsent: boolean;
@@ -56,8 +52,7 @@ export class ServerSpeechEngine {
             let context: AudioContext;
             try { context = new AudioContext({ sampleRate: TARGET_RATE }); } catch { context = new AudioContext(); }
             this.context = context;
-            const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
-            try { await context.audioWorklet.addModule(url); } finally { URL.revokeObjectURL(url); }
+            await context.audioWorklet.addModule(captureWorkletUrl);
             if (!this.active) return;
             this.source = context.createMediaStreamSource(new MediaStream([this.track]));
             this.node = new AudioWorkletNode(context, 'qsvc-capture');

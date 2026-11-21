@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { addSummaryCaption, finishLiveSummary, liveSummaryState, startLiveSummary, stopLiveSummary } from './live-summary.js';
+import { addSummaryCaption, refreshLiveSummary, finishLiveSummary, liveSummaryState, startLiveSummary, stopLiveSummary } from './live-summary.js';
 import { generateMeetingSummary } from './ai-meeting-summary.js';
 import { saveTranscript } from './transcript-store.js';
 import { roomManager } from './room-manager.js';
@@ -34,4 +34,20 @@ it('finishes a silent meeting without generating or storing a recap', async () =
     expect(generateMeetingSummary).not.toHaveBeenCalled();
     expect(saveTranscript).not.toHaveBeenCalled();
     await finishLiveSummary('silent', 'code');
+});
+
+it('refreshes once on open and preserves the recap during silence', async () => {
+    vi.useFakeTimers();
+    startLiveSummary('refresh');
+    refreshLiveSummary('refresh', 'code');
+    expect(generateMeetingSummary).not.toHaveBeenCalled();
+    addSummaryCaption('refresh', 'code', { id: '1', peerId: 'p', speaker: 'A', text: 'Decide today.', language: 'en', timestamp: Date.now() });
+    refreshLiveSummary('refresh', 'code');
+    refreshLiveSummary('refresh', 'code');
+    await vi.advanceTimersByTimeAsync(8001);
+    expect(liveSummaryState('refresh', true)).toMatchObject({ active: true, text: 'Recap' });
+    expect(liveSummaryState('refresh', true).hasSpeech).toBeUndefined();
+    refreshLiveSummary('refresh', 'code');
+    expect(generateMeetingSummary).toHaveBeenCalledTimes(1);
+    await finishLiveSummary('refresh', 'code');
 });

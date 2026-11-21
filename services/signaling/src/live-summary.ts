@@ -14,6 +14,9 @@ class LiveSummary {
     saved = false;
     message = 'Waiting for shared speech. Nothing to summarize yet.';
     timer?: ReturnType<typeof setTimeout>;
+    speaking = false;
+    silence?: ReturnType<typeof setTimeout>;
+    lastAttempt = -Infinity;
     pending?: Promise<void>;
 }
 
@@ -22,7 +25,7 @@ const notify = (roomId: string, active: boolean) => roomManager.broadcast(roomId
 
 export function liveSummaryState(roomId: string, manager: boolean) {
     const session = sessions.get(roomId);
-    return { active: !!session?.active, ...(session?.revision ? { hasSpeech: true } : {}), ...(manager && session ? { text: session.text, saved: session.saved, message: session.message } : {}) };
+    return { active: !!session?.active, ...(session?.speaking ? { hasSpeech: true } : {}), ...(session?.text ? { text: session.text } : {}), ...(manager && session ? { saved: session.saved, message: session.message } : {}) };
 }
 
 export function startLiveSummary(roomId: string) {
@@ -37,6 +40,7 @@ async function update(roomId: string, code: string, session: LiveSummary) {
     if (session.pending) await session.pending;
     if (session.completed === session.revision || !session.entries.length) return;
     if (session.pending) return session.pending;
+    session.lastAttempt = Date.now();
     const revision = session.revision;
     session.pending = (async () => {
         try {
@@ -59,16 +63,31 @@ async function update(roomId: string, code: string, session: LiveSummary) {
     await session.pending;
 }
 
+export function refreshLiveSummary(roomId: string, code: string) {
+    const session = sessions.get(roomId);
+    if (session?.active && session.entries.length && !session.pending && Date.now() - session.lastAttempt >= 5000) {
+        session.message = 'Updating recap…';
+        void update(roomId, code, session);
+    }
+}
+
 export function addSummaryCaption(roomId: string, code: string, entry: TranscriptEntry) {
     const session = sessions.get(roomId);
     if (!session?.active) return;
     session.entries.push(entry);
     if (session.entries.length > 2000) session.entries.shift();
     session.revision++;
-    if (session.revision === 1) {
+    if (!session.speaking) {
+        session.speaking = true;
         session.message = 'Receiving shared speech for the recap.';
         roomManager.broadcast(roomId, 'liveSummaryChanged', { active: true, hasSpeech: true });
     }
+    clearTimeout(session.silence);
+    session.silence = setTimeout(() => {
+        session.speaking = false;
+        notify(roomId, true);
+    }, 8000);
+    session.silence.unref();
     if (!session.timer) {
         session.timer = setTimeout(() => {
             session.timer = undefined;
@@ -82,6 +101,8 @@ export async function stopLiveSummary(roomId: string, code: string) {
     const session = sessions.get(roomId);
     if (!session?.active) return;
     session.active = false;
+    session.speaking = false;
+    clearTimeout(session.silence);
     clearTimeout(session.timer);
     if (!session.revision) session.message = 'No shared speech was captured. Nothing to summarize.';
     notify(roomId, false);

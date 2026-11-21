@@ -257,6 +257,6 @@
 .meeting-summary-switch[aria-checked=true] span { background: #006974; color: white; }
 .meeting-summary-switch[aria-checked=true] span::after { margin-left: auto; }
 .meeting-summary-state:not(:empty) { font-size: .75rem; flex-basis: 100%; text-align: center; }
-.meeting-room .meeting-summary-panel { position: fixed; inset: 4rem .75rem auto auto; margin: 0; z-index: 100; white-space: normal; }
+.meeting-room .meeting-summary-panel { margin: 0; z-index: 40; white-space: normal; }
 .meeting-summary-panel header { display: flex; align-items: center; justify-content: space-between; }
 @media (max-width: 640px) { .meeting-summary-label .mi { display: none; } .meeting-summary-label { font-size: .8rem; } }
