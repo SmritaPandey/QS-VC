@@ -28,6 +28,7 @@ export default function ShareScreenModal({ open, canCapture, canShareActivity, o
                 <h2 id="share-screen-title">Share with the meeting</h2>
                 <button type="button" className="share-screen-close" aria-label="Close sharing options" onClick={onClose}><span aria-hidden="true" className="mi">close</span></button>
             </header>
+            {!canCapture && !canShareActivity && <p role="status">Sharing is currently unavailable for you in this meeting.</p>}
             {canCapture && <fieldset className="share-picker-group">
                 <legend>Present your screen</legend>
                 <div className="share-picker-grid">{surfaces.map(([value, icon, label]) =>

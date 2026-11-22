@@ -25,7 +25,8 @@ const bindActions = new Function('context', compile(`
     return { startScreenShare, stopScreenShare, togglePauseScreenShare };
 `));
 const renderBanner = new Function('React', 'context', 'actions', compile(`
-    const {screenShareReady, screenPaused} = context;
+    const {screenShareReady, screenPaused, secureActivities, encryptedNotes, setShareScreenModalOpen} = context;
+    const manager = ['host', 'co-host'].includes(context.myRoleRef.current);
     const {togglePauseScreenShare, stopScreenShare} = actions;
     return (${banner});
 `));
@@ -44,6 +45,7 @@ function deferredCapture() {
         screenStreamRef: { current: null }, joinedRef: { current: true },
         myRoleRef: { current: 'member' }, roomSettingsRef: { current: { allowScreenShare: true } }, busyRef: { current: {} }, initializingRef: { current: false },
         screenPaused: false, screenShareReady: false, screenSharing: false,
+        secureActivities: false, encryptedNotes: undefined, setShareScreenModalOpen: vi.fn(),
         setScreenStream: vi.fn(),
         setScreenSharing: (value: boolean) => { context.screenSharing = value; },
         setScreenPaused: (value: boolean) => { context.screenPaused = value; },
