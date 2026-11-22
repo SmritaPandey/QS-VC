@@ -1,5 +1,6 @@
 const KEY = 'qsvc:storage-consent:v2';
-const OPTIONAL = ['qsvc:speech-language', 'qsvc:reaction-preferences', 'qsvc:ui-sounds', 'qsvc:theme'];
+export const CAPTION_LANGUAGE_KEY = 'qsvc:caption-language';
+const OPTIONAL = [CAPTION_LANGUAGE_KEY, 'qsvc:speech-language', 'qsvc:reaction-preferences', 'qsvc:ui-sounds', 'qsvc:theme'];
 let memory: boolean | null = null;
 export function readStorageConsent(): boolean | null {
     if (memory !== null) return memory;

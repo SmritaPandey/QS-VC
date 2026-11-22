@@ -18,7 +18,7 @@ function provider() {
     const request = vi.fn(async (url: string, init?: RequestInit) => ({
         ok: true,
         text: async () => JSON.stringify(url.endsWith('/languages')
-            ? [{ code: 'en', name: 'English', targets: ['hi', 'ta', 'pa'] }, { code: 'pa', name: 'Punjabi', targets: ['en'] }, { code: 'hi', name: 'Hindi', targets: ['en'] }, { code: 'ta', name: 'Tamil', targets: ['en'] }]
+            ? [{ code: 'en', name: 'English', targets: ['hi', 'ta', 'pa', 'bn'] }, { code: 'bn', name: 'Bengali', targets: ['en'] }, { code: 'pa', name: 'Punjabi', targets: ['en'] }, { code: 'hi', name: 'Hindi', targets: ['en'] }, { code: 'ta', name: 'Tamil', targets: ['en'] }]
             : { translatedText: `${JSON.parse(String(init?.body)).target}:${JSON.parse(String(init?.body)).q}` }),
     }));
     vi.stubEnv('LIBRETRANSLATE_URL', `http://mt-${crypto.randomUUID()}.local`);
@@ -51,6 +51,16 @@ describe('server-side translation fan-out', () => {
         expect(sent(original.ws, 'captionReceived')).toHaveLength(1);
         const translateCalls = request.mock.calls.filter(call => String(call[0]).endsWith('/translate'));
         expect(translateCalls).toHaveLength(2); // hi once (shared by two listeners) + ta once
+    });
+    it('translates a speaker’s own English recognition into their selected Bengali output', async () => {
+        const request = provider();
+        const speaker = participant();
+        subscribeCaptions(speaker.ws, speaker.roomId, speaker.id, { targets: ['bn-IN'] });
+        publishServerCaption(speaker.roomId, speaker.id, { id: 'greeting', text: 'Good morning', language: 'en-US' });
+        await vi.waitFor(() => expect(sent(speaker.ws, 'captionTranslated')).toHaveLength(1));
+        const call = request.mock.calls.find(([url]) => url.endsWith('/translate'));
+        expect(JSON.parse(String(call?.[1]?.body))).toMatchObject({ source: 'en', target: 'bn', q: 'Good morning' });
+        expect(sent(speaker.ws, 'captionTranslated')[0]).toMatchObject({ sourceLanguage: 'en-US', target: 'bn-IN', peerId: speaker.id });
     });
     it('delivers original Punjabi to B and translates English for a listener requesting Punjabi', async () => {
         provider();
