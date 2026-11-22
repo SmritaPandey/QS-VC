@@ -388,3 +388,44 @@
         animation: none;
     }
 }
+
+.share-picker-group, .share-picker-activities {
+    min-inline-size: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+.share-picker-group legend, .share-picker-activities h3 {
+    padding: 0;
+    margin: 0 0 .5rem;
+    font-size: 1rem;
+    font-weight: 600;
+}
+.share-picker-activities p { margin: 0 0 .65rem; color: var(--text-secondary); }
+.share-picker-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr));
+    gap: .45rem;
+}
+.share-picker-option {
+    display: flex;
+    align-items: center;
+    gap: .45rem;
+    min-height: 44px;
+    padding: .45rem .65rem;
+    border: 1px solid var(--border-subtle, #466174);
+    border-radius: .55rem;
+    color: inherit;
+    background: transparent;
+    font: inherit;
+    cursor: pointer;
+}
+.share-picker-option:has(:checked) { background: #17504b; color: #fff; }
+.share-picker-option:focus-within, button.share-picker-option:focus-visible { outline: 2px solid #49cfc0; outline-offset: 1px; }
+.share-picker-option input, .share-picker-sound input { accent-color: #087b72; width: 1rem; height: 1rem; margin: 0; flex: none; }
+.share-picker-sound { display: flex; gap: .5rem; align-items: center; min-height: 44px; }
+@media (max-width: 600px) {
+    .share-screen-modal-content { padding: 16px; gap: 16px; }
+    .meeting-stage-toolbar .presenting-banner { flex-wrap: wrap; }
+    .meeting-stage-toolbar .presenting-banner-actions { flex-wrap: wrap; }
+}

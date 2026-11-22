@@ -116,6 +116,7 @@ export interface BreakoutRoom {
 }
 
 export interface RoomState {
+    hostCaptionTranslation?: boolean;
     id: string;
     meetingCode: string;
     hostPeerId: string | null;

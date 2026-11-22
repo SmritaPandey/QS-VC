@@ -417,8 +417,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [reactionsOpen, setReactionsOpen] = useState(false);
     // Speaking language for voice-to-text: saved choice, else the user's location.
     const [speechLanguage, setSpeechLanguage] = useState<MeetingLanguage>(() => initialMeetingLanguage());
-    /** Guests read captions in the language of their location (time zone / region), fixed for the meeting. */
-    const guestCaptionLanguage = useMemo(() => detectLanguage().code, []);
     const [translatedSpeaking, setTranslatedSpeaking] = useState(false);
     const getMyPeerId = useCallback(() => myPeerIdRef.current, []);
     /** Captions use the same microphone the meeting sends (noise-suppressed when that is on). */
@@ -1820,15 +1818,20 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     const handleScreenShare = useCallback(() => {
         if (roomTransitionBusy.current) { showNotice('Wait for the room change to finish.'); return; }
-        if (!canPublishRef.current) { showNotice('Only people on stage can share media.'); return; }
-        if (!sharingRef.current && myRoleRef.current !== 'host' && !roomSettings.allowScreenShare) { showNotice('Only the host can share until they allow screen sharing.'); return; }
-        if (sharingRef.current) {
-            stopScreenShare();
-        } else if (typeof navigator.mediaDevices?.getDisplayMedia !== 'function') {
-            showNotice('Screen sharing isn’t available in this browser.');
-        } else {
-            setShareScreenModalOpen(true);
+        const manager = myRoleRef.current === 'host' || myRoleRef.current === 'co-host';
+        if (sharingRef.current) { void stopScreenShare(); return; }
+        const activitiesAvailable = manager && (!requiredE2eeRef.current || !!e2eeRef.current);
+        if (!activitiesAvailable) {
+            if (!canPublishRef.current || (myRoleRef.current !== 'host' && !roomSettings.allowScreenShare)) {
+                showNotice('The host can give you permission to share.');
+                return;
+            }
+            if (typeof navigator.mediaDevices?.getDisplayMedia !== 'function') {
+                showNotice('Screen sharing is unavailable in this browser.');
+                return;
+            }
         }
+        setShareScreenModalOpen(true);
     }, [stopScreenShare, roomSettings.allowScreenShare, showNotice]);
 
     const savePendingRecording = useCallback(async () => {
@@ -2220,7 +2223,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         : networkProfile === 'audio-only' ? 'Video is paused to keep audio clear.' : 'Video quality is reduced because of a weak connection.';
 
     const secureActivities = requiredE2eeRef.current;
-    const screenOnStage = screenSharing || Array.from(peers.values()).some(peer => peer.screenVideoTrack?.readyState === 'live');
     const activityOnStage = activitiesOpen && (!secureActivities || !!e2eeRef.current);
     const sidePanelOpen = chatOpen || participantsOpen || hostToolsOpen || effectsOpen || summaryOpen;
     const manager = myRole === 'host' || myRole === 'co-host';
@@ -2392,6 +2394,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         <span className="mi presenting-banner-icon" aria-hidden="true">screen_share</span>
                         <span className="presenting-banner-text" role="status"><span className="presenting-full">{screenShareReady ? `You are presenting to everyone${screenPaused ? ' (Paused)' : ''}` : 'Starting screen sharing…'}</span><span className="presenting-short">{screenShareReady ? (screenPaused ? 'Paused' : 'Presenting') : 'Starting…'}</span></span>
                         <div className="presenting-banner-actions">
+                            {manager && (!secureActivities || encryptedNotes) && <button type="button" className="btn-banner-action" onClick={() => setShareScreenModalOpen(true)}>Activities</button>}
                             <button type="button" className="btn-banner-action" onClick={togglePauseScreenShare} disabled={!screenShareReady} title={!screenShareReady ? 'Screen sharing is starting' : screenPaused ? 'Resume screen sharing' : 'Pause screen sharing'}>
                                 <span className="mi" aria-hidden="true">{screenPaused ? 'play_arrow' : 'pause'}</span>
                                 {screenPaused ? 'Resume' : 'Pause'}
@@ -2404,8 +2407,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     </div>
                 )}
             </div>}
-            <div className="meeting-content" data-activity-stage={activityOnStage || undefined} data-activity-dock={activityOnStage && (webinar || screenOnStage) || undefined}>
-                {(!secureActivities || encryptedNotes) && <MeetingCollaboration sharedTab={sharedTab} key={`${meetingCode}:${roomJoinEpoch}:${secureActivities}`} open={activitiesOpen} tabRequest={tabRequest}
+            <div className="meeting-content" data-activity-stage={activityOnStage || undefined} data-activity-dock={activityOnStage && webinar && !sharedTab || undefined}>
+                {(!secureActivities || encryptedNotes) && <MeetingCollaboration sharedTab={sharedTab} key={`${meetingCode}:${roomJoinEpoch}:${secureActivities}`} open={activitiesOpen} tabRequest={tabRequest} onSelectTab={tab => setTabRequest({ tab })}
                     connected={connected && (!secureActivities || e2eeActive)} role={myRole} myPeerId={myPeerIdRef.current}
                     onClose={closeActivityPanel} encryptedNotes={secureActivities ? encryptedNotes : undefined} canShareFiles={myRole === 'host' || roomSettings.allowFileShare === true} canEditBoard={myRole === 'host' || roomSettings.allowScreenShare === true} />}
                 <div ref={videoAreaRef} className={`video-area ${sidePanelOpen ? 'with-panel' : ''}`}>
@@ -2431,7 +2434,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     <MeetingCaptions statusHost={captionStatusHost} summaryActive={summaryActive} translatedSpeaking={translatedSpeaking} e2eeActive={e2eeActive} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
                         showCaptions={captionsOn} onShowCaptionsChange={setCaptionsOn} shareSpeech={shareSpeech} onShareSpeechChange={setShareSpeech}
                         getMicTrack={getCaptionMicTrack} isHost={manager} meetingCode={meetingCode}
-                        canShareSpeech={signedIn && !captionsLocked && canPublishRef.current} viewOnly={!signedIn || captionsLocked} viewerLanguage={guestCaptionLanguage} />
+                        canShareSpeech={canPublishRef.current} viewOnly={!signedIn || captionsLocked} />
                 </div>
 
                 {breakoutsOpen && <MeetingBreakouts connected={connected} isHost={myRole === 'host'} currentRoomId={currentRoomId} transitioning={roomTransitioning} participants={[{ peerId: myPeerIdRef.current || 'self', displayName: `${displayName} (You)` }, ...Array.from(peers.values()).map(peer => ({ peerId: peer.peerId, displayName: peer.displayName }))]} onJoin={moveToBreakout} onClose={() => { setBreakoutsOpen(false); restoreFormatFocus(); }} />}
@@ -2515,7 +2518,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 handRaised={handRaised} reactionsOpen={reactionsOpen}
                 onToggleReactions={() => { closePanels(); setReactionsOpen(!reactionsOpen); }}
                 languageOpen={languageOpen}
-                onToggleLanguage={signedIn ? () => { if (captionsLocked) { requestPlanFeature('ai_captions'); return; } closePanels(); setLanguageOpen(!languageOpen); } : undefined}
+                onToggleLanguage={() => { closePanels(); setLanguageOpen(!languageOpen); }}
                 onToggleAudio={handleToggleAudio} onToggleVideo={handleToggleVideo}
                 onToggleScreen={handleScreenShare} onOpenInvite={() => setInviteModalOpen(true)} onToggleRecording={handleToggleRecording}
                 onToggleChat={() => { if (!roomSettings.allowChat && !manager) { showNotice('Chat is disabled by the host.'); return; } setIncomingChatMessage(null); closePanels(); setChatOpen(!chatOpen); }}
@@ -2525,6 +2528,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             <MeetingInformation open={informationOpen} meetingCode={meetingCode || ''} joinUrl={`${window.location.origin}${meetingPreviewPath}`} meetingTitle={meetingTitle} onClose={() => setInformationOpen(false)} />
             <ShareScreenModal
                 open={shareScreenModalOpen}
+                canCapture={!screenSharing && canPublishRef.current && (myRole === 'host' || roomSettings.allowScreenShare) && typeof navigator.mediaDevices?.getDisplayMedia === 'function'}
+                canShareActivity={manager && (!secureActivities || !!encryptedNotes)}
+                onActivity={tab => { void signaling.request('setSharedActivity', { tab }).catch(() => showNotice('Could not share the activity. Try again.')); }}
                 onClose={() => setShareScreenModalOpen(false)}
                 onSelect={(surface, shareSound) => void startScreenShare(surface, shareSound)}
             />

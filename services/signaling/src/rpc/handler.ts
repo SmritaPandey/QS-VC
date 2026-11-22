@@ -348,7 +348,9 @@ async function endRoomForEveryone(roomId: string, by: string, peerId?: string, a
 }
 
 const joiningSockets = new WeakSet<object>();
-const CAPTION_SPEAKER_PLAN_MESSAGE = 'Sign in with a plan that includes captions to share your speech';
+function hasCaptionTranslation(roomId: string, user: Parameters<typeof can>[0]) {
+    return roomManager.getRoom(roomId)?.hostCaptionTranslation === true || can(user, 'ai_captions');
+}
 
 /**
  * Handle a JSON-RPC request from a WebSocket client.
@@ -420,6 +422,7 @@ export async function handleRpcMessage(
                     child.parentRoomId = parent.id;
                     child.ownerUserId = `breakout:${parent.id}`;
                     child.hostStarted = true;
+                    child.hostCaptionTranslation = parent.hostCaptionTranslation;
                     parent.breakoutRooms.set(child.id, { roomId: child.id, name: sanitizeString(parsed.data.name, 60), open: false, assignedPeerIds: new Set() });
                 } else if (method === 'assignBreakoutParticipants') {
                     const parsed = z.object({ breakoutRoomId: z.string().uuid(), peerIds: z.array(z.string().uuid()).max(parent.settings.maxParticipants) }).strict().safeParse(params);
@@ -585,18 +588,15 @@ export async function handleRpcMessage(
                 if (room?.settings.webinar && !canPublishInRoom(room.id, connectionState.peerId!, connectionState.authUser?.sub)) {
                     throw createError(-32005, 'Only the webinar organiser can publish captions');
                 }
-                if (!can(connectionState.authUser, 'ai_captions')) throw createError(-32005, CAPTION_SPEAKER_PLAN_MESSAGE);
                 return { jsonrpc: '2.0', id: id!, result: publishCaption(ws, connectionState.roomId!, connectionState.peerId!, params) };
             }
             case 'captionInterim':
             case 'asrStart':
             case 'asrAudio': {
-                // Sharing speech (and using the speech server) is a plan feature; guests can only read captions.
                 const room = roomManager.getRoom(connectionState.roomId!);
                 if (room?.settings.webinar && !canPublishInRoom(room.id, connectionState.peerId!, connectionState.authUser?.sub)) {
                     throw createError(-32005, 'Only the webinar organiser can publish captions');
                 }
-                if (!can(connectionState.authUser, 'ai_captions')) throw createError(-32005, CAPTION_SPEAKER_PLAN_MESSAGE);
                 const [roomId, peerId] = [connectionState.roomId!, connectionState.peerId!];
                 const result = method === 'captionInterim' ? publishInterim(ws, roomId, peerId, params)
                     : method === 'asrStart' ? await startAsr(ws, roomId, peerId, params)
@@ -608,7 +608,7 @@ export async function handleRpcMessage(
             case 'captionSubscribe': {
                 // Guests (and accounts without captions) read captions in ONE language and get no translated voice.
                 const targets = (params as { targets?: unknown })?.targets;
-                if (!can(connectionState.authUser, 'ai_captions') && Array.isArray(targets) && targets.filter(target => target !== 'original').length > 1) {
+                if (!hasCaptionTranslation(connectionState.roomId!, connectionState.authUser) && Array.isArray(targets) && targets.filter(target => target !== 'original').length > 1) {
                     throw createError(-32005, 'Guests can see captions in one language only');
                 }
                 return { jsonrpc: '2.0', id: id!, result: subscribeCaptions(ws, connectionState.roomId!, connectionState.peerId!, params) };
@@ -617,7 +617,7 @@ export async function handleRpcMessage(
                 const [captions, asr] = await Promise.all([translationCapabilities(ws, connectionState.roomId!, connectionState.peerId!).catch(() => ({
                     configured: false, temporarilyUnavailable: true, languages: [], transcript: { saving: transcriptSaving(connectionState.roomId!) },
                 })), asrCapabilities()]);
-                return { jsonrpc: '2.0', id: id!, result: { ...captions, asr: { ...asr, participants: asrParticipants(connectionState.roomId!) }, minutes: { configured: minutesConfigured() } } };
+                return { jsonrpc: '2.0', id: id!, result: { ...captions, translatedAudio: hasCaptionTranslation(connectionState.roomId!, connectionState.authUser), asr: { ...asr, participants: asrParticipants(connectionState.roomId!) }, minutes: { configured: minutesConfigured() } } };
             }
             case 'setTranscriptSaving': {
                 const parsed = z.object({ enabled: z.boolean() }).strict().safeParse(params);
@@ -731,7 +731,7 @@ export async function handleRpcMessage(
                 return { jsonrpc: '2.0', id: id!, result: { minutes } };
             }
             case 'captionVoice':
-                if (!can(connectionState.authUser, 'ai_captions')) throw createError(-32005, CAPTION_SPEAKER_PLAN_MESSAGE);
+                if (!hasCaptionTranslation(connectionState.roomId!, connectionState.authUser)) throw createError(-32005, 'Translated audio requires Starter or higher for you or the meeting host.');
                 return { jsonrpc: '2.0', id: id!, result: await translateCaption(ws, connectionState.roomId!, connectionState.peerId!, params, true) };
             case 'translateCaption':
                 return { jsonrpc: '2.0', id: id!, result: await translateCaption(ws, connectionState.roomId!, connectionState.peerId!, params) };
@@ -828,6 +828,9 @@ export async function handleRpcMessage(
                 const directEntry = canEnterWithoutApproval(room, connectionState.authUser, isGuestUser);
                 // Platform admins (role from the server-signed session) can enter and run any meeting.
                 const isPlatformAdmin = !sessionMeeting && connectionState.authUser?.role === 'admin';
+                if (room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub) {
+                    room.hostCaptionTranslation = can(connectionState.authUser, 'ai_captions');
+                }
                 const isOwner = guestHost || (!!room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub) || isPlatformAdmin;
                 // Google Meet rule: nobody gets in before the host starts the meeting. They wait, and
                 // are let in (or asked to knock) automatically when the host arrives.

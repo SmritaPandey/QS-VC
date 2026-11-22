@@ -1,152 +1,51 @@
 import { useEffect, useRef, useState } from 'react';
+import { ACTIVITY_TABS, type CollaborationTab } from './MeetingCollaboration';
 
 export type ScreenShareSurface = 'browser' | 'window' | 'monitor';
+const surfaces = [['browser', 'tab', 'Browser tab'], ['window', 'web_asset', 'Window'], ['monitor', 'desktop_windows', 'Entire screen']] as const;
 
 interface Props {
     open: boolean;
+    canCapture: boolean;
+    canShareActivity: boolean;
     onClose: () => void;
-    onSelect: (surface: ScreenShareSurface, shareSound: boolean) => void;
+    onSelect: (surface: ScreenShareSurface, sound: boolean) => void;
+    onActivity: (tab: CollaborationTab) => void;
 }
 
-interface ShareOption {
-    value: ScreenShareSurface;
-    icon: string;
-    title: string;
-    badge: string;
-    description: string;
-}
-
-const SHARE_OPTIONS: ShareOption[] = [
-    {
-        value: 'browser',
-        icon: 'tab',
-        title: 'Chrome / Browser Tab',
-        badge: 'Best for video & sound',
-        description: 'Share a single web tab with high frame rate and tab audio.',
-    },
-    {
-        value: 'window',
-        icon: 'web_asset',
-        title: 'Application Window',
-        badge: 'Docs & apps',
-        description: 'Share a specific software window without exposing your entire desktop.',
-    },
-    {
-        value: 'monitor',
-        icon: 'desktop_windows',
-        title: 'Entire Screen',
-        badge: 'Full display',
-        description: 'Share your complete monitor across multiple applications and windows.',
-    },
-];
-
-export default function ShareScreenModal({ open, onClose, onSelect }: Props) {
-    const dialogRef = useRef<HTMLDialogElement>(null);
-    const [selected, setSelected] = useState<ScreenShareSurface>('browser');
-
-    const [shareSound, setShareSound] = useState(false);
-
+export default function ShareScreenModal({ open, canCapture, canShareActivity, onClose, onSelect, onActivity }: Props) {
+    const dialog = useRef<HTMLDialogElement>(null);
+    const [surface, setSurface] = useState<ScreenShareSurface>('browser');
+    const [sound, setSound] = useState(false);
     useEffect(() => {
-        const dialog = dialogRef.current;
-        if (!dialog) return;
-        if (open && !dialog.open) {
-            dialog.showModal();
-        } else if (!open && dialog.open) {
-            dialog.close();
-        }
+        if (open) dialog.current?.showModal();
     }, [open]);
-
     if (!open) return null;
-
-    const handleConfirm = () => {
-        onSelect(selected, shareSound);
-        onClose();
-    };
-
-    return (
-        <dialog
-            ref={dialogRef}
-            className="share-screen-dialog"
-            aria-labelledby="share-screen-title"
-            onCancel={(e) => {
-                e.preventDefault();
-                onClose();
-            }}
-        >
-            <div className="share-screen-modal-content">
-                <div className="share-screen-header">
-                    <div className="share-screen-title-group">
-                        <div className="share-screen-icon-bubble">
-                            <span className="mi share-screen-icon" aria-hidden="true">screen_share</span>
-                        </div>
-                        <div>
-                            <h2 id="share-screen-title">Choose what to share</h2>
-                            <p className="share-screen-lead">Select how you want to present to everyone in the meeting.</p>
-                        </div>
-                    </div>
-                    <button
-                        type="button"
-                        className="share-screen-close"
-                        aria-label="Close screen sharing options"
-                        onClick={onClose}
-                    >
-                        <span className="mi" aria-hidden="true">close</span>
-                    </button>
-                </div>
-
-                <div className="share-screen-options" role="radiogroup" aria-label="Screen sharing mode">
-                    {SHARE_OPTIONS.map((opt) => (
-                        <div
-                            key={opt.value}
-                            role="radio"
-                            aria-checked={selected === opt.value}
-                            tabIndex={0}
-                            className={`share-screen-card ${selected === opt.value ? 'selected' : ''}`}
-                            onClick={() => setSelected(opt.value)}
-                            onKeyDown={(e) => {
-                                if (e.key === ' ' || e.key === 'Enter') {
-                                    e.preventDefault();
-                                    setSelected(opt.value);
-                                }
-                            }}
-                        >
-                            <div className="share-card-icon-wrapper">
-                                <span className="mi" aria-hidden="true">{opt.icon}</span>
-                            </div>
-                            <div className="share-card-body">
-                                <div className="share-card-title-row">
-                                    <span className="share-card-title">{opt.title}</span>
-                                    <span className="share-card-badge">{opt.badge}</span>
-                                </div>
-                                <p className="share-card-desc">{opt.description}</p>
-                            </div>
-                            <div className="share-card-radio">
-                                <span className="mi" aria-hidden="true">
-                                    {selected === opt.value ? 'radio_button_checked' : 'radio_button_unchecked'}
-                                </span>
-                            </div>
-                        </div>
-                    ))}
-                </div>
-
-                <label><input type="checkbox" checked={shareSound} onChange={event => setShareSound(event.target.checked)} /> Share sound when available</label>
-                <div className="share-screen-footer">
-                    <p className="share-screen-privacy-note">
-                        <span className="mi" aria-hidden="true">lock</span>
-                        Your browser will prompt for permission before capture begins.
-                    </p>
-                    <div className="share-screen-actions">
-                        <button type="button" className="share-screen-btn-secondary" onClick={onClose}>
-                            Cancel
-                        </button>
-                        <button type="button" className="share-screen-btn-primary" onClick={handleConfirm}>
-                            <span className="mi" aria-hidden="true">screen_share</span>
-                            Share
-                        </button>
-                    </div>
-                </div>
-            </div>
-        </dialog>
-    );
+    return <dialog ref={dialog} aria-labelledby="share-screen-title" className="share-screen-dialog"
+        onCancel={event => { event.preventDefault(); onClose(); }}>
+        <div className="share-screen-modal-content">
+            <header className="share-screen-header">
+                <h2 id="share-screen-title">Share with the meeting</h2>
+                <button type="button" className="share-screen-close" aria-label="Close sharing options" onClick={onClose}><span aria-hidden="true" className="mi">close</span></button>
+            </header>
+            {canCapture && <fieldset className="share-picker-group">
+                <legend>Present your screen</legend>
+                <div className="share-picker-grid">{surfaces.map(([value, icon, label]) =>
+                    <label key={value} className="share-picker-option">
+                        <input type="radio" name="share-surface" value={value} checked={surface === value} onChange={() => setSurface(value)} />
+                        <span className="mi" aria-hidden="true">{icon}</span>{label}
+                    </label>)}</div>
+                <label className="share-picker-sound"><input type="checkbox" checked={sound} onChange={event => setSound(event.target.checked)} />Include sound when available</label>
+                <button type="button" className="share-screen-btn-primary" onClick={() => { onSelect(surface, sound); onClose(); }}>Choose {surfaces.find(([value]) => value === surface)?.[2].toLowerCase()}…</button>
+            </fieldset>}
+            {canShareActivity && <section className="share-picker-activities" aria-labelledby="share-activity-heading">
+                <h3 id="share-activity-heading">Share an activity</h3>
+                <p>Opens for everyone alongside the call.</p>
+                <div className="share-picker-grid">{ACTIVITY_TABS.map(([tab, icon, title]) =>
+                    <button type="button" key={tab} className="share-picker-option" onClick={() => { onActivity(tab); onClose(); }}>
+                        <span className="mi" aria-hidden="true">{icon}</span>{title}
+                    </button>)}</div>
+            </section>}
+        </div>
+    </dialog>;
 }
-

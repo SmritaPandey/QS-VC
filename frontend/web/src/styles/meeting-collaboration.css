@@ -352,3 +352,7 @@
   }
   .meeting-room .meeting-processor-slot { flex:none; margin:0; }
 }
+
+.board-navigation { display:flex; align-items:center; justify-content:flex-end; gap:.25rem; }
+.board-viewport { overflow:auto; overscroll-behavior:contain; max-height:65dvh; background:#fff; }
+.board-viewport .collaboration-board { max-width:none; height:auto; border-radius:0; }

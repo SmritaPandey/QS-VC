@@ -2,7 +2,7 @@ import { downloadReport, pollReport, questionReport } from '../lib/activity-repo
 import SelectionInput from './SelectionInput';
 import { useCallback, useEffect, useRef, useState, type FormEvent, type PointerEvent } from 'react';
 import { signaling } from '../lib/signaling';
-import { boardPoint, EMPTY_COLLABORATION, newerCollaboration, pollCounts, sharedFileError, SHARED_FILE_TYPES, POLL_RESULT_LABELS, type BoardPoint, type CollaborationState, type PollResults } from '../lib/collaboration-state';
+import { boardPoint, EMPTY_COLLABORATION, newerCollaboration, pollCounts, sharedFileError, SHARED_FILE_TYPES, POLL_RESULT_LABELS, type BoardStroke, type BoardPoint, type CollaborationState, type PollResults } from '../lib/collaboration-state';
 import { MAX_SECURE_NOTES_BYTES, type EncryptedNotesRecord } from '../lib/e2ee-data';
 import { readEncryptedNotes, saveEncryptedNotes, type EncryptedNotesAccess } from '../lib/encrypted-notes';
 import EncryptedPolls from './EncryptedPolls';
@@ -14,26 +14,30 @@ import { downloadWhiteboard } from '../lib/whiteboard-export';
 import WhiteboardStickyNotes from './WhiteboardStickyNotes';
 import '../styles/meeting-collaboration.css';
 
-interface Props { sharedTab?: CollaborationTab | null; tabRequest?: { tab: CollaborationTab }; open: boolean; connected: boolean; role: string; myPeerId: string; onClose: () => void; encryptedNotes?: EncryptedNotesAccess; canShareFiles?: boolean; canEditBoard?: boolean }
-const TABS = [['board', 'draw', 'Whiteboard'], ['polls', 'poll', 'Polls'], ['questions', 'help', 'Q&A'], ['notes', 'description', 'Notes'], ['files', 'attach_file', 'Files']] as const;
-export type CollaborationTab = typeof TABS[number][0];
+interface Props { onSelectTab?: (tab: CollaborationTab) => void; sharedTab?: CollaborationTab | null; tabRequest?: { tab: CollaborationTab }; open: boolean; connected: boolean; role: string; myPeerId: string; onClose: () => void; encryptedNotes?: EncryptedNotesAccess; canShareFiles?: boolean; canEditBoard?: boolean }
+export const ACTIVITY_TABS = [['board', 'draw', 'Whiteboard'], ['polls', 'poll', 'Polls'], ['questions', 'help', 'Q&A'], ['notes', 'description', 'Notes'], ['files', 'attach_file', 'Files']] as const;
+export type CollaborationTab = typeof ACTIVITY_TABS[number][0];
 type Tab = CollaborationTab;
 const PALETTE = ['#102a43', '#006d77', '#c9364f', '#5141be'];
 const FILE_ICONS: Record<string, string> = { 'image/png': 'image', 'image/jpeg': 'image', 'application/pdf': 'picture_as_pdf', 'text/plain': 'description' };
 const fileSize = (bytes: number) => bytes < 1024 ? `${bytes} B` : `${Math.ceil(bytes / 1024)} KB`;
 
-export default function MeetingCollaboration({ sharedTab, tabRequest, open, connected, role, myPeerId, onClose, encryptedNotes, canShareFiles = true, canEditBoard = true }: Props) {
+export default function MeetingCollaboration({ onSelectTab, sharedTab, tabRequest, open, connected, role, myPeerId, onClose, encryptedNotes, canShareFiles = true, canEditBoard = true }: Props) {
     const [snapshot, setSnapshot] = useState<CollaborationState>(EMPTY_COLLABORATION);
     const [loading, setLoading] = useState(true);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const [tab, setTab] = useState<Tab>(tabRequest?.tab ?? 'board');
-    const tabs = TABS;
+    const tabs = ACTIVITY_TABS;
     useEffect(() => { if (tabRequest) { setPrivateView(false); setTab(tabRequest.tab); setError(''); } }, [tabRequest]);
     const [board, setBoard] = useState<EncryptedBoardState>({revision:0,strokes:[],stickyNotes:[],records:new Map()});
     const [boardError, setBoardError] = useState('');
     const boardRefresh = useRef<() => void>(() => {});
-    const [boardTool, setBoardTool] = useState<'notes' | 'draw'>('notes');
+    const [boardTool, setBoardTool] = useState<'notes' | 'draw' | 'pan' | 'line' | 'rectangle'>('draw');
+    const [redoStroke, setRedoStroke] = useState<BoardStroke | null>(null);
+    const drawingTool = boardTool === 'draw' || boardTool === 'line' || boardTool === 'rectangle';
+    const panOrigin = useRef<{ id: number; x: number; y: number; left: number; top: number } | null>(null);
+    const [zoom, setZoom] = useState(1);
     const [color, setColor] = useState(PALETTE[0]);
     const [width, setWidth] = useState(3);
     const [failedStroke,setFailedStroke]=useState<Record<string,unknown>|null>(null);
@@ -57,7 +61,15 @@ export default function MeetingCollaboration({ sharedTab, tabRequest, open, conn
     const fileInput = useRef<HTMLInputElement>(null);
     const tabsRef = useRef<HTMLElement>(null);
     // On narrow screens keep the chosen tab visible in the scrolling tab row.
-    useEffect(() => { tabsRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }, [tab, open]);
+    useEffect(() => {
+        const nav = tabsRef.current;
+        const selected = nav?.querySelector<HTMLElement>('[aria-selected="true"]');
+        if (!open || !nav || !selected) return;
+        const bounds = nav.getBoundingClientRect();
+        const item = selected.getBoundingClientRect();
+        if (item.left < bounds.left) nav.scrollLeft += item.left - bounds.left;
+        else if (item.right > bounds.right) nav.scrollLeft += item.right - bounds.right;
+    }, [tab, open]);
     const closeRef = useRef<HTMLButtonElement>(null);
     const active = useRef(true);
     const pending = useRef(false);
@@ -66,6 +78,12 @@ export default function MeetingCollaboration({ sharedTab, tabRequest, open, conn
         const accepted = newerCollaboration(current, next);
         return encryptedNotes ? {...accepted,strokes:current.strokes,stickyNotes:current.stickyNotes} : accepted;
     }); }, [encryptedNotes]);
+    const receiveBoard = useCallback((next: EncryptedBoardState) => {
+        setBoard(current => next.revision >= current.revision ? next : current);
+    }, []);
+    useEffect(() => {
+        if (encryptedNotes) setSnapshot(current => ({ ...current, strokes: board.strokes, stickyNotes: board.stickyNotes }));
+    }, [encryptedNotes, board]);
     useEffect(() => {
         if (!encryptedNotes || !connected) return;
         let disposed=false, running=false, queued=false;
@@ -76,7 +94,7 @@ export default function MeetingCollaboration({ sharedTab, tabRequest, open, conn
             running=true;
             try{
                 const next=await readEncryptedBoard(encryptedNotes);
-                if(!disposed){setBoard(next);setBoardError('');setSnapshot(current=>({...current,strokes:next.strokes,stickyNotes:next.stickyNotes}));}
+                if (!disposed) { receiveBoard(next); setBoardError(''); }
             }catch{if(!disposed)setBoardError('Whiteboard could not sync. Refresh when the secure connection is ready.');}
             finally{running=false;if(queued&&!disposed){queued=false;schedule();}}
         };
@@ -86,7 +104,7 @@ export default function MeetingCollaboration({ sharedTab, tabRequest, open, conn
         const key=encryptedNotes.manager.onKeyChange(schedule);
         schedule();
         return()=>{disposed=true;window.clearTimeout(timer);unsubscribe();key();boardRefresh.current=()=>{};};
-    },[encryptedNotes,connected]);
+    },[encryptedNotes,connected,receiveBoard]);
     const refresh = useCallback(async () => {
         try {
             const next = encryptedNotes
@@ -128,9 +146,8 @@ export default function MeetingCollaboration({ sharedTab, tabRequest, open, conn
             if (encryptedNotes) {
                 if (typeof action.type === 'string' && /^(stroke:|sticky:|board:)/.test(action.type)) {
                     const updated = await actEncryptedBoard(encryptedNotes,action,board,myPeerId);
-                    setBoard(updated);
+                    receiveBoard(updated);
                     const nextBoard={...snapshot,strokes:updated.strokes,stickyNotes:updated.stickyNotes};
-                    setSnapshot(current=>({...current,strokes:updated.strokes,stickyNotes:updated.stickyNotes}));
                     return nextBoard;
                 }
                 if (action.type !== 'notes:update' || typeof action.text !== 'string' || action.version !== snapshot.notes.version) return null;
@@ -151,24 +168,42 @@ export default function MeetingCollaboration({ sharedTab, tabRequest, open, conn
     };
     const pointAt = (event: PointerEvent<SVGSVGElement>) => boardPoint(event.clientX, event.clientY, event.currentTarget.getBoundingClientRect());
     const beginStroke = (event: PointerEvent<SVGSVGElement>) => {
-        if (!canEditBoard || !connected || loading || busy || event.button !== 0 || pointer.current !== null) return;
+        if (boardTool === 'pan' && event.button === 0) {
+            const viewport = event.currentTarget.parentElement!;
+            panOrigin.current = { id: event.pointerId, x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
+            event.currentTarget.setPointerCapture(event.pointerId);
+            return;
+        }
+        if (!drawingTool || !canEditBoard || !connected || loading || busy || event.button !== 0 || pointer.current !== null) return;
         const point = pointAt(event);
         if (!point) return;
         pointer.current = event.pointerId; event.currentTarget.setPointerCapture(event.pointerId);
         draftStroke.current = [point]; setDrawing([point]);
     };
     const moveStroke = (event: PointerEvent<SVGSVGElement>) => {
+        const pan = panOrigin.current;
+        if (pan?.id === event.pointerId) {
+            event.currentTarget.parentElement?.scrollTo(pan.left + pan.x - event.clientX, pan.top + pan.y - event.clientY);
+            return;
+        }
         if (pointer.current !== event.pointerId || draftStroke.current.length >= (encryptedNotes ? 400 : 1000)) return;
         const point = pointAt(event), previous = draftStroke.current[draftStroke.current.length - 1];
         if (!point || !previous || Math.hypot(point.x - previous.x, point.y - previous.y) < .002) return;
-        draftStroke.current.push(point); setDrawing([...draftStroke.current]);
+        const start = draftStroke.current[0];
+        if (boardTool === 'line') draftStroke.current = [start, point];
+        else if (boardTool === 'rectangle') {
+            draftStroke.current = [start, { x: point.x, y: start.y }, point, { x: start.x, y: point.y }, start];
+        } else draftStroke.current.push(point);
+        setDrawing([...draftStroke.current]);
     };
-    const cancelStroke = () => { pointer.current = null; draftStroke.current = []; setDrawing([]); };
+    const cancelStroke = () => { panOrigin.current = null; pointer.current = null; draftStroke.current = []; setDrawing([]); };
     const finishStroke = (event: PointerEvent<SVGSVGElement>) => {
         if (pointer.current !== event.pointerId) return;
+        moveStroke(event);
         const points = draftStroke.current;
         cancelStroke();
         if (points.length) {
+            setRedoStroke(null);
             const action={type:'stroke:add',points:points.length===1?[points[0],points[0]]:points,color,width};
             void act(action).then(saved=>setFailedStroke(saved?null:action));
         }
@@ -207,7 +242,7 @@ export default function MeetingCollaboration({ sharedTab, tabRequest, open, conn
         } catch { if (active.current) setError('Could not download this file. Try again.'); }
         finally { pending.current = false; if (active.current) setBusy(false); }
     };
-    const changeTab = (next: Tab) => { cancelStroke(); setInviteStatus(''); setTab(next); setError(''); };
+    const changeTab = (next: Tab) => { cancelStroke(); setInviteStatus(''); onSelectTab?.(next); setTab(next); setError(''); };
     const exportNotes = (text: string, filename: string) => {
         const url = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
         const link = document.createElement('a'); link.href = url; link.download = filename; document.body.append(link); link.click(); link.remove();
@@ -265,18 +300,33 @@ export default function MeetingCollaboration({ sharedTab, tabRequest, open, conn
             {tab === 'board' && <div className="whiteboard-modes" role="group" aria-label="Whiteboard tools">
                 <button type="button" aria-pressed={boardTool === 'notes'} onClick={() => { cancelStroke(); setBoardTool('notes'); }}><span className="mi" aria-hidden="true">sticky_note_2</span>Sticky notes</button>
                 <button type="button" aria-pressed={boardTool === 'draw'} onClick={() => setBoardTool('draw')}><span className="mi" aria-hidden="true">draw</span>Draw</button>
+                {(['line', 'rectangle'] as const).map(tool => <button key={tool} type="button" aria-pressed={boardTool === tool} onClick={() => { cancelStroke(); setBoardTool(tool); }}>
+                    <span className="mi" aria-hidden="true">{tool === 'line' ? 'show_chart' : 'crop_square'}</span>{tool === 'line' ? 'Line' : 'Rectangle'}
+                </button>)}
+                <button type="button" aria-pressed={boardTool === 'pan'} onClick={() => { cancelStroke(); setBoardTool('pan'); }}><span className="mi" aria-hidden="true">pan_tool</span>Pan</button>
                 <button type="button" disabled={!connected || loading || !!boardError || (!snapshot.strokes.length && !snapshot.stickyNotes?.length)} onClick={() => {
                     try { downloadWhiteboard(snapshot.strokes, snapshot.stickyNotes ?? []); }
                     catch { setError('Could not download the whiteboard image. Try again.'); }
                 }}><span className="mi" aria-hidden="true">download</span>Download board image</button>
             </div>}
-            <div hidden={tab !== 'board' || boardTool !== 'notes'}>
+            <div hidden={tab !== 'board' || (boardTool !== 'notes' && !snapshot.stickyNotes?.length)}>
                 <WhiteboardStickyNotes notes={snapshot.stickyNotes ?? []} myPeerId={myPeerId}
                     manager={manager} disabled={!canEditBoard || !connected || busy || loading} onAction={act} />
             </div>
             <fieldset className="collaboration-workspace" disabled={tab !== 'notes' && (!connected || busy || loading)}>
             {tab === 'board' && !canEditBoard && <p>The host can allow you to contribute to this whiteboard.</p>}
-            {tab === 'board' && boardTool === 'draw' && <><div className="collaboration-board-tools"><div role="group" aria-label="Pen colour">{PALETTE.map(value => <button key={value} type="button" aria-label={`Pen ${value}`} aria-pressed={color === value} onClick={() => setColor(value)} style={{ color: value }}><span aria-hidden="true">●</span></button>)}</div><label>Pen width<select value={width} onChange={event => setWidth(Number(event.target.value))}><option value={3}>Fine</option><option value={6}>Medium</option><option value={10}>Broad</option></select></label><button type="button" disabled={!myLastStroke} onClick={() => { if (myLastStroke) void act({ type: 'stroke:undo', id: myLastStroke.id }); }}>Undo mine</button>{manager && <button type="button" disabled={!snapshot.strokes.length} onClick={() => { if (window.confirm('Clear the shared whiteboard for everyone?')) void act({ type: 'board:clear' }); }}>Clear board</button>}</div><p className="collaboration-hint">Draw with a pointer or touch. Use shared notes for keyboard contributions.</p><svg className="collaboration-board" viewBox="0 0 1000 650" role="img" aria-label={`Shared whiteboard, ${snapshot.strokes.length} strokes`} onPointerDown={beginStroke} onPointerMove={moveStroke} onPointerUp={finishStroke} onPointerCancel={cancelStroke} onLostPointerCapture={cancelStroke}>{snapshot.strokes.map(stroke => <polyline key={stroke.id} points={stroke.points.map(point => `${point.x * 1000},${point.y * 650}`).join(' ')} fill="none" stroke={stroke.color} strokeWidth={stroke.width} strokeLinecap="round" strokeLinejoin="round" />)}<polyline points={drawing.map(point => `${point.x * 1000},${point.y * 650}`).join(' ')} fill="none" stroke={color} strokeWidth={width} strokeLinecap="round" strokeLinejoin="round" /></svg></>}
+            {tab === 'board' && <><div hidden={!drawingTool} className="collaboration-board-tools"><div role="group" aria-label="Pen colour">{PALETTE.map(value => <button key={value} type="button" aria-label={`Pen ${value}`} aria-pressed={color === value} onClick={() => setColor(value)} style={{ color: value }}><span aria-hidden="true">●</span></button>)}</div><label>Pen width<select value={width} onChange={event => setWidth(Number(event.target.value))}><option value={3}>Fine</option><option value={6}>Medium</option><option value={10}>Broad</option></select></label><button type="button" disabled={!canEditBoard || !myLastStroke} onClick={async () => {
+                if (myLastStroke && await act({ type: 'stroke:undo', id: myLastStroke.id })) setRedoStroke(myLastStroke);
+            }}>Undo my stroke</button>
+            <button type="button" disabled={!canEditBoard || !redoStroke} onClick={async () => {
+                if (!redoStroke) return;
+                const { points, color, width } = redoStroke;
+                if (await act({ type: 'stroke:add', points, color, width })) setRedoStroke(null);
+            }}>Redo stroke</button>{(encryptedNotes ? role === 'host' : manager) && <button type="button" disabled={!snapshot.strokes.length && !(encryptedNotes && snapshot.stickyNotes?.length)} onClick={() => { if (window.confirm(encryptedNotes ? 'Clear all drawings and sticky notes for everyone?' : 'Clear all drawings for everyone? Sticky notes will stay.')) void act({ type: 'board:clear' }).then(saved => { if (saved) setRedoStroke(null); }); }}>{encryptedNotes ? 'Clear board' : 'Clear drawings'}</button>}</div><p className="collaboration-hint">{boardTool === 'pan' ? 'Drag to move around the zoomed canvas.' : boardTool === 'notes' ? 'Add a sticky note above the canvas.' : boardTool === 'draw' ? 'Drag to draw. Use sticky notes to contribute with a keyboard.' : 'Drag from the start point to the end point.'}</p><div className="board-navigation" role="group" aria-label="Canvas zoom">
+                <button type="button" aria-label="Zoom out" disabled={zoom <= 1} onClick={() => setZoom(value => Math.max(1, value - .25))}>−</button>
+                <button type="button" aria-label="Reset canvas zoom" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
+                <button type="button" aria-label="Zoom in" disabled={zoom >= 3} onClick={() => setZoom(value => Math.min(3, value + .25))}>+</button>
+            </div><div className="board-viewport" role="region" aria-label="Drawing canvas" tabIndex={0}><svg className="collaboration-board" style={{ width: `${zoom * 100}%` }} viewBox="0 0 1000 650" role="img" aria-label={`Shared whiteboard, ${snapshot.strokes.length} strokes`} onPointerDown={beginStroke} onPointerMove={moveStroke} onPointerUp={finishStroke} onPointerCancel={cancelStroke} onLostPointerCapture={cancelStroke}>{snapshot.strokes.map(stroke => <polyline key={stroke.id} points={stroke.points.map(point => `${point.x * 1000},${point.y * 650}`).join(' ')} fill="none" stroke={stroke.color} strokeWidth={stroke.width} strokeLinecap="round" strokeLinejoin="round" />)}<polyline points={drawing.map(point => `${point.x * 1000},${point.y * 650}`).join(' ')} fill="none" stroke={color} strokeWidth={width} strokeLinecap="round" strokeLinejoin="round" /></svg></div></>}
             {manager && !encryptedNotes && tab === 'polls' && snapshot.polls.length > 0 &&
                 <button type="button" disabled={snapshot.polls.some(poll => poll.resultsHidden)} onClick={() =>
                     downloadReport('QS-VC-polls.csv', pollReport(snapshot.polls.map(poll => ({ ...poll, counts: pollCounts(poll) }))))}>Download poll report (CSV)</button>}

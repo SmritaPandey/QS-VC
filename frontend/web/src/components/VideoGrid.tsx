@@ -69,6 +69,7 @@ export default function VideoGrid({ localStream, localCameraTracks = {}, siteLoc
         ? (box.width <= 600 && box.height > box.width ? 'spotlight' : defaultLayout)
         : preferredView;
     const [page, setPage] = useState(0);
+    const [cameraPercent, setCameraPercent] = useState(28);
     useLayoutEffect(() => {
         const el = areaRef.current;
         if (!el || typeof ResizeObserver === 'undefined') return;
@@ -161,21 +162,38 @@ export default function VideoGrid({ localStream, localCameraTracks = {}, siteLoc
 
     if (presentationIds.length) {
         // Size the gallery from the available stage, including when chat takes up a column.
-        const sideGallery = box.width >= 720 && box.width > box.height * 1.1;
-        const galleryWidth = sideGallery ? box.width * 0.34 : box.width;
-        const galleryHeight = sideGallery ? box.height : box.height * 0.36;
-        const autoCapacity = Math.max(1, Math.floor(galleryWidth / 148)) * Math.max(1, Math.floor(galleryHeight / 120));
+        const sideGallery = box.width >= 720 && box.width > box.height * 1.1
+            || box.height < 440 && box.width > box.height * 1.6;
+        // Reserve the same space for the divider here and in the rendered grid.
+        const axis = Math.max(1, (sideGallery ? box.width : box.height) - 24);
+        const galleryExtent = axis * cameraPercent / 100;
+        const galleryWidth = sideGallery ? galleryExtent : box.width;
+        const galleryHeight = sideGallery ? box.height : galleryExtent;
+        const columns = Math.max(1, Math.floor((galleryWidth + 8) / 148));
+        const rows = Math.max(1, Math.floor((galleryHeight + 8) / 112));
+        const maxTiles = tilesPerPage === 'auto' ? 8 : tilesPerPage;
+        const capacity = columns * rows;
+        const pagerSpace = focusable.length > Math.min(capacity, maxTiles) ? 52 : 0;
+        const usableHeight = Math.max(1, galleryHeight - pagerSpace);
         const cameraLayout = computeLayout({ people, webinar, pinnedId: null, spotlightId: null, activeSpeaker,
-            pageSize: tilesPerPage === 'auto' ? Math.min(8, autoCapacity) : tilesPerPage, page });
-        const cameraShape = gridShape(Math.max(cameraLayout.tiles.length, 1), galleryWidth, galleryHeight - (cameraLayout.pages > 1 ? 52 : 0));
-        return <div ref={areaRef} className="qs-video-root qs-multi-content-stage" data-gallery-position={sideGallery ? 'beside' : 'below'}>
+            pageSize: Math.min(maxTiles, columns * Math.max(1, Math.floor((usableHeight + 8) / 112))), page });
+        const cameraShape = gridShape(Math.max(cameraLayout.tiles.length, 1), galleryWidth, usableHeight);
+        const shareShape = gridShape(presentationIds.length, sideGallery ? axis - galleryExtent : box.width,
+            sideGallery ? box.height : axis - galleryExtent);
+        return <div ref={areaRef} className="qs-video-root qs-multi-content-stage" data-gallery-position={sideGallery ? 'beside' : 'below'}
+            style={{ '--camera-space': `${cameraPercent}fr`, '--content-space': `${100 - cameraPercent}fr` } as CSSProperties}>
             <section className="qs-content-area" aria-label="Shared content">
                 <h2 className="sr-only">Shared content</h2>
-                <div className="qs-content-grid" data-count={presentationIds.length}>{presentationIds.map(peerId => tileFor(screenTileId(peerId), 'stage'))}</div>
+                <div className="qs-content-grid" data-count={presentationIds.length} style={{ gridTemplateColumns: `repeat(${shareShape.cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${shareShape.rows}, minmax(0, 1fr))` }}>{presentationIds.map(peerId => tileFor(screenTileId(peerId), 'stage'))}</div>
             </section>
+            <label className="qs-stage-divider" title="Adjust camera tile space">
+                <input type="range" min={16} max={48} step={1} value={cameraPercent}
+                    aria-label="Camera tile space" aria-valuetext={`${cameraPercent}% for cameras`}
+                    onChange={event => setCameraPercent(Number(event.target.value))} />
+            </label>
             <section className="qs-camera-area" aria-label="Participant cameras">
                 <h2 className="sr-only">Participant cameras</h2>
-                <div className="qs-camera-gallery" style={{ gridTemplateColumns: `repeat(${cameraShape.cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${cameraShape.rows}, minmax(96px, 1fr))` }}>
+                <div className="qs-camera-gallery" style={{ gridTemplateColumns: `repeat(${cameraShape.cols}, minmax(0, 1fr))`, gridTemplateRows: `repeat(${cameraShape.rows}, minmax(0, 1fr))` }}>
                     {cameraLayout.tiles.map(id => tileFor(id, 'grid'))}
                 </div>
                 {cameraLayout.pages > 1 && <nav className="qs-pager" aria-label="Pages of cameras"><button type="button" disabled={!cameraLayout.page} onClick={() => setPage(cameraLayout.page - 1)} aria-label="Previous cameras"><span className="mi" aria-hidden="true">chevron_left</span></button><span aria-live="polite">{cameraLayout.page + 1} / {cameraLayout.pages}</span><button type="button" disabled={cameraLayout.page >= cameraLayout.pages - 1} onClick={() => setPage(cameraLayout.page + 1)} aria-label="Next cameras"><span className="mi" aria-hidden="true">chevron_right</span></button></nav>}

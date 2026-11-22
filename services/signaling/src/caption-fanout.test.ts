@@ -18,7 +18,7 @@ function provider() {
     const request = vi.fn(async (url: string, init?: RequestInit) => ({
         ok: true,
         text: async () => JSON.stringify(url.endsWith('/languages')
-            ? [{ code: 'en', name: 'English', targets: ['hi', 'ta'] }, { code: 'hi', name: 'Hindi', targets: ['en'] }, { code: 'ta', name: 'Tamil', targets: ['en'] }]
+            ? [{ code: 'en', name: 'English', targets: ['hi', 'ta', 'pa'] }, { code: 'pa', name: 'Punjabi', targets: ['en'] }, { code: 'hi', name: 'Hindi', targets: ['en'] }, { code: 'ta', name: 'Tamil', targets: ['en'] }]
             : { translatedText: `${JSON.parse(String(init?.body)).target}:${JSON.parse(String(init?.body)).q}` }),
     }));
     vi.stubEnv('LIBRETRANSLATE_URL', `http://mt-${crypto.randomUUID()}.local`);
@@ -51,6 +51,21 @@ describe('server-side translation fan-out', () => {
         expect(sent(original.ws, 'captionReceived')).toHaveLength(1);
         const translateCalls = request.mock.calls.filter(call => String(call[0]).endsWith('/translate'));
         expect(translateCalls).toHaveLength(2); // hi once (shared by two listeners) + ta once
+    });
+    it('delivers original Punjabi to B and translates English for a listener requesting Punjabi', async () => {
+        provider();
+        const a = participant();
+        const b = participant(a.roomId);
+        const c = participant(a.roomId);
+        subscribeCaptions(b.ws, a.roomId, b.id, { targets: [] });
+        subscribeCaptions(c.ws, a.roomId, c.id, { targets: ['pa-IN'] });
+        const punjabi = { text: 'ਸਤਿ ਸ੍ਰੀ ਅਕਾਲ', language: 'pa-IN' };
+        publishCaption(a.ws, a.roomId, a.id, { ...punjabi, id: 'greeting', isFinal: true });
+        expect(sent(b.ws, 'captionReceived')[0]).toMatchObject(punjabi);
+        publishCaption(b.ws, a.roomId, b.id, { text: 'Hello', language: 'en', id: 'reply', isFinal: true });
+        await vi.waitFor(() => expect(sent(c.ws, 'captionTranslated')).toHaveLength(1));
+        expect(sent(c.ws, 'captionTranslated')[0]).toMatchObject({ target: 'pa-IN', translatedText: 'pa:Hello' });
+        expect(sent(b.ws, 'captionTranslated')).toHaveLength(0);
     });
     it('skips listeners whose language matches the speaker and reports provider failure', async () => {
         provider();
@@ -123,18 +138,20 @@ describe('server speech captions and transcript', () => {
 });
 
 describe('guest caption rules (RPC)', () => {
-    it('lets guests read captions in one language but not hear voice or share speech', async () => {
+    it('lets admitted guests contribute captions and inherit meeting translation access', async () => {
         const guest = participant();
         const state = { roomId: guest.roomId, peerId: guest.id };
         const call = (method: string, params: object, extra: object = {}) => handleRpcMessage(guest.ws, { jsonrpc: '2.0', id: 1, method, params }, { ...state, ...extra });
         expect((await call('captionSubscribe', { targets: ['hi-IN'] }))?.result).toEqual({ targets: ['hi-IN'] });
         expect((await call('captionSubscribe', { targets: ['hi-IN', 'ta'] }))?.error?.message).toContain('one language');
-        for (const method of ['captionInterim', 'asrStart', 'asrAudio']) {
-            expect((await call(method, { id: 'x', text: 'hi', language: 'en' }))?.error?.message).toContain('Sign in');
-        }
+        expect((await call('captionInterim', { id: 'x', text: 'hi', language: 'en' }))?.result).toEqual({ accepted: true });
+        expect((await call('asrStart', { language: 'en' }))?.error?.message).toContain('consent');
+        expect((await call('captionVoice', {}))?.error?.message).toContain('Starter');
         const paid = { authUser: { sub: 'u', plan: 'starter', status: 'paid_active' } };
         expect((await call('captionSubscribe', { targets: ['hi-IN', 'ta'] }, paid))?.result).toEqual({ targets: ['hi-IN', 'ta'] });
         const expired = { authUser: { sub: 'u', plan: 'starter_trial', status: 'trial_expired' } };
-        expect((await call('captionInterim', { id: 'x', text: 'hi', language: 'en' }, expired))?.error?.message).toContain('Sign in');
+        expect((await call('captionPublish', { id: 'final', text: 'hi', language: 'en', isFinal: true }, expired))?.result).toHaveProperty('id');
+        roomManager.getRoom(guest.roomId)!.hostCaptionTranslation = true;
+        expect((await call('captionSubscribe', { targets: ['pa', 'ta'] }))?.result).toEqual({ targets: ['pa', 'ta'] });
     });
 });

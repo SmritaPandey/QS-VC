@@ -146,7 +146,7 @@ export default function ControlBar({
     }
     const effectsRequirement = !signedIn ? `Sign in · ${minimumPlan('background_effects', 'basic')}` : effectsLocked ? `${minimumPlan('background_effects', 'basic')} plan` : undefined;
     const noiseRequirement = !signedIn ? `Sign in · ${minimumPlan('ai_noise_suppression', 'basic')}` : aiNoiseSuppressionLocked ? `${minimumPlan('ai_noise_suppression', 'basic')} plan` : undefined;
-    const languageRequirement = !signedIn ? 'Sign in to choose your language' : undefined;
+    const languageRequirement = !onToggleLanguage && !signedIn ? 'Sign in to choose your language' : undefined;
     const recordingRequirement = isRecording ? undefined : !signedIn ? `Sign in as host · ${minimumPlan('cloud_recording', 'basic')}` : !canRecord ? `Host only · ${minimumPlan('cloud_recording', 'basic')}` : recordingLocked ? `${minimumPlan('cloud_recording', 'basic')} plan` : undefined;
     const resolvePlanAccess = (feature: string) => { if (!signedIn) onSignInForExtras?.(); else onRequirePlanFeature?.(feature); };
     const chatCount = unreadChat > 99 ? '99+' : String(unreadChat);
