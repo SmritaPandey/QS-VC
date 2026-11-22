@@ -648,8 +648,6 @@ export async function handleRpcMessage(
                     budget = { until: now + 60_000, count: 0, pending: false };
                     assistantBudgets.set(account, budget);
                 }
-                if (budget.count >= 6) throw createError(-32003, 'Please wait a minute before asking another question.');
-                budget.count++;
                 budget.pending = true;
                 try {
                     const quickAnswers = new Map([
@@ -666,6 +664,8 @@ export async function handleRpcMessage(
                         const { isHost, e2eeActive, participantsCount, webinar } = request.data.context;
                         systemMsg += ` Current Meeting State: User is ${isHost ? 'Meeting Host' : 'Participant'}. Post-Quantum E2EE is ${e2eeActive ? 'ACTIVE (ML-KEM-1024)' : 'Standard'}. Meeting type is ${webinar ? 'Webinar' : 'Conference'}. Participant count is ${participantsCount ?? 'unknown'}.`;
                     }
+                    if (budget.count >= 6) throw createError(-32003, 'Please wait a minute before asking another question.');
+                    budget.count++;
                     const answer = await askOpenRouter(systemMsg, request.data.question);
                     return { jsonrpc: '2.0', id: id!, result: { answer } };
                 } finally { budget.pending = false; }

@@ -30,8 +30,9 @@ export function adminInsightsRouter(authorize: import('express').RequestHandler)
 
     router.post(
         '/',
-        rateLimit({ windowMs: 60_000, max: 10, standardHeaders: true, legacyHeaders: false }),
         authorize,
+        rateLimit({ windowMs: 60_000, max: 20, keyGenerator: (_req, res) => res.locals.admin.sub,
+            message: { error: 'Too many insight requests. Try again in a minute.' }, standardHeaders: true, legacyHeaders: false }),
         async (req, res) => {
             res.setHeader('Cache-Control', 'no-store');
 

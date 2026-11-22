@@ -13,14 +13,14 @@ const productInstructions = [
 
 export function productGuideRouter() {
     const router = Router();
-    let active = 0;
+    const pending = new Map<string, Promise<string>>();
+    const providerAttempts: number[] = [];
     let retryProviderAt = 0;
     const localReply = {
         source: 'local',
         answer: 'From the built-in QS-VC guide: open Meetings to join with a code, check Plans for recording access, or use Contact for help with your workspace.',
     };
-    router.post('/', rateLimit({ windowMs: 60_000, max: 5, standardHeaders: true, legacyHeaders: false }),
-        rateLimit({ windowMs: 3_600_000, max: 100, keyGenerator: () => 'product-guide', standardHeaders: true, legacyHeaders: false }),
+    router.post('/', rateLimit({ windowMs: 60_000, max: 20, message: { error: 'Too many guide requests. Try again in a minute.' }, standardHeaders: true, legacyHeaders: false }),
         async (req, res) => {
             res.setHeader('Cache-Control', 'no-store');
             const question = req.body?.question;
@@ -32,13 +32,25 @@ export function productGuideRouter() {
                 res.json(localReply);
                 return;
             }
-            if (!openRouterConfigured() || active >= 4) {
+            if (!openRouterConfigured()) {
                 res.status(503).json({ error: 'AI product guidance is unavailable.' });
                 return;
             }
-            active++;
+            const prompt = question.trim();
+            const now = Date.now();
+            while (providerAttempts.length && providerAttempts[0] <= now - 3_600_000) providerAttempts.shift();
             try {
-                const answer = await askOpenRouter(productInstructions, question.trim());
+                let completion = pending.get(prompt);
+                if (!completion) {
+                    if (pending.size >= 4 || providerAttempts.length >= 100) {
+                        res.json(localReply);
+                        return;
+                    }
+                    providerAttempts.push(now);
+                    completion = askOpenRouter(productInstructions, prompt).finally(() => pending.delete(prompt));
+                    pending.set(prompt, completion);
+                }
+                const answer = await completion;
                 res.json({ answer });
             } catch (error) {
                 if (error instanceof OpenRouterRateLimitError) {
@@ -47,8 +59,6 @@ export function productGuideRouter() {
                     return;
                 }
                 res.status(503).json({ error: 'AI product guidance is unavailable.' });
-            } finally {
-                active--;
             }
         });
     return router;
