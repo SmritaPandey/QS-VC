@@ -35,6 +35,7 @@ export class MediaManager {
     private e2ee: E2EEManager | null = null;
 
     private networkProfile: 'good' | 'poor' | 'audio-only' = 'poor';
+    private keepScreenShare = false;
     private userPaused = new Set<string>();
     private appliedQuality = new Map<string, string>();
     private qualityUpdates = new Map<string, Promise<void>>();
@@ -69,11 +70,12 @@ export class MediaManager {
         });
     }
 
-    async setNetworkProfile(profile: 'good' | 'poor' | 'audio-only'): Promise<void> {
+    async setNetworkProfile(profile: 'good' | 'poor' | 'audio-only', keepScreenShare = false): Promise<void> {
         this.networkProfile = profile;
+        this.keepScreenShare = keepScreenShare;
         await Promise.allSettled([...this.producers.values()].filter(p => p.kind === 'video' && !p.closed).map(async producer => {
-            if (profile === 'audio-only' || this.userPaused.has(producer.id)) producer.pause();
-            else { if (producer.paused) producer.resume(); await producer.setMaxSpatialLayer(profile === 'poor' ? 0 : 2); }
+            if (this.shouldPauseVideo(producer.appData) || this.userPaused.has(producer.id)) producer.pause();
+            else { if (producer.paused) producer.resume(); await producer.setMaxSpatialLayer(profile === 'good' ? 2 : 0); }
         }));
         await Promise.allSettled([...this.consumers.values()].filter(c => c.kind === 'video').map(c => this.applyConsumerQuality(c)));
     }
@@ -83,9 +85,14 @@ export class MediaManager {
         await Promise.allSettled([...this.consumers.values()].filter(c => c.peerId === peerId && c.kind === 'video').map(c => this.applyConsumerQuality(c)));
     }
 
+    private shouldPauseVideo(appData: Record<string, unknown>): boolean {
+        const screen = appData.source === 'screen' || appData.type === 'screen';
+        return this.networkProfile === 'audio-only' && !(this.keepScreenShare && screen);
+    }
+
     private async applyConsumerQuality(info: ConsumerInfo): Promise<void> {
         const desired = this.consumerQuality.get(info.peerId) || 'high';
-        const quality = this.networkProfile === 'audio-only' ? 'paused' : this.networkProfile === 'poor' && desired === 'high' ? 'low' : desired;
+        const quality = this.shouldPauseVideo(info.appData) ? 'paused' : this.networkProfile !== 'good' && desired === 'high' ? 'low' : desired;
         const previous = this.qualityUpdates.get(info.id);
         if (previous) { await previous; if (this.consumers.has(info.id)) return this.applyConsumerQuality(info); return; }
         if (this.appliedQuality.get(info.id) === quality || info.consumer.closed) return;
@@ -270,8 +277,8 @@ export class MediaManager {
         if (revision !== this.revision || transport.closed) { producer.close(); throw new Error('Media session closed'); }
         this.producers.set(producer.id, producer);
         if (producer.kind === 'video') {
-            if (this.networkProfile === 'audio-only') producer.pause();
-            else if (producer.setMaxSpatialLayer) await producer.setMaxSpatialLayer(this.networkProfile === 'poor' ? 0 : 2).catch(() => undefined);
+            if (this.shouldPauseVideo(producer.appData)) producer.pause();
+            else if (producer.setMaxSpatialLayer) await producer.setMaxSpatialLayer(this.networkProfile === 'good' ? 2 : 0).catch(() => undefined);
         }
         console.log(`[Media] Producing ${track.kind} [producer:${producer.id}]`);
         return producer;
@@ -347,7 +354,7 @@ export class MediaManager {
         for (const producer of this.producers.values()) {
             if (producer.kind !== kind || producer.closed || !this.hasSource(producer, source)) continue;
             if (paused) this.userPaused.add(producer.id); else this.userPaused.delete(producer.id);
-            if (!paused && kind === 'video' && this.networkProfile === 'audio-only') continue;
+            if (!paused && kind === 'video' && this.shouldPauseVideo(producer.appData)) continue;
             if (paused && !producer.paused) producer.pause();
             if (!paused && producer.paused) producer.resume();
         }
@@ -429,7 +436,7 @@ export class MediaManager {
     close(): void {
         this.revision++;
         for (const timer of this.recoveryTimers) clearTimeout(timer);
-        this.recoveryTimers.clear(); this.userPaused.clear(); this.consumerQuality.clear(); this.networkProfile = 'poor'; this.appliedQuality.clear(); this.qualityUpdates.clear();
+        this.recoveryTimers.clear(); this.userPaused.clear(); this.consumerQuality.clear(); this.networkProfile = 'poor'; this.keepScreenShare = false; this.appliedQuality.clear(); this.qualityUpdates.clear();
         for (const producer of this.producers.values()) {
             producer.close();
         }

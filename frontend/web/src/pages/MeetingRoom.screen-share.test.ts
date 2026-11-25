@@ -18,7 +18,7 @@ function visit(node: ts.Node) {
 visit(source);
 const compile = (code: string) => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React } }).outputText;
 const bindActions = new Function('context', compile(`
-    const { useCallback, sharingRef, sessionRevision, sessionActive, screenStreamRef, joinedRef,
+    const { useCallback, audioOnlyRef, sharingRef, sessionRevision, sessionActive, screenStreamRef, joinedRef,
         roomSettingsRef, myRoleRef, busyRef, initializingRef, media, navigator, signaling, playSound, showNotice,
         screenPaused, screenShareReady, setScreenStream, setScreenSharing, setScreenPaused, setScreenShareReady } = context;
     ${['stopScreenShare', 'togglePauseScreenShare', 'startScreenShare'].map(name => declarations.get(name)).join('\n')}
@@ -41,7 +41,7 @@ function deferredCapture() {
     const stream = { getTracks: () => [track], getVideoTracks: () => [track], getAudioTracks: () => [] };
     const context: any = {
         useCallback: (callback: unknown) => callback,
-        sharingRef: { current: false }, sessionRevision: { current: 1 }, sessionActive: { current: true },
+        audioOnlyRef: { current: false }, sharingRef: { current: false }, sessionRevision: { current: 1 }, sessionActive: { current: true },
         screenStreamRef: { current: null }, joinedRef: { current: true },
         myRoleRef: { current: 'member' }, roomSettingsRef: { current: { allowScreenShare: true } }, busyRef: { current: {} }, initializingRef: { current: false },
         screenPaused: false, screenShareReady: false, screenSharing: false,

@@ -97,6 +97,17 @@ describe('remote producer removal', () => {
         return { manager, made };
     }
 
+    it('keeps receiving visible screens during automatic bandwidth fallback', async () => {
+        const { manager } = await receiver();
+        await manager.consume('peer', 'camera');
+        await manager.setNetworkProfile('audio-only', true);
+        expect(mocks.request).toHaveBeenCalledWith('setConsumerQuality', { consumerId: 'consumer-camera', quality: 'paused' });
+        await manager.consume('peer', 'screen');
+        expect(mocks.request).toHaveBeenCalledWith('setConsumerQuality', { consumerId: 'consumer-screen', quality: 'low' });
+        await manager.setNetworkProfile('audio-only');
+        expect(mocks.request).toHaveBeenCalledWith('setConsumerQuality', { consumerId: 'consumer-screen', quality: 'paused' });
+    });
+
     it('removes the stopped screen consumer immediately without removing the camera or a replacement share', async () => {
         const { manager, made } = await receiver();
         const onNew = vi.fn(), onRemoved = vi.fn(); manager.setConsumerCallbacks(onNew, onRemoved);
@@ -236,7 +247,18 @@ it('keeps audio and explicitly muted cameras unchanged across bandwidth profiles
     await manager.produce({ kind: 'audio' } as MediaStreamTrack);
     await manager.produce({ kind: 'video' } as MediaStreamTrack, { source: 'camera' });
     expect(producers[1].setMaxSpatialLayer).toHaveBeenCalledWith(0);
+    await manager.produce({ kind: 'video' } as MediaStreamTrack, { source: 'screen' });
+    await manager.setNetworkProfile('audio-only', true);
+    expect(producers[2].paused).toBe(false);
+    manager.setPaused('video', true, 'screen');
+    await manager.setNetworkProfile('audio-only', true);
+    expect(producers[2].paused).toBe(true);
+    manager.setPaused('video', false, 'screen');
+    expect(producers[2].paused).toBe(false);
+    await manager.produce({ kind: 'video' } as MediaStreamTrack, { type: 'screen' });
+    expect(producers[3].paused).toBe(false);
     await manager.setNetworkProfile('audio-only');
+    expect(producers[2].paused).toBe(true);
     expect(producers[0].pause).not.toHaveBeenCalled();
     expect(producers[1].paused).toBe(true);
     manager.setPaused('video', true, 'camera');

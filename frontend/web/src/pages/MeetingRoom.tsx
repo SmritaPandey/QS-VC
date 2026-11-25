@@ -277,7 +277,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         setMeasuredPoorConnection(sample.status === 'poor');
         if (next !== profileRef.current) {
             const revision = profileRevision.current;
-            await media.setNetworkProfile(next);
+            await media.setNetworkProfile(next, !audioOnlyRef.current);
             if (revision !== profileRevision.current) return;
             profileRef.current = next; setNetworkProfile(next);
         }
@@ -1763,6 +1763,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     }, [screenPaused, screenShareReady, showNotice]);
 
     const startScreenShare = useCallback(async (surface?: ScreenShareSurface, shareSound = false) => {
+        if (audioOnlyRef.current) { showNotice('Turn off Audio-only in Connection quality before sharing your screen.'); return; }
         if (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare) { showNotice('Only the host can share until they allow screen sharing.'); return; }
         if (!sessionActive.current || sharingRef.current || busyRef.current.screen) return;
         if (initializingRef.current || !joinedRef.current || !media.canSend) { showNotice('Screen sharing is unavailable. Rejoin the meeting and try again.'); return; }
@@ -1782,7 +1783,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 audio: shareSound,
                 ...({ selfBrowserSurface: 'include', systemAudio: shareSound ? 'include' : 'exclude', surfaceSwitching: 'include' } as any),
             });
-            if (!sessionActive.current || revision !== sessionRevision.current || (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare)) { display.getTracks().forEach(t => t.stop()); return; }
+            if (!sessionActive.current || revision !== sessionRevision.current || audioOnlyRef.current || (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare)) { display.getTracks().forEach(t => t.stop()); return; }
             const screenTrack = display.getVideoTracks()[0];
             screenTrack.onended = () => { stopScreenShare(); };
             screenStreamRef.current = display;
@@ -2220,7 +2221,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const connectionMessage = mediaRecovery === 'failed' ? 'Media recovery failed. Rejoin if audio is unavailable.'
         : mediaRecovery === 'recovering' ? 'Restoring your media connection…'
         : audioOnly || !measuredPoorConnection || networkProfile === 'good' ? ''
-        : networkProfile === 'audio-only' ? 'Video is paused to keep audio clear.' : 'Video quality is reduced because of a weak connection.';
+        : networkProfile === 'audio-only' ? 'Camera video is paused to keep audio clear.' : 'Video quality is reduced because of a weak connection.';
 
     const secureActivities = requiredE2eeRef.current;
     const activityOnStage = activitiesOpen && (!secureActivities || !!e2eeRef.current);
@@ -2477,7 +2478,10 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 profileRef.current = enabled ? 'audio-only' : 'poor'; setNetworkProfile(profileRef.current);
                 qualityStreak.current = { good: 0, poor: 0 };
                 setMeasuredPoorConnection(false);
-                if (enabled) applyMute('video', true);
+                if (enabled) {
+                    applyMute('video', true);
+                    await stopScreenShare();
+                }
                 else showNotice('Audio-only is off. Start your camera when ready.');
             }} onOpenReport={signedIn ? () => setSessionReportOpen(true) : undefined} open={qualityOpen} connected={connected} getStats={getQualityStats} onSample={reportQualitySample} onClose={() => setQualityOpen(false)} />
             <MultiCameraPanel open={multiCameraOpen} onClose={() => setMultiCameraOpen(false)} cameras={additionalCameras} primaryDeviceId={localStream?.getVideoTracks()[0]?.getSettings().deviceId} canStart={connected && !roomTransitioning && !videoOff && pageVisible && canPublishRef.current && roomSettings.allowCamera} onStart={async deviceId => { if (roomTransitionBusy.current || !connected || videoOff || document.hidden || !canPublishRef.current || !roomSettingsRef.current.allowCamera) throw new Error('Start your main camera and check host camera permissions first.'); await multiCameraRef.current!.startCamera(deviceId, localStreamRef.current?.getVideoTracks()[0]?.getSettings().deviceId); }} onStop={source => multiCameraRef.current!.stopCamera(source)} />
