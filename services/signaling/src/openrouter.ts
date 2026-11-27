@@ -1,9 +1,13 @@
 import { scrubSensitiveData } from './ai/ai-sanitizer.js';
+import { requireFreeOpenRouterModel } from './ai/free-openrouter-model.js';
 import { request } from 'node:https';
 import { aiService, AIFeature, AIOptions } from './ai/index.js';
 
 const endpoint = 'https://openrouter.ai/api/v1/chat/completions';
 const unavailable = () => new Error('AI service is unavailable');
+export class OpenRouterResponseError extends Error {
+    constructor(readonly status: number) { super('AI service is unavailable'); }
+}
 export class OpenRouterRateLimitError extends Error {}
 let pending = 0;
 
@@ -28,7 +32,7 @@ async function requestCompletion(system: string, prompt: string, credential?: st
     const key = credential?.trim();
     if (process.env.QSVC_DEPLOYMENT === 'onprem' || !key || pending >= 16 || !prompt.trim() || prompt.length > 65_536) throw unavailable();
     const payload = JSON.stringify({
-        model: modelOverride?.trim() || process.env.OPENROUTER_MODEL?.trim() || 'openrouter/free',
+        model: requireFreeOpenRouterModel(modelOverride?.trim() || process.env.OPENROUTER_MODEL?.trim() || 'openrouter/free'),
         messages: [{ role: 'system', content: system }, { role: 'user', content: scrubSensitiveData(prompt) }],
         max_tokens: 2000,
         provider: { data_collection: 'deny', zdr: true },
@@ -51,7 +55,11 @@ async function requestCompletion(system: string, prompt: string, credential?: st
                     res.destroy();
                     return;
                 }
-                if (res.statusCode !== 200) { res.destroy(); fail(); return; }
+                if (res.statusCode !== 200) {
+                    reject(new OpenRouterResponseError(res.statusCode ?? 0));
+                    res.destroy();
+                    return;
+                }
                 const chunks: Buffer[] = [];
                 let bytes = 0;
                 res.on('data', (chunk: Buffer) => {
@@ -71,7 +79,7 @@ async function requestCompletion(system: string, prompt: string, credential?: st
             req.end(payload);
         });
     } catch (error) {
-        if (error instanceof OpenRouterRateLimitError) throw error;
+        if (error instanceof OpenRouterRateLimitError || error instanceof OpenRouterResponseError) throw error;
         throw unavailable();
     }
     finally { pending--; }

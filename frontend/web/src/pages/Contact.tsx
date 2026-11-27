@@ -1,4 +1,3 @@
-import { canAnswerProductQuestionLocally, productReply } from '../lib/public-help-replies';
 import ActionContents from '../components/ActionContents';
 import { useRef, useState, type FormEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
@@ -18,43 +17,6 @@ export default function Contact({ demo = false }: { demo?: boolean }) {
     const sending = useRef(false);
     const [error, setError] = useState('');
     const [receipt, setReceipt] = useState('');
-    const [aiError, setAiError] = useState('');
-    const [aiBusy, setAiBusy] = useState(false);
-    const [aiAdvice, setAiAdvice] = useState<{ suggestedAnswer: string; category: string } | null>(null);
-
-    async function handleAskAi(messageText: string) {
-        if (!messageText.trim() || aiBusy) return;
-        setAiError('');
-        setAiAdvice(null);
-        if (canAnswerProductQuestionLocally(messageText)) {
-            setAiAdvice({ suggestedAnswer: productReply(messageText).text, category: 'Product guide' });
-            return;
-        }
-        setAiBusy(true);
-        try {
-            const signalingUrl = import.meta.env.VITE_SIGNALING_URL || window.location.origin;
-            const endpoint = new URL('/api/contact-ai', signalingUrl);
-            if (endpoint.protocol === 'wss:') endpoint.protocol = 'https:';
-            if (endpoint.protocol === 'ws:') endpoint.protocol = 'http:';
-            const res = await fetch(endpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: messageText }),
-                signal: AbortSignal.timeout(50000),
-            });
-            if (!res.ok) throw new Error();
-            {
-                const data = await res.json();
-                if (data.result?.suggestedAnswer) {
-                    setAiAdvice(data.result);
-                }
-            }
-        } catch {
-            setAiError('AI guidance is unavailable. You can still submit your enquiry.');
-        } finally {
-            setAiBusy(false);
-        }
-    }
     async function submit(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
         if (sending.current) return;
@@ -94,22 +56,7 @@ export default function Contact({ demo = false }: { demo?: boolean }) {
                 {!demo && <><label htmlFor="contact-topic">What can we help with?</label><select id="contact-topic" name="topic" defaultValue={params.get('topic') === 'deployment' ? 'deployment' : interest ? 'pricing' : 'demo'}><option value="demo">Trying QS-VC</option><option value="pricing">Plans and pricing</option><option value="deployment">Organisation deployment</option><option value="support">Help with a meeting</option></select></>}
                 {demo && <><label htmlFor="demo-timing">Preferred time (optional)</label><input id="demo-timing" name="timing" maxLength={200} placeholder="Weekday afternoons, IST" /></>}
                 <label htmlFor="contact-message">{demo ? 'What would you like to explore?' : 'Your message'}</label>
-                <textarea id="contact-message" name="message" required minLength={10} maxLength={demo ? 3500 : 4000} rows={5} defaultValue={interest ? `I’d like to discuss the ${enquiryPlan}.` : ''} onChange={() => { setAiAdvice(null); setAiError(''); }} />
-                <button type="button" disabled={aiBusy} onClick={event => {
-                    const field = event.currentTarget.form?.elements.namedItem('message') as HTMLTextAreaElement | null;
-                    if (field?.value.trim()) void handleAskAi(field.value);
-                    else setAiError('Enter your question first.');
-                }}>{aiBusy ? 'Getting guidance…' : 'Ask OpenRouter about my message'}</button>
-                {aiError && <p role="status">{aiError}</p>}
-                {aiAdvice && (
-                    <div className="contact-ai-advice" style={{ background: 'rgba(0, 120, 121, 0.08)', border: '1px solid rgba(0, 120, 121, 0.25)', borderRadius: '8px', padding: '12px', margin: '8px 0 12px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px', fontWeight: 600, color: '#007879' }}>
-                            <span className="mi mi-sm">auto_awesome</span> AI guidance ({aiAdvice.category})
-                        </div>
-                        <p style={{ margin: 0, fontSize: '0.9rem' }}>{aiAdvice.suggestedAnswer}</p>
-                    </div>
-                )}
-                {aiBusy && <p style={{ fontSize: '0.85rem', color: '#64748b' }}>Checking instant AI guidance with OpenRouter…</p>}
+                <textarea id="contact-message" name="message" required minLength={10} maxLength={demo ? 3500 : 4000} rows={5} defaultValue={interest ? `I’d like to discuss the ${enquiryPlan}.` : ''} />
                 <div className="public-honeypot" aria-hidden="true"><label htmlFor="contact-website">Leave this field empty</label><input id="contact-website" name="website" tabIndex={-1} autoComplete="off" /></div>
                 <p>We’ll use your details to respond to your request. Read our <Link to="/privacy">Privacy Policy</Link>.</p>
                 <p>Include sample details only. Don’t send passwords or confidential meeting content.</p>

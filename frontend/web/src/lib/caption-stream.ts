@@ -29,6 +29,15 @@ export function supportedSpeechLanguage(languages: { code: string }[], selected:
         ?? languages.find(item => item.code.toLowerCase() === code.split('-')[0]))?.code;
 }
 
+export function defaultListeningLanguage(languages: { code: string }[], saved: string | null, reading: string, speaking: string): string {
+    return supportedSpeechLanguage(languages, saved || '')
+        ?? supportedSpeechLanguage(languages, reading)
+        ?? supportedSpeechLanguage(languages, speaking)
+        ?? supportedSpeechLanguage(languages, 'en-US')
+        ?? languages[0]?.code
+        ?? '';
+}
+
 /**
  * Options for "I speak". With server recognition, only languages the speech service reports;
  * otherwise the browser-recognition languages. The current choice is always kept selectable.

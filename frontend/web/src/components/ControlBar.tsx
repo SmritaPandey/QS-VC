@@ -1,11 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { haptic } from '../lib/haptics';
 import AnimatedNumber from './AnimatedNumber';
 import type { TilesPerPage, ViewMode } from './VideoGrid';
 import '../styles/meeting-feature-access.css';
 
 interface Props {
-    assistant?: ReactNode;
     activitiesOpen?: boolean;
     hostToolsOpen?: boolean;
     onToggleActivities?: () => void;
@@ -127,7 +126,7 @@ export function RestrictedFeatureButton({ label, icon, active, requirement, onAc
 }
 
 export default function ControlBar({
-    assistant, isRecording, canRecord = false, recordingLocked = false, onToggleRecording,
+    isRecording, canRecord = false, recordingLocked = false, onToggleRecording,
     signedIn = false, captionsLocked = false, effectsLocked = false, noiseMode = 'standard', aiNoiseSuppressionLocked = false,
     onChangeNoiseMode, onRequirePlanFeature, onSignInForExtras, onExplainAccess, featureMinimumPlans = {},
     activitiesOpen = false, hostToolsOpen = false, onToggleActivities, onToggleHostTools,
@@ -183,7 +182,7 @@ export default function ControlBar({
                 <ToggleControl on={!videoOff} label="Camera" title={videoOff ? 'Start video' : 'Stop video'}
                     iconOn="videocam" iconOff="videocam_off" stateClass={videoOff ? 'active-muted' : ''} onToggle={onToggleVideo} />
                 {onToggleCaptions && (
-                    <ToggleControl on={captionsOn} label="Captions" locked={captionsLocked} title={captionsLocked ? `AI captions require ${minimumPlan('ai_captions', 'starter')}` : captionsOn ? 'Turn off captions' : 'Turn on captions'}
+                    <ToggleControl on={captionsOn} label="Captions" locked={captionsLocked} title={captionsLocked ? `Captions require ${minimumPlan('ai_captions', 'starter')}` : captionsOn ? 'Turn off captions' : 'Turn on captions'}
                         iconOn="closed_caption" iconOff="closed_caption_disabled" stateClass={`control-extra-inline ${captionsOn ? 'active' : ''}`} onToggle={() => { setMoreOpen(false); if (captionsLocked) onRequirePlanFeature?.('ai_captions'); else onToggleCaptions(); }} />
                 )}
             </div>
@@ -216,7 +215,6 @@ export default function ControlBar({
             </div>
 
             <div className="controls-right">
-                {assistant}
                 <div className="controls-more" ref={moreRef}>
                     <button ref={moreButtonRef} type="button" className={`ctrl-btn ${moreOpen ? 'active' : ''}`} aria-label={moreTitle} aria-expanded={moreOpen} aria-controls="meeting-more-controls" data-tip="More controls" onClick={() => { haptic('tap'); setMoreOpen(open => !open); }}>
                         <span className="ctrl-icon mi" aria-hidden="true">more_horiz</span>
@@ -296,9 +294,7 @@ export default function ControlBar({
                             <select value={String(tilesPerPage)} onChange={event => onChangeTilesPerPage(event.target.value === 'auto' ? 'auto' : Number(event.target.value) as TilesPerPage)}>
                                 {TILE_OPTIONS.map(option => <option key={String(option)} value={String(option)}>{option === 'auto' ? 'Auto (fits your screen)' : `Up to ${option}`}</option>)}
                             </select></label>}
-                        {(onReportProblem || (!signedIn && onSignInForExtras)) && <h3>Help</h3>}
-                        {!signedIn && onSignInForExtras && <RestrictedFeatureButton label="Meeting assistant" icon="support_agent" requirement="Sign in"
-                            onResolve={() => { closeMore(); onSignInForExtras(); }} />}
+                        {onReportProblem && <h3>Help</h3>}
                         {onReportProblem && <button type="button" onClick={() => { closeMore(); onReportProblem(); }}><span className="mi" aria-hidden="true">feedback</span>Report a problem</button>}
                     </div>}
                 </div>

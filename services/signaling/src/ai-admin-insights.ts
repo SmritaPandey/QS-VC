@@ -6,9 +6,11 @@
 
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { OpenRouterRateLimitError, askOpenRouter, openRouterConfigured } from './openrouter.js';
+import { OpenRouterRateLimitError, OpenRouterResponseError, askOpenRouter, openRouterConfigured } from './openrouter.js';
 import { AICache } from './ai/ai-cache.js';
 import { z } from 'zod';
+import { OpenRouterModelPolicyError } from './ai/free-openrouter-model.js';
+import { logger } from './logger.js';
 
 const count = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const telemetry = z.object({ activeUsers: count, activeMeetingRecords: count, scheduledMeetings: count, endedMeetings: count }).strict();
@@ -22,11 +24,22 @@ Guidelines:
 3. Keep the insight under 4 bullet points.
 4. Never invent statistics not provided in the input data.`;
 
+function providerFailureReason(error: unknown): string {
+    if (error instanceof OpenRouterModelPolicyError) return 'free_model_required';
+    if (error instanceof OpenRouterRateLimitError) return 'rate_limited';
+    const status = error instanceof OpenRouterResponseError ? error.status : undefined;
+    if (status === 401 || status === 403) return 'provider_access';
+    if (status === 402) return 'provider_credits';
+    if (status === 404) return 'provider_routing';
+    return 'provider_unavailable';
+}
+
 export function adminInsightsRouter(authorize: import('express').RequestHandler): Router {
     const router = Router();
     const cache = new AICache(100);
     const pending = new Map<string, Promise<string>>();
     let nextProviderAttempt = 0;
+    let providerFailure = 'provider_unavailable';
 
     router.post(
         '/',
@@ -36,37 +49,48 @@ export function adminInsightsRouter(authorize: import('express').RequestHandler)
         async (req, res) => {
             res.setHeader('Cache-Control', 'no-store');
 
-            if (!openRouterConfigured()) {
-                res.status(503).json({ error: 'AI analytics service is not available.' });
-                return;
-            }
-
             const stats = telemetry.safeParse(req.body?.stats);
             if (!stats.success) { res.status(400).json({ error: 'Invalid analytics counts.' }); return; }
 
+            const localSnapshot = (reason: string) => {
+                const { activeUsers, activeMeetingRecords, scheduledMeetings, endedMeetings } = stats.data;
+                const total = BigInt(activeMeetingRecords) + BigInt(scheduledMeetings) + BigInt(endedMeetings);
+                return {
+                    insights: `${activeUsers} active user accounts. Of ${total} meeting records, ${activeMeetingRecords} are active, ${scheduledMeetings} scheduled and ${endedMeetings} ended. This snapshot alone cannot show a trend.`,
+                    reason, source: 'local', timestamp: Date.now(),
+                };
+            };
+            if (!openRouterConfigured()) {
+                res.json(localSnapshot(process.env.QSVC_DEPLOYMENT === 'onprem' ? 'disabled' : 'not_configured'));
+                return;
+            }
             const key = JSON.stringify(stats.data);
             const cached = cache.get(key);
             if (cached) {
                 res.json({ insights: cached, source: 'openrouter', timestamp: Date.now() });
                 return;
             }
-            const localSnapshot = () => {
-                const { activeMeetingRecords, scheduledMeetings, endedMeetings } = stats.data;
-                return {
-                    insights: `Local analysis · OpenRouter is rate-limited. The dashboard reports ${activeMeetingRecords} active meeting records, ${scheduledMeetings} scheduled meetings and ${endedMeetings} ended meetings. This snapshot alone cannot show a trend.`,
-                    source: 'local', timestamp: Date.now(),
-                };
-            };
             if (Date.now() < nextProviderAttempt) {
-                res.json(localSnapshot());
+                res.json(localSnapshot(providerFailure));
                 return;
             }
             try {
                 const prompt = `Current System Telemetry:\n${JSON.stringify(stats.data)}\n\nPlease generate 3-4 bullet point executive insights:`;
                 let analysis = pending.get(key);
                 if (!analysis) {
-                    analysis = askOpenRouter(ADMIN_SYSTEM, prompt)
+                    analysis = askOpenRouter(ADMIN_SYSTEM, prompt, process.env.OPENROUTER_MODEL_ADMIN_INSIGHTS)
                         .then(answer => { cache.set(key, answer, 10 * 60_000); return answer; })
+                        .catch(error => {
+                            const status = error instanceof OpenRouterResponseError ? error.status : undefined;
+                            const reason = providerFailureReason(error);
+                            const retryAt = Date.now() + (reason === 'provider_unavailable' ? 15_000 : 60_000);
+                            if (retryAt >= nextProviderAttempt) {
+                                providerFailure = reason;
+                                nextProviderAttempt = retryAt;
+                            }
+                            logger.warn({ status, reason }, 'OpenRouter admin insights request failed');
+                            throw error;
+                        })
                         .finally(() => pending.delete(key));
                     pending.set(key, analysis);
                 }
@@ -77,12 +101,7 @@ export function adminInsightsRouter(authorize: import('express').RequestHandler)
                     timestamp: Date.now(),
                 });
             } catch (error) {
-                if (error instanceof OpenRouterRateLimitError) {
-                    nextProviderAttempt = Date.now() + 60_000;
-                    res.json(localSnapshot());
-                    return;
-                }
-                res.status(503).json({ error: 'Failed to generate AI insights.' });
+                res.json(localSnapshot(providerFailureReason(error)));
             }
         }
     );

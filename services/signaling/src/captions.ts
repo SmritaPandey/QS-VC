@@ -1,5 +1,4 @@
 import { renderCaptionVoice } from './caption-voice.js';
-import { addSummaryCaption, finishLiveSummary } from './live-summary.js';
 import { z } from 'zod';
 import { googleLanguages, translateText } from './translation.js';
 import { roomManager } from './room-manager.js';
@@ -200,7 +199,6 @@ function store(roomId: string, state: RoomCaptions, caption: StoredCaption) {
     state.captions.set(caption.id, caption);
     if (state.captions.size > captionLimits().roomHistory) state.captions.delete(state.captions.keys().next().value!);
     const entry = { id: caption.id, peerId: caption.peerId, speaker: caption.displayName, language: caption.language, text: caption.text, timestamp: caption.timestamp };
-    addSummaryCaption(roomId, state.meetingCode, entry);
     if (state.transcript) {
         state.transcript.push(entry);
         if (state.transcript.length > captionLimits().transcriptMax) state.transcript.shift();
@@ -351,7 +349,6 @@ export function forgetPeerCaptions(roomId: string, peerId: string) {
 }
 
 export function clearEmptyRoomCaptions(roomId: string) {
-    if (!roomManager.getRoom(roomId)?.peers.size) void finishLiveSummary(roomId, rooms.get(roomId)?.meetingCode || roomId);
     const state = rooms.get(roomId);
     if (state && !roomManager.getRoom(roomId)?.peers.size) void finishRoom(roomId, state);
 }

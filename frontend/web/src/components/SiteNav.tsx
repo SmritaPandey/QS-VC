@@ -6,7 +6,6 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import '../styles/public.css';
 import BrandLogo from './BrandLogo';
-import PublicHelp from './PublicHelp';
 import CookieBanner from './CookieBanner';
 import useScrollReveal from '../lib/scroll-reveal';
 import { CrownBadge, TrialChip } from './PlanAccess';
@@ -105,6 +104,5 @@ export default function SiteNav({ accountAction, brandName = 'QS-VC' }: { accoun
                 </nav>
             </div>
         </aside>}
-        <PublicHelp key={pathname} navigationOpen={dockOpen || open || formVisible} />
     </>;
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { captionLanguageOptions, needsCaptionTranslation, supportedSpeechLanguage, transcriptToSrt, transcriptToText, upsertCaption } from './caption-stream';
+import { captionLanguageOptions, defaultListeningLanguage, needsCaptionTranslation, supportedSpeechLanguage, transcriptToSrt, transcriptToText, upsertCaption } from './caption-stream';
 import { floatToPcm16Base64, resampleTo16k } from './pcm';
 
 const line = (id: string, text: string, isFinal: boolean) => ({ id, speakerName: 'Asha', text, isFinal, timestamp: 1 });
@@ -64,4 +64,13 @@ describe('IndicConformer languages', () => {
         expect(options.map(option => option.code)).toEqual(['brx-IN', 'sat-IN', 'mni-IN']);
         expect(options[0].label).toContain('Bodo');
     });
+});
+
+it('preselects a supported listening language in preference order', () => {
+    const outputs = ['en', 'hi', 'fr'].map(code => ({ code }));
+    expect(defaultListeningLanguage(outputs, 'fr-FR', 'hi', 'en-US')).toBe('fr');
+    expect(defaultListeningLanguage(outputs, 'xx', 'hi', 'en-US')).toBe('hi');
+    expect(defaultListeningLanguage(outputs, null, 'original', 'hi-IN')).toBe('hi');
+    expect(defaultListeningLanguage(outputs, null, 'original', 'xx')).toBe('en');
+    expect(defaultListeningLanguage([], null, 'original', 'hi-IN')).toBe('');
 });

@@ -25,7 +25,7 @@ describe('meeting feature discoverability', () => {
         expect(html).toContain('Captions and language settings. Sign in to choose your language.');
         expect(html).toContain('Record meeting. Sign in as host · Basic.');
         expect(html).toContain('Host controls. Host or co-host only.');
-        expect(html).toContain('Meeting assistant. Sign in.');
+        expect(html).not.toContain('Meeting assistant');
     });
     it('shows the host requirement independently of plan access for signed-in participants', () => {
         expect(controls({ signedIn: true, canRecord: false, recordingLocked: false })).toContain('Record meeting. Host only · Basic.');

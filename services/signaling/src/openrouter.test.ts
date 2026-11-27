@@ -6,7 +6,7 @@ import { askOpenRouter } from './openrouter.js';
 vi.mock('node:https', () => ({ request: vi.fn() }));
 afterEach(() => { vi.unstubAllEnvs(); vi.clearAllMocks(); });
 
-it('uses the server credential and requires private routing and hybrid TLS', async () => {
+it.each(['openrouter/free', 'vendor/chat-model:free'])('uses free model %s with private routing and hybrid TLS', async model => {
     vi.stubEnv('OPENROUTER_API_KEY', 'test-key');
     vi.stubEnv('QSVC_DEPLOYMENT', 'online');
     let payload = '';
@@ -19,10 +19,11 @@ it('uses the server credential and requires private routing and hybrid TLS', asy
             res.emit('end');
         } });
     }) as typeof request);
-    await expect(askOpenRouter('Guide', 'question sk-123456789012345678901234')).resolves.toBe('answer');
+    await expect(askOpenRouter('Guide', 'question sk-123456789012345678901234', model)).resolves.toBe('answer');
     expect(request).toHaveBeenCalledWith('https://openrouter.ai/api/v1/chat/completions', expect.objectContaining({
         minVersion: 'TLSv1.3', maxVersion: 'TLSv1.3', ecdhCurve: 'X25519MLKEM768', rejectUnauthorized: true,
     }), expect.any(Function));
+    expect(JSON.parse(payload).model).toBe(model);
     expect(JSON.parse(payload).provider).toEqual({ data_collection: 'deny', zdr: true });
     expect(payload).not.toContain('test-key');
     expect(JSON.parse(payload).messages[1].content).toBe('question [REDACTED_SECRET]');
@@ -44,4 +45,26 @@ it('preserves an upstream rate limit for the product guide', async () => {
         } });
     }) as typeof request);
     await expect(askOpenRouter('Guide', 'question')).rejects.toThrow('AI request limit reached');
+});
+
+it('preserves only the HTTP status for other upstream rejections', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'test-key');
+    vi.stubEnv('QSVC_DEPLOYMENT', 'online');
+    const destroy = vi.fn();
+    vi.mocked(request).mockImplementation(((_url: unknown, _options: unknown, receive: Function) => {
+        return Object.assign(new EventEmitter(), { end() {
+            receive(Object.assign(new EventEmitter(), { statusCode: 404, destroy }));
+        } });
+    }) as typeof request);
+    await expect(askOpenRouter('Guide', 'question')).rejects.toMatchObject({
+        status: 404, message: 'AI service is unavailable',
+    });
+    expect(destroy).toHaveBeenCalledOnce();
+});
+
+it('rejects paid hosted models before opening a network connection', async () => {
+    vi.stubEnv('OPENROUTER_API_KEY', 'test-key');
+    vi.stubEnv('QSVC_DEPLOYMENT', 'online');
+    await expect(askOpenRouter('Guide', 'question', 'mistralai/mistral-nemo')).rejects.toThrow('requires a free model');
+    expect(request).not.toHaveBeenCalled();
 });

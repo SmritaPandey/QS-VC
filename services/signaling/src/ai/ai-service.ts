@@ -9,6 +9,7 @@
  * 5. Integrated Security: Input/output sanitization, PII scrubbing, injection defense, caching, rate limiting.
  */
 
+import { requireFreeOpenRouterModel } from './free-openrouter-model.js';
 import { request } from 'node:https';
 import { sanitizeInput, sanitizeOutput, detectPromptInjection, formatPromptWithBoundaries } from './ai-sanitizer.js';
 import { aiCache, AICache } from './ai-cache.js';
@@ -53,9 +54,9 @@ export class AIService {
      * Select the best model for the feature.
      */
     resolveModel(feature: AIFeature, override?: string): string {
-        if (override?.trim()) return override.trim();
+        if (override?.trim()) return requireFreeOpenRouterModel(override.trim());
         const featureEnv = `OPENROUTER_MODEL_${feature.toUpperCase().replace(/-/g, '_')}`;
-        return (
+        return requireFreeOpenRouterModel(
             process.env[featureEnv]?.trim() ||
             process.env.OPENROUTER_MODEL?.trim() ||
             'openrouter/free'
@@ -86,6 +87,7 @@ export class AIService {
             throw new Error('AI service is unavailable');
         }
 
+        const model = this.resolveModel(feature, options.model);
         const identifier = options.userId || 'anonymous';
 
         // 1. Rate Limiting Check
@@ -95,7 +97,6 @@ export class AIService {
         }
 
         const startedAt = Date.now();
-        const model = this.resolveModel(feature, options.model);
 
         try {
             // 2. Prompt Injection Defense

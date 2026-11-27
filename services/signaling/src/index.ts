@@ -1,7 +1,4 @@
-import { productGuideRouter } from './product-guide.js';
-import { contactRouterMiddleware } from './ai-contact-router.js';
-import { adminInsightsRouter } from './ai-admin-insights.js';
-import { adminControlsRouter, requirePlatformAdmin } from './admin-controls.js';
+import { adminControlsRouter } from './admin-controls.js';
 import { sfuClient } from './sfu-client.js';
 import { roomDialHandler } from './room-dial.js';
 import express, { Request, Response, NextFunction } from 'express';
@@ -49,9 +46,6 @@ app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, standardHeaders: true, l
 // REST API
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-app.use('/api/product-guide', productGuideRouter());
-app.use('/api/contact-ai', contactRouterMiddleware());
-app.use('/api/admin/ai-insights', adminInsightsRouter(requirePlatformAdmin(verifySession, AUTH_INTERNAL_URL)));
 app.post('/api/internal/room-numbers/:number/resolve', roomDialHandler);
 app.use('/api/admin/rooms', adminControlsRouter({ rooms: roomManager, verify: verifySession, pause: sfuClient.setProducerPaused, authUrl: AUTH_INTERNAL_URL,
     audit: event => logger.info({ event: 'admin-media-control', ...event }, 'Platform administrator media control'),

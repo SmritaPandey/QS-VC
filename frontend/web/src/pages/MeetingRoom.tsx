@@ -1,5 +1,3 @@
-import LiveMeetingSummary from '../components/LiveMeetingSummary';
-import MeetingSummaryPanel from '../components/MeetingSummaryPanel';
 import { FORMAT_ACTIONS, MEETING_FORMATS, roomFormat, type FormatAction } from '../lib/meeting-formats';
 import type { MeetingKind } from '../components/MeetingSetupDialog';
 import type { CollaborationTab } from '../components/MeetingCollaboration';
@@ -42,12 +40,12 @@ import MeetingSessionReport from '../components/MeetingSessionReport';
 import MeetingBreakouts from '../components/MeetingBreakouts';
 import PrivateConversationPanel, { type ActivePrivateConversation, type PrivateConversationInvite } from '../components/PrivateConversationPanel';
 import ReactionsOverlay, { MeetingReaction, REACTION_DURATION } from '../components/ReactionsOverlay';
-import AIChatBot from '../components/AIChatBot';
 import MeetingCaptions from '../components/MeetingCaptions';
 import MeetingCollaboration from '../components/MeetingCollaboration';
 import HostMeetingTools, { type RoomHostSettings } from '../components/HostMeetingTools';
 import { WaitingAdmission, type WaitingMode } from '../components/WaitingRoom';
 import { openMicrophone, startCameraWithFallback, microphoneMessage, deviceLabel } from '../lib/device-access';
+import { CAPTION_VISIBILITY_KEY, readCaptionPreference, saveCaptionPreference } from '../lib/storage-consent';
 import { initialMeetingLanguage, detectLanguage, setMeetingLanguage, clearSavedLanguage, LANGUAGE_EVENT, type MeetingLanguage } from '../lib/meeting-language';
 import type { EncryptedChatEnvelope } from '../lib/e2ee-data';
 import { E2EEManager, encodedTransformsSupported, type E2EEKeyBundle, type E2EEKeyEnvelope } from '../lib/e2ee';
@@ -173,6 +171,7 @@ const PERMISSION_KEYS = Object.keys(PERMISSION_LABELS) as MeetingPermission[];
 
 export default function MeetingRoom() {
     const { meetingCode } = useParams<{ meetingCode: string }>();
+    const [captionsOn, setCaptionsOn] = useState(() => readCaptionPreference(CAPTION_VISIBILITY_KEY) !== 'off');
     const [attempt, setAttempt] = useState(0);
     const failures = useRef(0);
     const hasConnected = useRef(false);
@@ -188,7 +187,7 @@ export default function MeetingRoom() {
         return true;
     }, []);
     const connectedOk = useCallback(() => { failures.current = 0; hasConnected.current = true; }, []);
-    return <MeetingRoomSession key={`${meetingCode}-${attempt}`} reconnecting={hasConnected.current} carried={carried.current} onDropped={reconnect} onConnected={connectedOk} />;
+    return <MeetingRoomSession key={`${meetingCode}-${attempt}`} reconnecting={hasConnected.current} carried={carried.current} onDropped={reconnect} onConnected={connectedOk} captionsOn={captionsOn} setCaptionsOn={setCaptionsOn} />;
 }
 
 interface SessionProps {
@@ -196,9 +195,11 @@ interface SessionProps {
     carried: { audioMuted?: boolean; videoOff?: boolean };
     onDropped: (current: { audioMuted: boolean; videoOff: boolean }) => boolean;
     onConnected: () => void;
+    captionsOn: boolean;
+    setCaptionsOn: (on: boolean) => void;
 }
 
-function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: SessionProps) {
+function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected, captionsOn, setCaptionsOn }: SessionProps) {
     const { meetingCode } = useParams<{ meetingCode: string }>();
     const organisationBranding = useMeetingBranding(meetingCode);
     const location = useLocation();
@@ -335,7 +336,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [activitiesOpen, setActivitiesOpen] = useState(false);
     const [broadcastSlot, setBroadcastSlot] = useState<HTMLDivElement | null>(null);
     const [hostToolsOpen, setHostToolsOpen] = useState(false);
-    const [summaryOpen, setSummaryOpen] = useState(false);
     const [breakoutsOpen, setBreakoutsOpen] = useState(false);
     const [currentRoomId, setCurrentRoomId] = useState<string | null>(null);
     const [currentBreakoutName, setCurrentBreakoutName] = useState<string | null>(null);
@@ -381,7 +381,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const format = MEETING_FORMATS[meetingKind];
     const webinar = meetingKind === 'webinar' || meetingKind === 'town_hall';
     const [myOnStage, setMyOnStage] = useState(false);
-    const [captionsOn, setCaptionsOn] = useState(false);
     const [noiseMode, setNoiseMode] = useState<'off' | 'standard' | 'ai'>('standard');
     const [shareSpeech, setShareSpeech] = useState(false);
     const [reportOpen, setReportOpen] = useState(false);
@@ -434,7 +433,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         if (processed?.readyState === 'live') return processed;
         return localStreamRef.current?.getAudioTracks().find(track => track.readyState === 'live') || null;
     }, []);
-    const [summaryActive, setSummaryActive] = useState(false);
     const [languageOpen, setLanguageOpen] = useState(false);
 
     // Refs mirror live state so async handlers and signaling callbacks never act on stale values.
@@ -1486,7 +1484,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             setPrivateAudioTrack(null); setPrivateConversation(null); setPrivateInvite(null);
             setPeers(new Map()); setChatMessages([]); setChatDraft(''); setIncomingChatMessage(null); setUnreadChat(0); setUnreadPermissions([]); setKnocks([]);
             notifiedKnocks.current.clear(); setReactions([]); setHandRaised(false);
-            handRaisedRef.current = false; setCaptionsOn(false); setShareSpeech(false);
+            handRaisedRef.current = false; setShareSpeech(false);
             setScreenSharing(false); setScreenStream(null); setScreenPaused(false);
             setHostToolsOpen(false); setActivitiesOpen(false); setMultiCameraOpen(false); setPinnedId(null); setMyOnStage(false);
             setConnected(false); setLocalStream(null); setLiveStreaming(null);
@@ -2169,13 +2167,14 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
         setLanguageOpen(false);
         setReactionsOpen(false);
         setInformationOpen(false);
-        setSummaryOpen(false);
     }, []);
     // ── Captions (CC button) ──
     const captionsLocked = signedIn && !isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'ai_captions'));
-    const toggleCaptions = useCallback(() => {
-        setCaptionsOn(on => !on);
-    }, []);
+    const changeCaptionVisibility = useCallback((on: boolean) => {
+        setCaptionsOn(on);
+        saveCaptionPreference(CAPTION_VISIBILITY_KEY, on ? 'on' : 'off');
+    }, [setCaptionsOn]);
+    const toggleCaptions = useCallback(() => changeCaptionVisibility(!captionsOn), [captionsOn, changeCaptionVisibility]);
     const openInformation = useCallback(() => {
         closePanels(); setInformationOpen(true);
     }, [closePanels]);
@@ -2245,7 +2244,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
 
     const secureActivities = requiredE2eeRef.current;
     const activityOnStage = activitiesOpen && (!secureActivities || !!e2eeRef.current);
-    const sidePanelOpen = chatOpen || participantsOpen || hostToolsOpen || effectsOpen || summaryOpen;
+    const sidePanelOpen = chatOpen || participantsOpen || hostToolsOpen || effectsOpen;
     const screenCaptureAvailable = !screenSharing && canPublishRef.current
         && (myRole === 'host' || roomSettings.allowScreenShare)
         && typeof navigator.mediaDevices?.getDisplayMedia === 'function';
@@ -2328,23 +2327,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     {externalConference && <span className="qs-topchip" role="status">External conference: Bharat VC{externalConference.status === 'connecting' ? ' · Connecting' : externalConference.status === 'unknown' ? ' · Status uncertain' : ''}</span>}
                     {e2eeEnabled && <EncryptionBadge active={e2eeActive} securityCode={securityCode} participants={peers.size + 1} />}
                     <span className="participant-count"><span className="mi mi-sm">group</span> {peers.size + 1}</span>
-                    {connected && (
-                        <LiveMeetingSummary
-                            onActiveChange={setSummaryActive}
-                            key={currentRoomId || meetingCode}
-                            manager={manager && hasFeature(entitlements, 'ai_meeting_summary')}
-                            code={meetingCode || ''}
-                            open={summaryOpen}
-                            onToggle={() => {
-                                if (summaryOpen) {
-                                    setSummaryOpen(false);
-                                } else {
-                                    closePanels();
-                                    setSummaryOpen(true);
-                                }
-                            }}
-                        />
-                    )}
                 </div>
             </div>
 
@@ -2455,8 +2437,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                         onAccept={acceptPrivateConversation} onDecline={declinePrivateConversation} onCancel={cancelPrivateConversationInvite}
                         onEnd={endPrivateConversation} onToggleMicrophone={() => void togglePrivateMicrophone()} onToggleFocusAudio={togglePrivateFocusAudio} />
                     <ReactionsOverlay reactions={reactions} pickerOpen={reactionsOpen} onSendReaction={handleSendReaction} onClosePicker={closeReactions} onExpire={expireReaction} />
-                    <MeetingCaptions statusHost={captionStatusHost} summaryActive={summaryActive} translatedSpeaking={translatedSpeaking} e2eeActive={e2eeActive} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} hasSavedSpeakingLanguage={speechLanguage.source === 'saved'} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
-                        showCaptions={captionsOn} onShowCaptionsChange={setCaptionsOn} shareSpeech={shareSpeech} onShareSpeechChange={setShareSpeech}
+                    <MeetingCaptions statusHost={captionStatusHost} translatedSpeaking={translatedSpeaking} e2eeActive={e2eeActive} stopRecognition={stopSpeechRecognition} open={languageOpen} onClose={closeLanguage} connected={connected} audioMuted={audioMuted} speakingLanguage={speechLanguage.code} hasSavedSpeakingLanguage={speechLanguage.source === 'saved'} onSpeakingLanguageChange={chooseLanguage} onUseDetectedLanguage={applyDetectedLanguage} displayName={displayName} myPeerId={getMyPeerId} onSpeakingChange={handleTranslatedSpeaking}
+                        showCaptions={captionsOn} onShowCaptionsChange={changeCaptionVisibility} shareSpeech={shareSpeech} onShareSpeechChange={setShareSpeech}
                         getMicTrack={getCaptionMicTrack} isHost={manager} meetingCode={meetingCode}
                         canShareSpeech={canPublishRef.current} viewOnly={!signedIn || captionsLocked} />
                 </div>
@@ -2479,18 +2461,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 {effectsOpen && <BackgroundEffects effect={effect} onChange={chooseEffect} preview={effectPreview} cameraOn={!videoOff && !!localStream?.getVideoTracks().some(t => t.readyState === 'live')}
                     status={effectStatus} error={effectError} onStartCamera={handleToggleVideo} onClose={() => setEffectsOpen(false)} />}
                 {hostToolsOpen && manager && <HostMeetingTools broadcastSlotRef={setBroadcastSlot} roomDevicesEnabled={roomDevicesEnabled && !webinar && Boolean(getToken())} role={myRole} myPeerId={myPeerIdRef.current} participants={[{ peerId: myPeerIdRef.current, displayName, role: myRole, audioMuted, videoOff, handRaised }, ...Array.from(peers.values()).map(peer => ({ ...peer, role: peer.role || 'member', videoOff: peer.videoOff ?? !peer.videoTrack }))]} settings={roomSettings} onClose={closeActivityPanel} onEndMeeting={() => setLeaveOpen(true)} />}
-                {summaryOpen && (
-                    <MeetingSummaryPanel
-                        open={summaryOpen}
-                        onClose={() => {
-                            setSummaryOpen(false);
-                            document.querySelector<HTMLButtonElement>('[aria-controls="meeting-summary-panel"]')?.focus();
-                        }}
-                        code={meetingCode || ''}
-                        isHost={manager}
-                        canManage={manager && hasFeature(entitlements, 'ai_meeting_summary')}
-                    />
-                )}
             </div>
 
             <MeetingSessionReport open={sessionReportOpen} meetingCode={meetingCode || ''} connected={connected} onClose={() => setSessionReportOpen(false)} />
@@ -2515,7 +2485,6 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 onOpenQuality={() => { closePanels(); setQualityOpen(true); }} onOpenMultiCamera={() => { closePanels(); setMultiCameraOpen(true); }} onRecordLocally={() => { void handleToggleRecording('local'); }}
                 featureMinimumPlans={entitlements.featureMinimumPlans} onExplainAccess={showNotice}
                 pictureInPicture={pictureInPictureOpen} onTogglePictureInPicture={() => { void pictureInPictureRef.current?.toggle(); }}
-                assistant={signedIn ? <AIChatBot onOpen={closePanels} closeSignal={chatOpen || participantsOpen || activitiesOpen || hostToolsOpen || informationOpen || languageOpen || reactionsOpen || effectsOpen || breakoutsOpen || summaryOpen} isHost={myRole === 'host'} e2eeActive={e2eeEnabled} participantsCount={peers.size + 1} /> : undefined}
                 signedIn={signedIn}
                 captionsLocked={false}
                 effectsLocked={!isPlatformAdmin && (entitlements.loading || !hasFeature(entitlements, 'background_effects'))}

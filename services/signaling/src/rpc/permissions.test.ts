@@ -1181,21 +1181,14 @@ it('rejects a persisted ended meeting code before creating a signaling room', as
     expect(roomManager.getRoomByCode(meetingCode)).toBeUndefined();
 });
 
-it('scopes assistant requests to admitted signed-in accounts and limits repeated questions', async () => {
-    const ws = socket(), other = socket();
-    const state: any = { authUser: { sub: crypto.randomUUID() } };
-    const question = { question: 'Where is the camera control?' };
-    expect((await rpc(ws, state, 'askMeetingAssistant', question))?.error).toBeDefined();
+it('keeps assistant, summaries and minutes unavailable to an admitted host', async () => {
+    const ws = socket();
+    const state: any = { authUser: { sub: crypto.randomUUID(), role: 'admin' } };
     await rpc(ws, state, 'joinRoom', { meetingCode: crypto.randomUUID().slice(0, 12), displayName: 'Host' });
-    expect((await rpc(other, state, 'askMeetingAssistant', question))?.error).toBeDefined();
-    expect((await rpc(ws, { ...state, authUser: null }, 'askMeetingAssistant', question))?.error).toBeDefined();
-    expect((await rpc(ws, state, 'askMeetingAssistant', { ...question, transcript: 'private data' }))?.error).toBeDefined();
-    vi.mocked(askOpenRouter).mockResolvedValue('Use Camera.');
-    for (let call = 0; call < 6; call++) {
-        expect((await rpc(ws, state, 'askMeetingAssistant', question))?.result).toEqual({ answer: 'Use Camera.' });
+    for (const method of ['askMeetingAssistant', 'liveSummaryState', 'startLiveSummary', 'stopLiveSummary', 'generateMeetingSummary', 'generateMinutes']) {
+        expect((await rpc(ws, state, method, {}))?.error?.code).toBe(-32601);
     }
-    expect((await rpc(ws, state, 'askMeetingAssistant', question))?.error?.code).toBe(-32003);
-    expect(askOpenRouter).toHaveBeenCalledTimes(6);
-    expect(askOpenRouter).toHaveBeenCalledWith(expect.any(String), question.question);
+    expect(askOpenRouter).not.toHaveBeenCalled();
+    expect((await rpc(ws, state, 'getTranscript', {}))?.result).toEqual({ saving: false, entries: [] });
     await handlePeerDisconnect(state);
 });

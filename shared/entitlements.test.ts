@@ -53,11 +53,11 @@ describe('plan entitlements and trial eligibility', () => {
     });
 
     it('assigns cloud recording to Basic while scheduling remains a Starter feature', () => {
-        expect(FEATURE_MIN_PLAN).toEqual({ meeting_scheduling: 'starter', ai_captions: 'starter', background_effects: 'basic', ai_noise_suppression: 'basic', cloud_recording: 'basic', ai_meeting_summary: 'pro' });
+        expect(FEATURE_MIN_PLAN).toEqual({ meeting_scheduling: 'starter', ai_captions: 'starter', background_effects: 'basic', ai_noise_suppression: 'basic', cloud_recording: 'basic' });
         expect(getEntitlements(null).featureMinimumPlans).toEqual(FEATURE_MIN_PLAN);
         expect(getEntitlements({ subscription_plan: 'starter_trial', trial_ends_at: '2026-11-15T12:00:00.000Z' }, started).features).toEqual(['meeting_scheduling', 'ai_captions', 'background_effects', 'ai_noise_suppression', 'cloud_recording']);
         expect(getEntitlements({ subscription_plan: 'pro_trial', trial_ends_at: '2026-11-15T12:00:00.000Z' }, started).features).toEqual([...Object.keys(FEATURE_MIN_PLAN)]);
-        expect(getEntitlements({ subscription_plan: 'pro' }, started).features).toEqual(['meeting_scheduling', 'ai_captions', 'background_effects', 'ai_noise_suppression', 'cloud_recording', 'ai_meeting_summary']);
+        expect(getEntitlements({ subscription_plan: 'pro' }, started).features).toEqual(['meeting_scheduling', 'ai_captions', 'background_effects', 'ai_noise_suppression', 'cloud_recording']);
     });
 
     it('grants admins every configured feature and unlimited private conversations regardless of plan', () => {

@@ -1,4 +1,4 @@
-import { CAPTION_LANGUAGE_KEY, preferencesAllowed } from '../lib/storage-consent';
+import { CAPTION_LANGUAGE_KEY, LISTENING_LANGUAGE_KEY, readCaptionPreference, saveCaptionPreference } from '../lib/storage-consent';
 import { MeetingVoice } from '../lib/meeting-voice';
 import { createPortal } from 'react-dom';
 import SelectionInput from './SelectionInput';
@@ -8,7 +8,7 @@ import { signaling } from '../lib/signaling';
 import { SpeechToTextEngine } from '../lib/speech-to-text';
 import { ServerSpeechEngine } from '../lib/server-speech';
 import { LANGUAGES, TextToSpeechEngine } from '../lib/realtime-translation';
-import { captionLanguageOptions, needsCaptionTranslation, supportedSpeechLanguage, downloadText, transcriptToSrt, transcriptToText, upsertCaption, type TranscriptEntry } from '../lib/caption-stream';
+import { captionLanguageOptions, needsCaptionTranslation, supportedSpeechLanguage, defaultListeningLanguage, downloadText, transcriptToSrt, transcriptToText, upsertCaption, type TranscriptEntry } from '../lib/caption-stream';
 import MeetingToast from './MeetingToast';
 import CaptionOverlay, { type CaptionEntry } from './CaptionOverlay';
 
@@ -16,11 +16,10 @@ interface RoomCaption { id: string; peerId: string; displayName: string; text: s
 interface Translated { id: string; target: string; translatedText: string; sourceLanguage: string; peerId: string; displayName: string; timestamp: number }
 interface Interim { id: string; peerId: string; displayName: string; text: string; language: string }
 interface AsrCapabilities { whisperFallback?: boolean; participants?: { peerId: string; displayName: string }[]; configured: boolean; available?: boolean; languages?: { code: string; name: string }[]; autoDetect?: boolean; engine?: string; model?: string }
-interface Capabilities { translatedAudio?: boolean; temporarilyUnavailable?: boolean; configured: boolean; languages: { code: string; name: string; targets?: string[] }[]; processing?: string; asr?: AsrCapabilities; minutes?: { configured: boolean }; transcript?: { saving: boolean } }
+interface Capabilities { translatedAudio?: boolean; temporarilyUnavailable?: boolean; configured: boolean; languages: { code: string; name: string; targets?: string[] }[]; processing?: string; asr?: AsrCapabilities; transcript?: { saving: boolean } }
 interface Props {
     statusHost?: HTMLElement | null;
     open: boolean; onClose: () => void; connected: boolean; audioMuted: boolean; translatedSpeaking: boolean;
-    summaryActive?: boolean;
     e2eeActive?: boolean;
     hasSavedSpeakingLanguage: boolean; speakingLanguage: string; onSpeakingLanguageChange: (code: string) => void; onUseDetectedLanguage: () => void; displayName: string; myPeerId: () => string;
     stopRecognition: MutableRefObject<() => void>;
@@ -32,7 +31,7 @@ interface Props {
     onShareSpeechChange: (on: boolean) => void;
     /** The live microphone track the meeting sends (selected device, after noise suppression). */
     getMicTrack?: () => MediaStreamTrack | null;
-    /** Host or co-host: can save the transcript and create minutes. */
+    /** Host or co-host: can save the transcript. */
     isHost?: boolean;
     meetingCode?: string;
     /** Guests can choose one caption output and cannot share speech or enable translated voice. */
@@ -41,25 +40,21 @@ interface Props {
 }
 
 /** Captions: speech → server (or browser) recognition → room; translations pushed by the server per chosen language. */
-export default function MeetingCaptions({ statusHost, summaryActive = false, open, onClose, connected, audioMuted, speakingLanguage, hasSavedSpeakingLanguage, displayName, myPeerId, onSpeakingChange, stopRecognition, translatedSpeaking, e2eeActive = false, onSpeakingLanguageChange, onUseDetectedLanguage, showCaptions, onShowCaptionsChange: setShowCaptions, shareSpeech, onShareSpeechChange, getMicTrack, isHost = false, meetingCode = 'meeting', canShareSpeech, viewOnly = false }: Props) {
-    const [preferredCaptionLanguage, setPreferredCaptionLanguage] = useState(() => {
-        try {
-            return (preferencesAllowed() && localStorage.getItem(CAPTION_LANGUAGE_KEY)) || 'original';
-        } catch { return 'original'; }
-    });
-    const [hearLanguage, setHearLanguage] = useState('');
+export default function MeetingCaptions({ statusHost, open, onClose, connected, audioMuted, speakingLanguage, hasSavedSpeakingLanguage, displayName, myPeerId, onSpeakingChange, stopRecognition, translatedSpeaking, e2eeActive = false, onSpeakingLanguageChange, onUseDetectedLanguage, showCaptions, onShowCaptionsChange: setShowCaptions, shareSpeech, onShareSpeechChange, getMicTrack, isHost = false, meetingCode = 'meeting', canShareSpeech, viewOnly = false }: Props) {
+    const [preferredCaptionLanguage, setPreferredCaptionLanguage] = useState(() => readCaptionPreference(CAPTION_LANGUAGE_KEY) || 'original');
+    const [preferredHearLanguage, setPreferredHearLanguage] = useState(() => readCaptionPreference(LISTENING_LANGUAGE_KEY));
     const [voiceEnabled, setVoiceEnabled] = useState(false);
     const meetingVoice = useRef<MeetingVoice | null>(null);
     const [capabilities, setCapabilities] = useState<Capabilities>({ configured: false, languages: [] });
     const offeredLanguages = capabilities.configured ? capabilities.languages : [];
     const captionLanguage = supportedSpeechLanguage(offeredLanguages, preferredCaptionLanguage) ?? 'original';
+    const hearLanguage = voiceEnabled && preferredHearLanguage
+        ? supportedSpeechLanguage(offeredLanguages, preferredHearLanguage) ?? ''
+        : defaultListeningLanguage(offeredLanguages, preferredHearLanguage, captionLanguage, speakingLanguage);
     const chooseCaptionLanguage = (language: string) => {
         setPreferredCaptionLanguage(language);
-        if (preferencesAllowed()) {
-            try { localStorage.setItem(CAPTION_LANGUAGE_KEY, language); } catch { /* Use the choice for this meeting. */ }
-        }
+        saveCaptionPreference(CAPTION_LANGUAGE_KEY, language);
         setCaptions([]);
-        setShowCaptions(true);
     };
     const [allowServerTranscription, setAllowServerTranscription] = useState(false);
     const [processorParticipants, setProcessorParticipants] = useState<{ peerId: string; displayName: string }[]>([]);
@@ -97,8 +92,6 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
             setTranscriptNoticeDismissed(false);
         }
     }, [transcriptSaving]);
-    const [minutes, setMinutes] = useState('');
-    const [minutesBusy, setMinutesBusy] = useState(false);
     /** False when the meeting server is an older build without transcripts / pushed translations. */
     const [serverUpToDate, setServerUpToDate] = useState(true);
     const panelRef = useRef<HTMLElement>(null);
@@ -106,18 +99,6 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
     const [allowBrowser, setAllowBrowser] = useState(false);
     const serverAvailable = Boolean(capabilities.asr?.available) && ServerSpeechEngine.isSupported() && Boolean(getMicTrack);
     const serverAsr = serverAvailable && !preferBrowser;
-    const summaryDefaultsApplied = useRef(false);
-    const declinedSpeech = useRef(false);
-    useEffect(() => {
-        if (!connected || !summaryActive) {
-            summaryDefaultsApplied.current = false;
-            return;
-        }
-        if (viewOnly || !capabilities.transcript || summaryDefaultsApplied.current) return;
-        summaryDefaultsApplied.current = true;
-        setShowCaptions(true);
-        if (canShareSpeech && serverAsr && allowServerTranscription && !declinedSpeech.current) onShareSpeechChange(true);
-    }, [summaryActive, connected, viewOnly, capabilities.transcript, serverAsr, capabilities.asr, allowServerTranscription, canShareSpeech, setShowCaptions, onShareSpeechChange]);
     const recognitionSupported = serverAsr || SpeechToTextEngine.isSupported();
     const ttsRef = useRef<TextToSpeechEngine | null>(null);
     const prefs = useRef({ captionLanguage, hearLanguage, voiceEnabled, showCaptions });
@@ -167,15 +148,13 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
     // Keep the speaker's original language until this listener requests translation.
     useEffect(() => {
         if (capabilities.temporarilyUnavailable || !capabilities.transcript) return;
-        const offered = capabilities.configured ? capabilities.languages : [];
         if (preferredCaptionLanguage !== 'original' && captionLanguage === 'original') {
             if (showCaptions) notifyFallback('language', `Captions in ${preferredCaptionLanguage} are unavailable. Showing the original speech.`);
         }
-        if (!capabilities.translatedAudio || (hearLanguage && !offered.some(item => item.code === hearLanguage))) {
+        if (!capabilities.translatedAudio || !hearLanguage) {
             setVoiceEnabled(false);
-            setHearLanguage('');
         }
-    }, [viewOnly, capabilities, preferredCaptionLanguage, captionLanguage, hearLanguage, showCaptions, notifyFallback]);
+    }, [capabilities, preferredCaptionLanguage, captionLanguage, hearLanguage, showCaptions, notifyFallback]);
 
     // A new connection or encryption transition requires a fresh processor permission.
     useEffect(() => {
@@ -256,7 +235,7 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
         if (!connected) {
             onShareSpeechChange(false); setVoiceEnabled(false); setAllowGoogleTranslation(false); setCaptions([]);
             setCapabilities({ configured: false, languages: [] });
-            setTranscriptSaving(false); setHadTranscript(false); setMinutes(''); setStatus('');
+            setTranscriptSaving(false); setHadTranscript(false); setStatus('');
         }
     }, [connected]);
 
@@ -306,6 +285,7 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
                 if (meetingVoice.current === voice) setStatus('Allow audio playback to hear the meeting voice.');
             });
         }
+        if (enabled) setPreferredHearLanguage(hearLanguage);
         setVoiceEnabled(enabled);
     };
 
@@ -366,7 +346,7 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
         return () => { offInterim(); offFinal(); offTranslated(); offFailed(); };
     }, [connected, capabilities.configured, myPeerId, displayName, onSpeakingChange]);
 
-    // ── Transcript and minutes ───────────────────────────────────────
+    // ── Transcript ───────────────────────────────────────
     const toggleTranscript = (enabled: boolean) => {
         signaling.request('setTranscriptSaving', { enabled }).then(result => setTranscriptSaving(Boolean(result?.saving)))
             .catch((error: Error) => {
@@ -378,27 +358,17 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
         try {
             const result = await signaling.request('getTranscript') as { saving: boolean; entries: TranscriptEntry[] };
             if (!result.entries.length) { setStatus(result.saving ? 'No shared speech yet. An eligible speaker must enable speech sharing and unmute.' : 'There is no saved transcript in this room yet.'); return; }
-            downloadText(`${meetingCode}-transcript.${format}`, format === 'srt' ? transcriptToSrt(result.entries) : transcriptToText(result.entries, minutes));
+            downloadText(`${meetingCode}-transcript.${format}`, format === 'srt' ? transcriptToSrt(result.entries) : transcriptToText(result.entries));
             setStatus('Transcript download requested.');
         } catch { setStatus('Could not download the transcript.'); }
     };
     const shareMySpeech = (enabled: boolean) => {
-        declinedSpeech.current = !enabled;
         if (!enabled) stopRecognition.current();
         if (serverAsr) setAllowServerTranscription(enabled);
         else setAllowBrowser(enabled);
         onShareSpeechChange(enabled);
         setStatus('');
     };
-    const createMinutes = async () => {
-        setMinutesBusy(true); setStatus('Writing meeting minutes…');
-        try {
-            const result = await signaling.request('generateMinutes', {}) as { minutes: string };
-            setMinutes(result.minutes); setStatus('Minutes are ready. They are saved with the transcript.');
-        } catch { setStatus('AI temporarily unavailable. Your meeting can continue.'); }
-        finally { setMinutesBusy(false); }
-    };
-
     const outputs = capabilities.configured ? capabilities.languages : [];
     const name = (code: string, fallback: string) => LANGUAGES.find(item => item.code === code)?.name || fallback;
     const speakOptions = captionLanguageOptions(serverAsr ? asrLanguages : null, speakingLanguage, outputs);
@@ -427,17 +397,11 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
         <CaptionOverlay enabled={showCaptions} captions={captions} fontSize="large" />
         {open && <section ref={panelRef} className="meeting-language-settings" id="meeting-language-settings" role="dialog" aria-labelledby="caption-settings-title" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
             <div className="caption-settings-head"><h2 id="caption-settings-title">Captions & language</h2><button type="button" className="neu-icon-btn" aria-label="Close language settings" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></div>
-            {!viewOnly && summaryActive && <div className="caption-settings-group">
-                <p>AI summary is on. You can change your caption and language settings at any time.</p>
-                {canShareSpeech && recognitionSupported && <label className="caption-toggle"><SelectionInput type="checkbox" checked={shareSpeech} disabled={!shareSpeech && !connected} onChange={event => {
-                    shareMySpeech(event.target.checked);
-                }} />{serverAsr ? 'Allow the transcription service to receive my mic audio and include my shared captions' : 'Allow browser speech recognition to include my shared captions'}</label>}
-            </div>}
             <label className="caption-toggle"><SelectionInput type="checkbox" checked={showCaptions} onChange={event => setShowCaptions(event.target.checked)} />Show meeting captions</label>
             <label htmlFor="caption-output-language">Read captions in</label>
-            <select aria-describedby="caption-translation-help" disabled={!outputs.length} id="caption-output-language" value={captionLanguage === 'original' ? preferredCaptionLanguage : captionLanguage} onChange={event => chooseCaptionLanguage(event.target.value)}><option value="original">Speaker’s original language</option>{captionLanguage === 'original' && preferredCaptionLanguage !== 'original' && <option disabled value={preferredCaptionLanguage}>{preferredCaptionLanguage} · {capabilities.transcript ? 'unavailable' : 'checking availability'}</option>}{outputs.map(lang => <option value={lang.code} key={lang.code}>{name(lang.code, lang.name)}</option>)}</select>
+            <select aria-describedby="caption-translation-help" id="caption-output-language" value={captionLanguage} onChange={event => chooseCaptionLanguage(event.target.value)}><option value="original">Speaker’s original language</option>{outputs.map(lang => <option value={lang.code} key={lang.code}>{name(lang.code, lang.name)}</option>)}</select>
 
-            <p id="caption-translation-help" className="caption-settings-note">Choose the language you want to read. You can speak a different language.</p>
+            <p id="caption-translation-help" className="caption-settings-note">Captions appear when someone shares speech. If translation is unavailable, captions use the speaker’s original language.</p>
             {canShareSpeech && <details className="caption-settings-group"><summary>Your microphone</summary>
             {serverAvailable && SpeechToTextEngine.isSupported() && <>
                 <label htmlFor="caption-recognition-source">Recognize speech using</label>
@@ -458,14 +422,13 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
             {!serverAsr && <button type="button" className="btn-text" onClick={onUseDetectedLanguage}>Use browser or region suggestion</button>}
             <details className="caption-privacy"><summary>How transcription uses audio</summary><p>{serverAsr
                 ? 'The configured transcription processor receives a copy of your microphone audio. The meeting service can read shared captions and translation text.'
-                : 'Browser speech recognition may send audio to your browser’s provider. It uses the browser’s microphone, which may differ from your selected meeting device. Only enable it if you agree.'} Captions are shared with this meeting{transcriptSaving ? ' and the host is saving a transcript.' : '. When AI summary is on, shared captions are used to create the recap.'}</p>
+                : 'Browser speech recognition may send audio to your browser’s provider. It uses the browser’s microphone, which may differ from your selected meeting device. Only enable it if you agree.'} Captions are shared with this meeting{transcriptSaving ? ' and the host is saving a transcript.' : '.'}</p>
             {serverAsr && <p>{e2eeActive ? 'Meeting audio, video and screen sharing remain end-to-end encrypted. Transcription separately shares your microphone audio with the processor.' : 'Transcription shares your microphone audio with the configured processor.'} Turning this permission off stops further audio sharing and discards pending results. Previously shared captions remain visible.</p>}
             </details>
             {serverAsr && <>
                 <label className="caption-toggle"><SelectionInput type="checkbox" checked={allowServerTranscription} disabled={!allowServerTranscription && !connected} onChange={event => {
                     stopRecognition.current();
                     onShareSpeechChange(false);
-                    declinedSpeech.current = !event.target.checked;
                     setAllowServerTranscription(event.target.checked);
                     setStatus('');
                 }} />Allow the transcription service to receive my mic audio for this connection</label>
@@ -477,8 +440,12 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
             </details>}
             {capabilities.translatedAudio && <details className="caption-settings-group"><summary>Translated audio</summary>
             <label htmlFor="heard-output-language">Listen in</label>
-            <select disabled={!outputs.length} id="heard-output-language" value={hearLanguage} onChange={event => { setVoiceEnabled(false); setHearLanguage(event.target.value); }}><option value="">Choose a language</option>{outputs.map(lang => <option value={lang.code} key={lang.code}>{name(lang.code, lang.name)}</option>)}</select>
-            <label className="caption-toggle"><SelectionInput type="checkbox" checked={voiceEnabled} disabled={!connected || !hearLanguage} onChange={event => listenToTranslation(event.target.checked)} />Listen to translated speech</label>
+            <select disabled={!outputs.length} id="heard-output-language" value={hearLanguage} onChange={event => {
+                listenToTranslation(false);
+                setPreferredHearLanguage(event.target.value);
+                saveCaptionPreference(LISTENING_LANGUAGE_KEY, event.target.value);
+            }}>{!hearLanguage && <option value="" disabled>Choose a language</option>}{outputs.map(lang => <option value={lang.code} key={lang.code}>{name(lang.code, lang.name)}</option>)}</select>
+            <label className="caption-toggle"><SelectionInput type="checkbox" checked={voiceEnabled} disabled={!voiceEnabled && (!connected || !hearLanguage)} onChange={event => listenToTranslation(event.target.checked)} />Listen to translated speech</label>
             <p className="caption-settings-note">If your device has no matching voice, QS-VC reads the translation using a meeting voice. Device voices may use a remote service.</p>
             {voiceEnabled && voiceDiagnostic && <div role="status" className="caption-settings-status" data-speech-gate={voiceDiagnostic.gate}>
                 {voiceDiagnostic.message} Original meeting audio stays on.
@@ -491,11 +458,7 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
             {(transcriptSaving || hadTranscript) && <div className="caption-actions">
                 <button type="button" className="btn-outline" onClick={() => download('txt')}>Download .txt</button>
                 <button type="button" className="btn-outline" onClick={() => download('srt')}>Download .srt</button>
-                {transcriptSaving && isHost && capabilities.minutes?.configured && <>
-                    <button type="button" className="btn-outline" disabled={minutesBusy} onClick={createMinutes}>{minutesBusy ? 'Writing minutes…' : 'Create AI minutes'}</button>
-                </>}
             </div>}
-            {minutes && <div className="caption-minutes"><pre>{minutes}</pre><button type="button" className="btn-text" onClick={() => downloadText(`${meetingCode}-minutes.md`, minutes)}>Download minutes</button></div>}
             </details>
             </>}
             <div role="status" className="caption-settings-status">{status || capabilityError}</div>

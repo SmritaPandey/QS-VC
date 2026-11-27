@@ -163,7 +163,6 @@ rawPool.on('error', () => logger.warn('Database connection lost; the pool will r
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 const authMiddleware = meetingAuth(AUTH_URL, (tenantId, next) => pool.runWithTenant(tenantId, next));
-const summaryFeature = requireFeature(AUTH_URL, 'ai_meeting_summary');
 const scheduleFeature = requireFeature(AUTH_URL, 'meeting_scheduling');
 registerSessionReportRoutes(app, pool, rawPool, authMiddleware);
 registerBrandingRoutes(app, pool, rawPool, authMiddleware);
@@ -486,21 +485,14 @@ app.post('/api/internal/meetings/:code/transcript', express.json({ limit: '2mb' 
 });
 
 // The meeting's host downloads saved transcripts and minutes: ?format=json (default) | txt | srt
-app.get('/api/meetings/code/:code/transcript', meetingCodeLookupLimit, authMiddleware, (req, res, next) => req.query.format === 'summary' ? summaryFeature(req, res, next) : next(), async (req, res) => {
+app.get('/api/meetings/code/:code/transcript', meetingCodeLookupLimit, authMiddleware, async (req, res) => {
     const user = (req as any).user as AuthPayload;
     const code = String(req.params.code).toUpperCase().slice(0, 30);
     try {
         const meeting = await pool.query('SELECT host_id FROM public.qsvc_meeting_by_code($1)', [code]);
         if (!meeting.rows.length) return res.status(404).json({ error: 'Meeting not found' });
         if (meeting.rows[0].host_id !== user.sub && user.role !== 'admin') return res.status(403).json({ error: 'Only the meeting host can open its transcript' });
-        if (req.query.format === 'summary') {
-            const saved = await pool.query(
-                "SELECT executive_summary FROM meeting_transcripts WHERE meeting_code = $1 AND executive_summary IS NOT NULL AND started_at >= NOW() - INTERVAL '90 days' ORDER BY started_at DESC LIMIT 1",
-                [code],
-            );
-            res.setHeader('Cache-Control', 'no-store');
-            return res.json({ summary: saved.rows[0]?.executive_summary ?? null });
-        }
+        if (req.query.format === 'summary') return res.sendStatus(404);
         const limitValue = Number(req.query.limit);
         const limit = Number.isInteger(limitValue) && limitValue > 0 ? Math.min(limitValue, 1000) : 500;
         let cursor: { at: string; id: string } | null = null;
