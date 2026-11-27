@@ -43,3 +43,32 @@ test('other routes and the local app do not request a session marker', () => {
         assert.deepEqual(calls, []);
     }
 });
+
+test('desktop plan prompts respect the verified administrator from the session', async () => {
+    const renderer = fs.readFileSync(path.join(__dirname, '../static/app.js'), 'utf8');
+    let nextState = new Promise(() => {});
+    let emit;
+    const context = vm.createContext({
+        window: { qsvcDesktop: { state: () => nextState, onEvent: listener => { emit = listener; } }, addEventListener() {} },
+        document: { getElementById() {} }, location: { search: '' }, URLSearchParams,
+    });
+    vm.runInContext(renderer + '\nrender = () => {};', context);
+    async function refreshUser(user, status = 'trial_expired') {
+        nextState = Promise.resolve({ user, entitlements: { plan: 'starter_trial', status, features: [] } });
+        await vm.runInContext('refresh()', context);
+    }
+    const prompt = () => vm.runInContext('state.upgradePrompt', context);
+    await refreshUser({ role: 'member' });
+    assert.equal(prompt().trialEnded, true);
+    await refreshUser({ role: 'admin' });
+    assert.equal(prompt(), null);
+    assert.equal(vm.runInContext('planBadge()', context), null);
+    await refreshUser({ role: 'member', isPlatformAdmin: true }, 'paid_active');
+    emit('upgrade-required', { requiredPlan: 'pro' });
+    assert.equal(prompt(), null);
+    await refreshUser({ role: 'member' }, 'paid_active');
+    emit('upgrade-required', { requiredPlan: 'pro' });
+    assert.equal(prompt().requiredPlan, 'pro');
+    await refreshUser(null);
+    assert.equal(prompt(), null);
+});

@@ -43,11 +43,15 @@ const dayText = d => {
 const greeting = () => { const hour = new Date().getHours(); return hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'; };
 const initials = name => String(name || '?').replace(/\(.*?\)/g, '').trim().split(/\s+/).slice(0, 2).map(p => p[0]).join('').toUpperCase() || '?';
 
+function hasAdminAccess() {
+    return state.user?.isPlatformAdmin === true || state.user?.role === 'admin';
+}
+
 // ── screens ──
 function render() {
     document.documentElement.dataset.theme = state.theme;
     const screen = !state.workspace ? setupScreen() : !state.user ? (state.personalEnrol ? personalEnrolScreen() : signInScreen()) : shell();
-    root.replaceChildren(state.upgradePrompt
+    root.replaceChildren(state.user && !hasAdminAccess() && state.upgradePrompt
         ? h('div', {}, h('div', { class: 'app-surface', inert: true }, screen), upgradeModal())
         : screen);
 }
@@ -55,7 +59,7 @@ function render() {
 function planName(plan) { return String(plan || 'guest').replace(/_trial$/, ' trial').replace(/^./, letter => letter.toUpperCase()); }
 function planBadge() {
     const plan = state.entitlements.plan;
-    if (!plan || plan === 'guest') return null;
+    if (hasAdminAccess() || !plan || plan === 'guest') return null;
     const silver = plan === 'starter' || plan === 'starter_trial';
     const tone = silver ? 'silver' : plan === 'enterprise' ? 'violet' : 'gold';
     const crown = plan === 'basic' || plan === 'basic_trial' ? null : h('span', { class: `plan-crown ${tone}`, 'aria-label': `${planName(plan)} plan`, title: `${planName(plan)} plan` }, icon('workspace_premium'));
@@ -263,7 +267,7 @@ function personalEnrolScreen() {
 }
 
 function shell() {
-    const scheduleLocked = !state.entitlements.features.includes('meeting_scheduling');
+    const scheduleLocked = !hasAdminAccess() && !state.entitlements.features.includes('meeting_scheduling');
     const nav = (view, label, name) => h('button', { class: 'nav', 'aria-current': state.view === view ? 'page' : false, onclick: () => {
         state.view = view; state.scheduled = null;
         if (view === 'schedule' && scheduleLocked) state.upgradePrompt = 'meeting_scheduling';
@@ -457,14 +461,15 @@ async function changeOrganisation() {
 
 async function refresh() {
     Object.assign(state, await api.state());
-    if (state.user && state.entitlements.status === 'trial_expired') state.upgradePrompt = { requiredPlan: 'starter', trialEnded: true };
+    if (!state.user || hasAdminAccess()) state.upgradePrompt = null;
+    else if (state.entitlements.status === 'trial_expired') state.upgradePrompt = { requiredPlan: 'starter', trialEnded: true };
     else if (state.entitlements.status !== 'trial_expired' && state.upgradePrompt?.trialEnded) state.upgradePrompt = null;
     render();
 }
 
 api.onEvent((event, payload) => {
     if (event === 'session-expired') { state.user = null; toast('Your session ended. Sign in again.', 'error'); render(); }
-    if (event === 'upgrade-required' && state.user && state.entitlements.status !== 'trial_expired') {
+    if (event === 'upgrade-required' && state.user && !hasAdminAccess() && state.entitlements.status !== 'trial_expired') {
         state.upgradePrompt = { requiredPlan: payload?.requiredPlan || 'starter' };
         render();
     }
