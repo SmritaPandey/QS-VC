@@ -9,6 +9,7 @@ const shared = path.resolve(desktop, '..', '..', 'shared');
 const copies = [
     ['entitlements.cjs', path.join(desktop, 'dist', 'vendor', 'entitlements.cjs')],
     ['plan-levels.json', path.join(desktop, 'dist', 'vendor', 'plan-levels.json')],
+    ['recording-storage-gib.json', path.join(desktop, 'dist', 'vendor', 'recording-storage-gib.json')],
     ['entitlements.d.cts', path.join(desktop, 'src', 'vendor', 'entitlements.d.cts')],
 ];
 for (const [name, target] of copies) {
@@ -17,3 +18,6 @@ for (const [name, target] of copies) {
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.copyFileSync(source, target);
 }
+
+// Fail before packaging if a desktop runtime dependency was omitted.
+require(path.join(desktop, 'dist', 'vendor', 'entitlements.cjs'));

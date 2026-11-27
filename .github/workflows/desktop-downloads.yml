@@ -13,6 +13,9 @@ on:
       - '.github/workflows/desktop-downloads.yml'
       - 'docs/QS-VC-Intranet-Setup.pdf'
       - 'shared/entitlements.cjs'
+      - 'shared/entitlements.d.cts'
+      - 'shared/plan-levels.json'
+      - 'shared/recording-storage-gib.json'
 
 permissions:
   contents: read
