@@ -263,6 +263,7 @@ export default function MeetingCollaboration({ onSelectTab, sharedTab, tabReques
             }
         }
     };
+    const filePickerDisabled = !connected || busy || loading || !!uploading;
     const notesConflict = notesDirty && snapshot.notes.version !== notesVersion;
     const myLastStroke = [...snapshot.strokes].reverse().find(stroke => stroke.authorId === myPeerId);
     if (!open && !encryptedNotes) return null;
@@ -350,14 +351,14 @@ export default function MeetingCollaboration({ onSelectTab, sharedTab, tabReques
             {tab === 'files' && !encryptedNotes && <>
                 {!canShareFiles && <p className="collaboration-hint">The host can allow you to share files.</p>}
                 {canShareFiles && <div className="collaboration-dropzone" data-dragging={dragging || undefined} data-busy={uploading ? true : undefined}
-                    onClick={event => { if (!uploading && event.target === event.currentTarget) fileInput.current?.click(); }}
-                    onDragOver={event => { event.preventDefault(); if (!dragging) setDragging(true); }}
+                    onClick={event => { if (!filePickerDisabled && event.target === event.currentTarget) fileInput.current?.click(); }}
+                    onDragOver={event => { event.preventDefault(); if (!filePickerDisabled && !dragging) setDragging(true); }}
                     onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragging(false); }}
-                    onDrop={event => { event.preventDefault(); setDragging(false); if (connected && !busy && !loading) void upload(event.dataTransfer.files?.[0]); }}>
+                    onDrop={event => { event.preventDefault(); setDragging(false); if (!filePickerDisabled) void upload(event.dataTransfer.files?.[0]); }}>
                     <span className="mi collaboration-dropzone-icon" aria-hidden="true">{uploading ? 'progress_activity' : 'upload_file'}</span>
-                    <p className="collaboration-dropzone-title">{uploading ? <>Sharing <strong>{uploading}</strong>…</> : <>Drop a file here, or <button type="button" className="collaboration-link" onClick={() => fileInput.current?.click()}>browse</button></>}</p>
+                    <p className="collaboration-dropzone-title">{uploading ? <>Sharing <strong>{uploading}</strong>…</> : <>Drop a file here, or <button type="button" className="collaboration-link" disabled={filePickerDisabled} onClick={() => fileInput.current?.click()}>browse</button></>}</p>
                     <p className="collaboration-dropzone-meta">PNG, JPEG, PDF or text · up to 32 KB</p>
-                    <input ref={fileInput} className="collaboration-sr" type="file" aria-label="Choose a file to share" accept={SHARED_FILE_TYPES.join(',')} onChange={event => { void upload(event.target.files?.[0]); event.target.value = ''; }} />
+                    <input ref={fileInput} className="collaboration-sr" type="file" disabled={filePickerDisabled} aria-label="Choose a file to share" accept={SHARED_FILE_TYPES.join(',')} onChange={event => { void upload(event.target.files?.[0]); event.target.value = ''; }} />
                 </div>}
                 <div className="collaboration-files-head"><h3>Shared files{snapshot.files.length ? ` (${snapshot.files.length})` : ''}</h3><span><span className="mi" aria-hidden="true">schedule</span>Available until the meeting ends</span></div>
                 {!snapshot.files.length ? <div className="collaboration-empty"><span className="mi" aria-hidden="true">folder_open</span><p>No files shared yet</p><p className="collaboration-hint">Files you share appear here for everyone in the meeting.</p></div> :

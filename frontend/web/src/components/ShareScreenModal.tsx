@@ -8,27 +8,34 @@ interface Props {
     open: boolean;
     canCapture: boolean;
     canShareActivity: boolean;
+    captureUnavailableReason?: string;
     onClose: () => void;
     onSelect: (surface: ScreenShareSurface, sound: boolean) => void;
     onActivity: (tab: CollaborationTab) => void;
 }
 
-export default function ShareScreenModal({ open, canCapture, canShareActivity, onClose, onSelect, onActivity }: Props) {
+export default function ShareScreenModal({ open, canCapture, canShareActivity, captureUnavailableReason, onClose, onSelect, onActivity }: Props) {
     const dialog = useRef<HTMLDialogElement>(null);
     const [surface, setSurface] = useState<ScreenShareSurface>('browser');
     const [sound, setSound] = useState(false);
     useEffect(() => {
         if (open) dialog.current?.showModal();
     }, [open]);
+    const close = () => {
+        dialog.current?.close();
+        onClose();
+    };
     if (!open) return null;
     return <dialog ref={dialog} aria-labelledby="share-screen-title" className="share-screen-dialog"
-        onCancel={event => { event.preventDefault(); onClose(); }}>
+        onCancel={event => { event.preventDefault(); close(); }}>
         <div className="share-screen-modal-content">
             <header className="share-screen-header">
                 <h2 id="share-screen-title">Share with the meeting</h2>
-                <button type="button" className="share-screen-close" aria-label="Close sharing options" onClick={onClose}><span aria-hidden="true" className="mi">close</span></button>
+                <button type="button" className="share-screen-close" aria-label="Close sharing options" onClick={close}><span aria-hidden="true" className="mi">close</span></button>
             </header>
-            {!canCapture && !canShareActivity && <p role="status">Sharing is currently unavailable for you in this meeting.</p>}
+            {!canCapture && (captureUnavailableReason || !canShareActivity) && <p className="share-picker-status" role="status">
+                {captureUnavailableReason || 'Sharing is currently unavailable for you in this meeting.'}
+            </p>}
             {canCapture && <fieldset className="share-picker-group">
                 <legend>Present your screen</legend>
                 <div className="share-picker-grid">{surfaces.map(([value, icon, label]) =>
@@ -37,13 +44,13 @@ export default function ShareScreenModal({ open, canCapture, canShareActivity, o
                         <span className="mi" aria-hidden="true">{icon}</span>{label}
                     </label>)}</div>
                 <label className="share-picker-sound"><input type="checkbox" checked={sound} onChange={event => setSound(event.target.checked)} />Include sound when available</label>
-                <button type="button" className="share-screen-btn-primary" onClick={() => { onSelect(surface, sound); onClose(); }}>Choose {surfaces.find(([value]) => value === surface)?.[2].toLowerCase()}…</button>
+                <button type="button" className="share-screen-btn-primary" onClick={() => { onSelect(surface, sound); close(); }}>Choose {surfaces.find(([value]) => value === surface)?.[2].toLowerCase()}…</button>
             </fieldset>}
             {canShareActivity && <section className="share-picker-activities" aria-labelledby="share-activity-heading">
                 <h3 id="share-activity-heading">Share an activity</h3>
                 <p>Opens for everyone alongside the call.</p>
                 <div className="share-picker-grid">{ACTIVITY_TABS.map(([tab, icon, title]) =>
-                    <button type="button" key={tab} className="share-picker-option" onClick={() => { onActivity(tab); onClose(); }}>
+                    <button type="button" key={tab} className="share-picker-option" onClick={() => { onActivity(tab); close(); }}>
                         <span className="mi" aria-hidden="true">{icon}</span>{title}
                     </button>)}</div>
             </section>}

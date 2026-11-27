@@ -429,7 +429,7 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
             <div className="caption-settings-head"><h2 id="caption-settings-title">Captions & language</h2><button type="button" className="neu-icon-btn" aria-label="Close language settings" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></div>
             {!viewOnly && summaryActive && <div className="caption-settings-group">
                 <p>AI summary is on. You can change your caption and language settings at any time.</p>
-                {canShareSpeech && recognitionSupported && <label className="caption-toggle"><SelectionInput type="checkbox" checked={shareSpeech} onChange={event => {
+                {canShareSpeech && recognitionSupported && <label className="caption-toggle"><SelectionInput type="checkbox" checked={shareSpeech} disabled={!shareSpeech && !connected} onChange={event => {
                     shareMySpeech(event.target.checked);
                 }} />{serverAsr ? 'Allow the transcription service to receive my mic audio and include my shared captions' : 'Allow browser speech recognition to include my shared captions'}</label>}
             </div>}
@@ -462,7 +462,7 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
             {serverAsr && <p>{e2eeActive ? 'Meeting audio, video and screen sharing remain end-to-end encrypted. Transcription separately shares your microphone audio with the processor.' : 'Transcription shares your microphone audio with the configured processor.'} Turning this permission off stops further audio sharing and discards pending results. Previously shared captions remain visible.</p>}
             </details>
             {serverAsr && <>
-                <label className="caption-toggle"><SelectionInput type="checkbox" checked={allowServerTranscription} disabled={!connected} onChange={event => {
+                <label className="caption-toggle"><SelectionInput type="checkbox" checked={allowServerTranscription} disabled={!allowServerTranscription && !connected} onChange={event => {
                     stopRecognition.current();
                     onShareSpeechChange(false);
                     declinedSpeech.current = !event.target.checked;
@@ -471,7 +471,7 @@ export default function MeetingCaptions({ statusHost, summaryActive = false, ope
                 }} />Allow the transcription service to receive my mic audio for this connection</label>
             </>}
             {!serverAsr && <p className="caption-settings-note">Your browser may send mic audio to its speech provider.</p>}
-            <label className="caption-toggle"><SelectionInput type="checkbox" checked={shareSpeech} disabled={!connected || !recognitionSupported || (serverAsr && !allowServerTranscription)} onChange={event => { shareMySpeech(event.target.checked); }} />{serverAsr ? 'Share my speech as captions' : 'Share captions using browser speech recognition'}</label>
+            <label className="caption-toggle"><SelectionInput type="checkbox" checked={shareSpeech} disabled={!shareSpeech && (!connected || !recognitionSupported || (serverAsr && !allowServerTranscription))} onChange={event => { shareMySpeech(event.target.checked); }} />{serverAsr ? 'Share my speech as captions' : 'Share captions using browser speech recognition'}</label>
             {capabilities.processing === 'google-cloud' && capabilities.configured && <label className="caption-toggle"><SelectionInput type="checkbox" checked={allowGoogleTranslation} onChange={event => setAllowGoogleTranslation(event.target.checked)} />Allow Google Cloud to translate my shared caption text</label>}
             <p className="caption-settings-note">{!recognitionSupported ? 'Speech recognition is unavailable in this browser. You can still receive captions.' : audioMuted && shareSpeech ? 'Recognition is paused while your microphone is muted.' : translatedSpeaking && shareSpeech ? 'Recognition is paused while translated audio plays.' : serverAsr && !asrLanguage ? 'Choose an available spoken language.' : serverAsr && asrLanguage ? `Speaking: ${asrLanguage === 'auto' ? 'detected automatically' : name(asrLanguage, asrLanguage)}.` : `Speaking: ${name(speakingLanguage, speakingLanguage)}. Recognition support depends on your browser.`}</p>
             </details>}

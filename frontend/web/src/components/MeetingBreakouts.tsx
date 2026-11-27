@@ -17,9 +17,12 @@ export default function MeetingBreakouts({ connected, isHost, currentRoomId, tra
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
     const inFlight = useRef(false);
+    const close = useRef<HTMLButtonElement>(null);
+    useEffect(() => { close.current?.focus(); }, []);
     useEffect(() => {
         if (!connected) return;
         let active = true;
+        setError('');
         const off = signaling.on('breakoutRoomsUpdated', (value: BreakoutState) => { if (active) setSnapshot(value); });
         signaling.request('getBreakoutRooms', {}).then(value => { if (active) setSnapshot(value); }).catch(() => { if (active) setError('Breakout rooms could not be loaded. Close this panel and try again.'); });
         return () => { active = false; off(); };
@@ -42,13 +45,12 @@ export default function MeetingBreakouts({ connected, isHost, currentRoomId, tra
     const roomsOpen = snapshot?.rooms.some(room => room.open) || false;
     const inBreakout = !!snapshot && !!currentRoomId && currentRoomId !== snapshot.mainRoomId;
     return <section id="meeting-breakouts" className="side-panel meeting-breakouts" aria-labelledby="meeting-breakouts-title" onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
-        <div className="panel-header"><h3 id="meeting-breakouts-title">Breakout rooms</h3><button type="button" className="panel-close" aria-label="Close breakout rooms" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></div>
+        <div className="panel-header"><h3 id="meeting-breakouts-title">Breakout rooms</h3><button type="button" ref={close} className="panel-close" aria-label="Close breakout rooms" onClick={onClose}><span className="mi" aria-hidden="true">close</span></button></div>
         <div className="meeting-breakouts-content">
             <p>Move into a smaller conversation, then return to the main meeting. Your screen share stops when you move.</p>
             {error && <p role="alert" className="meeting-breakouts-error">{error}</p>}
-            <p role="status">{transitioning ? 'Moving rooms and setting up your secure media…' : busy ? 'Updating breakout rooms…' : ''}</p>
+            <p role="status">{!connected ? 'Reconnect to manage or join breakout rooms.' : transitioning ? 'Moving rooms and setting up your secure media…' : busy ? 'Updating breakout rooms…' : !snapshot && !error ? 'Loading breakout rooms…' : ''}</p>
             {inBreakout && <button type="button" disabled={disabled} onClick={() => void join(null)}>Return to main meeting</button>}
-            {!snapshot && !error && <p>Loading breakout rooms…</p>}
             {isHost && snapshot && <>
                 <form onSubmit={event => { event.preventDefault(); if (name.trim()) void run('createBreakoutRoom', { name: name.trim() }); }}>
                     <label htmlFor="breakout-name">Room name</label><input id="breakout-name" value={name} maxLength={60} disabled={disabled || snapshot.rooms.length >= 20} onChange={event => setName(event.target.value)} />

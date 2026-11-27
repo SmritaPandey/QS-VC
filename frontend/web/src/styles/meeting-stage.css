@@ -237,6 +237,7 @@
 .meeting-room .meeting-more-panel { width:300px; max-height:min(560px, calc(100dvh - 160px)); }
 .meeting-more-panel > button { margin-bottom:6px; font-size:15px; }
 .meeting-more-panel > h3 { margin:16px 0 8px; }
+.meeting-more-panel > h4 { margin:12px 0 8px; font-size:14px; font-weight:500; }
 .meeting-more-panel button > .mi { flex-shrink:0; }
 .meeting-more-panel button { line-height:1.35; }
 .meeting-noise-options { display:grid; gap:6px; }
@@ -280,8 +281,9 @@
 /* Report a problem */
 .report-dialog { width:min(480px,100%); }
 .report-categories { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; margin-bottom:16px; }
-.report-categories button { display:flex; flex-direction:column; align-items:center; gap:4px; min-height:64px; padding:8px; border-radius:12px; border:1px solid #2d4556; background:#1a2a3b; color:#c8d9e2; font:inherit; font-size:13px; cursor:pointer; }
-.report-categories button[aria-checked='true'] { border-color:#43d9c2; background:#16473f; color:#a6f2e4; }
+.report-categories label { display:flex; flex-direction:column; align-items:center; gap:4px; min-height:64px; padding:8px; border-radius:12px; border:1px solid #2d4556; background:#1a2a3b; color:#c8d9e2; font:inherit; font-size:13px; cursor:pointer; }
+.report-categories label:has(:checked) { border-color:#43d9c2; background:#16473f; color:#a6f2e4; }
+.report-categories label:has(:focus-visible) { outline:3px solid #43d9c2; outline-offset:2px; }
 .report-categories .mi { font-size:20px; }
 .report-field { display:block; margin-bottom:6px; font-size:14px; color:#c8d9e2; }
 .report-dialog textarea { width:100%; box-sizing:border-box; min-height:96px; padding:10px; border-radius:10px; border:1px solid #385063; background:#0f1c28; color:#edf5fa; font:inherit; font-size:15px; resize:vertical; }

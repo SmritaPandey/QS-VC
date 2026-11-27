@@ -189,7 +189,7 @@ export default function ControlBar({
             </div>
 
             <div className="controls-center">
-                <ToggleControl on={screenSharing} label="Share" title={screenSharing ? 'Stop presenting' : 'Present your screen'}
+                <ToggleControl on={screenSharing} label={screenSharing ? 'Stop sharing' : 'Share'} title={screenSharing ? 'Stop sharing' : 'Open sharing options'}
                     iconOn="stop_screen_share" iconOff="screen_share" stateClass={screenSharing ? 'active-sharing' : ''} onToggle={onToggleScreen} />
                 {onOpenInvite && (
                     <button
@@ -249,33 +249,32 @@ export default function ControlBar({
                             <button type="button" className="control-chat-overflow" aria-label={chatTitle} aria-expanded={chatOpen} aria-controls="meeting-chat-panel" onClick={() => { closeMore(); onToggleChat(); }}><span className="mi" aria-hidden="true">chat</span>Chat{unreadChat > 0 && <span className="meeting-menu-count" aria-hidden="true"><AnimatedNumber value={Math.min(unreadChat, 99)} />{unreadChat > 99 ? '+' : ''}</span>}</button>
                             <button type="button" aria-pressed={handRaised} onClick={() => { closeMore(); onRaiseHand(); }}><span className="mi" aria-hidden="true">front_hand</span>{handRaised ? 'Lower hand' : 'Raise hand'}</button>
                         </div>
-                        {!signedIn && onSignInForExtras && <RestrictedFeatureButton label="Meeting assistant" icon="support_agent" requirement="Sign in"
-                            onResolve={() => { closeMore(); onSignInForExtras(); }} />}
+                        <h3>Meeting tools</h3>
                         {onToggleActivities && <button type="button" aria-expanded={activitiesOpen} aria-controls="meeting-activities" onClick={() => { closeMore(); onToggleActivities(); }}><span className="mi" aria-hidden="true">dashboard</span>Activities</button>}
                         <RestrictedFeatureButton label="Host controls" icon="admin_panel_settings" active={hostToolsOpen} requirement={!onToggleHostTools ? 'Host or co-host only' : undefined}
                             onActivate={() => { closeMore(); onToggleHostTools?.(); }} onResolve={() => { closeMore(); onExplainAccess?.('Only the host or co-host can manage meeting settings. Ask the host if you need access.'); }} />
+                        {onOpenBreakouts && <button type="button" onClick={() => { closeMore(); onOpenBreakouts(); }}><span className="mi" aria-hidden="true">workspaces</span>Breakout rooms</button>}
+                        <h3>Recording</h3>
                         <RestrictedFeatureButton label={isRecording ? 'Stop recording' : 'Record meeting'} icon={isRecording ? 'stop_circle' : 'fiber_manual_record'} active={isRecording} requirement={recordingRequirement}
                             onActivate={() => { closeMore(); onToggleRecording(); }}
                             onResolve={() => { closeMore(); if (!signedIn) onSignInForExtras?.(); else if (!canRecord) onExplainAccess?.('Only the signed-in meeting host can record. Upgrading does not change your meeting role.'); else onRequirePlanFeature?.('cloud_recording'); }} />
-                        {(onOpenEffects || onSignInForExtras) && <RestrictedFeatureButton label="Backgrounds and effects" icon="background_replace" active={effectsOn} requirement={effectsRequirement}
-                            onActivate={() => { closeMore(); onOpenEffects?.(); }} onResolve={() => { closeMore(); resolvePlanAccess('background_effects'); }} />}
-                        {onTogglePictureInPicture && <button type="button" aria-pressed={pictureInPicture} onClick={() => { closeMore(); onTogglePictureInPicture(); }}><span className="mi" aria-hidden="true">picture_in_picture_alt</span>{pictureInPicture ? 'Close floating view' : 'Open floating view'}</button>}
-                        {onToggleFullscreen && <button type="button" aria-pressed={fullscreen} onClick={() => { closeMore(); onToggleFullscreen(); }}><span className="mi" aria-hidden="true">{fullscreen ? 'fullscreen_exit' : 'fullscreen'}</span>{fullscreen ? 'Exit full screen' : 'Full screen'}</button>}
+                        {onRecordLocally && canRecord && !isRecording && <button type="button" onClick={() => { closeMore(); onRecordLocally(); }}><span className="mi" aria-hidden="true">save</span>Record on this device</button>}
+                        <h3>Audio and video</h3>
                         {(onToggleLanguage || onSignInForExtras) && <RestrictedFeatureButton label="Captions and language settings" icon="translate" active={languageOpen} requirement={languageRequirement}
                             onActivate={() => { closeMore(); onToggleLanguage?.(); }} onResolve={() => { closeMore(); resolvePlanAccess('ai_captions'); }} />}
-                        {onOpenBreakouts && <button type="button" onClick={() => { closeMore(); onOpenBreakouts(); }}><span className="mi" aria-hidden="true">workspaces</span>Breakout rooms</button>}
-                        {onOpenQuality && <button type="button" onClick={() => { closeMore(); onOpenQuality(); }}><span className="mi" aria-hidden="true">monitoring</span>Connection quality</button>}
+                        {(onOpenEffects || onSignInForExtras) && <RestrictedFeatureButton label="Backgrounds and effects" icon="background_replace" active={effectsOn} requirement={effectsRequirement}
+                            onActivate={() => { closeMore(); onOpenEffects?.(); }} onResolve={() => { closeMore(); resolvePlanAccess('background_effects'); }} />}
                         {onOpenMultiCamera && <button type="button" onClick={() => { closeMore(); onOpenMultiCamera(); }}><span className="mi" aria-hidden="true">video_camera_front</span>Additional cameras</button>}
-                        {onRecordLocally && canRecord && <button type="button" onClick={() => { closeMore(); onRecordLocally(); }}><span className="mi" aria-hidden="true">save</span>{isRecording ? 'Stop recording' : 'Record on this device'}</button>}
-                        {onReportProblem && <button type="button" onClick={() => { closeMore(); onReportProblem(); }}><span className="mi" aria-hidden="true">feedback</span>Report a problem</button>}
-                        <h3>Noise reduction</h3>
+                        {onOpenQuality && <button type="button" onClick={() => { closeMore(); onOpenQuality(); }}><span className="mi" aria-hidden="true">monitoring</span>Connection quality</button>}
+                        <h4>Noise reduction</h4>
                         <div className="meeting-noise-options" role="group" aria-label="Microphone noise reduction">
                             <button type="button" aria-pressed={noiseMode === 'standard'} onClick={() => onChangeNoiseMode?.('standard')}><span className="mi" aria-hidden="true">graphic_eq</span>Standard</button>
                             <RestrictedFeatureButton label="AI noise reduction" icon="auto_awesome" active={noiseMode === 'ai'} requirement={noiseRequirement}
                                 onActivate={() => onChangeNoiseMode?.('ai')} onResolve={() => { closeMore(); resolvePlanAccess('ai_noise_suppression'); }} />
                             <button type="button" aria-pressed={noiseMode === 'off'} onClick={() => onChangeNoiseMode?.('off')}><span className="mi" aria-hidden="true">volume_off</span>Off</button>
                         </div>
-                        <h3>Audio output</h3>
+                        <p className="meeting-more-hint">Muted-mic reminders analyse sound locally. Nothing is saved or sent.</p>
+                        <h4>Audio output</h4>
                         {audioOutputSupported ? <>
                             <label className="meeting-audio-output"><span>Speaker or headphones</span>
                                 <select value={audioOutputId} onChange={event => onAudioOutputChange?.(event.target.value)}>
@@ -287,6 +286,9 @@ export default function ControlBar({
                             {onChooseAudioOutput && <button type="button" onClick={onChooseAudioOutput}><span className="mi" aria-hidden="true">speaker</span>Choose audio device</button>}
                         </> : <p className="meeting-more-hint">Use your device’s audio controls to switch speakers or headphones.</p>}
                         <h3>Layout</h3>
+                        {onTogglePictureInPicture && <button type="button" aria-pressed={pictureInPicture} onClick={() => { closeMore(); onTogglePictureInPicture(); }}><span className="mi" aria-hidden="true">picture_in_picture_alt</span>{pictureInPicture ? 'Close floating view' : 'Open floating view'}</button>}
+                        {onToggleFullscreen && <button type="button" aria-pressed={fullscreen} onClick={() => { closeMore(); onToggleFullscreen(); }}><span className="mi" aria-hidden="true">{fullscreen ? 'fullscreen_exit' : 'fullscreen'}</span>{fullscreen ? 'Exit full screen' : 'Full screen'}</button>}
+
                         <div className="meeting-view-options" role="group" aria-label="Meeting layout">
                             {VIEWS.map(([view, icon, label]) => <button type="button" key={view} aria-pressed={viewMode === view} onClick={() => onChangeView(view)}><span className="mi" aria-hidden="true">{icon}</span>{label}</button>)}
                         </div>
@@ -294,7 +296,10 @@ export default function ControlBar({
                             <select value={String(tilesPerPage)} onChange={event => onChangeTilesPerPage(event.target.value === 'auto' ? 'auto' : Number(event.target.value) as TilesPerPage)}>
                                 {TILE_OPTIONS.map(option => <option key={String(option)} value={String(option)}>{option === 'auto' ? 'Auto (fits your screen)' : `Up to ${option}`}</option>)}
                             </select></label>}
-                        <p className="meeting-more-hint">Muted-mic reminders analyse sound locally. Nothing is saved or sent.</p>
+                        {(onReportProblem || (!signedIn && onSignInForExtras)) && <h3>Help</h3>}
+                        {!signedIn && onSignInForExtras && <RestrictedFeatureButton label="Meeting assistant" icon="support_agent" requirement="Sign in"
+                            onResolve={() => { closeMore(); onSignInForExtras(); }} />}
+                        {onReportProblem && <button type="button" onClick={() => { closeMore(); onReportProblem(); }}><span className="mi" aria-hidden="true">feedback</span>Report a problem</button>}
                     </div>}
                 </div>
                 <button type="button" className="ctrl-btn leave-btn" aria-label="Leave meeting" onClick={() => { haptic('warning'); onLeave(); }} data-tip="Leave meeting">

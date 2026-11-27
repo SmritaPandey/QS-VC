@@ -92,7 +92,7 @@ export default function HostMeetingTools({ broadcastSlotRef, roomDevicesEnabled,
     };
     const setSetting = (key: keyof RoomHostSettings, value: boolean) => run(key === 'locked' ? 'lockMeeting' : 'updateSettings', key === 'locked' ? { locked: value } : { settings: { [key]: value } });
     if (!isManager) return null;
-    const others = participants.filter(peer => peer.peerId !== myPeerId);
+    const canMuteAnyone = participants.some(peer => !peer.audioMuted && canManagePeer(role, myPeerId, peer));
     const raisedHands = participants.filter(peer => peer.handRaised).length;
     const toggle = (key: string, label: string, icon: string, checked: boolean, onChange: (value: boolean) => void, hint?: string, restricted = false) =>
         <label key={key} className="host-switch"><span className="mi" aria-hidden="true">{icon}</span><span className="host-switch-text"><span>{label}</span>{hint && <small>{hint}</small>}</span>
@@ -142,7 +142,7 @@ export default function HostMeetingTools({ broadcastSlotRef, roomDevicesEnabled,
                 {role === 'host' && <p className="host-cohost-count" aria-label={`Co-hosts: ${coHostCount} of 5`}><span aria-hidden="true">Co-hosts: <AnimatedNumber value={coHostCount} /> of 5</span></p>}
                 {coHostLimitReached && <p id="host-cohost-limit" className="host-cohost-limit" role="status">All five co-host seats are in use. Remove a co-host before promoting another participant.</p>}
                 <div className="host-tools-bulk">
-                    <button type="button" disabled={busy || others.length === 0} onClick={() => { void run('muteAll', { kind: 'audio' }); }}><span className="mi mi-sm" aria-hidden="true">mic_off</span>Mute all</button>
+                    <button type="button" disabled={busy || !canMuteAnyone} onClick={() => { void run('muteAll', { kind: 'audio' }); }}><span className="mi mi-sm" aria-hidden="true">mic_off</span>Mute all</button>
                     <button type="button" disabled={busy || raisedHands === 0} onClick={() => { void run('lowerHand', {}); }}><span className="mi mi-sm" aria-hidden="true">back_hand</span>Lower all hands{raisedHands ? ` (${raisedHands})` : ''}</button>
                 </div>
                 <ul className="host-tools-people">{participants.map(peer => <li key={peer.peerId}>

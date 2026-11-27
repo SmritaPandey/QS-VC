@@ -4,8 +4,12 @@ import ts from 'typescript';
 
 const source = ts.createSourceFile('MeetingRoom.tsx', readFileSync(new URL('./MeetingRoom.tsx', import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 let chatCallback = '';
+let knockCallback = '';
 function visit(node: ts.Node) {
     if (ts.isCallExpression(node) && node.expression.getText(source) === 'signaling.on' && ts.isStringLiteral(node.arguments[0]) && node.arguments[0].text === 'chatMessage') chatCallback = node.arguments[1].getText(source);
+    if (ts.isVariableDeclaration(node) && node.name.getText(source) === 'answerKnock' && node.initializer && ts.isCallExpression(node.initializer)) {
+        knockCallback = node.initializer.arguments[0].getText(source);
+    }
     ts.forEachChild(node, visit);
 }
 visit(source);
@@ -44,4 +48,28 @@ it('sounds a remote message with chat open without adding a duplicate flash', ()
     expect(h.context.playSound).toHaveBeenCalledWith('notice');
     expect(h.context.setIncomingChatMessage).not.toHaveBeenCalled();
     expect(h.context.setUnreadChat).not.toHaveBeenCalled();
+});
+
+it('keeps a waiting-room request available after failure and prevents duplicate replies', async () => {
+    let reject!: (error: Error) => void;
+    let knocks = [{ peerId: 'guest' }];
+    const request = vi.fn().mockImplementationOnce(() => new Promise<void>((_resolve, fail) => { reject = fail; })).mockResolvedValue(undefined);
+    const showNotice = vi.fn();
+    const context = {
+        sessionRevision: { current: 1 }, pendingKnockAnswers: { current: new Set<string>() },
+        notifiedKnocks: { current: new Set(['guest']) }, signaling: { request }, showNotice,
+        setKnocks: (update: (current: typeof knocks) => typeof knocks) => { knocks = update(knocks); },
+    };
+    const js = ts.transpileModule(`return (${knockCallback});`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+    const answer = new Function(...Object.keys(context), js)(...Object.values(context));
+    const first = answer('guest', true);
+    await answer('guest', false);
+    expect(request).toHaveBeenCalledTimes(1);
+    reject(new Error('Temporary failure'));
+    await first;
+    expect(knocks).toEqual([{ peerId: 'guest' }]);
+    expect(showNotice).toHaveBeenCalledOnce();
+    await answer('guest', false);
+    expect(request).toHaveBeenLastCalledWith('rejectPeer', { targetPeerId: 'guest' });
+    expect(knocks).toEqual([]);
 });

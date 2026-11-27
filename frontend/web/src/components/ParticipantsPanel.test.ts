@@ -88,3 +88,31 @@ describe('ParticipantsPanel host transfer eligibility', () => {
         expect(markup).not.toContain('participant-transfer-action');
     });
 });
+
+describe('ParticipantsPanel moderation boundaries', () => {
+    it('lets co-hosts mute and remove members, but not other co-hosts', () => {
+        const peers = new Map([
+            ['cohost', { peerId: 'cohost', displayName: 'Blair', role: 'co-host', audioMuted: false }],
+            ['member', { peerId: 'member', displayName: 'Alice', role: 'member', audioMuted: false }],
+        ]);
+        const markup = renderToStaticMarkup(createElement(ParticipantsPanel, {
+            peers, displayName: 'Me', myRole: 'co-host', canManage: true, onSpotlight: () => {}, onClose: () => {},
+        }));
+        expect(markup).toContain('aria-label="Mute Alice"');
+        expect(markup).toContain('aria-label="Remove Alice"');
+        expect(markup).not.toContain('aria-label="Mute Blair"');
+        expect(markup).not.toContain('aria-label="Remove Blair"');
+        expect(markup).toContain('aria-label="Spotlight Blair for everyone"');
+    });
+
+    it('explains the co-host limit while keeping demotion available', () => {
+        const peers = new Map(Array.from({ length: 5 }, (_, index) => [String(index), { peerId: String(index), displayName: `Co-host ${index}`, role: 'co-host' }]));
+        peers.set('member', { peerId: 'member', displayName: 'Alice', role: 'member' });
+        const markup = renderToStaticMarkup(createElement(ParticipantsPanel, {
+            peers, displayName: 'Me', myRole: 'host', canManage: true, onClose: () => {},
+        }));
+        expect(markup).toContain('disabled="" aria-describedby="participants-cohost-limit" title="Make co-host"');
+        expect(markup).toContain('title="Remove co-host">Remove co-host</button>');
+        expect(markup).toContain('All five co-host seats are in use.');
+    });
+});

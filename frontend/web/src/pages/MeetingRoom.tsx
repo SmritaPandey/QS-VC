@@ -353,7 +353,16 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const [restoring, setRestoring] = useState(reconnecting);
     const [knocks, setKnocks] = useState<Array<{ peerId: string; displayName: string }>>([]);
     const notifiedKnocks = useRef(new Set<string>());
+    const pendingKnockAnswers = useRef(new Set<string>());
     const [leaveOpen, setLeaveOpen] = useState(false);
+    const leaveDialog = useRef<HTMLDialogElement>(null);
+    const [isMeetingOwner, setIsMeetingOwner] = useState(false);
+    useEffect(() => {
+        const dialog = leaveDialog.current;
+        if (!dialog) return;
+        if (leaveOpen && !dialog.open) dialog.showModal();
+        if (!leaveOpen && dialog.open) dialog.close();
+    }, [leaveOpen]);
     const myRoleRef = useRef('member');
     myRoleRef.current = myRole;
     const isManagerNow = () => myRoleRef.current === 'host' || myRoleRef.current === 'co-host';
@@ -991,6 +1000,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 myPeerIdRef.current = joinResult.peerId;
                 requiredE2eeRef.current = joinResult.settings?.e2eeRequired !== false;
                 setCurrentRoomId(joinResult.roomId || null);
+                setIsMeetingOwner(joinResult.isOwner === true);
                 setCurrentBreakoutName(joinResult.breakout?.name || null);
                 if (joinResult.transitionError) showNotice(joinResult.transitionError);
                 setLiveStreaming(joinResult.liveStream || null);
@@ -2022,11 +2032,21 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Local time';
     const timeZoneLabel = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(clockNow).find(part => part.type === 'timeZoneName')?.value || timeZone;
 
-    const answerKnock = useCallback((peerId: string, admit: boolean) => {
-        setKnocks(current => current.filter(k => k.peerId !== peerId));
-        signaling.request(admit ? 'admitPeer' : 'rejectPeer', { targetPeerId: peerId }).then(() => {
+    const answerKnock = useCallback(async (peerId: string, admit: boolean) => {
+        const revision = sessionRevision.current;
+        const requestKey = `${revision}:${peerId}`;
+        if (pendingKnockAnswers.current.has(requestKey)) return;
+        pendingKnockAnswers.current.add(requestKey);
+        try {
+            await signaling.request(admit ? 'admitPeer' : 'rejectPeer', { targetPeerId: peerId });
+            if (revision !== sessionRevision.current) return;
+            setKnocks(current => current.filter(knock => knock.peerId !== peerId));
             if (!admit) notifiedKnocks.current.delete(peerId);
-        }).catch(() => showNotice('That request could not be answered. Try again.'));
+        } catch {
+            if (revision === sessionRevision.current) showNotice('That request could not be answered. Try again.');
+        } finally {
+            pendingKnockAnswers.current.delete(requestKey);
+        }
     }, [showNotice]);
     const endForEveryone = useCallback(async () => {
         setLeaveOpen(false);
@@ -2226,6 +2246,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
     const secureActivities = requiredE2eeRef.current;
     const activityOnStage = activitiesOpen && (!secureActivities || !!e2eeRef.current);
     const sidePanelOpen = chatOpen || participantsOpen || hostToolsOpen || effectsOpen || summaryOpen;
+    const screenCaptureAvailable = !screenSharing && canPublishRef.current
+        && (myRole === 'host' || roomSettings.allowScreenShare)
+        && typeof navigator.mediaDevices?.getDisplayMedia === 'function';
     const manager = myRole === 'host' || myRole === 'co-host';
     const restoreFormatFocus = () => {
         const opener = formatOpener.current;
@@ -2483,7 +2506,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                     await stopScreenShare();
                 }
                 else showNotice('Audio-only is off. Start your camera when ready.');
-            }} onOpenReport={signedIn ? () => setSessionReportOpen(true) : undefined} open={qualityOpen} connected={connected} getStats={getQualityStats} onSample={reportQualitySample} onClose={() => setQualityOpen(false)} />
+            }} onOpenReport={connected && signedIn && (isMeetingOwner || isPlatformAdmin) ? () => setSessionReportOpen(true) : undefined} open={qualityOpen} connected={connected} getStats={getQualityStats} onSample={reportQualitySample} onClose={() => setQualityOpen(false)} />
             <MultiCameraPanel open={multiCameraOpen} onClose={() => setMultiCameraOpen(false)} cameras={additionalCameras} primaryDeviceId={localStream?.getVideoTracks()[0]?.getSettings().deviceId} canStart={connected && !roomTransitioning && !videoOff && pageVisible && canPublishRef.current && roomSettings.allowCamera} onStart={async deviceId => { if (roomTransitionBusy.current || !connected || videoOff || document.hidden || !canPublishRef.current || !roomSettingsRef.current.allowCamera) throw new Error('Start your main camera and check host camera permissions first.'); await multiCameraRef.current!.startCamera(deviceId, localStreamRef.current?.getVideoTracks()[0]?.getSettings().deviceId); }} onStop={source => multiCameraRef.current!.stopCamera(source)} />
             <MeetingLiveStreaming container={broadcastSlot} onClosePanel={closeActivityPanel} meetingCode={meetingCode || ''} isHost={myRole === 'host'} connected={connected} e2eeRequired={e2eeEnabled} onNotice={showNotice} onStreamingChange={async value => { await signaling.request('liveStreamState', value); setLiveStreaming(value.active ? value : null); }} createComposite={() => createMeetingComposite(() => videoAreaRef.current, () => [...(privateConversationRef.current ? [] : localStreamRef.current?.getAudioTracks() || []), ...(screenStreamRef.current?.getAudioTracks() || []), ...Array.from(peersRef.current.values()).flatMap(peer => [peer.audioTrack, peer.screenAudioTrack].filter((track): track is MediaStreamTrack => !!track))], `QS-VC ${meetingCode}`)} />
             <MeetingPictureInPicture ref={pictureInPictureRef} cameraStartAllowed={pageVisible} peers={peers} localStream={displayedLocalStream} localScreenTrack={screenStream?.getVideoTracks()[0]} sharing={screenSharing} displayName={displayName} videoOff={videoOff} audioMuted={audioMuted} activeSpeaker={activeSpeaker} onToggleAudio={handleToggleAudio} onToggleVideo={handleToggleVideo} onNotice={showNotice} onOpenChange={setPictureInPictureOpen} />
@@ -2532,7 +2555,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
             <MeetingInformation open={informationOpen} meetingCode={meetingCode || ''} joinUrl={`${window.location.origin}${meetingPreviewPath}`} meetingTitle={meetingTitle} onClose={() => setInformationOpen(false)} />
             <ShareScreenModal
                 open={shareScreenModalOpen}
-                canCapture={!screenSharing && canPublishRef.current && (myRole === 'host' || roomSettings.allowScreenShare) && typeof navigator.mediaDevices?.getDisplayMedia === 'function'}
+                captureUnavailableReason={audioOnly && screenCaptureAvailable ? 'Open More, then Connection quality, and turn off Audio-only to share your screen.' : undefined}
+                canCapture={screenCaptureAvailable && !audioOnly}
                 canShareActivity={manager && (!secureActivities || !!encryptedNotes)}
                 onActivity={tab => { void signaling.request('setSharedActivity', { tab }).catch(() => showNotice('Could not share the activity. Try again.')); }}
                 onClose={() => setShareScreenModalOpen(false)}
@@ -2546,17 +2570,19 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected }: S
                 onClose={() => setInviteModalOpen(false)}
             />
             {reportOpen && <ReportProblem meetingCode={meetingCode || ''} displayName={displayName} diagnostics={collectDiagnostics} onClose={() => setReportOpen(false)} />}
-            {leaveOpen && <div className="meeting-dialog-backdrop" onClick={() => setLeaveOpen(false)}>
-                <div className="meeting-dialog" role="dialog" aria-modal="true" aria-labelledby="leave-title" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') setLeaveOpen(false); }}>
+            <dialog ref={leaveDialog} className="meeting-native-dialog" aria-labelledby="leave-title"
+                onCancel={event => { event.preventDefault(); setLeaveOpen(false); }}
+                onClick={event => { if (event.target === event.currentTarget) setLeaveOpen(false); }}>
+                <div className="meeting-dialog">
                     <h2 id="leave-title">Leave the meeting?</h2>
                     <p>You can leave and let the meeting continue, or end it for everyone.</p>
                     <div className="meeting-dialog-actions">
-                        <button type="button" className="btn-text" autoFocus onClick={() => setLeaveOpen(false)}>Cancel</button>
+                        <button type="button" className="btn-text" onClick={() => setLeaveOpen(false)}>Cancel</button>
                         <button type="button" className="btn-outline" onClick={() => { setLeaveOpen(false); void handleLeave(); }}>Just leave</button>
                         <button type="button" className="meeting-danger" onClick={() => { void endForEveryone(); }}>End for everyone</button>
                     </div>
                 </div>
-            </div>}
+            </dialog>
 
         </div>
     );

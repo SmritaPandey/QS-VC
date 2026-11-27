@@ -3,9 +3,9 @@ import React from 'react';
 import { renderToString } from 'react-dom/server';
 import ShareScreenModal from './ShareScreenModal';
 
-function renderPicker(open: boolean, canCapture: boolean, canShareActivity: boolean) {
+function renderPicker(open: boolean, canCapture: boolean, canShareActivity: boolean, captureUnavailableReason?: string) {
     return renderToString(React.createElement(ShareScreenModal, {
-        open, canCapture, canShareActivity, onClose: vi.fn(), onSelect: vi.fn(), onActivity: vi.fn(),
+        open, canCapture, canShareActivity, captureUnavailableReason, onClose: vi.fn(), onSelect: vi.fn(), onActivity: vi.fn(),
     }));
 }
 
@@ -27,6 +27,13 @@ describe('ShareScreenModal', () => {
         const html = renderPicker(true, false, true);
         expect(html).toContain('Share an activity');
         expect(html).toContain('Whiteboard');
+        expect(html).not.toContain('Present your screen');
+    });
+
+    it('explains how to restore screen capture while keeping activities available', () => {
+        const html = renderPicker(true, false, true, 'Turn off Audio-only in Connection quality to share your screen.');
+        expect(html).toContain('Turn off Audio-only in Connection quality');
+        expect(html).toContain('Share an activity');
         expect(html).not.toContain('Present your screen');
     });
 

@@ -41,6 +41,11 @@ describe('meeting feature discoverability', () => {
         expect(html).toContain('Stop recording');
         expect(html).not.toContain('Stop recording. Sign in');
     });
+    it('offers one stop action while recording', () => {
+        const html = controls({ signedIn: true, canRecord: true, isRecording: true, onRecordLocally: noop });
+        expect(html.match(/>Stop recording</g)).toHaveLength(1);
+        expect(html).not.toContain('Record on this device');
+    });
     it('keeps existing signed-in language access and assistant placement unchanged', () => {
         const html = controls({ signedIn: true, captionsLocked: true, onToggleLanguage: noop });
         expect(html).not.toContain('Meeting assistant. Sign in.');
@@ -51,6 +56,17 @@ describe('meeting feature discoverability', () => {
         const html = controls({ signedIn: true, captionsLocked: true });
         expect(html).toContain('aria-label="Leave meeting"');
         expect(html).toContain('Turn on captions. Starter plan.');
+    });
+    it('places common actions in their corresponding More groups', () => {
+        const html = controls({ onOpenQuality: noop, onOpenMultiCamera: noop, onReportProblem: noop, onToggleFullscreen: noop });
+        const sections = html.split(/<h3>([^<]+)<\/h3>/);
+        const group = (heading: string) => sections[sections.indexOf(heading) + 1];
+        expect(group('Meeting tools')).toContain('Host controls');
+        expect(group('Recording')).toContain('Record meeting');
+        expect(group('Audio and video')).toContain('Connection quality');
+        expect(group('Audio and video')).toContain('Additional cameras');
+        expect(group('Layout')).toContain('Full screen');
+        expect(group('Help')).toContain('Report a problem');
     });
     it('routes locked feature activation to access resolution without invoking the feature', () => {
         const activate = vi.fn(); const resolve = vi.fn();

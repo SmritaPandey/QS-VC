@@ -11,7 +11,15 @@ export default function MultiCameraPanel({ open, onClose, primaryDeviceId, camer
     const [busy, setBusy] = useState(false);
     const [message, setMessage] = useState('');
     const closeRef = useRef<HTMLButtonElement>(null);
-    useEffect(() => { if (open) closeRef.current?.focus(); }, [open]);
+    useEffect(() => {
+        if (!open) return;
+        const opener = document.activeElement as HTMLElement | null;
+        closeRef.current?.focus();
+        return () => {
+            if (opener?.isConnected && opener !== document.body) opener.focus();
+            else document.querySelector<HTMLButtonElement>('.meeting-room [aria-controls="meeting-more-controls"]')?.focus();
+        };
+    }, [open]);
     useEffect(() => {
         if (!open) return;
         let active = true;
@@ -47,7 +55,7 @@ export default function MultiCameraPanel({ open, onClose, primaryDeviceId, camer
             {available.map((device, index) => <option key={device.deviceId} value={device.deviceId}>{device.label || `Camera device ${index + 1}`}</option>)}
         </select></label>
         <button className="multi-camera-start" type="button" disabled={busy || !canStart || !chosen || cameras.length >= 3} onClick={() => void action(() => onStart(chosen))}>{busy ? 'Updating camera…' : 'Start additional camera'}</button>
-        {!canStart && <p>Return to the meeting and check host camera permissions before starting.</p>}
+        {!canStart && <p>Turn on your main camera first. If camera access is restricted, ask the host to allow it.</p>}
         {cameras.length >= 3 && <p>All four camera slots are in use. Stop an extra camera to choose another.</p>}
         {message && <p role="alert">{message}</p>}
     </section>;

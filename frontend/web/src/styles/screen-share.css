@@ -389,6 +389,8 @@
     }
 }
 
+.share-picker-status { margin: 0; line-height: 1.5; }
+
 .share-picker-group, .share-picker-activities {
     min-inline-size: 0;
     margin: 0;

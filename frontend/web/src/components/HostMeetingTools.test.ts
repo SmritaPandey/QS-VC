@@ -29,6 +29,19 @@ describe('host tools boundaries', () => {
   expect(html).toContain('Admit to meeting'); expect(html).toContain('Decline');
   expect(html).toContain('Kept waiting'); expect(html).toContain('disabled="" aria-label="Ari is already kept waiting in this queue"');
  });
+ it('disables bulk mute when a co-host has no eligible unmuted participants', () => {
+  const html=renderToStaticMarkup(createElement(HostMeetingTools,{
+   role:'co-host',myPeerId:'self',
+   participants:[
+    {peerId:'host',displayName:'Host',role:'host',audioMuted:false},
+    {peerId:'other-cohost',displayName:'Other co-host',role:'co-host',audioMuted:false},
+    {peerId:'member',displayName:'Member',role:'member',audioMuted:true},
+   ],
+   settings:{locked:false,waitingRoomEnabled:true,muteOnEntry:false,allowScreenShare:true,allowChat:true,allowMicrophone:true,allowCamera:true,allowReactions:true},
+   onClose:()=>{},
+  }));
+  expect(html).toMatch(/<button type="button" disabled=""><span[^>]*>mic_off<\/span>Mute all<\/button>/);
+ });
  it('shows the five co-host limit and disables further promotions', () => {
   const participants=[
    {peerId:'host',displayName:'Host',role:'host'},

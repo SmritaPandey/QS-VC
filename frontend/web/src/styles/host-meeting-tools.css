@@ -67,8 +67,10 @@
 @keyframes meeting-knock-in { from { opacity:0; transform:translateY(-6px); } }
 
 /* Leave / end for everyone */
-.meeting-dialog-backdrop { position:fixed; inset:0; z-index:200; display:grid; place-items:center; padding:16px; background:#050b12b3; }
 .meeting-dialog { width:min(420px,100%); padding:24px; border-radius:18px; background:#132230; color:#edf5fa; border:1px solid #2d4556; box-shadow:0 24px 64px #000a; }
+.meeting-native-dialog { border:0; padding:0; background:transparent; width:min(470px, calc(100% - 32px)); max-height:calc(100% - 32px); }
+.meeting-native-dialog::backdrop { background:#050b12b3; }
+.meeting-native-dialog > .meeting-dialog { box-sizing:border-box; width:100%; }
 .meeting-dialog h2 { margin:0 0 8px; font-size:20px; font-weight:500; }
 .meeting-dialog p { margin:0 0 20px; color:#b5c9d4; line-height:1.5; font-size:14px; }
 .meeting-dialog-actions { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:8px; }

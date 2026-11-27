@@ -23,9 +23,13 @@ export default function ReportProblem({ meetingCode, displayName, diagnostics, o
     const [includeDetails, setIncludeDetails] = useState(true);
     const [state, setState] = useState<'editing' | 'sending' | 'sent' | 'failed'>('editing');
     const [error, setError] = useState('');
-    const firstRef = useRef<HTMLButtonElement>(null);
+    const dialog = useRef<HTMLDialogElement>(null);
     const lastReport = useRef<object | null>(null);
-    useEffect(() => { firstRef.current?.focus(); }, []);
+    useEffect(() => { dialog.current?.showModal(); }, []);
+    const close = () => {
+        dialog.current?.close();
+        onClose();
+    };
 
     const build = async () => ({ category, description: description.trim(), meetingCode, reporterName: displayName, diagnostics: includeDetails ? await diagnostics().catch(() => ({})) : {} });
     const submit = async () => {
@@ -49,18 +53,23 @@ export default function ReportProblem({ meetingCode, displayName, diagnostics, o
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     };
 
-    return <div className="meeting-dialog-backdrop" onClick={onClose}>
-        <div className="meeting-dialog report-dialog" role="dialog" aria-modal="true" aria-labelledby="report-title" onClick={event => event.stopPropagation()} onKeyDown={event => { if (event.key === 'Escape') onClose(); }}>
+    return <dialog ref={dialog} className="meeting-native-dialog" aria-labelledby="report-title"
+        onCancel={event => { event.preventDefault(); close(); }}
+        onClick={event => { if (event.target === event.currentTarget) close(); }}>
+        <div className="meeting-dialog report-dialog">
             {state === 'sent' ? <>
                 <span className="mi report-done" aria-hidden="true">task_alt</span>
                 <h2 id="report-title">Thanks, your report was sent</h2>
                 <p>It helps us fix problems faster. You can keep using the meeting.</p>
-                <div className="meeting-dialog-actions"><button type="button" className="btn-outline" autoFocus onClick={onClose}>Done</button></div>
+                <div className="meeting-dialog-actions"><button type="button" className="btn-outline" autoFocus onClick={close}>Done</button></div>
             </> : <>
                 <h2 id="report-title">Report a problem</h2>
                 <p>What isn’t working?</p>
                 <div className="report-categories" role="radiogroup" aria-label="Problem type">
-                    {CATEGORIES.map(([value, label, icon], index) => <button type="button" key={value} ref={index === 0 ? firstRef : undefined} role="radio" aria-checked={category === value} onClick={() => setCategory(value)}><span className="mi" aria-hidden="true">{icon}</span>{label}</button>)}
+                    {CATEGORIES.map(([value, label, icon]) => <label key={value}>
+                        <input className="sr-only" type="radio" name="report-category" value={value} checked={category === value} onChange={() => setCategory(value)} />
+                        <span className="mi" aria-hidden="true">{icon}</span>{label}
+                    </label>)}
                 </div>
                 <label className="report-field" htmlFor="report-description">Describe what happened</label>
                 <textarea id="report-description" rows={4} maxLength={2000} value={description} placeholder="For example: others can’t hear me after I switched to my headset." onChange={event => { setDescription(event.target.value); setError(''); }} />
@@ -68,10 +77,10 @@ export default function ReportProblem({ meetingCode, displayName, diagnostics, o
                 {error && <p className="report-error" role="alert">{error}</p>}
                 <div className="meeting-dialog-actions">
                     {state === 'failed' && <button type="button" className="btn-text" onClick={download}>Download report</button>}
-                    <button type="button" className="btn-text" onClick={onClose}>Cancel</button>
+                    <button type="button" className="btn-text" onClick={close}>Cancel</button>
                     <button type="button" className="btn-outline" disabled={state === 'sending'} onClick={() => { void submit(); }}>{state === 'sending' ? 'Sending…' : state === 'failed' ? 'Try again' : 'Send report'}</button>
                 </div>
             </>}
         </div>
-    </div>;
+    </dialog>;
 }
