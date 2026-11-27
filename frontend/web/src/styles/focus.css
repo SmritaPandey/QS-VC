@@ -3,9 +3,8 @@
 .meeting-room { --qsvc-focus-glow: #43d9c2; }
 body :is(a,button,input,textarea,select,summary,[tabindex],[contenteditable]):focus-visible,
 body :is(input,textarea,select):focus {
-  outline: none !important;
-  box-shadow: 0 0 5px 1px color-mix(in srgb,var(--qsvc-focus-glow) 70%,transparent),
-    0 0 16px 3px color-mix(in srgb,var(--qsvc-focus-glow) 30%,transparent) !important;
+  outline: 2px solid var(--qsvc-focus-glow) !important;
+  outline-offset: 3px;
 }
 @media (forced-colors: none) {
   body .meeting-room :is(a,button,input,textarea,select,summary,[tabindex],[contenteditable]):focus-visible,

@@ -87,7 +87,7 @@
 .pricing-page :is(.pricing-offer-header, .pricing-free-row) p { margin: 16px 0 0; color: var(--text-secondary); font-size: 16px; font-weight: 400; line-height: 1.55; }
 .pricing-offer-promotion { min-height: 28px; }
 .pricing-offer-amount { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; font-variant-numeric: tabular-nums; }
-.pricing-offer-amount strong { color: var(--text-primary); font-size: clamp(30px, 2.6vw, 40px); font-weight: 600; letter-spacing: -.025em; line-height: 1.12; white-space: nowrap; }
+.pricing-offer-amount strong { color: var(--text-primary); font-size: clamp(30px, 2.6vw, 40px); font-weight: 600; letter-spacing: -.025em; line-height: 1.12; min-width: 0; overflow-wrap: anywhere; }
 .pricing-regular-price { color: var(--text-secondary); font-size: 17px; line-height: 1.5; }
 .pricing-page .pricing-offer-rate p { color: var(--text-secondary); font-size: 14px; font-weight: 400; margin: 10px 0 0; line-height: 1.5; }
 .pricing-page .pricing-offer-rate .pricing-offer-renewal { font-size: 13px; margin-top: 6px; }

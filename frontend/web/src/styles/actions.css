@@ -91,17 +91,17 @@
 .qsvc-action__inner > .mi { flex: 0 0 auto; }
 
 .qsvc-action__circle > .mi { transform: translateX(-100%); opacity: 0; transition: transform 300ms cubic-bezier(.165,.84,.44,1) 100ms, opacity 300ms ease 100ms; }
-.qsvc-action:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):focus-visible .qsvc-action__circle > .mi { transform: translateX(0); opacity: 1; }
+.qsvc-action:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):not(:has([aria-busy="true"])):focus-visible .qsvc-action__circle > .mi { transform: translateX(0); opacity: 1; }
 @media (hover:hover) and (pointer:fine) {
- .qsvc-action:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):hover .qsvc-action__circle > .mi { transform: translateX(0); opacity: 1; }
+ .qsvc-action:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):not(:has([aria-busy="true"])):hover .qsvc-action__circle > .mi { transform: translateX(0); opacity: 1; }
 }
 .qsvc-action.qsvc-action.qsvc-action { transition: transform 160ms ease; }
 .qsvc-action.qsvc-action.qsvc-action:not(:disabled):active { transform: translateY(1px); }
 .public-nav-cta.qsvc-action.qsvc-action { width:216px; }
 @media(max-width:560px) { .public-nav-cta.qsvc-action.qsvc-action { width:164px; font-size:13px; } .public-nav-cta .qsvc-action__inner { padding-inline:8px; } }
 @media (hover:none), (pointer:coarse), (prefers-reduced-motion:reduce) {
- .qsvc-action:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]) .qsvc-action__inner { width:calc(100% - 52px); }
- .qsvc-action:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]) .qsvc-action__circle { transform:scale(1); }
- .qsvc-action:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]) .qsvc-action__circle > .mi { transform:translateX(0); opacity:1; }
+ .qsvc-action:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):not(:has([aria-busy="true"])) .qsvc-action__inner { width:calc(100% - 52px); }
+ .qsvc-action:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):not(:has([aria-busy="true"])) .qsvc-action__circle { transform:scale(1); }
+ .qsvc-action:not(:disabled):not([aria-disabled="true"]):not([aria-busy="true"]):not(:has([aria-busy="true"])) .qsvc-action__circle > .mi { transform:translateX(0); opacity:1; }
 }
 @media(prefers-reduced-motion:reduce) { .qsvc-action.qsvc-action.qsvc-action, .qsvc-action__inner, .qsvc-action__circle, .qsvc-action__circle > .mi { transition:none; } }

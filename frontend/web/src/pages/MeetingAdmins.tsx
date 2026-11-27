@@ -1,3 +1,4 @@
+import ActionContents from '../components/ActionContents';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import SiteNav from '../components/SiteNav';
@@ -72,14 +73,14 @@ function AdminSettings({ token }: { token: string }) {
                     <option value="admin">Admin</option>
                     <option value="co_admin">Co-admin</option>
                 </select></label>
-                <button className="qsvc-action" disabled={busy}>Save access</button>
+                <button className="qsvc-action" disabled={busy}><ActionContents>Save access</ActionContents></button>
             </form>
             <h2>People with access</h2>
             {!admins.length && <p>No meeting admins have been assigned.</p>}
             <ul>{admins.map(admin => <li key={admin.id}>
                 <p>{admin.displayName} ({admin.email}) · {admin.role === 'admin' ? 'Admin' : 'Co-admin'}</p>
                 <button type="button" className="qsvc-action qsvc-action--secondary" disabled={busy}
-                    onClick={() => void change(`/${encodeURIComponent(admin.id)}`, { method: 'DELETE' }, 'Meeting access removed.')}>Remove access</button>
+                    onClick={() => void change(`/${encodeURIComponent(admin.id)}`, { method: 'DELETE' }, 'Meeting access removed.')}><ActionContents>Remove access</ActionContents></button>
             </li>)}</ul>
         </>}
     </>;

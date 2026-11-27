@@ -33,6 +33,11 @@ export default function MeetingSetupDialog({ action, creating, guest = false, on
         return () => { if (dialog?.open) dialog.close(); };
     }, []);
 
+    const close = () => {
+        dialogRef.current?.close();
+        onClose();
+    };
+
     const submit = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         if (creating) return;
@@ -41,23 +46,27 @@ export default function MeetingSetupDialog({ action, creating, guest = false, on
         if (!cleanTitle) { setError('Enter a title for your meeting.'); return; }
         try {
             await onCreate({ title: cleanTitle, meetingKind, startNow });
-            onClose();
+            close();
         } catch {
             setError('Could not create the meeting. Please try again.');
         }
     };
 
-    return <dialog ref={dialogRef} className="meeting-setup-dialog" aria-labelledby="meeting-setup-title" onCancel={event => { event.preventDefault(); if (!creating) onClose(); }}>
+    return <dialog ref={dialogRef} className="meeting-setup-dialog" aria-labelledby="meeting-setup-title" onCancel={event => { event.preventDefault(); if (!creating) close(); }}>
         <form onSubmit={submit}>
-            <div className="meeting-setup-heading">
-                <div><span className="mi" aria-hidden="true">video_call</span></div>
-                <button type="button" className="meeting-setup-close" aria-label="Close meeting setup" disabled={creating} onClick={onClose}><span className="mi" aria-hidden="true">close</span></button>
-            </div>
-            <h2 id="meeting-setup-title">Set up your meeting</h2>
-            <p className="meeting-setup-lead">Choose a meeting type and give it a title.</p>
+            <header className="meeting-setup-heading">
+                <div className="meeting-setup-heading-icon" aria-hidden="true"><span className="mi">video_call</span></div>
+                <div>
+                    <h2 id="meeting-setup-title">Set up your meeting</h2>
+                    <p className="meeting-setup-lead">Give your meeting a title and choose a type.</p>
+                </div>
+                <button type="button" className="meeting-setup-close" aria-label="Close meeting setup" disabled={creating} onClick={close}><span className="mi" aria-hidden="true">close</span></button>
+            </header>
 
-            <label className="meeting-setup-title-label" htmlFor="new-meeting-title">Meeting title</label>
-            <input id="new-meeting-title" className="meeting-setup-title-input" autoComplete="off" maxLength={255} required value={title} onChange={event => setTitle(event.target.value)} placeholder="For example, Product planning" />
+            <div className="meeting-setup-title-field">
+                <label className="meeting-setup-title-label" htmlFor="new-meeting-title">Meeting title</label>
+                <input id="new-meeting-title" className="meeting-setup-title-input" autoComplete="off" maxLength={255} required value={title} onChange={event => setTitle(event.target.value)} placeholder="For example, Product planning" />
+            </div>
 
             <fieldset className="meeting-setup-kinds">
                 <legend>Meeting type</legend>
@@ -70,7 +79,7 @@ export default function MeetingSetupDialog({ action, creating, guest = false, on
             <p className="meeting-setup-waiting"><span className="mi" aria-hidden="true">hourglass_top</span><span>Guests wait until you or a co-host admits them.</span></p>
             {error && <p className="meeting-setup-error" role="alert">{error}</p>}
             <div className="meeting-setup-actions">
-                <button type="button" className="meeting-setup-secondary" disabled={creating} onClick={onClose}>Cancel</button>
+                <button type="button" className="meeting-setup-secondary" disabled={creating} onClick={close}>Cancel</button>
                 <button type="submit" className="meeting-setup-primary" disabled={creating} aria-busy={creating}>{creating ? 'Creating…' : startNow ? 'Start meeting' : 'Create invitation link'}</button>
             </div>
         </form>

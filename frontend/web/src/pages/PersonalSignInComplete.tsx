@@ -1,3 +1,4 @@
+import ActionContents from '../components/ActionContents';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { beginSignIn, nextPath } from '../lib/session';
@@ -85,13 +86,13 @@ export default function PersonalSignInComplete() {
                 <label htmlFor="personal-phone">Mobile number with country code</label>
                 <input id="personal-phone" name="phoneNumber" type="tel" autoComplete="tel" placeholder="+91 98765 43210" required maxLength={24} />
                 <p>By creating an account, you agree to our <Link to="/terms">Terms</Link>. Read our <Link to="/privacy">Privacy Policy</Link>.</p>
-                <button className="public-primary qsvc-action" disabled={busy}>{enrol.verifiedEmail ? 'Create account' : 'Send verification code'}</button>
+                <button className="public-primary qsvc-action" disabled={busy}><ActionContents>{enrol.verifiedEmail ? 'Create account' : 'Send verification code'}</ActionContents></button>
             </form>}
             {verification && <form className="public-auth-form" onSubmit={submit} aria-label="Verify your email" aria-busy={busy}>
                 <p>Enter the eight-digit code sent to {verification.email}.</p>
                 <label htmlFor="personal-otp">Verification code</label>
                 <input id="personal-otp" name="otp" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{8}" maxLength={8} required />
-                <button className="public-primary qsvc-action" disabled={busy}>Verify and create account</button>
+                <button className="public-primary qsvc-action" disabled={busy}><ActionContents>Verify and create account</ActionContents></button>
             </form>}
         </main>
     </div>;

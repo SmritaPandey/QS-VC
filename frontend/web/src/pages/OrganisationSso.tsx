@@ -1,3 +1,4 @@
+import ActionContents from '../components/ActionContents';
 import SelectionInput from '../components/SelectionInput';
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, Navigate } from 'react-router-dom';
@@ -88,7 +89,7 @@ export default function OrganisationSso() {
             {link && <section className="public-auth-form">
                 <h2>Link your account</h2>
                 <p>Verify your organisation identity while signed in to keep using this QS-VC account with SSO.</p>
-                <button type="button" className="public-primary qsvc-action" disabled={busy} onClick={() => void navigateTo('link')}>Verify my organisation sign-in</button>
+                <button type="button" className="public-primary qsvc-action" disabled={busy} onClick={() => void navigateTo('link')}><ActionContents>Verify my organisation sign-in</ActionContents></button>
             </section>}
             {admin && <form className="public-auth-form" onSubmit={event => {
                 event.preventDefault();
@@ -96,7 +97,7 @@ export default function OrganisationSso() {
             }}>
                 <h2>Add a domain</h2>
                 <label>Organisation domain <input className="input-meeting-code" name="domain" placeholder="example.com" maxLength={253} required /></label>
-                <button className="public-primary qsvc-action" disabled={busy}>Add domain</button>
+                <button className="public-primary qsvc-action" disabled={busy}><ActionContents>Add domain</ActionContents></button>
             </form>}
             {admin && connections.map(connection => <section key={connection.id} className="public-auth-form">
                 <h2>{connection.domain}</h2>
@@ -105,7 +106,7 @@ export default function OrganisationSso() {
                     <p>Add a DNS TXT record using these values.</p>
                     <dl><dt>Record name</dt><dd><code>{connection.txtName}</code></dd><dt>Record value</dt><dd><code>{connection.txtValue}</code></dd></dl>
                     <button type="button" className="qsvc-action qsvc-action--secondary" disabled={busy}
-                        onClick={() => void save(`connections/${connection.id}/verify`, 'POST', {})}>Verify DNS record</button>
+                        onClick={() => void save(`connections/${connection.id}/verify`, 'POST', {})}><ActionContents>Verify DNS record</ActionContents></button>
                 </>}
                 {connection.verified && <>
                     <p>Use this callback URL when configuring your identity provider.</p>
@@ -119,7 +120,7 @@ export default function OrganisationSso() {
                         }}>
                             <label>Test account email <input className="input-meeting-code" type="email" name="email" required maxLength={255}
                                 defaultValue={session.profile?.email.endsWith(`@${connection.domain}`) ? session.profile.email : ''} /></label>
-                            <button className="qsvc-action qsvc-action--secondary" disabled={busy}>Test connection</button>
+                            <button className="qsvc-action qsvc-action--secondary" disabled={busy}><ActionContents>Test connection</ActionContents></button>
                         </form>
                         <p>{connection.tested ? 'Connection tested successfully.' : 'A successful test is required before enforcing SSO.'}</p>
                         <label className="organisation-sso-toggle"><SelectionInput type="checkbox" checked={connection.enforced} disabled={busy || !connection.tested}
@@ -138,7 +139,7 @@ export default function OrganisationSso() {
                     const { url } = await ssoRequest<{ url: string }>('digilocker/start', 'POST', { challenge }, true);
                     sessionStorage.setItem('qsvc-digilocker', verifier);
                     window.location.assign(url);
-                })}>Connect DigiLocker</button>
+                })}><ActionContents>Connect DigiLocker</ActionContents></button>
             </section>}
         </main>
     </div>;
@@ -158,6 +159,6 @@ function ProviderForm({ configure, busy }: { configure: (event: FormEvent<HTMLFo
             <input className="input-meeting-code" type={name === 'clientSecret' ? 'password' : name === 'clientId' ? 'text' : 'url'}
                 name={name} autoComplete="off" required />
         </label>)}
-        <button className="public-primary qsvc-action" disabled={busy}>Save identity provider</button>
+        <button className="public-primary qsvc-action" disabled={busy}><ActionContents>Save identity provider</ActionContents></button>
     </form>;
 }

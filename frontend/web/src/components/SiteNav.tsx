@@ -29,6 +29,7 @@ export default function SiteNav({ accountAction, brandName = 'QS-VC' }: { accoun
     const [scrolled, setScrolled] = useState(false);
     const [dockOpen, setDockOpen] = useState(false);
     const headerRef = useRef<HTMLElement>(null);
+    const menuButton = useRef<HTMLButtonElement>(null);
     const dockRef = useRef<HTMLElement>(null);
     const dockButton = useRef<HTMLButtonElement>(null);
     const { pathname } = useLocation();
@@ -68,11 +69,22 @@ export default function SiteNav({ accountAction, brandName = 'QS-VC' }: { accoun
     }, [dockOpen]);
     return <>
         <header ref={headerRef} className="public-header" id="nav-top">
-            <a className="public-skip" href="#main-content">Skip to content</a>
-            <nav className="public-nav" aria-label="Main navigation">
+            <a className="public-skip" href="#main-content" onClick={() => {
+                const main = document.getElementById('main-content');
+                if (main) {
+                    main.tabIndex = -1;
+                    main.focus({ preventScroll: true });
+                }
+            }}>Skip to content</a>
+            <nav className="public-nav" aria-label="Main navigation" onKeyDown={event => {
+                if (event.key === 'Escape' && open) {
+                    setOpen(false);
+                    menuButton.current?.focus();
+                }
+            }}>
                 <Link className="public-brand" to="/" aria-label={`${brandName} home`}><BrandLogo name={brandName} /></Link>
-                <button className="public-menu-toggle" type="button" aria-label={open ? 'Close navigation' : 'Open navigation'} aria-expanded={open} aria-controls="public-nav-links" onClick={() => setOpen(value => !value)}><span className="mi" aria-hidden="true">{open ? 'close' : 'menu'}</span></button>
-                <div className="public-nav-links" id="public-nav-links" data-open={open} onKeyDown={event => { if (event.key === 'Escape') { setOpen(false); document.querySelector<HTMLButtonElement>('.public-menu-toggle')?.focus(); } }}>
+                <button ref={menuButton} className="public-menu-toggle" type="button" aria-label={open ? 'Close navigation' : 'Open navigation'} aria-expanded={open} aria-controls="public-nav-links" onClick={() => setOpen(value => !value)}><span className="mi" aria-hidden="true">{open ? 'close' : 'menu'}</span></button>
+                <div className="public-nav-links" id="public-nav-links" data-open={open}>
                     <Link to="/" aria-current={pathname === '/' ? 'page' : undefined} onClick={() => setOpen(false)}>Home</Link>
                     <Link to="/pricing" aria-current={pathname === '/pricing' ? 'page' : undefined} onClick={() => setOpen(false)}>Plans</Link>
                     <Link to="/intranet" aria-current={pathname === '/intranet' ? 'page' : undefined} onClick={() => setOpen(false)}>On-prem</Link>
