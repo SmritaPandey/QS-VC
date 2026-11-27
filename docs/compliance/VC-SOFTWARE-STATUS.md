@@ -23,3 +23,27 @@ This is an implementation record, not a compliance certificate. Existing work wa
 ## Live acceptance still required
 
 Use a staging media stack and two devices. Verify simultaneous audio/video, breakout transitions and return, text chat across a key change, admin microphone/camera actions, branding persistence after reload, and Bharat VC two-way media with an authorised invitation. Browser component checks and mocked protocol tests do not establish live interoperability. Native mobile applications remain deferred.
+
+## Self-managed installer and government pilot
+
+The Linux appliance package includes the SFU-side Bharat VC bridge. The site
+administrator can enable it with the persistent organisation Compose override
+and connect to site-operated FreeSWITCH and drachtio. These gateway services
+still require separate provisioning. Bharat VC and ordinary room-device
+bridging require an interoperability meeting. An authorised government SIP
+invitation and two-way media test remain required.
+
+The installer now checks the gateway with certificate verification. The local
+recording service is started with the appliance and provides the existing
+RTMPS broadcast path when a destination is configured and outbound access is
+approved. This deployment still needs qualified server recording storage.
+
+| Section 26 acceptance | Status |
+| --- | --- |
+| Customer-run clean Linux installation and branch trust | Source and Compose checks complete. Signed bundle build, clean host installation and two-client media remain pending. |
+| Existing installation upgrades | Blocked. The installer can record migration filenames without running their SQL against an existing volume. Existing ledgers need reconciliation before production upgrades. |
+| Government SSO and SHQ alternate access | Site IdP, private DNS, branch routing and firewall failover require customer environment integration and acceptance. |
+| NIC/Bharat VC and mixed-codec rooms | Source available for SIP audio/video, subject to authorised media test. Mixed-protocol presentation forwarding, gateway qualification and 100 Full HD ports remain open. |
+| Capacity | Separate acceptance runs required for 300 participants, 1,500 interactive participants and 30,000 simultaneous webinar viewers. Current interactive admission and webinar delivery require further work. |
+| Security and operations | Negotiated cipher evidence, feature compatibility in required-E2EE rooms, India deployment, SLA and 24×7 support require release and site evidence. |
+| Native iOS and Android clients | Deferred by user. Record the exception in tender qualification. |

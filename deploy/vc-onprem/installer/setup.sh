@@ -109,7 +109,7 @@ if [[ -n $ANSWERS ]]; then
   [[ -f $ANSWERS && ! -L $ANSWERS ]] || fail "answers file not found: $ANSWERS"
   # Only simple KEY=VALUE lines for known keys are read; nothing is executed.
   while IFS='=' read -r key value; do
-    [[ $key =~ ^QSVC_(ACCEPT_EULA|ORG_NAME|DOMAIN|SERVER_IP|ADMIN_EMAIL|ADMIN_PASSWORD_FILE|TLS_MODE|TLS_CERT|TLS_KEY|TRUST_FINGERPRINTS|OPEN_FIREWALL)$ ]] || continue
+    [[ $key =~ ^QSVC_(ACCEPT_EULA|ORG_NAME|DOMAIN|SERVER_IP|ADMIN_EMAIL|ADMIN_PASSWORD_FILE|TLS_MODE|TLS_CERT|TLS_KEY|TLS_CA|TRUST_FINGERPRINTS|OPEN_FIREWALL)$ ]] || continue
     value=${value%$'\r'}; value=${value#\"}; value=${value%\"}
     printf -v "$key" '%s' "$value"
   done < <(grep -E '^[A-Z_]+=' "$ANSWERS")
@@ -253,6 +253,7 @@ if ! $SILENT; then
   if [[ $QSVC_TLS_MODE == organisation ]]; then
     ui_input QSVC_TLS_CERT "Path to the certificate file (PEM, full chain)" "${QSVC_TLS_CERT:-}"
     ui_input QSVC_TLS_KEY "Path to the private key file (PEM)" "${QSVC_TLS_KEY:-}"
+    ui_input QSVC_TLS_CA "Root CA bundle path for private PKI (leave empty for system trust)" "${QSVC_TLS_CA:-}"
   fi
 else
   [[ -n ${QSVC_ADMIN_PASSWORD_FILE:-} && -f $QSVC_ADMIN_PASSWORD_FILE ]] || fail "silent mode needs QSVC_ADMIN_PASSWORD_FILE"
@@ -263,7 +264,12 @@ fi
 [[ ${QSVC_ADMIN_EMAIL:-} =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || fail "invalid administrator email"
 (( ${#ADMIN_PASSWORD} >= 12 )) || fail "administrator password must have at least 12 characters"
 QSVC_ADMIN_EMAIL=${QSVC_ADMIN_EMAIL,,}
+case "$QSVC_TLS_MODE" in
+  internal|organisation) ;;
+  *) fail "TLS mode must be internal or organisation" ;;
+esac
 if [[ $QSVC_TLS_MODE == organisation ]]; then
+  [[ -z ${QSVC_TLS_CA:-} || -r $QSVC_TLS_CA ]] || fail "organisation CA bundle is unreadable"
   [[ -f ${QSVC_TLS_CERT:-} && -f ${QSVC_TLS_KEY:-} ]] || fail "certificate or key file not found"
   "$OSSL" x509 -in "$QSVC_TLS_CERT" -noout -checkend 604800 >/dev/null || fail "the certificate is invalid or expires within 7 days"
   CERT_PUB=$("$OSSL" x509 -in "$QSVC_TLS_CERT" -noout -pubkey | "$OSSL" dgst -sha256 -r | cut -c1-64)
@@ -382,6 +388,7 @@ services:
       SIGNALING_DIST: ""
 EOF
 chmod 644 "$ETC/compose.site.yml"
+install -m 0600 "$HERE/compose.organisation.example.yml" "$ETC/compose.organisation.example.yml"
 ok "Configuration written to $ETC (root-only)"
 
 # ── 7. 14-day period and installation ID ─────────────────────────────────────
@@ -402,8 +409,9 @@ $DOCKER load -i "$REL/qsvc-intranet-images.tar" >>"$LOG" 2>&1 || fail "could not
 ok "Images loaded"
 
 compose() {
-  /usr/local/libexec/qsvc-compose -p "$PROJECT" --project-directory "$PREFIX/current" --env-file "$ENV" \
-    -f "$PREFIX/current/docker-compose.prod.yml" -f "$PREFIX/current/compose.offline.yml" -f "$ETC/compose.site.yml" "$@"
+  local files=(-f "$PREFIX/current/docker-compose.prod.yml" -f "$PREFIX/current/compose.offline.yml" -f "$ETC/compose.site.yml")
+  if [[ -f $ETC/compose.organisation.yml ]]; then files+=(-f "$ETC/compose.organisation.yml"); fi
+  /usr/local/libexec/qsvc-compose -p "$PROJECT" --project-directory "$PREFIX/current" --env-file "$ENV" "${files[@]}" "$@"
 }
 compose config --quiet >>"$LOG" 2>&1 || fail "service configuration is invalid (see log)"
 
@@ -439,10 +447,10 @@ ok "Database ready with restricted service accounts"
 
 # ── 10. Start services ───────────────────────────────────────────────────────
 step "Starting QS-VC services"
-SERVICES=(redis coturn trial-gateway sfu signaling auth meeting web caddy)
+SERVICES=(redis coturn trial-gateway sfu signaling auth meeting recording web caddy)
 compose up -d --no-build --pull never --no-deps "${SERVICES[@]}" >>"$LOG" 2>&1 || fail "services did not start (see log)"
 healthy() { [[ $($DOCKER inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1" 2>/dev/null) =~ ^(healthy|running)$ ]]; }
-for svc in qsvc-redis qsvc-sfu qsvc-auth qsvc-meeting; do
+for svc in qsvc-redis qsvc-sfu qsvc-auth qsvc-meeting qsvc-recording; do
   for _ in $(seq 1 90); do healthy "$svc" && break; sleep 2; done
   healthy "$svc" && ok "$svc" || fail "$svc is not healthy (run: qsvc logs ${svc#qsvc-})"
 done
@@ -488,6 +496,7 @@ systemctl daemon-reload >>"$LOG" 2>&1 && systemctl enable qsvc.service >>"$LOG" 
 # ── 12. Finish ───────────────────────────────────────────────────────────────
 step "Final checks"
 CA_NOTE=
+CA_ARGS=()
 if [[ $QSVC_TLS_MODE == internal ]]; then
   for _ in $(seq 1 30); do
     compose exec -T caddy cat /data/caddy/pki/authorities/local/root.crt >"$PREFIX/downloads/QS-VC-Root-CA.crt" 2>/dev/null && [[ -s $PREFIX/downloads/QS-VC-Root-CA.crt ]] && break
@@ -495,11 +504,17 @@ if [[ $QSVC_TLS_MODE == internal ]]; then
   done
   if [[ -s $PREFIX/downloads/QS-VC-Root-CA.crt ]]; then
     chmod 644 "$PREFIX/downloads/QS-VC-Root-CA.crt"
+    CA_ARGS=(--cacert "$PREFIX/downloads/QS-VC-Root-CA.crt")
     CA_NOTE="Distribute $PREFIX/downloads/QS-VC-Root-CA.crt to every PC (Group Policy) so browsers trust the server."
-  else warn "internal CA certificate not found yet; run 'qsvc ca' later"; fi
+  else fail "internal CA certificate unavailable; check Caddy and retry setup"; fi
+elif [[ -n ${QSVC_TLS_CA:-} ]]; then
+  CA_ARGS=(--cacert "$QSVC_TLS_CA")
 fi
-code=$(curl -sk --noproxy '*' -o /dev/null -w '%{http_code}' --resolve "$QSVC_DOMAIN:443:127.0.0.1" "https://$QSVC_DOMAIN/health" || true)
-[[ $code == 200 ]] && ok "HTTPS gateway answers on https://$QSVC_DOMAIN" || warn "HTTPS health check returned '$code' (see: qsvc logs caddy)"
+code=$(curl -sS --max-time 10 --retry 5 --retry-connrefused --noproxy '*' "${CA_ARGS[@]}" \
+  -o /dev/null -w '%{http_code}' --resolve "$QSVC_DOMAIN:443:127.0.0.1" \
+  "https://$QSVC_DOMAIN/health" 2>>"$LOG") || fail "HTTPS certificate or gateway check failed; check $LOG"
+[[ $code == 200 ]] || fail "HTTPS gateway health check returned $code; check $LOG"
+ok "Verified HTTPS gateway at https://$QSVC_DOMAIN"
 rm -rf "$WORK"
 SUMMARY="QS-VC is installed and running.
 

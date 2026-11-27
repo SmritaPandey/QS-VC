@@ -1735,8 +1735,8 @@ export async function handleRpcMessage(
                 const { roomId, peerId } = connectionState;
                 const room = roomId && roomManager.getRoom(roomId);
                 if (process.env.POLY_BRIDGE_ENABLED !== 'true' || !room || !peerId ||
-                    room.hostPeerId !== peerId || !connectionState.authUser?.sub || room.settings.webinar || room.settings.locked) {
-                    throw createError(-32005, 'Only the signed-in host of an unlocked meeting can enable room devices.');
+                    room.hostPeerId !== peerId || !connectionState.authUser?.sub || room.settings.webinar || room.settings.locked || room.settings.e2eeRequired) {
+                    throw createError(-32005, 'Only the signed-in host of an unlocked interoperability meeting can enable room devices.');
                 }
                 try {
                     await sfuClient.startPolyRoom(room.id);

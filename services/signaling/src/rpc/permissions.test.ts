@@ -919,7 +919,7 @@ it('scopes Poly snapshots and admission to the joined room and hides lobby data 
     }
 });
 
-it('lets only the signed-in meeting host enable the room-device bridge', async () => {
+it('lets only the signed-in host of an interoperability meeting enable the room-device bridge', async () => {
     const { sfuClient } = await import('../sfu-client.js');
     vi.stubEnv('POLY_BRIDGE_ENABLED', 'true');
     const host = socket(), guest = socket();
@@ -930,6 +930,12 @@ it('lets only the signed-in meeting host enable the room-device bridge', async (
         await rpc(guest, guestState, 'joinRoom', { meetingCode, displayName: 'Guest' });
         await rpc(host, hostState, 'admitPeer', { targetPeerId: guestState.peerId });
         expect((await rpc(guest, guestState, 'startPolyRoom'))?.error?.code).toBe(-32005);
+        const room = roomManager.getRoom(hostState.roomId)!;
+        room.settings.e2eeRequired = true;
+        vi.mocked(sfuClient.startPolyRoom).mockClear();
+        expect((await rpc(host, hostState, 'startPolyRoom'))?.error?.code).toBe(-32005);
+        expect(sfuClient.startPolyRoom).not.toHaveBeenCalled();
+        room.settings.e2eeRequired = false;
         expect((await rpc(host, hostState, 'startPolyRoom'))?.result).toEqual({ roomAlias: hostState.roomId });
         expect(sfuClient.startPolyRoom).toHaveBeenLastCalledWith(hostState.roomId);
         vi.mocked(sfuClient.startPolyRoom).mockRejectedValueOnce(new Error('internal endpoint'));

@@ -122,8 +122,8 @@ services:
   sfu:
     image: qsvc-sfu:intranet
     build:
-      context: ./services/sfu
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/sfu/Dockerfile
     container_name: qsvc-sfu
     ports:
       - "40000-40100:40000-40100/udp"

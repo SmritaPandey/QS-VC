@@ -82,3 +82,5 @@ services:
     depends_on: !reset {}
     environment:
       RECORDING_BUCKET: ""
+      AUTH_INTERNAL_URL: http://auth:4002
+      MEETING_INTERNAL_URL: http://meeting:4003

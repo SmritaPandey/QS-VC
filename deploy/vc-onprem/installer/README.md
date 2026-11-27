@@ -41,3 +41,37 @@ Rocky/RHEL offline installers retain the bundled RPM dependency closure. Ubuntu 
 Existing installations whose `/etc/qsvc/runtime` records Docker keep that engine and data in place during repairs/upgrades. Restore their Docker service before upgrading; this installer does not automatically migrate Docker volumes into Podman.
 
 Docker used by `build-verifier.sh` or release image tooling is a release-machine dependency only, not a new Linux customer-server prerequisite.
+
+## Organisation-managed infrastructure
+
+The installer and `qsvc` both load the optional root-managed
+`/etc/qsvc/compose.organisation.yml` after the generated site settings.
+This file survives reinstall and upgrade. Setup installs a separate
+`compose.organisation.example.yml` as a starting point. Keep the active
+file root-only (0600). Apply changes with `sudo qsvc restart`.
+
+The SFU image ships the existing Bharat VC bridge module. The example
+enables it for an organisation-operated FreeSWITCH and drachtio on the
+private network. Provision them using the [gateway guide](../../poly-bridge/README.md).
+Limit Event Socket and drachtio control ports to the QS-VC server and
+allow the documented RTP and SIP paths. Provide the site-generated
+credentials and the SFU address reachable by the MCU. Only the site
+gateway needs the approved Bharat VC network route. Basic QS-VC stays
+available with the optional bridge disabled. The gateway is a separately
+provisioned dependency of this installer release.
+
+For acceptance, use the host's Bharat VC action with an authorised SIP
+invitation in an unlocked interoperability meeting. Verify participant
+notice, consent, two-way audio/video, disconnect, and rejection in E2EE
+meetings. A bridge API success does not establish live media.
+
+For organisation TLS certificates issued by private PKI, provide the
+organisation CA bundle in the installer or as `QSVC_TLS_CA` in silent
+mode. The completion check validates the hostname and certificate chain.
+
+The installed recording service can relay an allowed host broadcast through
+the existing FFmpeg and RTMPS path. Set `LIVE_YOUTUBE_RTMPS_URL` and/or
+`LIVE_FACEBOOK_RTMPS_URL` as recording service environment values in the
+root-only organisation override when outbound broadcasting is approved.
+Leave them unset for isolated networks. Server recording storage requires
+a separate qualified storage configuration.

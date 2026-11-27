@@ -21,10 +21,10 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends python3 python3-pip make g++ ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY package*.json ./
+COPY services/sfu/package*.json ./
 RUN npm ci
-COPY tsconfig.json ./
-COPY src/ ./src/
+COPY services/sfu/tsconfig.json ./
+COPY services/sfu/src/ ./src/
 RUN npm run build && npm prune --omit=dev
 # Fail the build early if the worker needs a library beyond glibc, libstdc++ and libgcc.
 RUN set -e; \
@@ -37,6 +37,14 @@ RUN set -e; \
       done; \
     done
 
+FROM ${SFU_BUILD_BASE} AS bridge
+WORKDIR /poly
+COPY deploy/poly-bridge/package*.json ./
+RUN npm ci --ignore-scripts
+COPY deploy/poly-bridge/tsconfig.json ./
+COPY deploy/poly-bridge/src/ ./src/
+RUN npm run build && npm prune --omit=dev --ignore-scripts && rm -rf node_modules/mediasoup
+
 FROM ${SFU_RUNTIME_BASE}
 # The runtime image provides Node (no npm, shell or package manager is needed or shipped).
 ENV PATH=/usr/bin:/usr/local/bin:/bin:/nodejs/bin \
@@ -45,6 +53,8 @@ WORKDIR /app
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
+COPY --from=bridge /poly/dist /poly/dist
+COPY --from=bridge /poly/node_modules /poly/node_modules
 # Non-root user (uid/gid 65532 in Chainguard and distroless images). No shell exists, so the
 # compose health check must keep using the exec form with node.
 USER 65532:65532

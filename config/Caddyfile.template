@@ -54,7 +54,8 @@
     }
 
     # Recording Service API
-    handle /api/recordings/* {
+    @recording path /api/recordings/* /api/live-streams/*
+    handle @recording {
         reverse_proxy recording:4004
     }
 

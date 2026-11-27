@@ -88,8 +88,8 @@ services:
 
   sfu:
     build:
-      context: ./services/sfu
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: services/sfu/Dockerfile
     container_name: qsvc-sfu
     # Note: ports not needed — network_mode: host exposes all ports directly
     environment:

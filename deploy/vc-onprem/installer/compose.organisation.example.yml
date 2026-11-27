@@ -1,0 +1,18 @@
+# Copy to /etc/qsvc/compose.organisation.yml with mode 0600.
+# Replace the example network names and credentials before enabling the bridge.
+services:
+  sfu:
+    environment:
+      POLY_BRIDGE_MODULE: /poly/dist/index.js
+      BRIDGE_API_TOKEN: ${SFU_CONTROL_TOKEN:?Set a shared SFU control token}
+      BRIDGE_RTP_ANNOUNCED_IP: ${SFU_ANNOUNCED_IP:?Set the SFU address}
+      BRIDGE_SRTP: mandatory
+      SIGNALING_URL: http://signaling:4001
+      FS_ESL_HOST: mcu.example.gov.in
+      FS_ESL_PASSWORD: REPLACE_WITH_SITE_ESL_PASSWORD
+      FS_SIP_HOST: mcu.example.gov.in:5090
+      DRACHTIO_HOST: sip-control.example.gov.in
+      DRACHTIO_SECRET: REPLACE_WITH_SITE_DRACHTIO_SECRET
+  signaling:
+    environment:
+      POLY_BRIDGE_ENABLED: "true"

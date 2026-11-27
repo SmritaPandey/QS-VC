@@ -18,28 +18,48 @@ export class FreeSwitch extends EventEmitter {
   constructor() {
     super();
     this.ready = this.connect();
+    this.ready.catch(() => undefined);
   }
 
   private connect(): Promise<void> {
     const { eslHost, eslPort, eslPassword } = config.freeswitch;
     return new Promise((resolve, reject) => {
       const conn = new esl.Connection(eslHost, eslPort, eslPassword, () => {
+        clearTimeout(timeout);
         this.conn = conn;
         conn.events("json", "CHANNEL_PARK CHANNEL_HANGUP_COMPLETE CUSTOM conference::maintenance");
         conn.on("esl::event::**", (e: any) => this.onEvent(e));
         resolve();
       });
-      conn.on("error", (err: Error) => reject(err));
-      conn.on("esl::end", () => {
-        console.error("[esl] connection lost, reconnecting in 2s");
-        setTimeout(() => (this.ready = this.connect()), 2000);
+      const socket = conn.socket;
+      const timeout = setTimeout(() => socket.destroy(new Error("FreeSWITCH connection timed out")), 5000);
+      conn.on("error", (err: Error) => {
+        reject(err);
+        socket.destroy();
+      });
+      socket.once("close", () => {
+        clearTimeout(timeout);
+        reject(new Error("FreeSWITCH connection closed"));
+        if (this.conn === conn) this.conn = undefined;
+        setTimeout(() => {
+          this.ready = this.connect();
+          this.ready.catch(() => undefined);
+        }, 2000).unref();
       });
     });
   }
 
   async api(cmd: string): Promise<string> {
     await this.ready;
-    return new Promise((resolve) => this.conn.api(cmd, (res: any) => resolve(res.getBody() as string)));
+    const conn = this.conn;
+    if (!conn) throw new Error("FreeSWITCH is unavailable");
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(new Error("FreeSWITCH command timed out")), 12000);
+      conn.api(cmd, (res: any) => {
+        clearTimeout(timeout);
+        resolve(res.getBody() as string);
+      });
+    });
   }
 
   private onEvent(e: any) {

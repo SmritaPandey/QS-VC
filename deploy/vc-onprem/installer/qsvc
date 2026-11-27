@@ -13,10 +13,11 @@ case "$RUNTIME" in
 esac
 command -v "$DOCKER" >/dev/null || { echo "Installed runtime $RUNTIME is unavailable; restore it before managing QS-VC." >&2; exit 1; }
 compose() {
-  /usr/local/libexec/qsvc-compose -p qsvc --project-directory "$PREFIX/current" --env-file "$ETC/qsvc.env" \
-    -f "$PREFIX/current/docker-compose.prod.yml" -f "$PREFIX/current/compose.offline.yml" -f "$ETC/compose.site.yml" "$@"
+  local files=(-f "$PREFIX/current/docker-compose.prod.yml" -f "$PREFIX/current/compose.offline.yml" -f "$ETC/compose.site.yml")
+  if [[ -f $ETC/compose.organisation.yml ]]; then files+=(-f "$ETC/compose.organisation.yml"); fi
+  /usr/local/libexec/qsvc-compose -p qsvc --project-directory "$PREFIX/current" --env-file "$ETC/qsvc.env" "${files[@]}" "$@"
 }
-SERVICES=(postgres redis coturn trial-gateway sfu signaling auth meeting web caddy)
+SERVICES=(postgres redis coturn trial-gateway sfu signaling auth meeting recording web caddy)
 case "${1:-status}" in
   start)   compose up -d --no-build --pull never --no-deps "${SERVICES[@]}" ;;
   stop)    compose stop ;;

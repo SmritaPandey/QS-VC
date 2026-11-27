@@ -47,7 +47,8 @@ text = text.replace(original, f"tls internal {{\n        protocols {protocol} {p
 anchor = "    handle /health {"
 if text.count(anchor) != 1:
     raise SystemExit("Caddy health route changed. Review offline trial gate before packaging.")
-gate = """    forward_auth trial-gateway:4010 {
+gate = """    @requiresActivation not path /health
+    forward_auth @requiresActivation trial-gateway:4010 {
         uri /check
     }
 

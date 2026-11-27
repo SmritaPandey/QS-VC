@@ -43,7 +43,7 @@ install -m 0755 "$verifier" "$stage/bin/openssl"
 install -m 0644 "$keys/Ed25519.pub" "$keys/ML-DSA-65.pub" "$stage/keys/"
 install -m 0644 "$package" "$stage/QS-VC-On-prem-Installer.tar.gz"
 install -m 0755 "$here/setup.sh" "$here/qsvc" "$stage/"
-install -m 0644 "$here/create-admin.cjs" "$here/answers.example.env" "$stage/"
+install -m 0644 "$here/create-admin.cjs" "$here/answers.example.env" "$here/compose.organisation.example.yml" "$stage/"
 install -m 0755 "$repo/deploy/vc-onprem/release/verify.sh" "$stage/verify.sh"
 install -m 0644 "$repo/deploy/vc-onprem/release/manifest.py" "$stage/manifest.py"
 if grep -q DRAFT-EULA-PLACEHOLDER "$here/EULA.txt" && [[ ${QSVC_ALLOW_DRAFT_EULA:-} != test-build-only ]]; then

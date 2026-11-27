@@ -159,7 +159,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { image: sfu, context: services/sfu, file: services/sfu/Dockerfile }
+          - { image: sfu, context: ., file: services/sfu/Dockerfile }
           - { image: signaling, context: ., file: services/signaling/Dockerfile }
           - { image: auth, context: ., file: services/auth/Dockerfile }
           - { image: meeting, context: ., file: services/meeting/Dockerfile }
