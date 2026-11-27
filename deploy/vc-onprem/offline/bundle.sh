@@ -19,6 +19,7 @@ mkdir -- "$output"
 node --test "$package/stack/ai/gateway.test.cjs"
 QSVC_DEPLOYMENT=onprem QSVC_PACKAGE_OFFLINE_PILOT=true QSVC_PACKAGE_SSO=false bash "$repo/scripts/package-intranet-images.sh" "$1" "$output"
 cp "$package/stack/compose.offline.yml" "$output/"
+cp "$repo/db/migrate.js" "$output/db/migrate.js"
 cp -R "$package/stack/trial" "$output/trial"
 chmod 755 "$output/trial"
 chmod 644 "$output/trial/"*.cjs

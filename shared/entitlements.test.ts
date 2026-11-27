@@ -4,6 +4,16 @@ import { FEATURE_MIN_PLAN, getEntitlements, getPrivateConversationLimitMs, start
 const started = new Date('2026-11-01T12:00:00.000Z');
 
 describe('plan entitlements and trial eligibility', () => {
+    it('uses Enterprise approval ahead of retail plans and respects the access term', () => {
+        const retail = { tenant_plan: 'free', subscription_plan: 'basic' };
+        const approved = { ...retail, enterprise_status: 'enterprise_approved' as const };
+        const expiry = new Date('2026-11-02T00:00:00Z');
+        expect(getEntitlements(approved, started)).toMatchObject({ plan: 'enterprise', features: Object.keys(FEATURE_MIN_PLAN) });
+        expect(getEntitlements({ ...retail, enterprise_access_expires_at: expiry }, started)).toMatchObject({ plan: 'enterprise', status: 'enterprise_approved' });
+        expect(getEntitlements({ ...approved, enterprise_access_expires_at: expiry }, expiry)).toMatchObject({ plan: 'basic', status: 'paid_active' });
+        expect(getEntitlements({ ...retail, enterprise_status: 'enterprise_pending' }, started).plan).toBe('basic');
+    });
+
     it('keeps a signed-in personal account free until a plan is chosen', () => {
         const member = { tenant_plan: 'free', subscription_plan: null, trial_started_at: null, trial_ends_at: null };
         expect(getEntitlements(member, started)).toMatchObject({

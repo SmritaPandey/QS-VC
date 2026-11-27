@@ -186,10 +186,6 @@ export function enterpriseRouter(
     const serverDownloads = {
         'linux-installer': { env: 'ENTERPRISE_ONPREM_LINUX_INSTALLER', ext: '.run' },
         'linux-package': { env: 'ENTERPRISE_ONPREM_TRIAL_INSTALLER', ext: '.tar.gz' },
-        'vmware-ova': { env: 'ENTERPRISE_ONPREM_OVA', ext: '.ova' },
-        'hyperv-vhdx': { env: 'ENTERPRISE_ONPREM_VHDX', ext: '.zip' },
-        'kvm-qcow2': { env: 'ENTERPRISE_ONPREM_QCOW2', ext: '.qcow2' },
-        'windows-server': { env: 'ENTERPRISE_ONPREM_WINDOWS_SERVER', ext: '.exe' },
     } as const;
     type ServerPlatform = keyof typeof serverDownloads;
     const serverFile = async (platform: ServerPlatform) => {

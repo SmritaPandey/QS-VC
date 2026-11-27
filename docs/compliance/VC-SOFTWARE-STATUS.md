@@ -41,9 +41,9 @@ approved. This deployment still needs qualified server recording storage.
 | Section 26 acceptance | Status |
 | --- | --- |
 | Customer-run clean Linux installation and branch trust | Source and Compose checks complete. Signed bundle build, clean host installation and two-client media remain pending. |
-| Existing installation upgrades | Blocked. The installer can record migration filenames without running their SQL against an existing volume. Existing ledgers need reconciliation before production upgrades. |
-| Government SSO and SHQ alternate access | Site IdP, private DNS, branch routing and firewall failover require customer environment integration and acceptance. |
+| Existing installation upgrades | Installer now backs up the existing database and runs the migration runner before service startup. An isolated PostgreSQL run applied a fresh schema, upgraded it, safely repeated the upgrade and restored the pre-upgrade backup. Signed target-host upgrade and rollback rehearsal remain required. Older migration ledgers may require reconciliation. |
+| Government SSO and SHQ alternate access | Installer has private and internet-edge access profiles. Government IdP, external edge and media routing, split DNS and SHQ failover require customer environment integration and acceptance. |
 | NIC/Bharat VC and mixed-codec rooms | Source available for SIP audio/video, subject to authorised media test. Mixed-protocol presentation forwarding, gateway qualification and 100 Full HD ports remain open. |
 | Capacity | Separate acceptance runs required for 300 participants, 1,500 interactive participants and 30,000 simultaneous webinar viewers. Current interactive admission and webinar delivery require further work. |
 | Security and operations | Negotiated cipher evidence, feature compatibility in required-E2EE rooms, India deployment, SLA and 24×7 support require release and site evidence. |
-| Native iOS and Android clients | Deferred by user. Record the exception in tender qualification. |
+| Native iOS and Android clients | Excluded from implementation by the user. Browser access stays in scope. Obtain written tender acceptance of the native app exception if the clause applies. |

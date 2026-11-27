@@ -16,6 +16,12 @@ here=$(cd -- "$(dirname -- "$0")" && pwd)
 repo=$(cd -- "$here/../../.." && pwd)
 package=$1; keys=$2; out=$3
 verifier=${QSVC_VERIFIER_OPENSSL:?Set QSVC_VERIFIER_OPENSSL to the static OpenSSL built by build-verifier.sh}
+if [[ -n ${QSVC_UPDATE_DROP_DIR:-} ]]; then
+  [[ -d $QSVC_UPDATE_DROP_DIR && -n ${QSVC_RELEASE_KEY_DIR:-} ]] || {
+    echo 'An administrator drop requires an existing directory and both production signing keys.' >&2
+    exit 2
+  }
+fi
 COMPOSE_VERSION=v5.7.1
 COMPOSE_SHA256=af426722a8af5de812fcee30cc1c39f0639f5f723cbadefb25e5d4db054064cf
 MAKESELF_TAG=release-2.7.1
@@ -42,7 +48,7 @@ git clone -q --depth 1 --branch "$MAKESELF_TAG" https://github.com/megastep/make
 install -m 0755 "$verifier" "$stage/bin/openssl"
 install -m 0644 "$keys/Ed25519.pub" "$keys/ML-DSA-65.pub" "$stage/keys/"
 install -m 0644 "$package" "$stage/QS-VC-On-prem-Installer.tar.gz"
-install -m 0755 "$here/setup.sh" "$here/qsvc" "$stage/"
+install -m 0755 "$here/setup.sh" "$here/qsvc" "$here/verify-update.sh" "$stage/"
 install -m 0644 "$here/create-admin.cjs" "$here/answers.example.env" "$here/compose.organisation.example.yml" "$stage/"
 install -m 0755 "$repo/deploy/vc-onprem/release/verify.sh" "$stage/verify.sh"
 install -m 0644 "$repo/deploy/vc-onprem/release/manifest.py" "$stage/manifest.py"
@@ -64,6 +70,16 @@ if [[ -n ${QSVC_RELEASE_KEY_DIR:-} ]]; then
   ossl=${QSVC_SIGNING_OPENSSL:-openssl}
   "$ossl" pkeyutl -sign -inkey "$QSVC_RELEASE_KEY_DIR/Ed25519.key" -rawin -in "$run.sha256" -out "$run.sha256.ed25519.sig"
   "$ossl" pkeyutl -sign -inkey "$QSVC_RELEASE_KEY_DIR/ML-DSA-65.key" -rawin -in "$run.sha256" -out "$run.sha256.ml-dsa-65.sig"
+fi
+if [[ -n ${QSVC_UPDATE_DROP_DIR:-} ]]; then
+  drop="$QSVC_UPDATE_DROP_DIR/qsvc-server-setup-$version"
+  [[ ! -e $drop && ! -L $drop ]] || { echo "Update handoff already exists: $drop" >&2; exit 1; }
+  staging=$(mktemp -d "$QSVC_UPDATE_DROP_DIR/.qsvc-update.XXXXXX")
+  install -m 0644 "$run" "$run.sha256" "$run.sha256.ed25519.sig" "$run.sha256.ml-dsa-65.sig" "$staging/"
+  tar -xOzf "$package" ./CHANGELOG.md >"$staging/CHANGELOG.md"
+  chmod 0750 "$staging"
+  python3 -c 'import os, sys; os.rename(sys.argv[1], sys.argv[2])' "$staging" "$drop"
+  printf 'Published signed update to administrator drop: %s\n' "$drop"
 fi
 ls -la "$out"
 echo "Built $run"

@@ -383,8 +383,10 @@ app.get('/api/auth/verify', async (req, res) => {
         const token = authHeader.slice(7);
         const payload = await verifyToken(token);
         const result = await pool.query(
-            `SELECT u.email, u.role, u.subscription_plan, u.trial_started_at, u.trial_ends_at, u.subscription_expires_at, u.enterprise_status, t.plan AS tenant_plan
+            `SELECT u.email, u.role, u.subscription_plan, u.trial_started_at, u.trial_ends_at, u.subscription_expires_at, u.enterprise_status, t.plan AS tenant_plan,
+                    access.expires_at AS enterprise_access_expires_at
              FROM users u JOIN tenants t ON t.id = u.tenant_id
+             LEFT JOIN public.enterprise_access_terms access ON access.user_id = u.id
              WHERE u.id = $1 AND u.tenant_id = $2 AND u.is_active AND t.is_active`,
             [payload.sub, payload.tenantId],
         );
@@ -467,8 +469,10 @@ app.get('/api/auth/me/entitlements', async (req, res) => {
     try {
         const user = await verifyToken(authorization.slice(7));
         const result = await pool.query(
-            `SELECT u.email, u.role, u.subscription_plan, u.trial_started_at, u.trial_ends_at, u.subscription_expires_at, u.enterprise_status, t.plan AS tenant_plan
+            `SELECT u.email, u.role, u.subscription_plan, u.trial_started_at, u.trial_ends_at, u.subscription_expires_at, u.enterprise_status, t.plan AS tenant_plan,
+                    access.expires_at AS enterprise_access_expires_at
              FROM users u JOIN tenants t ON t.id = u.tenant_id
+             LEFT JOIN public.enterprise_access_terms access ON access.user_id = u.id
              WHERE u.id = $1 AND u.tenant_id = $2 AND u.is_active AND t.is_active`,
             [user.sub, user.tenantId],
         );

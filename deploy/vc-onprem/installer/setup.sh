@@ -109,7 +109,7 @@ if [[ -n $ANSWERS ]]; then
   [[ -f $ANSWERS && ! -L $ANSWERS ]] || fail "answers file not found: $ANSWERS"
   # Only simple KEY=VALUE lines for known keys are read; nothing is executed.
   while IFS='=' read -r key value; do
-    [[ $key =~ ^QSVC_(ACCEPT_EULA|ORG_NAME|DOMAIN|SERVER_IP|ADMIN_EMAIL|ADMIN_PASSWORD_FILE|TLS_MODE|TLS_CERT|TLS_KEY|TLS_CA|TRUST_FINGERPRINTS|OPEN_FIREWALL)$ ]] || continue
+    [[ $key =~ ^QSVC_(ACCEPT_EULA|ORG_NAME|DOMAIN|SERVER_IP|ADMIN_EMAIL|ADMIN_PASSWORD_FILE|TLS_MODE|TLS_CERT|TLS_KEY|TLS_CA|EXPOSURE|TRUST_FINGERPRINTS|OPEN_FIREWALL)$ ]] || continue
     value=${value%$'\r'}; value=${value#\"}; value=${value%\"}
     printf -v "$key" '%s' "$value"
   done < <(grep -E '^[A-Z_]+=' "$ANSWERS")
@@ -119,6 +119,7 @@ if $SILENT; then
 fi
 
 [[ $(id -u) == 0 ]] || fail "run as root (sudo)"
+[[ $(uname -s) == Linux ]] || fail "run setup on an existing Linux server or guest"
 [[ $(uname -m) == x86_64 ]] || fail "this package is for x86-64 servers (found $(uname -m))"
 
 OSSL="$HERE/bin/openssl"
@@ -155,6 +156,11 @@ FP_TEXT="Compare these release key fingerprints with the ones QS-VC sent you sep
 
 Full values are in $LOG."
 log "Ed25519 fingerprint $ED_FP"; log "ML-DSA-65 fingerprint $ML_FP"
+if [[ -f $ETC/release-keys/Ed25519.pub && -f $ETC/release-keys/ML-DSA-65.pub ]]; then
+  cmp -s "$HERE/keys/Ed25519.pub" "$ETC/release-keys/Ed25519.pub" &&
+    cmp -s "$HERE/keys/ML-DSA-65.pub" "$ETC/release-keys/ML-DSA-65.pub" ||
+    fail "installer signing keys differ from the installation's trusted keys"
+fi
 if $SILENT; then
   if [[ -n ${QSVC_TRUST_FINGERPRINTS:-} ]]; then
     [[ $QSVC_TRUST_FINGERPRINTS == "$ED_FP,$ML_FP" ]] || fail "release key fingerprints differ from QSVC_TRUST_FINGERPRINTS"
@@ -167,14 +173,22 @@ fi
 WORK="$HERE/payload"; rm -rf "$WORK"; mkdir -p "$WORK"
 python3 - "$HERE/QS-VC-On-prem-Installer.tar.gz" "$WORK" <<'PY' || fail "the server package archive is damaged"
 import sys, tarfile
+from pathlib import PurePosixPath
 with tarfile.open(sys.argv[1], 'r:gz') as archive:
     members = archive.getmembers()
-    if any(not (m.isfile() or m.isdir()) for m in members):
-        raise SystemExit('unsupported archive entry')
+    seen = set()
+    for member in members:
+        path = PurePosixPath(member.name)
+        if (path.is_absolute() or '..' in path.parts or path in seen
+                or not (member.isfile() or member.isdir())
+                or (not path.parts and not member.isdir())):
+            raise SystemExit('unsupported archive entry')
+        seen.add(path)
     archive.extractall(sys.argv[2], members=members, filter='data') if hasattr(tarfile, 'data_filter') else archive.extractall(sys.argv[2], members=members)
 PY
 bash "$HERE/verify.sh" "$WORK" "$HERE/keys/Ed25519.pub" "$HERE/keys/ML-DSA-65.pub" >>"$LOG" 2>&1 \
   || fail "signature or file check failed: do not install this package; contact QS-VC"
+[[ -f $WORK/db/migrate.js ]] || fail "this package lacks the database upgrade runner; obtain the matching signed release"
 ok "Both signatures (Ed25519 and ML-DSA-65) and all $(python3 -c 'import json,sys;print(len(json.load(open(sys.argv[1]))["sha256"]))' "$WORK/manifest.json") files verified"
 
 # ── 3. System check ──────────────────────────────────────────────────────────
@@ -241,7 +255,11 @@ step "Organisation details"
 DEF_IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<NF;i++) if ($i=="src") print $(i+1)}' | head -1)
 DEF_IP=${DEF_IP:-$(hostname -I 2>/dev/null | awk '{print $1}')}
 DEF_FQDN=$(hostname -f 2>/dev/null || hostname)
+QSVC_EXPOSURE=${QSVC_EXPOSURE:-$(cat "$ETC/exposure" 2>/dev/null || printf private)}
 if ! $SILENT; then
+  ui_menu QSVC_EXPOSURE "How staff will reach QS-VC" "$QSVC_EXPOSURE" \
+    private "Intranet or organisation VPN" \
+    public "Intranet and internet via the organisation edge"
   ui_input QSVC_ORG_NAME "Organisation name" "${QSVC_ORG_NAME:-}"
   ui_input QSVC_DOMAIN "Server name (DNS name staff will open, e.g. vc.example.gov.in)" "${QSVC_DOMAIN:-$DEF_FQDN}"
   ui_input QSVC_SERVER_IP "Server IP address reachable from every branch over MPLS" "${QSVC_SERVER_IP:-$DEF_IP}"
@@ -264,6 +282,24 @@ fi
 [[ ${QSVC_ADMIN_EMAIL:-} =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || fail "invalid administrator email"
 (( ${#ADMIN_PASSWORD} >= 12 )) || fail "administrator password must have at least 12 characters"
 QSVC_ADMIN_EMAIL=${QSVC_ADMIN_EMAIL,,}
+case "$QSVC_EXPOSURE" in
+  private|public) ;;
+  *) fail "exposure must be private or public" ;;
+esac
+if [[ $QSVC_EXPOSURE == public && ( $QSVC_TLS_MODE != organisation || -n ${QSVC_TLS_CA:-} ) ]]; then
+  fail "internet access requires an organisation certificate trusted by standard clients"
+fi
+PUBLIC_MEETING_ORIGIN=
+if [[ $QSVC_EXPOSURE == public ]]; then
+  PUBLIC_MEETING_ORIGIN="https://$QSVC_DOMAIN"
+  QSVC_OPEN_FIREWALL=${QSVC_OPEN_FIREWALL:-no}
+else
+  QSVC_OPEN_FIREWALL=${QSVC_OPEN_FIREWALL:-yes}
+fi
+case "$QSVC_OPEN_FIREWALL" in
+  yes|no) ;;
+  *) fail "QSVC_OPEN_FIREWALL must be yes or no" ;;
+esac
 case "$QSVC_TLS_MODE" in
   internal|organisation) ;;
   *) fail "TLS mode must be internal or organisation" ;;
@@ -284,6 +320,7 @@ step "Installing files and generating secrets"
 REL="$PREFIX/releases/$VERSION"
 if [[ -d $REL ]]; then rm -rf "$REL.previous"; mv "$REL" "$REL.previous"; fi
 mkdir -p "$PREFIX/releases" "$ETC/tls" "$STATE" "$PREFIX/downloads"
+install -d -m 0755 "$STATE/postgres-init"
 cp -a "$WORK" "$REL"; chmod -R go-w "$REL"; find "$REL" -type d -exec chmod 755 {} +; find "$REL" -type f -exec chmod a+r {} +
 ln -sfn "$REL" "$PREFIX/current"
 [[ -d $REL/clients ]] && cp -a "$REL/clients/." "$PREFIX/downloads/"
@@ -374,12 +411,18 @@ fi
 cat >"$ETC/compose.site.yml" <<EOF
 # Site overrides written by QS-VC Server Setup. Re-running setup regenerates this file.
 services:
+  postgres:
+    volumes:
+      - $STATE/postgres-init:/docker-entrypoint-initdb.d:ro
   caddy:
     volumes:
       - $CADDY_SITE:/etc/caddy/Caddyfile:ro
       - $ETC/tls:/etc/qsvc-tls:ro
       - $PREFIX/downloads:/srv/downloads:ro
   auth:
+    environment:
+      QSVC_ONPREM_EXPOSURE: "$QSVC_EXPOSURE"
+      QSVC_PUBLIC_MEETING_ORIGIN: "$PUBLIC_MEETING_ORIGIN"
     volumes:
       - $PREFIX/downloads:/opt/qsvc/installers:ro
   meeting:
@@ -418,13 +461,32 @@ compose config --quiet >>"$LOG" 2>&1 || fail "service configuration is invalid (
 # ── 9. Database ──────────────────────────────────────────────────────────────
 step "Preparing the database"
 compose up -d --no-build --pull never postgres >>"$LOG" 2>&1 || fail "the database did not start"
+postgres() {
+  compose exec -T postgres "$@" -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+}
+# The image's temporary first-start server listens on Unix sockets only.
 for _ in $(seq 1 120); do
-  if compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT to_regclass('public.tenants') IS NOT NULL" 2>/dev/null | grep -q t \
-     && $DOCKER logs qsvc-postgres 2>&1 | grep -q 'ready to accept connections'; then break; fi
+  postgres pg_isready -h 127.0.0.1 -q && break
   sleep 2
 done
-compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT 1 FROM tenants LIMIT 1" >/dev/null 2>&1 || fail "database schema was not created (see log)"
-# Restricted service accounts (create or set password), and record the applied migrations so later upgrades run only new ones.
+postgres pg_isready -h 127.0.0.1 -q || fail "database did not become ready"
+existing_schema=$(postgres psql -Atc "SELECT to_regclass('public.users') IS NOT NULL") || fail "could not inspect database"
+if [[ $existing_schema == t ]]; then
+  backup_dir="$STATE/pre-upgrade"
+  install -d -m 0700 "$backup_dir"
+  backup=$(mktemp "$backup_dir/qsvc.XXXXXX")
+  if ! postgres pg_dump --format=custom >"$backup" 2>>"$LOG" ||
+     ! compose exec -T postgres pg_restore --list <"$backup" >>"$LOG" 2>&1; then
+    rm -f -- "$backup"
+    fail "could not create a readable database backup"
+  fi
+  ok "Database backup saved to $backup"
+fi
+MIGRATION_DATABASE_URL="postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@postgres:5432/$POSTGRES_DB" POSTGRES_SSL=disable \
+  compose run -T --rm --no-deps --pull never -e MIGRATION_DATABASE_URL -e POSTGRES_SSL \
+    -e NODE_PATH=/app/node_modules -v "$REL/db:/db:ro" auth node /db/migrate.js >>"$LOG" 2>&1 ||
+  fail "database migrations failed; review the log before retrying"
+# Create or update the restricted service accounts after the schema and roles exist.
 {
   echo '\set ON_ERROR_STOP on'
   for pair in "qs_auth_app:qsvc_auth_service:$AUTH_DB_PASSWORD" "qs_meeting_app:qsvc_meeting_service:$MEETING_DB_PASSWORD"; do
@@ -440,8 +502,7 @@ END \$\$;
 GRANT $group TO $role;
 SQL
   done
-  echo "CREATE TABLE IF NOT EXISTS _migrations (id SERIAL PRIMARY KEY, filename VARCHAR(255) UNIQUE NOT NULL, applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW());"
-  for f in "$REL"/db/migrations/*.sql; do echo "INSERT INTO _migrations (filename) VALUES ('$(basename "$f")') ON CONFLICT DO NOTHING;"; done
+
 } | compose exec -T postgres psql -q -U "$POSTGRES_USER" -d "$POSTGRES_DB" >>"$LOG" 2>&1 || fail "could not create the database service accounts"
 ok "Database ready with restricted service accounts"
 
@@ -450,7 +511,7 @@ step "Starting QS-VC services"
 SERVICES=(redis coturn trial-gateway sfu signaling auth meeting recording web caddy)
 compose up -d --no-build --pull never --no-deps "${SERVICES[@]}" >>"$LOG" 2>&1 || fail "services did not start (see log)"
 healthy() { [[ $($DOCKER inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1" 2>/dev/null) =~ ^(healthy|running)$ ]]; }
-for svc in qsvc-redis qsvc-sfu qsvc-auth qsvc-meeting qsvc-recording; do
+for svc in qsvc-redis qsvc-sfu qsvc-signaling qsvc-auth qsvc-meeting qsvc-recording; do
   for _ in $(seq 1 90); do healthy "$svc" && break; sleep 2; done
   healthy "$svc" && ok "$svc" || fail "$svc is not healthy (run: qsvc logs ${svc#qsvc-})"
 done
@@ -463,7 +524,9 @@ ok "Administrator $QSVC_ADMIN_EMAIL created"
 # ── 11. Network access, start on boot, management tool ───────────────────────
 step "Opening network ports and enabling start on boot"
 PORTS_TCP="80 443 3478"; PORTS_UDP="3478 40000-40100 49152-49200"
-if systemctl is-active --quiet firewalld 2>/dev/null; then
+if [[ $QSVC_OPEN_FIREWALL == no ]]; then
+  warn "host firewall unchanged; use the organisation-approved HTTPS and media rules"
+elif systemctl is-active --quiet firewalld 2>/dev/null; then
   for p in $PORTS_TCP; do firewall-cmd -q --permanent --add-port="$p/tcp"; done
   for p in $PORTS_UDP; do firewall-cmd -q --permanent --add-port="$p/udp"; done
   firewall-cmd -q --reload; ok "firewalld: opened TCP $PORTS_TCP and UDP $PORTS_UDP"
@@ -474,6 +537,10 @@ elif command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q 'Status: acti
 else
   warn "No active host firewall found; make sure your network firewall allows TCP $PORTS_TCP and UDP $PORTS_UDP from branch subnets"
 fi
+install -d -m 0700 "$ETC/release-keys"
+install -m 0600 "$HERE/keys/Ed25519.pub" "$HERE/keys/ML-DSA-65.pub" "$ETC/release-keys/"
+install -m 0755 "$HERE/bin/openssl" /usr/local/libexec/qsvc-release-openssl
+install -m 0755 "$HERE/verify-update.sh" /usr/local/libexec/qsvc-verify-update
 install -m 0755 "$HERE/qsvc" /usr/local/sbin/qsvc
 cat >/etc/systemd/system/qsvc.service <<EOF
 [Unit]
@@ -490,6 +557,7 @@ TimeoutStartSec=600
 WantedBy=multi-user.target
 EOF
 printf 'RUNTIME=%s\nVERSION=%s\n' "$RUNTIME" "$VERSION" >"$ETC/runtime"
+printf '%s\n' "$QSVC_EXPOSURE" >"$ETC/exposure"
 systemctl daemon-reload >>"$LOG" 2>&1 && systemctl enable qsvc.service >>"$LOG" 2>&1 && ok "QS-VC starts automatically at boot" \
   || warn "systemd not available; start QS-VC after a reboot with: qsvc start"
 
@@ -526,7 +594,9 @@ SUMMARY="QS-VC is installed and running.
   Contact QS-VC with the installation ID to activate before then.
 
 $CA_NOTE
-Make sure DNS resolves $QSVC_DOMAIN to $QSVC_SERVER_IP for every branch.
+Access profile: $QSVC_EXPOSURE
+Make sure branch DNS resolves $QSVC_DOMAIN to the approved internal route.
+For internet access, validate the organisation edge, HTTPS and media paths from an external network.
 Manage the server with: qsvc status | logs | support-bundle
 Setup log: $LOG"
 log "INSTALL COMPLETE $VERSION $INSTALLATION_ID"

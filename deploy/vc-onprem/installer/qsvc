@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# qsvc — manage an installed QS-VC server.  Usage: qsvc status|start|stop|restart|logs [service]|ca|support-bundle|version
+# qsvc — manage an installed QS-VC server.  Usage: qsvc status|start|stop|restart|logs [service]|ca|support-bundle|check-update INSTALLER.run|version
 set -euo pipefail
 PREFIX=/opt/qsvc; ETC=/etc/qsvc
 [[ $(id -u) == 0 ]] || { echo 'Run as root (sudo qsvc ...)' >&2; exit 1; }
 [[ -f $ETC/qsvc.env && -f $ETC/runtime ]] || { echo 'QS-VC is not installed on this server.' >&2; exit 1; }
 # shellcheck disable=SC1091
 . "$ETC/runtime"
+if [[ ${1:-} == check-update ]]; then
+  [[ $# == 2 ]] || { echo 'Usage: sudo qsvc check-update INSTALLER.run' >&2; exit 2; }
+  exec /usr/local/libexec/qsvc-verify-update "$2" "$ETC/release-keys" /usr/local/libexec/qsvc-release-openssl
+fi
 case "$RUNTIME" in
   podman) export DOCKER_HOST=unix:///run/podman/podman.sock; DOCKER=podman ;;
   docker) DOCKER=docker ;; # Preserve existing deployments; no automatic data migration.
@@ -36,5 +40,5 @@ case "${1:-status}" in
            cp /var/log/qsvc-setup.log "$tmp/" 2>/dev/null || true
            tar -C "$tmp" -czf "$out" . && rm -rf "$tmp" && chmod 600 "$out" && echo "Support bundle (secrets removed): $out" ;;
   version) echo "QS-VC $VERSION" ;;
-  *) echo 'Usage: qsvc status|start|stop|restart|logs [service]|ca|support-bundle|version' >&2; exit 2 ;;
+  *) echo 'Usage: qsvc status|start|stop|restart|logs [service]|ca|support-bundle|check-update INSTALLER.run|version' >&2; exit 2 ;;
 esac

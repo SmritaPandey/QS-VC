@@ -59,8 +59,6 @@
     <li>Before you start: checklist and worksheet</li>
     <li>Download the right file</li>
     <li>Install on a Linux server (.run file)</li>
-    <li>Install as a virtual machine (VMware, Hyper-V, KVM)</li>
-    <li>Install on Windows Server (Hyper-V)</li>
     <li>Connect your network and computers</li>
     <li>Give the QS-VC app to your branches</li>
     <li>Activate QS-VC (before the 14 days end)</li>
@@ -88,7 +86,7 @@
 <p>After setup, staff open a web address such as <code>https://vc.yourorg.gov.in</code> in a browser, or use the QS-VC app, which your server hands out on its own <code>/downloads</code> page.</p>
 
 <h3>Who should do this</h3>
-<p>Anyone who can follow instructions carefully. You will need help from your <b>network person</b> twice: to give the server a fixed IP address and a name (Part 2), and to allow the network ports (Part 7). Show them those pages.</p>
+<p>Anyone who can follow instructions carefully. You will need help from your <b>network person</b> twice: to give the server a fixed IP address and a name (Part 2), and to allow the network ports (Part 5). Show them those pages.</p>
 </section>
 
 <section class="part">
@@ -97,7 +95,7 @@
 <table>
   <tr><th style="width:28%">Item</th><th>What it means</th></tr>
   <tr><td><b>A server</b></td><td>A physical server or a virtual machine with an Intel/AMD 64-bit processor.<br><b>Minimum:</b> 4 CPU cores, 8 GB memory, 30 GB free disk.<br><b>Recommended for 50 people:</b> 8 cores, 16 GB memory, 100 GB disk.</td></tr>
-  <tr><td><b>An operating system</b><br><span class="muted">(only for the .run file)</span></td><td>A fresh install of <b>Rocky Linux 9</b>, <b>Red Hat Enterprise Linux 9</b>, or <b>Ubuntu 22.04 / 24.04</b>. If you use the virtual machine files (Part 5 or 6), the operating system is already included.</td></tr>
+  <tr><td><b>An operating system</b></td><td>An existing x86-64 system running <b>Rocky Linux 9</b>, <b>Red Hat Enterprise Linux 9</b>, or <b>Ubuntu 22.04 / 24.04</b>. For a fully offline install, use a bundle with the required packages or have your IT team install Podman in advance.</td></tr>
   <tr><td><b>A fixed IP address</b></td><td>An address that never changes and that every branch can reach, for example <code>10.20.1.50</code>. Ask your network person.</td></tr>
   <tr><td><b>A server name</b></td><td>The web address staff will open, for example <code>vc.yourorg.gov.in</code>. Your network person adds it to your DNS so it points to the IP address above.</td></tr>
   <tr><td><b>An administrator email and password</b></td><td>The first person who will manage QS-VC. The password needs at least <b>12 characters</b>.</td></tr>
@@ -118,27 +116,17 @@
   <tr><td>Fingerprint 2: ML-DSA-65 (from QS-VC)</td><td class="blank"></td></tr>
   <tr><td>Certificate: "internal" (easiest) or your organisation's own</td><td class="blank"></td></tr>
 </table>
-<div class="box tip"><b>Not sure about certificates?</b>Choose <b>internal</b>. QS-VC creates its own certificate, and you install one small file on each computer afterwards (Part 7 explains how).</div>
+<div class="box tip"><b>Not sure about certificates?</b>Choose <b>internal</b>. QS-VC creates its own certificate, and you install one small file on each computer afterwards (Part 5 explains how).</div>
 </section>
 
 <section class="part">
 <h2>Part 3 · Download the right file</h2>
 <ol class="steps">
   <li>On your PC, open <b>https://qsvcmeet.com/intranet</b> and find <b>Install the QS-VC server</b>.</li>
-  <li>Choose <b>one</b> file from this table:
-    <table>
-      <tr><th>Your situation</th><th>Download</th><th>Then go to</th></tr>
-      <tr><td>You have a server with Rocky Linux 9, RHEL 9 or Ubuntu already installed <b>(most common)</b></td><td>Linux server setup (.run)</td><td>Part 4</td></tr>
-      <tr><td>You use VMware ESXi / vSphere</td><td>Server appliance for VMware (.ova)</td><td>Part 5</td></tr>
-      <tr><td>You use Hyper-V and are comfortable with it</td><td>Server appliance for Hyper-V (.vhdx)</td><td>Part 5</td></tr>
-      <tr><td>You use KVM, Proxmox or Nutanix</td><td>Server appliance for KVM (.qcow2)</td><td>Part 5</td></tr>
-      <tr><td>You have Windows Server with Hyper-V and want the easiest option</td><td>Windows Server setup (.exe)</td><td>Part 6</td></tr>
-    </table>
-  </li>
-  <li>Click <b>Download</b>. The file is large (around 400 MB for the .run, several GB for virtual machines). Wait until it finishes.</li>
+  <li>Choose <b>Linux server setup (.run)</b>. Download it from a connected computer and transfer it to your existing Linux host using your organisation’s approved process.</li>
   <li>Under the download button you see a long code after <b>SHA-256</b>. Keep this page open: you will compare it in Part 4, step 4.</li>
 </ol>
-<div class="box warn"><b>If a card says "Coming soon"</b>that file is not published yet. Use the Linux server setup (.run), or contact QS-VC.</div>
+<div class="box warn"><b>If a card says "Coming soon"</b>the installer is not published yet. Contact QS-VC for a signed release.</div>
 </section>
 
 <section class="part">
@@ -178,7 +166,7 @@
     <div class="screen"><span class="t">QS-VC Server Setup</span><br>Compare these release key fingerprints with the ones QS-VC sent you separately:<br><br>&nbsp;&nbsp;Ed25519&nbsp;&nbsp;&nbsp;&nbsp;3fa1…&nbsp;&nbsp;&nbsp;&nbsp;ML-DSA-65&nbsp;&nbsp;9c0e…<br><br>Do the fingerprints match? &lt;Yes&gt; &lt;No&gt;</div>
     <span class="muted">(The codes above are only an example; yours are different.)</span><br>
     Compare them with your worksheet. If they match, choose <b>Yes</b>. If they <b>do not</b> match, choose <b>No</b> and contact QS-VC: the file may have been changed.</li>
-  <li><b>Checks run by themselves.</b> The installer checks the file's signatures and the server (processor, memory, disk, ports, clock). Lines with a green tick are fine. If it stops with a red message, see Part 11.</li>
+  <li><b>Checks run by themselves.</b> The installer checks the file's signatures and the server (processor, memory, disk, ports, clock). Lines with a green tick are fine. If it stops with a red message, see Part 9.</li>
   <li><b>Organisation name.</b> Type it and press Enter.</li>
   <li><b>Server name.</b> Type the name from your worksheet (e.g. <code>vc.yourorg.gov.in</code>).</li>
   <li><b>Server IP address.</b> The installer suggests one. Check it matches your worksheet; correct it if needed.</li>
@@ -187,49 +175,14 @@
   <li><b>Wait.</b> The installer now loads QS-VC and starts it. This takes <b>10 to 20 minutes</b>. Do not close the window.</li>
   <li><b>Done.</b> You see <b>"Congratulations! Setup is complete"</b> with:
     <div class="screen">Open: https://vc.yourorg.gov.in<br>Administrator: admin@yourorg.gov.in<br>Branch app setup: https://vc.yourorg.gov.in/downloads/<br>Installation ID: 1b2c3d4e-…<br>14 days of use end on 2026-12-01.</div>
-    <b>Write down the Installation ID and the end date.</b> You need them in Part 9.</li>
+    <b>Write down the Installation ID and the end date.</b> You need them in Part 7.</li>
 </ol>
-<div class="box tip"><b>Ran it twice by mistake?</b>That is safe. Running the installer again repairs the installation and keeps your data, passwords and Installation ID.</div>
-<p>Now go to <b>Part 7</b>.</p>
+<div class="box tip"><b>Already installed?</b>Verify the signed update and follow your backup and maintenance process before running setup again.</div>
+<p>Now go to <b>Part 5</b>.</p>
 </section>
 
 <section class="part">
-<h2>Part 5 · Install as a virtual machine (VMware, Hyper-V, KVM)</h2>
-<p>The appliance is a ready-made virtual machine with the operating system and QS-VC included. Give it <b>8 virtual CPUs, 16 GB memory</b> and connect it to the network your branches can reach.</p>
-<h3>A. Import the virtual machine</h3>
-<table>
-  <tr><th style="width:24%">Platform</th><th>What to do</th></tr>
-  <tr><td><b>VMware</b> (.ova)</td><td>In vSphere Client: right-click your host or cluster → <b>Deploy OVF Template</b> → <b>Local file</b> → choose the .ova → Next through the screens, picking your datastore and network → <b>Finish</b>. Then <b>Power On</b>.</td></tr>
-  <tr><td><b>Hyper-V</b> (.vhdx in a .zip)</td><td>Unzip the file. Hyper-V Manager → <b>New → Virtual Machine</b> → <b>Generation 2</b> → memory 16384 MB, untick "Dynamic Memory" → choose your <b>External</b> network switch → <b>Use an existing virtual hard disk</b> → choose the .vhdx → Finish. Settings → Processor → 8. Settings → Security → Template: <b>Microsoft UEFI Certificate Authority</b>. <b>Start</b>.</td></tr>
-  <tr><td><b>Proxmox</b> (.qcow2)</td><td>Create a VM with no disk (8 cores, 16 GB, OVMF/UEFI). Copy the .qcow2 to the Proxmox host and run <code>qm importdisk &lt;vm-id&gt; QS-VC-Server-Appliance.qcow2 &lt;storage&gt;</code>. Attach the imported disk, set it as the boot disk, <b>Start</b>.</td></tr>
-  <tr><td><b>KVM / Nutanix</b> (.qcow2)</td><td>virt-manager: <b>Import existing disk image</b>, OS "Rocky Linux 9", UEFI firmware. Nutanix: upload the .qcow2 in <b>Image Configuration</b>, then create a VM from it (UEFI).</td></tr>
-</table>
-<h3>B. First-start menu</h3>
-<p>Open the virtual machine's <b>console</b>. A blue menu appears. Do the items <b>in order</b>:</p>
-<ol class="steps">
-  <li><b>Network</b>: set the fixed IP address, gateway and DNS from your network person. Choose "Manual" instead of "Automatic", fill in the address with its size (e.g. <code>10.20.1.50/24</code>), gateway and DNS servers, then <b>OK</b> and <b>Back</b>.</li>
-  <li><b>Hostname</b>: type the server name (e.g. <code>vc.yourorg.gov.in</code>).</li>
-  <li><b>Time server</b>: type your organisation's time server if you have one. The clock must be correct.</li>
-  <li><b>Console administrator password</b>: set a password for maintenance logins (user name <code>qsvcadmin</code>).</li>
-  <li><b>Install QS-VC</b>: the installer opens. Follow <b>Part 4, section D</b>, from step 6.</li>
-</ol>
-<p>After that, go to <b>Part 7</b>.</p>
-</section>
-
-<section class="part">
-<h2>Part 6 · Install on Windows Server (Hyper-V)</h2>
-<p>For Windows Server 2019, 2022 or 2025 with the Hyper-V role. The setup program creates the QS-VC virtual machine for you.</p>
-<ol class="steps">
-  <li>Check Hyper-V has an <b>External</b> virtual switch on the network your branches reach: Hyper-V Manager → <b>Virtual Switch Manager</b>. Note its exact name (for example <i>Hub LAN</i>). If there is none, create one: <b>New virtual network switch → External</b> → choose the network card → OK.</li>
-  <li>Download <b>QS-VC-Server-Setup-&lt;version&gt;.exe</b>. It includes the matching server appliance and checksum; no separate appliance download is needed.</li>
-  <li>Right-click <b>QS-VC-Server-Setup.exe</b> → <b>Run as administrator</b>. If Windows says "Windows protected your PC", click <b>More info → Run anyway</b>.</li>
-  <li>Accept the licence → type the <b>switch name</b> from step 1 → keep the suggested memory (16 GB) and CPUs (8) → <b>Install</b>. Creating the virtual machine takes several minutes.</li>
-  <li>Open Hyper-V Manager, right-click <b>QS-VC Server</b> → <b>Connect</b>. Continue with <b>Part 5, section B</b> (first-start menu).</li>
-</ol>
-</section>
-
-<section class="part">
-<h2>Part 7 · Connect your network and computers</h2>
+<h2>Part 5 · Connect your network and computers</h2>
 <h3>A. Ask your network person to do two things</h3>
 <ol class="steps">
   <li><b>DNS:</b> make the server name (e.g. <code>vc.yourorg.gov.in</code>) point to the server's IP address, for all branches.</li>
@@ -260,7 +213,7 @@
 </section>
 
 <section class="part">
-<h2>Part 8 · Give the QS-VC app to your branches</h2>
+<h2>Part 6 · Give the QS-VC app to your branches</h2>
 <p>Staff can join from a browser, but the QS-VC app is easier for daily use. Your server shares it on <b>https://<i>your-server-name</i>/downloads/</b>.</p>
 <h3>A. Put the app files on the server (administrator, once)</h3>
 <ol class="steps">
@@ -284,7 +237,7 @@ Use this with Intune, SCCM or a login script.</div>
 </section>
 
 <section class="part">
-<h2>Part 9 · Activate QS-VC (before the 14 days end)</h2>
+<h2>Part 7 · Activate QS-VC (before the 14 days end)</h2>
 <p>QS-VC works fully for 14 days after installation. To keep using it, QS-VC approves your installation. If the 14 days pass first, users see "This QS-VC installation needs activation". <b>Nothing is deleted</b>; everything returns as soon as you activate.</p>
 <ol class="steps">
   <li>Find your <b>Installation ID</b> (it was on the Congratulations screen). Or type on the server:
@@ -299,7 +252,7 @@ Use this with Intune, SCCM or a login script.</div>
 </section>
 
 <section class="part">
-<h2>Part 10 · Everyday tasks</h2>
+<h2>Part 8 · Everyday tasks</h2>
 <p>Type these on the server. They all start with <code>sudo qsvc</code>.</p>
 <table>
   <tr><th style="width:40%">To do this</th><th>Type</th></tr>
@@ -314,11 +267,11 @@ Use this with Intune, SCCM or a login script.</div>
 </table>
 <p>QS-VC starts automatically when the server restarts. You do not need to do anything after a reboot.</p>
 <h3>Update to a new version</h3>
-<p>Download the new .run file and repeat <b>Part 4, sections A to D</b>. Your data, accounts and Installation ID are kept.</p>
+<p>Obtain the signed update and follow your organisation’s backup and maintenance process. Verify the installer before running it on the same Linux host.</p>
 </section>
 
 <section class="part">
-<h2>Part 11 · If something goes wrong</h2>
+<h2>Part 9 · If something goes wrong</h2>
 <table>
   <tr><th style="width:38%">You see</th><th>What to do</th></tr>
   <tr><td>"run as root (sudo)"</td><td>Start the installer with <code>sudo</code> in front, as in Part 4 step 5.</td></tr>
@@ -333,10 +286,10 @@ Use this with Intune, SCCM or a login script.</div>
   <tr><td>"invalid server name" / "invalid IPv4 address"</td><td>Check spelling: a name like <code>vc.yourorg.gov.in</code> (no https://) and an address like <code>10.20.1.50</code>.</td></tr>
   <tr><td>"the certificate is not issued for …"</td><td>Your organisation's certificate is for a different name. Get a matching one, or choose "internal".</td></tr>
   <tr><td>"… is not healthy"</td><td>Run the installer again (safe). If it repeats, send a support bundle (<code>sudo qsvc support-bundle</code>) to QS-VC.</td></tr>
-  <tr><td>Browser says "Not secure"</td><td>Do Part 7B on that computer.</td></tr>
-  <tr><td>Branches cannot open the address</td><td>Check Part 7A with your network person (DNS and firewall).</td></tr>
-  <tr><td>Video freezes or there is no sound between branches</td><td>The UDP ports in Part 7A are blocked somewhere on the network.</td></tr>
-  <tr><td>"This QS-VC installation needs activation"</td><td>The 14 days have passed. Do Part 9.</td></tr>
+  <tr><td>Browser says "Not secure"</td><td>Do Part 5B on that computer.</td></tr>
+  <tr><td>Branches cannot open the address</td><td>Check Part 5A with your network person (DNS and firewall).</td></tr>
+  <tr><td>Video freezes or there is no sound between branches</td><td>The UDP ports in Part 5A are blocked somewhere on the network.</td></tr>
+  <tr><td>"This QS-VC installation needs activation"</td><td>The 14 days have passed. Do Part 7.</td></tr>
 </table>
 <h3>Getting help</h3>
 <p>Contact QS-VC through <b>Contact us</b> on qsvcmeet.com (or support@qsvcmeet.com). Include your Installation ID and attach the support bundle: the command <code>sudo qsvc support-bundle</code> tells you where it saved the file. The full setup log is at <code>/var/log/qsvc-setup.log</code>.</p>

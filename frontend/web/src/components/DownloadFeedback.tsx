@@ -1,6 +1,7 @@
 export type DownloadState =
     | { phase: 'idle' }
-    | { phase: 'working'; received: number; total: number | null }
+    | { phase: 'working'; received: number; total: number | null; browserManaged?: boolean }
+    | { phase: 'handed-off' }
     | { phase: 'done'; checksum: string; size: number; archive: 'macos' | 'windows' | 'linux' }
     | { phase: 'error'; message: string };
 
@@ -13,15 +14,20 @@ function megabytes(bytes: number) { return `${(bytes / 1048576).toFixed(bytes < 
 export default function DownloadFeedback({ state, onDismiss }: { state: DownloadState; onDismiss: () => void }) {
     if (state.phase === 'idle') return null;
     const percent = state.phase === 'working' && state.total ? Math.min(100, Math.round(state.received / state.total * 100)) : null;
+    const visualPhase = state.phase === 'handed-off' ? 'done' : state.phase;
     return <>
-        <div className="download-glow" data-phase={state.phase} aria-hidden="true" />
-        <div className="download-toast" data-phase={state.phase} role={state.phase === 'error' ? 'alert' : 'status'} aria-live={state.phase === 'error' ? 'assertive' : 'polite'}>
-            <span className="download-toast-icon mi" aria-hidden="true">{state.phase === 'working' ? 'downloading' : state.phase === 'done' ? 'task_alt' : 'error'}</span>
+        <div className="download-glow" data-phase={visualPhase} aria-hidden="true" />
+        <div className="download-toast" data-phase={visualPhase} role={state.phase === 'error' ? 'alert' : 'status'} aria-live={state.phase === 'error' ? 'assertive' : 'polite'}>
+            <span className="download-toast-icon mi" aria-hidden="true">{state.phase === 'working' ? 'downloading' : visualPhase === 'done' ? 'task_alt' : 'error'}</span>
             <div className="download-toast-body">
                 {state.phase === 'working' && <>
-                    <strong>Downloading QS-VC…</strong>
-                    <span>{percent !== null ? `${percent}% · ${megabytes(state.received)} of ${megabytes(state.total!)}` : `${megabytes(state.received)} received`}</span>
+                    <strong>{state.browserManaged ? 'Preparing your download…' : 'Downloading QS-VC…'}</strong>
+                    {!state.browserManaged && <span>{percent !== null ? `${percent}% · ${megabytes(state.received)} of ${megabytes(state.total!)}` : `${megabytes(state.received)} received`}</span>}
                     <span className="download-progress" data-indeterminate={percent === null || undefined}><i style={percent !== null ? { width: `${percent}%` } : undefined} /></span>
+                </>}
+                {state.phase === 'handed-off' && <>
+                    <strong>Download sent to your browser.</strong>
+                    <span>Check your browser’s downloads for progress.</span>
                 </>}
                 {state.phase === 'done' && <>
                     <strong>Download complete.</strong>

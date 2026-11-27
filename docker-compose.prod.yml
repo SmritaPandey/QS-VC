@@ -107,6 +107,7 @@ services:
       TURN_REALM: ${TURN_REALM:-qsvc}
       SFU_ANNOUNCED_IP: ${SFU_ANNOUNCED_IP:-}
       TURN_ALLOWED_SFU_IP: ${TURN_ALLOWED_SFU_IP:-}
+      TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
     image: coturn/coturn:4.6.3
     container_name: qsvc-coturn
     ports:

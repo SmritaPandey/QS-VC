@@ -20,13 +20,9 @@ const downloadChoices: Array<{ id: DesktopDownload; label: string; availableKey:
     { id: 'linux-x64', label: 'Linux · x64 · ZIP', availableKey: 'linuxX64', endpoint: 'linux/x64', filename: 'QS-VC-Linux-x64.zip', mime: 'application/zip' },
 ];
 type ServerFile = { available: boolean; filename?: string; size?: number; sha256?: string };
-const serverChoices: Array<{ id: string; os: 'linux' | 'windows' | 'any'; title: string; detail: string; recommended?: boolean }> = [
-    { id: 'linux-installer', os: 'linux', title: 'Linux server setup (.run)', detail: 'Guided installer for Rocky Linux 9 / RHEL 9 (Ubuntu 22.04/24.04 also supported). Works offline; installs, configures and starts QS-VC.', recommended: true },
-    { id: 'vmware-ova', os: 'any', title: 'Server appliance for VMware (.ova)', detail: 'Hardened Rocky Linux 9 virtual machine with QS-VC preinstalled. Import, set the IP on the console, finish in the setup wizard.' },
-    { id: 'hyperv-vhdx', os: 'windows', title: 'Server appliance for Hyper-V (.vhdx)', detail: 'The same appliance as a Generation 2 Hyper-V disk.' },
-    { id: 'kvm-qcow2', os: 'any', title: 'Server appliance for KVM / Proxmox / Nutanix (.qcow2)', detail: 'The same appliance as a QCOW2 disk image.' },
-    { id: 'windows-server', os: 'windows', title: 'Windows Server setup (.exe)', detail: 'For Windows Server 2019/2022/2025 with Hyper-V: creates and configures the QS-VC appliance VM for you.' },
-    { id: 'linux-package', os: 'linux', title: 'Offline server package (.tar.gz)', detail: 'Signed package for administrators who install manually or build their own media.' },
+const serverChoices = [
+    { id: 'linux-installer', title: 'Linux server setup (.run)', detail: 'Guided setup for an existing x86-64 Linux server or guest. Use Rocky Linux 9, RHEL 9, or Ubuntu 22.04 or 24.04.', recommended: true },
+    { id: 'linux-package', title: 'Offline server package (.tar.gz)', detail: 'Signed Linux payload for administrators using the manual installation process.', recommended: false },
 ];
 const formatSize = (bytes?: number) => !bytes ? '' : bytes >= 1e9 ? (bytes / 1e9).toFixed(1) + ' GB' : Math.max(1, Math.round(bytes / 1e6)) + ' MB';
 
@@ -40,9 +36,7 @@ export default function IntranetPage() {
         cancelDownloadStep();
         if (!platform) return;
         if (platform.startsWith('desktop:')) { void download(); return; }
-        const link = document.createElement('a');
-        link.href = `${AUTH_API}/api/auth/enterprise/server-package/${platform}`;
-        link.download = ''; document.body.append(link); link.click(); link.remove();
+        void downloadServer(platform);
     }
     const [serverStatus, setServerStatus] = useState<'checking' | 'ready' | 'unavailable'>('checking');
     const [serverFiles, setServerFiles] = useState<Record<string, ServerFile>>({});
@@ -63,7 +57,6 @@ export default function IntranetPage() {
             .catch(() => { if (!controller.signal.aborted) setServerStatus('unavailable'); });
         return () => controller.abort();
     }, []);
-    const visitorOs = typeof navigator === 'undefined' ? '' : /Windows/i.test(navigator.userAgent) ? 'windows' : /Linux|X11/i.test(navigator.userAgent) && !/Android/i.test(navigator.userAgent) ? 'linux' : '';
 
     const token = session.profile ? getToken() : '';
     const [result, setResult] = useState<{ token: string; access?: { workspaceUrl: string; downloads: DownloadAvailability; onlineDemo: boolean }; error?: string }>();
@@ -73,7 +66,7 @@ export default function IntranetPage() {
     const loading = !current && (session.status === 'checking' || session.status === 'authenticated');
     const error = session.status === 'unavailable' ? 'We couldn’t check your account. Try again.' : current?.error;
     const downloadRequest = useRef<AbortController | null>(null);
-    const downloadOwner = useRef('');
+    const downloadOwner = useRef<string | null>(null);
     const [downloadState, setDownloadState] = useState<DownloadState>({ phase: 'idle' });
     const [downloadPlatform, setDownloadPlatform] = useState<DesktopDownload>('windows');
     const chosenDownload = downloadChoices.find(choice => choice.id === downloadPlatform)!;
@@ -81,7 +74,7 @@ export default function IntranetPage() {
     const downloading = downloadState.phase === 'working';
     // Success and failure messages fade on their own; Esc dismisses them sooner.
     useEffect(() => {
-        if (downloadState.phase !== 'done' && downloadState.phase !== 'error') return;
+        if (downloadState.phase !== 'done' && downloadState.phase !== 'handed-off' && downloadState.phase !== 'error') return;
         const timer = window.setTimeout(() => setDownloadState({ phase: 'idle' }), downloadState.phase === 'done' ? 15000 : 9000);
         const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') setDownloadState({ phase: 'idle' }); };
         window.addEventListener('keydown', onKey);
@@ -130,6 +123,33 @@ export default function IntranetPage() {
         });
         return () => controller.abort();
     }, [token, attempt, session.status]);
+    async function downloadServer(platform: string) {
+        if (!serverFiles[platform]?.available || downloadRequest.current) return;
+        const controller = new AbortController();
+        downloadRequest.current = controller;
+        downloadOwner.current = null;
+        setDownloadState({ phase: 'working', received: 0, total: null, browserManaged: true });
+        const url = `${AUTH_API}/api/auth/enterprise/server-package/${platform}`;
+        try {
+            const response = await fetch(url, {
+                method: 'HEAD', cache: 'no-store',
+                signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8000)]),
+            });
+            if (controller.signal.aborted) return;
+            if (!response.ok) throw new Error('Unavailable');
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = '';
+            document.body.append(link);
+            link.click();
+            link.remove();
+            setDownloadState({ phase: 'handed-off' });
+        } catch {
+            if (!controller.signal.aborted) setDownloadState({ phase: 'error', message: 'The server download is unavailable. Please try again.' });
+        } finally {
+            if (downloadRequest.current === controller) downloadRequest.current = null;
+        }
+    }
     async function download() {
         if (session.status !== 'authenticated' || !token || !chosenDownloadAvailable || downloadRequest.current) return;
         const controller = new AbortController();
@@ -198,17 +218,17 @@ export default function IntranetPage() {
         <header className="public-page-intro"><h1>{access?.onlineDemo ? 'Your online test workspace.' : access ? 'Your QS-Enterprise workspace.' : 'Meet inside your organisation.'}</h1><p>{access?.onlineDemo ? 'Open the shared QS-VC app to try your admin experience online.' : access ? 'Choose how you connect to your approved workspace.' : 'Set up QS-VC on your organisation’s Linux server.'}</p></header>
         <section className="service-card" aria-labelledby="onprem-package-title">
             <h2 id="onprem-package-title">Install the QS-VC server</h2>
-            <p>Install once on a server in your data centre or hub. Every file is signed and works without internet after download. The server then provides the QS-VC app for Windows, Mac and Linux to all your branches on its own <code>/downloads</code> page.</p>
+            <p>Run setup on a Linux server or guest your organisation already manages. For an offline install, use a bundle with the required packages or prepare the container runtime in advance. Your branches connect to the installed server from their browsers.</p>
             {serverStatus === 'checking' && <p role="status">Checking available downloads…</p>}
             {serverStatus === 'unavailable' && <p role="status">Downloads are temporarily unavailable. Please try again later.</p>}
             {serverStatus === 'ready' && <ul className="onprem-server-downloads">
-                {[...serverChoices].sort((a, b) => Number(b.os === visitorOs) - Number(a.os === visitorOs)).map(choice => {
+                {serverChoices.map(choice => {
                     const item = serverFiles[choice.id];
                     return <li key={choice.id} className="onprem-server-download">
                         <h3>{choice.title}{choice.recommended && <span className="enterprise-access-badge onprem-recommended">Recommended</span>}</h3>
                         <p>{choice.detail}</p>
                         {item?.available ? <>
-                            <button className="qsvc-action" type="button" aria-expanded={pendingDownload === choice.id} onClick={event => { downloadTrigger.current = event.currentTarget; setPendingDownload(choice.id); }}>
+                            <button className="qsvc-action" type="button" disabled={downloading} aria-expanded={pendingDownload === choice.id} onClick={event => { downloadTrigger.current = event.currentTarget; setPendingDownload(choice.id); }}>
                                 <ActionContents><span className="mi" aria-hidden="true">download</span>Download{item.size ? ' · ' + formatSize(item.size) : ''}</ActionContents>
                             </button>
                             {pendingDownload === choice.id && <DownloadLeadStep key={choice.id} platform={choice.id} onContinue={continueDownload} onCancel={cancelDownloadStep} />}
@@ -237,5 +257,5 @@ export default function IntranetPage() {
             <section className="service-card"><span className="enterprise-access-badge">{access.onlineDemo ? 'Admin · Online test workspace' : 'Approved QS-Enterprise access'}</span><h2>Open in your browser</h2><p>{access.onlineDemo ? 'This opens the shared QS-VC online app to test the QS-Enterprise experience. It is not an isolated organisation deployment.' : 'Connect to your office network or approved VPN, then sign in to your organisation’s workspace.'}</p><p className="enterprise-address">{access.workspaceUrl}</p><a className="qsvc-action" href={access.workspaceUrl} rel="noreferrer"><ActionContents>Open workspace</ActionContents></a></section>
             <section className="service-card"><h2>Download QS-VC</h2><p>{access.onlineDemo ? 'Choose your computer and use the same online test workspace.' : 'Choose the app for your computer. The app connects to the organisation workspace above.'}</p><p>On Mac, extract the ZIP and move QS-VC.app to Applications. On Windows, extract the ZIP and run QS-VC.exe from the extracted folder. On Linux x64, extract the ZIP and run qs-vc from the extracted folder. Ask your administrator if you need help with your Linux distribution.</p><label className="intranet-platform-label" htmlFor="intranet-download-platform">Your device</label><select id="intranet-download-platform" value={downloadPlatform} disabled={downloading || Boolean(pendingDownload?.startsWith('desktop:'))} onChange={event => setDownloadPlatform(event.target.value as DesktopDownload)}>{downloadChoices.map(choice => <option key={choice.id} value={choice.id}>{choice.label}</option>)}</select><button className="qsvc-action intranet-download" type="button" aria-busy={downloading} disabled={!chosenDownloadAvailable || downloading || session.status !== 'authenticated'} onClick={event => { downloadTrigger.current = event.currentTarget; setPendingDownload(`desktop:${downloadPlatform}`); }}><ActionContents><span className="mi" aria-hidden="true">download</span>{downloading ? 'Downloading…' : downloadPlatform === 'linux-x64' ? 'Download Linux ZIP' : downloadPlatform.startsWith('macos-') ? 'Download Mac ZIP' : 'Download Windows ZIP'}</ActionContents></button>{pendingDownload === `desktop:${downloadPlatform}` && <DownloadLeadStep key={pendingDownload} platform={downloadPlatform} onContinue={continueDownload} onCancel={cancelDownloadStep} />}{!chosenDownloadAvailable && <p role="status">This app archive is not available yet. Choose another device or contact your administrator.</p>}<p>{access.onlineDemo ? 'For an isolated enterprise workspace, use the address supplied by your organisation.' : 'After installation, use the organisation address above.'} A download does not grant additional meeting permissions.</p><p>Each ZIP includes the getting-started guide, the prerequisites and the on-prem setup guide for IT. <a href="/guides/QS-VC-Prerequisites.pdf" target="_blank" rel="noreferrer">Prerequisites (PDF)</a> · <a href="/guides/QS-VC-Getting-Started.pdf" target="_blank" rel="noreferrer">Getting started (PDF)</a> · <a href="/guides/QS-VC-Intranet-Setup.pdf" target="_blank" rel="noreferrer">On-prem setup (PDF)</a></p></section>
         </div> : null}
-    </main><SiteFooter /><DownloadFeedback state={token && downloadOwner.current === token ? downloadState : { phase: 'idle' }} onDismiss={() => setDownloadState({ phase: 'idle' })} /></div>;
+    </main><SiteFooter /><DownloadFeedback state={downloadOwner.current === null || downloadOwner.current === token ? downloadState : { phase: 'idle' }} onDismiss={() => setDownloadState({ phase: 'idle' })} /></div>;
 }

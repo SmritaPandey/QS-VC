@@ -45,15 +45,20 @@ function can(user, feature) {
 
 function resolvePlan(row, now = new Date()) {
     if (!row) return { plan: 'guest', status: 'paid_active' };
+    const approved = row.enterprise_status === 'enterprise_approved';
+    if (row.enterprise_access_expires_at
+        ? new Date(row.enterprise_access_expires_at) > now
+        : approved) return { plan: 'enterprise', status: 'enterprise_approved' };
+    const enterpriseStatus = approved ? 'enterprise_pending' : row.enterprise_status || 'enterprise_pending';
     if (isTrialPlan(row.subscription_plan) && row.trial_ends_at && new Date(row.trial_ends_at) <= now) return { plan: row.subscription_plan, status: 'trial_expired' };
     if (isTrialPlan(row.subscription_plan) && row.trial_ends_at) return { plan: row.subscription_plan, status: 'trial_active' };
     if (PAID_PLANS.includes(row.subscription_plan)) return {
         plan: row.subscription_plan,
         status: row.subscription_expires_at && new Date(row.subscription_expires_at) <= now ? 'paid_expired' : 'paid_active',
     };
-    if (row.subscription_plan === 'enterprise') return { plan: 'enterprise', status: row.enterprise_status || 'enterprise_pending' };
+    if (row.subscription_plan === 'enterprise') return { plan: 'enterprise', status: enterpriseStatus };
     const tenantPlan = String(row.tenant_plan || '').toLowerCase();
-    if (tenantPlan === 'enterprise') return { plan: 'enterprise', status: row.enterprise_status || 'enterprise_pending' };
+    if (tenantPlan === 'enterprise') return { plan: 'enterprise', status: enterpriseStatus };
     if (PAID_PLANS.includes(tenantPlan)) return { plan: tenantPlan, status: 'paid_active' };
     return { plan: 'guest', status: 'paid_active' };
 }

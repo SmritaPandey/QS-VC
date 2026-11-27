@@ -9,7 +9,8 @@ fi
 set -- turnserver -c /etc/coturn/peer-policy.conf --use-auth-secret \
   "--static-auth-secret=$TURN_SECRET" "--realm=$TURN_REALM" --listening-port=3478 \
   --min-port=49152 --max-port=49200 --log-file=stdout --pidfile=/tmp/turnserver.pid
-if [ -n "${SFU_ANNOUNCED_IP:-}" ]; then set -- "$@" "--external-ip=$SFU_ANNOUNCED_IP"; fi
+relay_address=${TURN_EXTERNAL_IP:-${SFU_ANNOUNCED_IP:-}}
+if [ -n "$relay_address" ]; then set -- "$@" "--external-ip=$relay_address"; fi
 if [ -n "${TURN_ALLOWED_SFU_IP:-}" ]; then
   case "$TURN_ALLOWED_SFU_IP" in *[!0-9a-fA-F:.]*) echo 'TURN_ALLOWED_SFU_IP must be one literal SFU address' >&2; exit 1;; esac
   set -- "$@" "--allowed-peer-ip=$TURN_ALLOWED_SFU_IP"

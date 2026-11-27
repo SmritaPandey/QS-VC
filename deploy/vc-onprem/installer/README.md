@@ -3,6 +3,11 @@
 `qsvc-server-setup-<version>.run` installs the QS-VC server (hub) on Rocky Linux 9 / RHEL 9
 (Ubuntu 22.04/24.04 also supported) with a guided wizard, fully offline.
 
+Run the installer inside an existing x86-64 Linux system, either a physical
+server or a guest provisioned by your organisation. It installs QS-VC and
+its container services on that system. Your IT team owns the operating
+system, hypervisor if used, storage, and network configuration.
+
 ## Build (release machine)
 
 1. Build and sign the server package: `deploy/vc-onprem/offline/bundle.sh` (see docs/onprem/RELEASE_CHECKLIST.md).
@@ -30,7 +35,36 @@ restricted accounts → services and first administrator → firewall and start-
 (server URL, installation ID, root CA for branch PCs).
 
 Manage afterwards: `qsvc status | start | stop | restart | logs [service] | ca | support-bundle`.
-Re-running the installer repairs/upgrades in place and keeps secrets, data and the installation ID.
+For an existing installation, setup creates a root-only database backup
+under `/var/lib/qsvc/pre-upgrade` and checks that PostgreSQL can read its
+table of contents. It runs the signed migration runner before starting
+the new application services. Migration failures stop setup. Older
+installers could record migrations they did not run. Reconcile a suspect
+migration ledger against the actual database before upgrading. Run the
+upgrade and recovery rehearsal in a maintenance window.
+
+## Intranet and internet access
+
+Choose **Intranet or organisation VPN** for a private deployment. Choose
+**Intranet and internet via the organisation edge** when both access paths
+are required. In silent setup set `QSVC_EXPOSURE=public` for the second
+profile. Supply a certificate for the meeting hostname that standard
+clients trust. QS-VC keeps sign-in required for meetings in both profiles.
+
+Use the same meeting hostname for both access paths. Have your network
+team route internal DNS to the approved intranet address and external
+DNS to the approved SHQ edge. Configure HTTPS and WebSocket forwarding
+and the separate WebRTC media routes for that site. The installer does
+not configure the external firewall or prove MPLS failover. The public
+profile preserves host firewall rules by default.
+
+If TURN is behind NAT, set `TURN_EXTERNAL_IP` in the coturn environment
+in the organisation override to the relay address reachable from clients.
+Keep the permitted SFU peer address separate. Translate the published
+relay UDP ports consistently and verify relay-only calls. Test an
+authenticated browser call from outside the network and again after
+simulating MPLS loss. Keep database, service control and room-device
+administration ports private.
 
 ## Container runtime
 
@@ -75,3 +109,28 @@ the existing FFmpeg and RTMPS path. Set `LIVE_YOUTUBE_RTMPS_URL` and/or
 root-only organisation override when outbound broadcasting is approved.
 Leave them unset for isolated networks. Server recording storage requires
 a separate qualified storage configuration.
+
+## Offline updates for room-system administrators
+
+Set `QSVC_UPDATE_DROP_DIR` to an existing, operator-controlled transfer
+directory at build time to publish a signed release for the site administrator.
+For a shared directory, set its group to the administrator group and enable
+group inheritance on that directory.
+The connected release station hands the site administrator the versioned
+`qsvc-server-setup-<version>.run`, its `.sha256` file, both signatures of that
+file, and the release notes. Transfer those files through the organisation's
+approved media or transfer station. Keep the four installer files together
+and keep their original names.
+
+On a server installed with this release or later, run
+`sudo qsvc check-update /path/to/qsvc-server-setup-<version>.run`.
+It checks both signatures against the keys pinned during setup and validates
+the installer bytes. It only verifies the transfer. Review the release notes
+and follow the approved backup and maintenance process before running setup.
+For servers without the command, verify against the independently obtained
+release keys at the transfer station before executing the first installer.
+
+QS-VC packages update the QS-VC server. Poly/Polycom administrators use
+the vendor's firmware package and management path for each device model.
+Keep the two updates separate in the maintenance record. An isolated site
+receives releases across its approved transfer boundary.
