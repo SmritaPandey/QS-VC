@@ -124,7 +124,7 @@
 <ol class="steps">
   <li>On your PC, open <b>https://qsvcmeet.com/intranet</b> and find <b>Install the QS-VC server</b>.</li>
   <li>Choose <b>Linux server setup (.run)</b>. Download it from a connected computer and transfer it to your existing Linux host using your organisation’s approved process.</li>
-  <li>Under the download button you see a long code after <b>SHA-256</b>. Keep this page open: you will compare it in Part 4, step 4.</li>
+  <li>Keep the published <b>SHA-256</b> and obtain both release signing key fingerprints independently. The <b>.tar.gz</b> download is a manual server package for IT. For this guide, use the <b>.run</b> file.</li>
 </ol>
 <div class="box warn"><b>If a card says "Coming soon"</b>the installer is not published yet. Contact QS-VC for a signed release.</div>
 </section>
@@ -135,7 +135,7 @@
 <p>Use <b>WinSCP</b>, a free program for Windows (from winscp.net). On a Mac, use the <code>scp</code> command or a USB stick.</p>
 <ol class="steps">
   <li>Open WinSCP. In <b>Host name</b> type the server's IP address. Type the server's user name and password. Click <b>Login</b>.</li>
-  <li>If asked "Continue connecting to an unknown server?", click <b>Yes</b>.</li>
+  <li>If asked about an unknown server, compare the SSH host key fingerprint with the value from your IT team before accepting it.</li>
   <li>On the left, find the downloaded file (usually in <i>Downloads</i>). Drag it to the right-hand side (your home folder on the server). Wait for the copy to finish.</li>
 </ol>
 <div class="box tip"><b>No network yet?</b>Copy the file onto a USB stick, plug it into the server, and copy it from there. Your IT person can help with mounting the stick.</div>
@@ -151,10 +151,11 @@
   <li>Go to the folder that holds the file. If you copied it to your home folder, type:
     <span class="type">cd ~</span></li>
   <li>Check that the file arrived complete. Type:
-    <span class="type">sha256sum qsvc-server-setup-*.run</span>
+    <span class="type">sha256sum ./qsvc-server-setup-VERSION.run</span>
+    Replace <code>VERSION</code> with the version in your downloaded filename.
     Compare the long code shown with the <b>SHA-256</b> on the download page. They must be <b>exactly the same</b>. If not, download and copy the file again.</li>
   <li>Start the installer. Type:
-    <span class="type">sudo bash qsvc-server-setup-*.run</span>
+    <span class="type">sudo bash ./qsvc-server-setup-VERSION.run</span>
     If asked for a password, type <b>your own login password</b> (nothing appears while you type; that is normal) and press Enter.</li>
 </ol>
 <div class="box tip"><b>Moving around the installer screens</b>Use the <b>arrow keys</b> to move, <b>Tab</b> to jump to the buttons, and <b>Enter</b> to press a button. The mouse does not work in these screens.</div>
@@ -167,11 +168,12 @@
     <span class="muted">(The codes above are only an example; yours are different.)</span><br>
     Compare them with your worksheet. If they match, choose <b>Yes</b>. If they <b>do not</b> match, choose <b>No</b> and contact QS-VC: the file may have been changed.</li>
   <li><b>Checks run by themselves.</b> The installer checks the file's signatures and the server (processor, memory, disk, ports, clock). Lines with a green tick are fine. If it stops with a red message, see Part 9.</li>
+  <li><b>Access profile.</b> Choose <b>Intranet or organisation VPN</b> for private access, or <b>Intranet and internet via the organisation edge</b> if remote staff will connect directly. IT must prepare external DNS, HTTPS and media forwarding for the second option.</li>
   <li><b>Organisation name.</b> Type it and press Enter.</li>
   <li><b>Server name.</b> Type the name from your worksheet (e.g. <code>vc.yourorg.gov.in</code>).</li>
   <li><b>Server IP address.</b> The installer suggests one. Check it matches your worksheet; correct it if needed.</li>
   <li><b>First administrator email</b>, then the <b>password twice</b>.</li>
-  <li><b>Server certificate.</b> Choose <b>"Create a QS-VC internal certificate authority"</b> unless your IT team gave you certificate files. (If they did, choose the first option and type the file paths they give you.)</li>
+  <li><b>Server certificate.</b> For internet access, select your organisation’s certificate and supply the trusted certificate chain and matching key. For intranet-only use, you can choose the QS-VC internal CA. If IT gave you a private CA bundle, supply its path when prompted.</li>
   <li><b>Wait.</b> The installer now loads QS-VC and starts it. This takes <b>10 to 20 minutes</b>. Do not close the window.</li>
   <li><b>Done.</b> You see <b>"Congratulations! Setup is complete"</b> with:
     <div class="screen">Open: https://vc.yourorg.gov.in<br>Administrator: admin@yourorg.gov.in<br>Branch app setup: https://vc.yourorg.gov.in/downloads/<br>Installation ID: 1b2c3d4e-…<br>14 days of use end on 2026-12-01.</div>
@@ -193,12 +195,12 @@
       <tr><td>TCP and UDP</td><td>3478</td><td>Connecting calls through firewalls</td></tr>
       <tr><td>UDP</td><td>40000–40100 and 49152–49200</td><td>Audio and video</td></tr>
     </table>
-    The installer already opens these on the server itself.</li>
+    Have IT confirm host firewall rules. The internet profile leaves existing host rules in place by default. External users need the approved HTTPS/WebSocket and media paths via the organisation edge.</li>
 </ol>
 <h3>B. Trust the server's certificate (only if you chose "internal")</h3>
 <p>Without this step, browsers show a "Not secure" warning. Do it once per computer, or let IT push it to all PCs with Group Policy.</p>
 <ol class="steps">
-  <li>On any computer, open <b>https://<i>your-server-name</i>/downloads/</b> (click "Advanced → Continue" if a warning appears this one time) and download <b>QS-VC-Root-CA.crt</b>.</li>
+  <li>Ask IT for the verified <b>QS-VC-Root-CA.crt</b> from the server console. IT can export it with <code>sudo qsvc ca</code> and distribute it through the organisation’s trusted device management process.</li>
   <li><b>Windows:</b> double-click the file → <b>Install Certificate</b> → <b>Local Machine</b> → <b>Place all certificates in the following store</b> → Browse → <b>Trusted Root Certification Authorities</b> → Next → Finish.</li>
   <li><b>Mac:</b> double-click the file → it opens Keychain Access in <b>System</b> → double-click "QS-VC" → open <b>Trust</b> → "When using this certificate": <b>Always Trust</b> → close and enter your Mac password.</li>
   <li><b>Group Policy (many PCs):</b> IT imports the file in <i>Computer Configuration → Policies → Windows Settings → Security Settings → Public Key Policies → Trusted Root Certification Authorities</i>.</li>
@@ -208,12 +210,15 @@
 <ol class="steps">
   <li>Open <b>https://<i>your-server-name</i></b> in Chrome, Edge, Firefox or Safari.</li>
   <li>Sign in with the administrator email and password you chose during setup.</li>
-  <li>Invite your staff from the administration area, then start a test meeting with a colleague at another branch.</li>
+  <li>On the server, run <code>sudo qsvc status</code>. In the browser, choose <b>New meeting</b> and send the invitation to a second authorised user. Confirm they can join and that both users can hear and see each other. Share a test screen and end the meeting.</li>
 </ol>
 </section>
 
 <section class="part">
-<h2>Part 6 · Give the QS-VC app to your branches</h2>
+<h2>Part 6 · Connect staff devices</h2>
+<p>Give staff the organisation’s HTTPS meeting address. On Windows, Mac and Linux, open it in a supported desktop browser. On iPhone and iPad, open it in Safari. On Android, open it in Chrome. Use the invitation or sign in and open Meetings. Allow camera and microphone only when you want to use them. Native iOS and Android apps are outside this release.</p>
+<p>Before rollout, run the meeting check in Part 5 on each device family you support. For internet access, repeat from a device outside the organisation network. Test screen sharing on desktop. For existing room equipment, ask IT to verify an authorised Bharat VC or Polycom call separately.</p>
+<h3>Optional desktop downloads</h3>
 <p>Staff can join from a browser, but the QS-VC app is easier for daily use. Your server shares it on <b>https://<i>your-server-name</i>/downloads/</b>.</p>
 <h3>A. Put the app files on the server (administrator, once)</h3>
 <ol class="steps">
@@ -266,8 +271,10 @@ Use this with Intune, SCCM or a login script.</div>
   <tr><td>Show the version</td><td><code>sudo qsvc version</code></td></tr>
 </table>
 <p>QS-VC starts automatically when the server restarts. You do not need to do anything after a reboot.</p>
+<h3>Who can see administration data?</h3>
+<p>Organisation meeting views are scoped to the signed-in organisation. A platform administrator can see platform-wide summaries for the installation they manage. Hosted and self-hosted installations have separate data. If your intranet and internet entry points use the same installation, they share that installation’s data. Hosted accounting has no automatic feed from an isolated server.</p>
 <h3>Update to a new version</h3>
-<p>Obtain the signed update and follow your organisation’s backup and maintenance process. Verify the installer before running it on the same Linux host.</p>
+<p>Obtain the versioned installer, its checksum, and both checksum signatures. On the server run <code>sudo qsvc check-update ./qsvc-server-setup-VERSION.run</code>. Follow your organisation’s backup and maintenance process before running the installer on the same Linux host.</p>
 </section>
 
 <section class="part">
@@ -285,7 +292,7 @@ Use this with Intune, SCCM or a login script.</div>
   <tr><td>"Podman is not installed and your package repository could not provide it"</td><td>New Linux server installations use Podman; Docker is not required. On Rocky/RHEL ask IT to run <code>sudo dnf install podman</code>; on Ubuntu <code>sudo apt install podman</code>. Then run the installer again.</td></tr>
   <tr><td>"invalid server name" / "invalid IPv4 address"</td><td>Check spelling: a name like <code>vc.yourorg.gov.in</code> (no https://) and an address like <code>10.20.1.50</code>.</td></tr>
   <tr><td>"the certificate is not issued for …"</td><td>Your organisation's certificate is for a different name. Get a matching one, or choose "internal".</td></tr>
-  <tr><td>"… is not healthy"</td><td>Run the installer again (safe). If it repeats, send a support bundle (<code>sudo qsvc support-bundle</code>) to QS-VC.</td></tr>
+  <tr><td>"… is not healthy"</td><td>Check <code>sudo qsvc status</code> and <code>sudo qsvc logs</code>. For an upgrade failure, review the setup log before retrying. If the cause is unclear, send a support bundle (<code>sudo qsvc support-bundle</code>) to QS-VC.</td></tr>
   <tr><td>Browser says "Not secure"</td><td>Do Part 5B on that computer.</td></tr>
   <tr><td>Branches cannot open the address</td><td>Check Part 5A with your network person (DNS and firewall).</td></tr>
   <tr><td>Video freezes or there is no sound between branches</td><td>The UDP ports in Part 5A are blocked somewhere on the network.</td></tr>

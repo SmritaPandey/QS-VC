@@ -323,6 +323,7 @@ services:
       - INVITATION_SECRET=${INVITATION_SECRET:-}
       - NODE_ENV=production
       - MEETING_PORT=4003
+      - AUTH_INTERNAL_URL=http://auth:4002
       # Signaling runs as its own service (Caddy routes /ws to it); do not start the copy bundled in this image.
       - SIGNALING_DIST=
       - POSTGRES_HOST=postgres
