@@ -973,10 +973,14 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected, cap
                     setWaitingAdmission(mode);
                 });
                 unsubscribe.push(stopAdmitted, stopRejected, stopWaitingStatus);
+                const guestRejoinKey = `qsvc:guest-rejoin:${meetingCode}`;
+                let guestRejoinToken: string | undefined;
+                try { guestRejoinToken = sessionStorage.getItem(guestRejoinKey) || undefined; } catch { /* storage is optional */ }
                 let joinResult = roomHandover || await signaling.request('joinRoom', {
                     meetingCode, displayName,
                     inviteToken: initialInviteToken || undefined,
                     guestToken: initialGuestToken || undefined,
+                    guestRejoinToken,
                     guestHostToken: getGuestHostToken(meetingCode),
                     supportsE2EE: encodedTransformsSupported(),
                 });
@@ -994,6 +998,9 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected, cap
                 }
                 stopAdmitted(); stopRejected(); stopWaitingStatus(); settleAdmission = undefined;
                 if (!alive()) return;
+                if (typeof joinResult.guestRejoinToken === 'string') {
+                    try { sessionStorage.setItem(guestRejoinKey, joinResult.guestRejoinToken); } catch { /* storage is optional */ }
+                }
                 if (typeof joinResult.inviteToken === 'string') setMeetingInviteToken(joinResult.inviteToken);
                 myPeerIdRef.current = joinResult.peerId;
                 requiredE2eeRef.current = joinResult.settings?.e2eeRequired !== false;

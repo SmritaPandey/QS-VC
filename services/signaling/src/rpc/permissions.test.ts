@@ -732,6 +732,67 @@ it('enforces host management: mics, cameras, reactions and lowering hands', asyn
     await handlePeerDisconnect(guestState); await handlePeerDisconnect(hostState);
 });
 
+it('closes a new participant camera if the host revokes permission during SFU setup', async () => {
+    const meetingCode = `camera-policy-${crypto.randomUUID().slice(0, 10)}`;
+    const host = socket(), guest = socket();
+    const hostState: any = { authUser: { sub: 'owner' } }, guestState: any = {};
+    try {
+        await rpc(host, hostState, 'joinRoom', { meetingCode, displayName: 'Host' });
+        await rpc(guest, guestState, 'joinRoom', { meetingCode, displayName: 'Guest' });
+        await rpc(host, hostState, 'admitPeer', { targetPeerId: guestState.peerId });
+        vi.mocked(sfuClient.produce).mockImplementationOnce(async () => {
+            await rpc(host, hostState, 'updateSettings', { settings: { allowCamera: false } });
+            return { producerId: 'revoked-camera' };
+        });
+        expect((await rpc(guest, guestState, 'produce', { kind: 'video', appData: { source: 'camera' } }))?.error?.message).toContain('cameras');
+        expect(sfuClient.closeProducer).toHaveBeenCalledWith(hostState.roomId, guestState.peerId, 'revoked-camera');
+        expect(roomManager.getRoom(hostState.roomId)?.peers.get(guestState.peerId)?.producers.has('revoked-camera')).toBe(false);
+        expect((await rpc(guest, guestState, 'produce', { kind: 'video', appData: { source: 'camera' } }))?.error?.code).toBe(-32004);
+        await rpc(host, hostState, 'updateSettings', { settings: { allowCamera: true } });
+        expect((await rpc(guest, guestState, 'produce', { kind: 'video', appData: { source: 'camera' } }))?.result.producerId).toBe('test-producer');
+    } finally {
+        await handlePeerDisconnect(guestState);
+        await handlePeerDisconnect(hostState);
+    }
+});
+
+it('applies participant chat changes to members and admitted guests while preserving host and co-host chat', async () => {
+    const meetingCode = `chat-policy-${crypto.randomUUID().slice(0, 10)}`;
+    const host = socket(), coHost = socket(), member = socket(), guest = socket();
+    const hostState = { authUser: { sub: 'owner' } } as any;
+    const coHostState = { authUser: { sub: 'deputy' } } as any;
+    const memberState = { authUser: { sub: 'member' } } as any;
+    const guestState: any = {};
+    const attendees = [[coHost, coHostState], [member, memberState], [guest, guestState]];
+    const chat = (ws: any, state: any) => rpc(ws, state, 'chatMessage', { content: 'Test chat' });
+    try {
+        await rpc(host, hostState, 'joinRoom', { meetingCode, displayName: 'Host' });
+        for (const [ws, state] of attendees) {
+            const join = await rpc(ws, state, 'joinRoom', { meetingCode, displayName: 'Attendee' });
+            if (join?.result.status === 'waiting') {
+                expect((await chat(ws, state))?.error?.code).toBe(-32000);
+                await rpc(host, hostState, 'admitPeer', { targetPeerId: state.peerId });
+            }
+        }
+        const room = roomManager.getRoom(hostState.roomId)!;
+        room.settings.e2eeRequired = false;
+        await rpc(host, hostState, 'changeRole', { targetPeerId: coHostState.peerId, newRole: 'co-host' });
+        expect((await rpc(coHost, coHostState, 'updateSettings', { settings: { allowChat: false } }))?.result.updated).toBe(true);
+        expect((await chat(host, hostState))?.result.sent).toBe(true);
+        expect((await chat(coHost, coHostState))?.result.sent).toBe(true);
+        expect((await chat(member, memberState))?.error?.code).toBe(-32004);
+        expect((await chat(guest, guestState))?.error?.code).toBe(-32004);
+        expect((await rpc(guest, guestState, 'updateSettings', { settings: { allowChat: true } }))?.error?.code).toBe(-32005);
+        await rpc(host, hostState, 'updateSettings', { settings: { allowChat: true } });
+        expect((await chat(member, memberState))?.result.sent).toBe(true);
+        expect((await chat(guest, guestState))?.result.sent).toBe(true);
+        expect((await chat(socket(), guestState))?.error?.code).toBe(-32000);
+    } finally {
+        for (const [, state] of attendees) await handlePeerDisconnect(state);
+        await handlePeerDisconnect(hostState);
+    }
+});
+
 it('does not let hosts disable approval or remove people from the waiting room', async () => {
     const code=`quick-${crypto.randomUUID().slice(0,10)}`;
     const host=socket(), hostState:any={ authUser: { sub: 'host-user' } }, guest=socket(), guestState:any={};
@@ -850,7 +911,8 @@ it('spotlights for everyone, tracks presenters and clears both when people leave
     expect((await rpc(guest,guestState,'updateSettings',{settings:{allowScreenShare:true,allowFileShare:true}}))?.error?.code).toBe(-32005);
     attendee.role = attendeeRole;
     expect((await rpc(host,hostState,'updateSettings',{settings:{allowScreenShare:true}}))?.result.updated).toBe(true);
-    await rpc(guest,guestState,'muteStateChanged',{kind:'screen',muted:true,presenting:true});
+    const screen = { kind: 'video', appData: { source: 'screen' } };
+    expect((await rpc(guest, guestState, 'produce', screen))?.result.producerId).toBe('test-producer');
     const room = roomManager.getRoom(hostState.roomId)!;
     expect(room.peers.get(guestState.peerId)?.screenSharing).toBe(true);
     expect(sent(host).some(m => m.method === 'presenterChanged' && m.params.presenting)).toBe(true);
@@ -863,6 +925,8 @@ it('spotlights for everyone, tracks presenters and clears both when people leave
     expect(lateJoin?.existingPeers.find((p: any) => p.peerId === guestState.peerId).screenSharing).toBe(true);
     await rpc(host,hostState,'updateSettings',{settings:{allowScreenShare:false}});
     expect(room.peers.get(guestState.peerId)?.screenSharing).toBe(false);
+    expect(sfuClient.closeProducer).toHaveBeenCalledWith(room.id, guestState.peerId, 'test-producer');
+    expect((await rpc(guest, guestState, 'produce', screen))?.error?.code).toBe(-32004);
     expect(room.peers.get(hostState.peerId)?.screenSharing).toBe(true);
     expect((await rpc(late,lateState,'muteStateChanged',{kind:'screen',muted:true,presenting:true}))?.error?.message).toContain('disabled');
     await handlePeerDisconnect(guestState);
@@ -987,6 +1051,37 @@ it('lets the host rejoin without transferring their role to someone else', async
     await handlePeerDisconnect(oldState);
     await handlePeerDisconnect(attendeeState);
     await handlePeerDisconnect(newState);
+});
+
+it('lets an admitted guest rejoin with a rotated credential until removed', async () => {
+    const meetingCode = `guest-rejoin-${crypto.randomUUID().slice(0, 10)}`;
+    const host = socket(), first = socket(), second = socket(), replay = socket(), removed = socket();
+    const hostState: any = { authUser: { sub: 'owner' } };
+    const firstState: any = {}, secondState: any = {}, replayState: any = {}, removedState: any = {};
+    const join = (ws: any, state: any, guestRejoinToken?: string) =>
+        rpc(ws, state, 'joinRoom', { meetingCode, displayName: 'Guest', guestRejoinToken });
+    try {
+        await rpc(host, hostState, 'joinRoom', { meetingCode, displayName: 'Host' });
+        expect((await join(first, firstState))?.result.status).toBe('waiting');
+        await rpc(host, hostState, 'admitPeer', { targetPeerId: firstState.peerId });
+        const token = sent(first).find(message => message.method === 'admitted')?.params.guestRejoinToken;
+        expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
+        expect(JSON.stringify(sent(host))).not.toContain(token);
+        await handlePeerDisconnect(firstState);
+        await rpc(host, hostState, 'updateSettings', { settings: { locked: true } });
+        expect((await join(second, secondState, token))?.error?.message).toContain('locked');
+        await rpc(host, hostState, 'updateSettings', { settings: { locked: false } });
+        const rejoined = await join(second, secondState, token);
+        expect(rejoined?.result.role).toBe('guest');
+        const replacement = rejoined?.result.guestRejoinToken;
+        expect(replacement).toMatch(/^[A-Za-z0-9_-]{43}$/);
+        expect(replacement).not.toBe(token);
+        expect((await join(replay, replayState, token))?.result.status).toBe('waiting');
+        await rpc(host, hostState, 'kickPeer', { targetPeerId: secondState.peerId });
+        expect((await join(removed, removedState, replacement))?.result.status).toBe('waiting');
+    } finally {
+        for (const state of [firstState, secondState, replayState, removedState, hostState]) await handlePeerDisconnect(state);
+    }
 });
 
 it('requires fresh admission after an account is removed and retracts disconnected guest requests', async () => {

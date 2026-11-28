@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { bharatVcDial, disconnectBharatVc } from '../bharat-vc.js';
 import { recordMeetingAttendance } from '../meeting-attendance.js';
 import { meetingObservability } from '../meeting-observability.js';
@@ -31,6 +32,16 @@ const cancelledRooms = new WeakSet<object>();
 const endedCodes = new Map<string, number>();
 const startedSessionCodes = new Map<string, number>();
 const sessionInviteExpirations = new WeakMap<RoomState, number>();
+const guestAdmissions = new WeakMap<RoomState, Map<string, { peerId: string; userId?: string; expiresAt: number }>>();
+
+function rememberGuestAdmission(room: RoomState, peerId: string, userId?: string) {
+    let admissions = guestAdmissions.get(room);
+    if (!admissions) guestAdmissions.set(room, admissions = new Map());
+    if (admissions.size >= 2048) admissions.delete(admissions.keys().next().value!);
+    const token = randomBytes(32).toString('base64url');
+    admissions.set(token, { peerId, userId, expiresAt: Date.now() + 8 * 60 * 60 * 1000 });
+    return token;
+}
 const endedCodeCleanup = setInterval(() => {
     const now = Date.now();
     for (const codes of [endedCodes, startedSessionCodes]) {
@@ -146,6 +157,9 @@ async function admitWaitingPeer(roomId: string, targetId: string, automatic = fa
             waiting.isGuest ? 'guest' : waiting.initialRole);
         room.waitingRoom.delete(targetId);
         if (waiting.authUser?.sub) room.removedUserIds.delete(waiting.authUser.sub);
+        if (waiting.isGuest && result?.result) {
+            result.result.guestRejoinToken = rememberGuestAdmission(room, waiting.id, waiting.authUser?.sub);
+        }
         roomManager.sendToSocket(waiting.ws, 'admitted', result?.result || {}, waiting.id);
         return result;
     } finally { admittingPeers.delete(targetId); }
@@ -260,6 +274,7 @@ const joinRoomSchema = z.object({
     siteLocation: z.string().trim().max(120).optional(),
     inviteToken: z.string().max(512).optional(),
     guestToken: z.string().max(128).optional(),
+    guestRejoinToken: z.string().regex(/^[A-Za-z0-9_-]{43}$/).optional(),
     guestHostToken: z.string().max(43).optional(),
     rtpCapabilities: z.record(z.string(), z.unknown()).optional(),
     password: z.string().max(50).optional(),
@@ -322,6 +337,7 @@ async function endRoomForEveryone(roomId: string, by: string, peerId?: string, a
         room.hostPeerId = null;
         room.hostStarted = false;
         room.removedUserIds.clear();
+        guestAdmissions.delete(room);
         for (const waiting of room.waitingRoom.values()) {
             if (waiting.ws?.readyState === 1) {
                 roomManager.sendToSocket(waiting.ws, 'rejected', { reason }, waiting.id);
@@ -641,7 +657,7 @@ export async function handleRpcMessage(
                         error: { code: -32602, message: 'Invalid params: ' + joinParams.error.issues.map(i => i.message).join(', ') },
                     };
                 }
-                const { meetingCode: requestedCode, displayName: rawName, rtpCapabilities, password, inviteToken, guestToken, guestHostToken } = joinParams.data;
+                const { meetingCode: requestedCode, displayName: rawName, rtpCapabilities, password, inviteToken, guestToken, guestHostToken, guestRejoinToken } = joinParams.data;
                 const sessionMeeting = isSessionMeetingCode(requestedCode);
                 const meetingCode = sessionMeeting ? requestedCode.toUpperCase() : requestedCode;
                 if (connectionState.expectedMeetingCode && connectionState.expectedMeetingCode !== meetingCode.trim().toUpperCase()) {
@@ -712,7 +728,15 @@ export async function handleRpcMessage(
                 if (policy?.status === 'active' || (startedSessionCodes.get(codeKey) ?? 0) > Date.now()) room.hostStarted = true;
                 const isInvited = sessionMeeting || verifyMeetingInviteToken(meetingCode, inviteToken) || !!verifiedAccess?.isInvited;
                 const isGuestUser = !signedIn || Boolean(guestToken || verifiedAccess?.isGuest);
-                const directEntry = canEnterWithoutApproval(room, connectionState.authUser, isGuestUser);
+                const admissions = guestAdmissions.get(room);
+                const canResumeGuest = () => {
+                    const admission = guestRejoinToken && admissions?.get(guestRejoinToken);
+                    return !!admission && isGuestUser && admission.userId === connectionState.authUser?.sub &&
+                        admission.expiresAt > Date.now() && !room.peers.has(admission.peerId) &&
+                        !room.breakoutParticipants?.has(admission.peerId) &&
+                        (!admission.userId || !room.removedUserIds.has(admission.userId));
+                };
+                const directEntry = canEnterWithoutApproval(room, connectionState.authUser, isGuestUser) || canResumeGuest();
                 // Platform admins (role from the server-signed session) can enter and run any meeting.
                 const isPlatformAdmin = !sessionMeeting && connectionState.authUser?.role === 'admin';
                 if (room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub) {
@@ -791,6 +815,7 @@ export async function handleRpcMessage(
 
                 // Direct entry for verified accounts and the organiser.
                 const hostWasPresent = room.hostStarted;
+                let resumedGuest = false;
                 const joined = await joinPeerToRoom(ws, room.id, peerId, displayName, rtpCapabilities, connectionState, id!, () => {
                     checkMeetingOpen();
                     if (sharedSchedule && Date.now() >= sharedSchedule.expiresAt) {
@@ -799,12 +824,19 @@ export async function handleRpcMessage(
                     if (!isOwner && room.settings.password && room.settings.password !== password) {
                         throw createError(-32001, 'Invalid meeting password');
                     }
-                    if (!isOwner && (!canEnterWithoutApproval(room, connectionState.authUser, isGuestUser) ||
+                    if (!isOwner && (room.settings.locked && room.peers.size > 0 ||
+                        !(canEnterWithoutApproval(room, connectionState.authUser, isGuestUser) || canResumeGuest()) ||
                         (room.ownerUserId && !room.hostStarted))) {
                         throw createError(-32005, 'Meeting access changed. Try joining again.');
                     }
-                }, verifiedAccess?.role as any, false, guestHost);
+                    if (!isOwner && guestRejoinToken && canResumeGuest()) {
+                        resumedGuest = admissions?.delete(guestRejoinToken) === true;
+                    }
+                }, isGuestUser && !isOwner ? 'guest' : verifiedAccess?.role as PeerRole | undefined, false, guestHost);
                 const me = room.peers.get(peerId);
+                if (me && joined?.result && resumedGuest) {
+                    joined.result.guestRejoinToken = rememberGuestAdmission(room, peerId, connectionState.authUser?.sub);
+                }
                 if (me?.role === 'host' && joined?.result) joined.result.inviteToken = sessionMeeting ? inviteToken : createMeetingInviteToken(meetingCode);
                 if (me?.role === 'host') {
                     if (sharedSchedule) startedSessionCodes.set(codeKey, sharedSchedule.expiresAt);
@@ -908,9 +940,13 @@ export async function handleRpcMessage(
                 }
 
 
-                if (screen && producerPeer?.role !== 'host' && !policyRoom.settings.allowScreenShare) {
+                const permissionDenied = screen
+                    ? producerPeer.role !== 'host' && !policyRoom.settings.allowScreenShare
+                    : !isManager(producerPeer) && !isPrivateSideAudio &&
+                        !(kind === 'audio' ? policyRoom.settings.allowMicrophone : policyRoom.settings.allowCamera);
+                if (permissionDenied) {
                     await sfuClient.closeProducer(roomId, peerId, result.producerId).catch(() => {});
-                    throw createError(-32004, 'Screen sharing is disabled by host');
+                    throw createError(-32004, screen ? 'Screen sharing is disabled by host' : PERMISSION_MESSAGES[kind === 'audio' ? 'audio' : 'video']);
                 }
 
                 // The session can expire or be ended while the SFU request is in flight.
@@ -1213,7 +1249,9 @@ export async function handleRpcMessage(
                 const { peerId, roomId, displayName } = connectionState;
                 if (!peerId || !roomId) throw createError(-32000, 'Not joined a room');
                 const room = roomManager.getRoom(roomId);
-                if (!room || !room.settings.allowChat) throw createError(-32004, 'Chat is disabled by host');
+                const sender = room?.peers.get(peerId);
+                if (!room || !sender || sender.ws !== ws) throw createError(-32000, 'Not admitted to the room');
+                if (!room.settings.allowChat && !isManager(sender)) throw createError(-32004, 'Chat is disabled by host');
                 let payload: Record<string, unknown>;
                 if (room.settings.e2eeRequired) {
                     const b64 = (max: number, min = 1) => z.string().min(min).max(max).regex(/^[A-Za-z0-9+/]+={0,2}$/).refine(value => value.length % 4 === 0);
@@ -1223,7 +1261,7 @@ export async function handleRpcMessage(
                         nonce: b64(16, 16), ciphertext: b64(22000, 24), signature: b64(8192, 6000),
                     }).strict() }).strict().safeParse(params);
                     if (!parsed.success) throw createError(-32602, 'This meeting accepts signed encrypted chat only.');
-                    if (!room.peers.get(peerId)?.e2eeKeyBundle) throw createError(-32005, 'Register your encryption identity before sending chat.');
+                    if (!sender.e2eeKeyBundle) throw createError(-32005, 'Register your encryption identity before sending chat.');
                     if (parsed.data.encrypted.createdAt < Date.now() - 120000 || parsed.data.encrypted.createdAt > Date.now() + 30000) throw createError(-32602, 'Encrypted chat message has expired.');
                     payload = { encrypted: parsed.data.encrypted, type: 'encrypted' };
                 } else {
@@ -1532,7 +1570,14 @@ export async function handleRpcMessage(
 
                 const room = roomManager.getRoom(roomId)!;
                 const kicked = room.peers.get(targetPeerId);
-                if (kicked?.userId) (room.parentRoomId ? roomManager.getRoom(room.parentRoomId) : room)?.removedUserIds.add(kicked.userId);
+                const admissionRoom = room.parentRoomId ? roomManager.getRoom(room.parentRoomId) : room;
+                if (kicked?.userId) admissionRoom?.removedUserIds.add(kicked.userId);
+                if (admissionRoom) {
+                    const admissions = guestAdmissions.get(admissionRoom);
+                    for (const [token, admission] of admissions ?? []) {
+                        if (admission.peerId === targetPeerId) admissions?.delete(token);
+                    }
+                }
 
                 // Notify the kicked peer
                 roomManager.sendToPeer(roomId, targetPeerId, 'kicked', {
