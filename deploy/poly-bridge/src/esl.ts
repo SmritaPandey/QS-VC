@@ -135,6 +135,13 @@ export class FreeSwitch extends EventEmitter {
     const dest = protocol === "h323" ? `h323/${target}` : `sofia/qsvc-poly/${target}`;
     return this.api(`originate {${vars}}${dest} qsvc-join-${room} XML qsvc-admitted`);
   }
+  async dialRegisteredPolycom(room: string, extension: string, callId: string) {
+    if (!/^[A-Za-z0-9-]{1,80}$/.test(room) || !/^[0-9]{3,10}$/.test(extension) || !/^[0-9a-f-]{36}$/.test(callId)) throw new Error("Invalid room device");
+    const contact = (await this.api(`sofia_contact qsvc-poly/${extension}@qsvc-rooms`)).trim();
+    // Only dial a single registered TLS contact on the managed Poly profile.
+    if (!/^sofia\/qsvc-poly\/sips?:[A-Za-z0-9_.+%-]+@[A-Za-z0-9.:[\]-]+;transport=tls$/i.test(contact)) return null;
+    return this.api(`originate {origination_uuid=${callId},originate_timeout=8,qsvc_room=${room},rtp_secure_media=mandatory}${contact} qsvc-join-${room} XML qsvc-admitted`);
+  }
   dialBharatVc(room: string, target: string, pin: string, callId: string) {
     // Values validated again at the command boundary; no FreeSWITCH expression is caller-controlled.
     if (!/^[a-zA-Z0-9-]{1,80}$/.test(room) || !/^[0-9]{6,16}@(sip\.bharatvc\.nic\.in|bhvc\.nic\.in)$/.test(target) || !/^[0-9]{4,16}$/.test(pin) || !/^[0-9a-f-]{36}$/.test(callId)) throw new Error("Invalid Bharat VC destination");

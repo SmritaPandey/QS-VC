@@ -3,28 +3,32 @@ import express from 'express';
 import type { Server } from 'node:http';
 import { adminControlsRouter } from './admin-controls.js';
 import { RoomManager, type PeerState } from './room-manager.js';
+import { sfuClient } from './sfu-client.js';
 import { InvalidAuthentication } from './ws-attach.js';
 
 const nativeFetch = globalThis.fetch;
 const servers: Server[] = [];
 afterEach(async () => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
     await Promise.all(servers.splice(0).map(server => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()))));
 });
 async function setup() {
     const manager = new RoomManager();
     const room = manager.getOrCreateRoom('ADMIN-TEST');
+    room.ownerTenantId = 'tenant';
     const peer = { id: 'participant', displayName: 'Attendee', role: 'member', ws: { readyState: 1, send: vi.fn() }, producers: new Map(), audioMuted: false, videoOff: false } as unknown as PeerState;
     room.peers.set(peer.id, peer);
     const broadcast = vi.spyOn(manager, 'broadcast');
     const send = vi.spyOn(manager, 'sendToPeer');
     const verify = vi.fn(async () => ({ sub: 'admin', tenantId: 'tenant', role: 'admin' }));
-    const profile = vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ id: 'admin', tenantId: 'tenant', role: 'admin', isPlatformAdmin: true }) }));
+    const profile = vi.fn(async (_url?: string): Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }> => ({ ok: true, status: 200, json: async () => ({ id: 'admin', tenantId: 'tenant', role: 'admin', isPlatformAdmin: true }) }));
     vi.stubGlobal('fetch', profile);
     const pause = vi.fn(async () => ({}));
     const audit = vi.fn();
     const app = express(); app.use(express.json());
-    app.use('/api/admin/rooms', adminControlsRouter({ rooms: manager, verify, pause, audit, authUrl: 'http://auth' }));
+    app.use('/api/admin/rooms', adminControlsRouter({ rooms: manager, verify, pause, audit, authUrl: 'http://auth', meetingUrl: 'http://meeting' }));
     const server = app.listen(0, '127.0.0.1'); servers.push(server);
     await new Promise<void>(resolve => server.once('listening', resolve));
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('Missing address');
@@ -32,7 +36,10 @@ async function setup() {
         method: body === undefined ? 'GET' : 'POST', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}), 'Content-Type': 'application/json' },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    return { manager, room, peer, verify, profile, pause, audit, broadcast, send, request };
+    const deviceRequest = (payload: unknown) => nativeFetch(`http://127.0.0.1:${address.port}/api/admin/rooms/${room.id}/devices`, {
+        method: 'POST', headers: { Authorization: 'Bearer verified', 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+    });
+    return { manager, room, peer, verify, profile, pause, audit, broadcast, send, request, deviceRequest };
 }
 
 it('requires current verified authentication, failing closed on stale and unavailable verification', async () => {
@@ -125,4 +132,36 @@ it('does not mutate or notify a participant who leaves while the pause is pendin
     ctx.pause.mockImplementationOnce(async () => { ctx.room.peers.delete(ctx.peer.id); return {}; });
     expect((await ctx.request({ kind: 'audio', muted: true })).status).toBe(404);
     expect(ctx.send).not.toHaveBeenCalled();
+});
+
+it('hides other tenants’ rooms and rejects media controls against them', async () => {
+    const ctx = await setup();
+    ctx.room.ownerTenantId = 'another-tenant';
+    expect(await (await ctx.request()).json()).toMatchObject({ rooms: [] });
+    expect((await ctx.request({ kind: 'audio', muted: true })).status).toBe(404);
+    expect(ctx.pause).not.toHaveBeenCalled();
+});
+
+it('dials only enabled, tenant-directory SIP devices in eligible live rooms', async () => {
+    const ctx = await setup();
+    vi.stubEnv('POLY_BRIDGE_ENABLED', 'true');
+    ctx.room.hostPeerId = ctx.peer.id;
+    ctx.peer.userId = 'signed-in-host';
+    const start = vi.spyOn(sfuClient, 'startPolyRoom').mockResolvedValue({});
+    const dial = vi.spyOn(sfuClient, 'dialRegisteredPolycom').mockResolvedValue({ requested: true });
+    const deviceId = 'fd4543d5-32ff-4cb9-a2e4-5e2d5778d406';
+    ctx.room.settings.e2eeRequired = true;
+    expect((await ctx.deviceRequest({ action: 'dial', deviceId })).status).toBe(409);
+    ctx.room.settings.e2eeRequired = false;
+    expect((await ctx.deviceRequest({ action: 'dial', deviceId, target: 'an-arbitrary-target' })).status).toBe(400);
+    expect(start).not.toHaveBeenCalled();
+    ctx.profile.mockImplementation(async (url?: string) => ({ ok: true, status: 200, json: async () =>
+        url?.startsWith('http://meeting/')
+            ? { devices: [{ id: deviceId, enabled: true, protocol: 'sip', extension: '245' }] }
+            : { id: 'admin', tenantId: 'tenant', role: 'admin', isPlatformAdmin: true } }));
+    expect((await ctx.deviceRequest({ action: 'dial', deviceId })).status).toBe(200);
+    expect(dial).toHaveBeenCalledWith(ctx.room.id, '245');
+    ctx.room.ownerTenantId = 'other-tenant';
+    expect((await ctx.deviceRequest({ action: 'dial', deviceId })).status).toBe(404);
+    expect(dial).toHaveBeenCalledTimes(1);
 });

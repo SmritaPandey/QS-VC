@@ -94,6 +94,18 @@ gateway needs the approved Bharat VC network route. Basic QS-VC stays
 available with the optional bridge disabled. The gateway is a separately
 provisioned dependency of this installer release.
 
+For central operation, go to **Admin Console → Conference Control**. The
+platform administrator sees live meetings owned by their organisation on
+this signaling server. In a meeting set up for room interoperability,
+enable room devices or select an enabled SIP device from the organisation
+directory. Provision the endpoint on the site's FreeSWITCH Poly profile
+in the `qsvc-rooms` registration domain using TLS. The operator action
+only dials an eligible registered TLS contact and requires SRTP. The
+console also shows connected and waiting room devices and accepts an
+authorised Bharat VC invitation. A device can be configured in the
+directory while offline. For an interop call the gateway can access
+media, so this path is separate from required-E2EE meetings.
+
 For acceptance, use the host's Bharat VC action with an authorised SIP
 invitation in an unlocked interoperability meeting. Verify participant
 notice, consent, two-way audio/video, disconnect, and rejection in E2EE

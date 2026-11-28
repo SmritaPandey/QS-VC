@@ -219,6 +219,26 @@ export function createPolyBridge(sfu: SfuAdapter) {
   }));
 
   // Dial-out to a Poly endpoint (SIP URI or H.323 IP/alias)
+  http.post("/rooms/:room/registered-device", wrap(async (req, res) => {
+    const extension = req.body?.extension;
+    if (typeof extension !== "string" || !/^[0-9]{3,10}$/.test(extension)) return res.sendStatus(400);
+    room(req);
+    const callId = randomUUID();
+    let result: string | null;
+    try { result = await fs.dialRegisteredPolycom(req.params.room, extension, callId); }
+    catch (error) {
+      await fs.api(`uuid_kill ${callId} NORMAL_CLEARING`).catch(() => undefined);
+      throw error;
+    }
+    if (result?.startsWith("+OK") && !rooms.has(req.params.room)) {
+      await fs.api(`uuid_kill ${callId} NORMAL_CLEARING`);
+      return res.status(409).json({ error: "Meeting ended while dialing" });
+    }
+    if (!result) return res.status(409).json({ error: "No verified TLS registration for this device" });
+    if (!result.startsWith("+OK")) return res.status(502).json({ error: "The registered device did not answer" });
+    return res.status(202).json({ requested: true });
+  }));
+
   http.post("/rooms/:room/dial", wrap(async (req, res) => {
     const { target, protocol = "sip", encryption = "required" } = req.body ?? {};
     if (!target || !/^[\w.@:+#-]+$/.test(target)) return res.status(400).json({ error: "invalid target" });

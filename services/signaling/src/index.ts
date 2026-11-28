@@ -47,7 +47,7 @@ app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 200, standardHeaders: true, l
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 app.post('/api/internal/room-numbers/:number/resolve', roomDialHandler);
-app.use('/api/admin/rooms', adminControlsRouter({ rooms: roomManager, verify: verifySession, pause: sfuClient.setProducerPaused, authUrl: AUTH_INTERNAL_URL,
+app.use('/api/admin/rooms', adminControlsRouter({ rooms: roomManager, verify: verifySession, pause: sfuClient.setProducerPaused, authUrl: AUTH_INTERNAL_URL, meetingUrl: MEETING_INTERNAL_URL,
     audit: event => logger.info({ event: 'admin-media-control', ...event }, 'Platform administrator media control'),
 }));
 

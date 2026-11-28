@@ -64,7 +64,7 @@ const deploymentLabels: Record<DeploymentMode, string> = {
 };
 const tabs: { id: TabName; label: string; icon: string }[] = [
     { id:'overview', label:'Overview', icon:'dashboard' },
-    { id:'meetings', label:'Live meetings', icon:'videocam' },
+    { id:'meetings', label:'Conference Control', icon:'videocam' },
     { id:'users', label:'Accounts', icon:'group' },
     { id:'recordings', label:'Recordings', icon:'video_library' },
     { id:'leads', label:'Download leads', icon:'contact_mail' },

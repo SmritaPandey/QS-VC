@@ -127,6 +127,7 @@ export interface RoomState {
     breakoutRooms?: Map<string, BreakoutRoom>;
     breakoutParticipants?: Map<string, PeerState>;
     ownerUserId?: string | null;
+    ownerTenantId?: string;
     peers: Map<string, PeerState>;
     waitingRoom: Map<string, WaitingPeer>;
     removedUserIds: Set<string>;

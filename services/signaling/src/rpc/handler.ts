@@ -934,7 +934,7 @@ export async function handleRpcMessage(
                     reservedSources?.delete(source);
                     if (reservedSources?.size === 0) pendingVideoSources.get(policyRoom)?.delete(peerId);
                 }
-                if (policyRoom.peers.get(peerId) !== producerPeer || producerPeer?.ws !== ws || roomIsEnding(policyRoom)) {
+                if (!producerPeer || policyRoom.peers.get(peerId) !== producerPeer || producerPeer.ws !== ws || roomIsEnding(policyRoom)) {
                     await sfuClient.closeProducer(roomId, peerId, result.producerId).catch(() => {});
                     throw createError(-32004, 'The meeting media session changed.');
                 }
@@ -2045,6 +2045,9 @@ async function joinPeerToRoom(
         if (ws.readyState !== 1) throw createError(-32000, 'Connection closed during join');
         if (roomIsEnding(room) || (roomEpochs.get(room) || 0) !== epoch) throw createError(-32004, 'This meeting has ended');
         beforeRegister?.();
+        if (room.ownerUserId && room.ownerUserId === connectionState.authUser?.sub && connectionState.authUser.tenantId) {
+            room.ownerTenantId ??= connectionState.authUser.tenantId;
+        }
         if (!room.parentRoomId && !connectionState.mainRoomId && (guestHost || (peerState.userId && !peerState.isGuest))) {
             const sameAccount = (peer: PeerState) => guestHost ? !!peer.guestHost : peer.userId === peerState.userId && !peer.isGuest && !peer.guestHost;
             const previous = [...room.peers.values()].find(sameAccount) || [...room.breakoutParticipants?.values() || []].find(sameAccount);

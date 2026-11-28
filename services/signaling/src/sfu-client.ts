@@ -50,6 +50,8 @@ export const sfuClient = {
     polySnapshot: (roomId: string) => sfuFetch(`/api/poly/rooms/${encodeURIComponent(roomId)}/snapshot`, {}, PROBE_TIMEOUT_MS),
     polyLobbyAction: (roomId: string, callId: string, action: 'admit' | 'deny') =>
         sfuFetch(`/api/poly/rooms/${encodeURIComponent(roomId)}/lobby/${encodeURIComponent(callId)}/${action}`, { method: 'POST' }),
+    dialRegisteredPolycom: (roomId: string, extension: string) =>
+        sfuFetch(`/api/poly/rooms/${encodeURIComponent(roomId)}/registered-device`, { method: 'POST', body: JSON.stringify({ extension }) }, 15000),
     stopPolyRoom: (roomId: string) =>
         sfuFetch(`/api/poly/rooms/${encodeURIComponent(roomId)}/stop`, { method: 'POST' }),
 

@@ -1070,6 +1070,21 @@ async function meetingAnalytics(req: Request, res: Response, hostOnly: boolean) 
 }
 
 app.get('/api/meetings/admin/analytics', authMiddleware, (req, res) => meetingAnalytics(req, res, false));
+app.get('/api/meetings/admin/room-devices', authMiddleware, async (req, res) => {
+    const user = (req as express.Request & { user?: AuthPayload }).user;
+    res.set('Cache-Control', 'no-store');
+    if (!user || user.role !== 'admin') return res.sendStatus(403);
+    try {
+        const result = await pool.query(
+            'SELECT id, name, model, protocol, extension, enabled FROM room_devices WHERE tenant_id = $1 ORDER BY name, id',
+            [user.tenantId],
+        );
+        return res.json({ devices: result.rows });
+    } catch {
+        return res.status(503).json({ error: 'The room device directory is unavailable.' });
+    }
+});
+
 app.get('/api/meetings/me/analytics', authMiddleware, (req, res) => meetingAnalytics(req, res, true));
 
 // List user's meetings
