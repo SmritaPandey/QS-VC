@@ -1,7 +1,7 @@
-import { defineConfig, version } from 'vite';
+import { defineConfig, loadEnv, version } from 'vite';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
     plugins: [react()],
     // Keep optimized browser modules separate from other Vite versions in the monorepo.
     cacheDir: `node_modules/.vite-web-${version}`,
@@ -39,5 +39,12 @@ export default defineConfig({
     },
     define: {
         'process.env': {},
+        ...(loadEnv(mode, process.cwd()).VITE_DEPLOYMENT === 'onprem' ? {
+            'import.meta.env.VITE_API_URL': '""',
+            'import.meta.env.VITE_AUTH_URL': '""',
+            'import.meta.env.VITE_MEETING_URL': '""',
+            'import.meta.env.VITE_RECORDING_URL': '""',
+            'import.meta.env.VITE_SIGNALING_URL': '""',
+        } : {}),
     },
-});
+}));
