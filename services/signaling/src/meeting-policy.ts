@@ -14,14 +14,14 @@ export async function loadMeetingPolicy(code: string, allowCancelled = false) {
     if (!response.ok) throw new Error('Meeting access could not be verified. Please retry.');
     const policy = policySchema.parse(await response.json());
     if (policy.status === 'cancelled' && !allowCancelled) throw new Error('This meeting was cancelled.');
-    const { waitingRoom, chatEnabled, screenShareEnabled: _legacyScreenShareEnabled, recording_allowed, e2eeRequired, ...settings } = policy.settings;
+    const { waitingRoom, chatEnabled, screenShareEnabled, recording_allowed, e2eeRequired, ...settings } = policy.settings;
     return { ...policy, settings: {
         ...settings,
         ...(typeof e2eeRequired === 'boolean' ? { e2eeRequired } : {}),
         meetingKind: settings.meetingKind ?? (settings.webinar ? 'town_hall' : 'conference'),
         waitingRoomEnabled: true,
         allowChat: settings.allowChat ?? chatEnabled ?? true,
-        allowScreenShare: settings.allowScreenShare ?? false,
+        allowScreenShare: settings.allowScreenShare ?? screenShareEnabled ?? true,
         allowRecording: settings.allowRecording ?? recording_allowed ?? true,
     } };
 }

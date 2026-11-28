@@ -3,7 +3,7 @@ import { loadMeetingPolicy, reportMeetingStatus, endHostedMeetingStatus } from '
 afterEach(() => vi.unstubAllGlobals());
 it('loads saved owner and validated restrictions', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok:true, json:async()=>({ hostId:'owner', status:'waiting', settings:{waitingRoomEnabled:true,password:'private'} }) }));
-    expect((await loadMeetingPolicy('QS-TEST'))?.hostId).toBe('owner');
+    expect(await loadMeetingPolicy('QS-TEST')).toMatchObject({hostId:'owner',settings:{allowScreenShare:true}});
 });
 it('never falls back to guest ownership on service failure', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok:false,status:503 }));

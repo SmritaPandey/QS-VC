@@ -91,7 +91,10 @@ export class MediaManager {
     }
 
     private async applyConsumerQuality(info: ConsumerInfo): Promise<void> {
-        const desired = this.consumerQuality.get(info.peerId) || 'high';
+        const viewportQuality = this.consumerQuality.get(info.peerId) || 'high';
+        const isScreen = info.appData.source === 'screen' || info.appData.type === 'screen';
+        // Keep presentations flowing when the viewer switches tabs or uses a floating window.
+        const desired = isScreen && viewportQuality === 'paused' ? 'low' : viewportQuality;
         const quality = this.shouldPauseVideo(info.appData) ? 'paused' : this.networkProfile !== 'good' && desired === 'high' ? 'low' : desired;
         const previous = this.qualityUpdates.get(info.id);
         if (previous) { await previous; if (this.consumers.has(info.id)) return this.applyConsumerQuality(info); return; }

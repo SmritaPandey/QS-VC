@@ -108,6 +108,20 @@ describe('remote producer removal', () => {
         expect(mocks.request).toHaveBeenCalledWith('setConsumerQuality', { consumerId: 'consumer-screen', quality: 'paused' });
     });
 
+    it('keeps receiving screen video when the viewer hides the meeting tab', async () => {
+        const { manager, made } = await receiver();
+        await manager.setNetworkProfile('good');
+        await manager.consume('peer', 'camera');
+        await manager.consume('peer', 'screen');
+        mocks.request.mockClear();
+        await manager.setConsumerVideoQuality('peer', 'paused');
+        expect(mocks.request).toHaveBeenCalledWith('setConsumerQuality', { consumerId: 'consumer-camera', quality: 'paused' });
+        expect(mocks.request).toHaveBeenCalledWith('setConsumerQuality', { consumerId: 'consumer-screen', quality: 'low' });
+        expect(made[1].close).not.toHaveBeenCalled();
+        await manager.setConsumerVideoQuality('peer', 'high');
+        expect(mocks.request).toHaveBeenCalledWith('setConsumerQuality', { consumerId: 'consumer-screen', quality: 'high' });
+    });
+
     it('removes the stopped screen consumer immediately without removing the camera or a replacement share', async () => {
         const { manager, made } = await receiver();
         const onNew = vi.fn(), onRemoved = vi.fn(); manager.setConsumerCallbacks(onNew, onRemoved);

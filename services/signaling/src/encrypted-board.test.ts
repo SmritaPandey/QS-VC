@@ -21,6 +21,7 @@ function setup() {
 describe('opaque encrypted board storage', () => {
     it('requires secure membership and the host grant, retains sealed data, and notifies other attendees', () => {
         const { room, sockets, rpc, item } = setup();
+        room.settings.allowScreenShare = false;
         expect(() => encryptedBoardRpc({}, room.id, 'host', 'getEncryptedBoard', {})).toThrow('Not joined');
         expect(() => rpc('a', 'putEncryptedBoard', item('a'))).toThrow('grant');
         const note = item();

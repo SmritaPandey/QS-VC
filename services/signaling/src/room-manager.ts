@@ -154,7 +154,7 @@ const DEFAULT_SETTINGS: RoomSettings = {
     locked: false,
     password: null,
     muteOnEntry: false,
-    allowScreenShare: false,
+    allowScreenShare: true,
     allowFileShare: false,
     allowChat: true,
     allowRecording: true,

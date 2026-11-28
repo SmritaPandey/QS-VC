@@ -74,6 +74,24 @@ authenticated browser call from outside the network and again after
 simulating MPLS loss. Keep database, service control and room-device
 administration ports private.
 
+## Verify guest screen sharing after installation
+
+1. On a desktop device, open the organisation’s trusted HTTPS meeting address.
+   Start a meeting, then admit a guest from a second browser session.
+2. New meetings let admitted participants share by default. If sharing was
+   turned off, the host can enable **Share their screen** under
+   **More → Host controls → Let everyone**. In a webinar, invite the guest
+   on stage before they share.
+3. As guest, start sharing. Pick **Entire screen** to present across apps.
+   **Browser tab** and **Window** limit capture to the selected source.
+4. Have the other participant confirm the share continues as you switch
+   apps. Stop sharing and confirm the viewer no longer sees it.
+
+If the screen picker is unavailable, check the host grant, browser capture
+support, HTTPS certificate trust, and system screen recording permission.
+Turn off **Audio-only** under **More → Connection quality**. If optional
+source audio fails, the presentation can continue without it.
+
 ## Container runtime
 
 New Linux installations use Podman. Docker Engine and the Docker daemon are not prerequisites. The bundled pinned Compose compatibility client talks to the local Podman socket; its upstream filename `docker-compose` does not mean Docker Engine is installed. QS-VC still runs in containers.

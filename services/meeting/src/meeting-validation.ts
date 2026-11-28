@@ -14,6 +14,6 @@ export const createMeetingSchema = (maxMeetingParticipants: number) => z.object(
         e2eeRequired: z.boolean().default(true),
         recordingAllowed: z.boolean().default(true),
         chatEnabled: z.boolean().default(true),
-        screenShareEnabled: z.boolean().default(false),
+        screenShareEnabled: z.boolean().default(true),
     }).optional(),
 });

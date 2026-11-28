@@ -348,7 +348,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected, cap
 
     const [waitingAdmission, setWaitingAdmission] = useState<WaitingMode | null>(null);
     const waitingStatusRef = useRef<WaitingMode | null>(null);
-    const [roomSettings, setRoomSettings] = useState<RoomHostSettings>({ locked: false, waitingRoomEnabled: true, muteOnEntry: false, allowScreenShare: false, allowFileShare: false, allowChat: true, allowMicrophone: true, allowCamera: true, allowReactions: true });
+    const [roomSettings, setRoomSettings] = useState<RoomHostSettings>({ locked: false, waitingRoomEnabled: true, muteOnEntry: false, allowScreenShare: true, allowFileShare: false, allowChat: true, allowMicrophone: true, allowCamera: true, allowReactions: true });
     const [joinFailure, setJoinFailure] = useState<JoinFailure | null>(null);
     const [restoring, setRestoring] = useState(reconnecting);
     const [knocks, setKnocks] = useState<Array<{ peerId: string; displayName: string }>>([]);
@@ -1779,6 +1779,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected, cap
 
     const startScreenShare = useCallback(async (surface?: ScreenShareSurface, shareSound = false) => {
         if (audioOnlyRef.current) { showNotice('Turn off Audio-only in Connection quality before sharing your screen.'); return; }
+        if (!canPublishRef.current) { showNotice('Ask the host to invite you on stage before sharing.'); return; }
         if (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare) { showNotice('Only the host can share until they allow screen sharing.'); return; }
         if (!sessionActive.current || sharingRef.current || busyRef.current.screen) return;
         if (initializingRef.current || !joinedRef.current || !media.canSend) { showNotice('Screen sharing is unavailable. Rejoin the meeting and try again.'); return; }
@@ -1798,9 +1799,19 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected, cap
                 audio: shareSound,
                 ...({ selfBrowserSurface: 'include', systemAudio: shareSound ? 'include' : 'exclude', surfaceSwitching: 'include' } as any),
             });
-            if (!sessionActive.current || revision !== sessionRevision.current || audioOnlyRef.current || (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare)) { display.getTracks().forEach(t => t.stop()); return; }
+            if (!sessionActive.current || revision !== sessionRevision.current || !canPublishRef.current || audioOnlyRef.current || (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare)) { display.getTracks().forEach(t => t.stop()); return; }
             const screenTrack = display.getVideoTracks()[0];
-            screenTrack.onended = () => { stopScreenShare(); };
+            if (!screenTrack || screenTrack.readyState !== 'live') {
+                display.getTracks().forEach(track => track.stop());
+                showNotice('The selected screen source is no longer available. Choose a source to share again.');
+                return;
+            }
+            // A temporary browser mute during a tab or window switch is not the end of capture.
+            screenTrack.onended = () => {
+                if (screenStreamRef.current !== display || !sharingRef.current) return;
+                void stopScreenShare();
+                showNotice('Screen sharing ended. Choose a screen, window, or tab to share again.');
+            };
             screenStreamRef.current = display;
             sharingRef.current = true;
             setScreenStream(display);
@@ -1810,9 +1821,14 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected, cap
             await media.produce(screenTrack, { source: 'screen', type: 'screen' });
             const sound = display.getAudioTracks()[0];
             if (shareSound && sound?.readyState === 'live' && screenTrack.readyState === 'live' && sharingRef.current && revision === sessionRevision.current) {
-                await media.produce(sound, { source: 'screen', type: 'screen' });
+                try {
+                    await media.produce(sound, { source: 'screen', type: 'screen' });
+                } catch {
+                    sound.stop();
+                    if (sharingRef.current && revision === sessionRevision.current) showNotice('Your screen is sharing without sound. The meeting could not send the selected audio.');
+                }
             }
-            if (!sessionActive.current || revision !== sessionRevision.current || !sharingRef.current || (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare) || screenTrack.readyState !== 'live') {
+            if (!sessionActive.current || revision !== sessionRevision.current || !canPublishRef.current || !sharingRef.current || (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare) || screenTrack.readyState !== 'live') {
                 display.getTracks().forEach(t => t.stop());
                 // Stop can run before produce registers the screen producer.
                 if (sessionActive.current && revision === sessionRevision.current) await media.closeProducerBySource('screen').catch(() => { });
@@ -1826,7 +1842,15 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected, cap
             if (!sessionActive.current || revision !== sessionRevision.current) return;
             if (sharingRef.current) await stopScreenShare();
             if (!sessionActive.current || revision !== sessionRevision.current) return;
-            if (sessionActive.current && (err as DOMException)?.name !== 'NotAllowedError') showNotice('Screen sharing is not available.');
+            const { name, message } = err instanceof Error ? err : {};
+            if (name === 'NotAllowedError') return;
+            if (/screen sharing is disabled by host|four screens are already being shared|only the webinar organiser can publish/i.test(message || '')) {
+                showNotice(message!);
+            } else if (name === 'NotReadableError' || name === 'AbortError') {
+                showNotice('Your browser could not capture that source. Check your system’s screen recording permission or choose another source.');
+            } else {
+                showNotice('Could not start screen sharing. Try another source or rejoin the meeting.');
+            }
         } finally {
             busyRef.current.screen = false;
         }
@@ -1838,17 +1862,23 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected, cap
         if (sharingRef.current) { void stopScreenShare(); return; }
         const activitiesAvailable = manager && (!requiredE2eeRef.current || !!e2eeRef.current);
         if (!activitiesAvailable) {
-            if (!canPublishRef.current || (myRoleRef.current !== 'host' && !roomSettings.allowScreenShare)) {
+            if (!canPublishRef.current) {
+                showNotice('Ask the host to invite you on stage before sharing.');
+                return;
+            }
+            if (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare) {
                 showNotice('The host can give you permission to share.');
                 return;
             }
             if (typeof navigator.mediaDevices?.getDisplayMedia !== 'function') {
-                showNotice('Screen sharing is unavailable in this browser.');
+                showNotice(window.isSecureContext
+                    ? 'This browser cannot share your screen. Open the meeting in a desktop browser that supports screen capture.'
+                    : 'Open the meeting using its trusted HTTPS address to share your screen.');
                 return;
             }
         }
         setShareScreenModalOpen(true);
-    }, [stopScreenShare, roomSettings.allowScreenShare, showNotice]);
+    }, [stopScreenShare, showNotice]);
 
     const savePendingRecording = useCallback(async () => {
         const pending = pendingRecording.current;

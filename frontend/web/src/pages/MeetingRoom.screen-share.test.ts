@@ -18,7 +18,7 @@ function visit(node: ts.Node) {
 visit(source);
 const compile = (code: string) => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.React } }).outputText;
 const bindActions = new Function('context', compile(`
-    const { useCallback, audioOnlyRef, sharingRef, sessionRevision, sessionActive, screenStreamRef, joinedRef,
+    const { useCallback, audioOnlyRef, sharingRef, sessionRevision, sessionActive, screenStreamRef, joinedRef, canPublishRef,
         roomSettingsRef, myRoleRef, busyRef, initializingRef, media, navigator, signaling, playSound, showNotice,
         screenPaused, screenShareReady, setScreenStream, setScreenSharing, setScreenPaused, setScreenShareReady } = context;
     ${['stopScreenShare', 'togglePauseScreenShare', 'startScreenShare'].map(name => declarations.get(name)).join('\n')}
@@ -37,12 +37,12 @@ function deferredCapture() {
     const camera = { paused: false, closed: false };
     const screen = { paused: false, closed: true };
     let registered = false;
-    const track = { readyState: 'live', stop: vi.fn(() => { track.readyState = 'ended'; }) };
+    const track = { readyState: 'live', onended: null as (() => void) | null, stop: vi.fn(() => { track.readyState = 'ended'; }) };
     const stream = { getTracks: () => [track], getVideoTracks: () => [track], getAudioTracks: () => [] };
     const context: any = {
         useCallback: (callback: unknown) => callback,
         audioOnlyRef: { current: false }, sharingRef: { current: false }, sessionRevision: { current: 1 }, sessionActive: { current: true },
-        screenStreamRef: { current: null }, joinedRef: { current: true },
+        screenStreamRef: { current: null }, joinedRef: { current: true }, canPublishRef: { current: true },
         myRoleRef: { current: 'member' }, roomSettingsRef: { current: { allowScreenShare: true } }, busyRef: { current: {} }, initializingRef: { current: false },
         screenPaused: false, screenShareReady: false, screenSharing: false,
         secureActivities: false, encryptedNotes: undefined, setShareScreenModalOpen: vi.fn(),
@@ -63,6 +63,42 @@ function deferredCapture() {
 }
 
 describe('presenting controls during screen-share startup', () => {
+    it('starts a guest share after a live grant even if optional display audio fails', async () => {
+        const share = deferredCapture();
+        share.context.myRoleRef.current = 'guest';
+        share.context.roomSettingsRef.current.allowScreenShare = false;
+        await share.actions().startScreenShare();
+        expect(share.context.navigator.mediaDevices.getDisplayMedia).not.toHaveBeenCalled();
+        share.context.roomSettingsRef.current.allowScreenShare = true;
+        const sound = { readyState: 'live', stop: vi.fn() };
+        share.context.navigator.mediaDevices.getDisplayMedia.mockResolvedValue({
+            getTracks: () => [share.track, sound], getVideoTracks: () => [share.track], getAudioTracks: () => [sound],
+        });
+        share.context.media.produce.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('Audio relay failed'));
+        await share.actions().startScreenShare('browser', true);
+        expect(share.context.screenShareReady).toBe(true);
+        expect(sound.stop).toHaveBeenCalledOnce();
+        expect(share.track.stop).not.toHaveBeenCalled();
+    });
+    it('ignores an ended event from a previous share and ends the active share when its source closes', async () => {
+        const share = deferredCapture();
+        share.finishProduce();
+        const actions = share.actions();
+        await actions.startScreenShare();
+        const previousEnded = share.track.onended!;
+        await actions.stopScreenShare();
+        const next = { ...share.track, readyState: 'live', onended: null as (() => void) | null, stop: vi.fn() };
+        share.context.navigator.mediaDevices.getDisplayMedia.mockResolvedValue({
+            getTracks: () => [next], getVideoTracks: () => [next], getAudioTracks: () => [],
+        });
+        await actions.startScreenShare();
+        previousEnded();
+        expect(share.context.screenSharing).toBe(true);
+        expect(next.stop).not.toHaveBeenCalled();
+        next.onended!();
+        expect(share.context.screenSharing).toBe(false);
+        expect(next.stop).toHaveBeenCalledOnce();
+    });
     it('blocks attendee capture before permission and lets the host present', async () => {
         const share = deferredCapture();
         share.context.roomSettingsRef.current.allowScreenShare = false;

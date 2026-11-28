@@ -94,8 +94,8 @@
 <h3>What you need</h3>
 <table>
   <tr><th style="width:28%">Item</th><th>What it means</th></tr>
-  <tr><td><b>A server</b></td><td>A physical server or a virtual machine with an Intel/AMD 64-bit processor.<br><b>Minimum:</b> 4 CPU cores, 8 GB memory, 30 GB free disk.<br><b>Recommended for 50 people:</b> 8 cores, 16 GB memory, 100 GB disk.</td></tr>
-  <tr><td><b>An operating system</b></td><td>An existing x86-64 system running <b>Rocky Linux 9</b>, <b>Red Hat Enterprise Linux 9</b>, or <b>Ubuntu 22.04 / 24.04</b>. For a fully offline install, use a bundle with the required packages or have your IT team install Podman in advance.</td></tr>
+  <tr><td><b>A server</b></td><td>An existing Intel/AMD x86-64 Linux host. Your organisation provisions the physical machine or guest. The installer does not create a virtual machine.<br><b>Minimum:</b> 4 CPU cores, 8 GB memory, 30 GB free disk.<br><b>Recommended for 50 people:</b> 8 cores, 16 GB memory, 100 GB disk.</td></tr>
+  <tr><td><b>An operating system</b></td><td>An existing x86-64 system running <b>Rocky Linux 9</b>, <b>Red Hat Enterprise Linux 9</b>, or <b>Ubuntu 22.04 / 24.04</b>. The Rocky/RHEL bundle includes offline runtime packages. On isolated Ubuntu hosts, install Podman before transferring the bundle. Existing Docker installations retain Docker during upgrades.</td></tr>
   <tr><td><b>A fixed IP address</b></td><td>An address that never changes and that every branch can reach, for example <code>10.20.1.50</code>. Ask your network person.</td></tr>
   <tr><td><b>A server name</b></td><td>The web address staff will open, for example <code>vc.yourorg.gov.in</code>. Your network person adds it to your DNS so it points to the IP address above.</td></tr>
   <tr><td><b>An administrator email and password</b></td><td>The first person who will manage QS-VC. The password needs at least <b>12 characters</b>.</td></tr>
@@ -124,7 +124,7 @@
 <ol class="steps">
   <li>On your PC, open <b>https://qsvcmeet.com/intranet</b> and find <b>Install the QS-VC server</b>.</li>
   <li>Choose <b>Linux server setup (.run)</b>. Download it from a connected computer and transfer it to your existing Linux host using your organisation’s approved process.</li>
-  <li>Keep the published <b>SHA-256</b> and obtain both release signing key fingerprints independently. The <b>.tar.gz</b> download is a manual server package for IT. For this guide, use the <b>.run</b> file.</li>
+  <li>Keep the installer, its <b>.sha256</b> file and both signature files together. Obtain the release signing key fingerprints independently. The <b>.tar.gz</b> download is a manual server package for IT. For this guide, use the <b>.run</b> file.</li>
 </ol>
 <div class="box warn"><b>If a card says "Coming soon"</b>the installer is not published yet. Contact QS-VC for a signed release.</div>
 </section>
@@ -161,6 +161,8 @@
 <div class="box tip"><b>Moving around the installer screens</b>Use the <b>arrow keys</b> to move, <b>Tab</b> to jump to the buttons, and <b>Enter</b> to press a button. The mouse does not work in these screens.</div>
 
 <h3>D. Answer the installer screens</h3>
+<p>For unattended installation, copy the release’s <code>answers.example.env</code> into a root-only answers file. Fill in the exposure, hostname, IP, certificate choice, admin details and independently verified fingerprints. Protect the answers and admin password files with mode 0600. Start it with:</p>
+<span class="type">sudo bash ./qsvc-server-setup-VERSION.run -- --silent --answers /root/qsvc-answers.env</span>
 <ol class="steps" style="counter-reset: step 5">
   <li><b>Licence agreement.</b> Read it (arrow keys to scroll), press <b>Enter</b>, then choose <b>Yes</b> to accept.</li>
   <li><b>Fingerprints.</b> The screen shows two codes:
@@ -210,8 +212,16 @@
 <ol class="steps">
   <li>Open <b>https://<i>your-server-name</i></b> in Chrome, Edge, Firefox or Safari.</li>
   <li>Sign in with the administrator email and password you chose during setup.</li>
-  <li>On the server, run <code>sudo qsvc status</code>. In the browser, choose <b>New meeting</b> and send the invitation to a second authorised user. Confirm they can join and that both users can hear and see each other. Share a test screen and end the meeting.</li>
+  <li>On the server, run <code>sudo qsvc status</code> and <code>sudo qsvc doctor</code>. Pass the organisation CA file to <code>qsvc doctor</code> if the private issuer is absent from the server trust store. In the browser, choose <b>New meeting</b> and send the invitation to a second authorised user. Confirm they can join and that both users can hear and see each other. Share a test screen and end the meeting.</li>
 </ol>
+<h3>D. Check guest screen sharing</h3>
+<ol class="steps">
+  <li>Open the organisation’s trusted HTTPS address in a supported desktop browser. Join from a second browser session as a guest and have the host admit you.</li>
+  <li>Admitted participants can share by default in new meetings. If the meeting has sharing turned off, the host can enable <b>Share their screen</b> under <b>More → Host controls → Let everyone</b>. In a webinar, invite audience members on stage before they share.</li>
+  <li>As guest, open the screen sharing control and choose a source. Use <b>Entire screen</b> to present across apps, or choose a specific <b>Window</b> or <b>Browser tab</b> to limit what viewers can see.</li>
+  <li>Have the other participant confirm the share continues when you switch apps. Stop sharing and confirm the presentation disappears.</li>
+</ol>
+<p>If sharing is unavailable, confirm the host grant, the trusted HTTPS address and system screen recording permission. Turn off Audio-only under <b>More → Connection quality</b>. Try sharing without optional source audio if sound fails.</p>
 </section>
 
 <section class="part">
@@ -273,8 +283,11 @@ Use this with Intune, SCCM or a login script.</div>
 <p>QS-VC starts automatically when the server restarts. You do not need to do anything after a reboot.</p>
 <h3>Who can see administration data?</h3>
 <p>Organisation meeting views are scoped to the signed-in organisation. A platform administrator can see platform-wide summaries for the installation they manage. Hosted and self-hosted installations have separate data. If your intranet and internet entry points use the same installation, they share that installation’s data. Hosted accounting has no automatic feed from an isolated server.</p>
+<h3>Organisation services and recording</h3>
+<p>Copy <code>/etc/qsvc/compose.organisation.example.yml</code> to <code>/etc/qsvc/compose.organisation.yml</code> only when adding site-specific integration. Keep it root-only. Use the approved identity broker for SSO, and a separately provisioned gateway for Polycom or Bharat VC. Restart QS-VC and verify from a branch client.</p>
+<p>The offline installer stores uploaded recordings on a persistent local volume. Use encrypted storage and include the volume in your backup and restore checks. Keep the database, settings and recording backups together for recovery.</p>
 <h3>Update to a new version</h3>
-<p>Obtain the versioned installer, its checksum, and both checksum signatures. On the server run <code>sudo qsvc check-update ./qsvc-server-setup-VERSION.run</code>. Follow your organisation’s backup and maintenance process before running the installer on the same Linux host.</p>
+<p>Obtain the versioned installer, its checksum, and both checksum signatures. On the server run <code>sudo qsvc check-update ./qsvc-server-setup-VERSION.run</code>. Schedule downtime, drain meetings and take a recoverable backup before running the installer on the same Linux host. Afterward, run <code>sudo qsvc doctor</code> and verify sign-in and a two-user call. After a failed migration, review the setup log. Restore the coordinated backup if schema changes prevent a safe version rollback.</p>
 </section>
 
 <section class="part">

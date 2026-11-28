@@ -903,7 +903,7 @@ it('spotlights for everyone, tracks presenters and clears both when people leave
     expect((await rpc(host,hostState,'setSpotlight',{targetPeerId:'nobody'}))?.error?.code).toBe(-32602);
     expect((await rpc(host,hostState,'setSpotlight',{targetPeerId:guestState.peerId}))?.result.spotlightPeerId).toBe(guestState.peerId);
     expect(sent(guest).some(m => m.method === 'spotlightChanged' && m.params.peerId === guestState.peerId)).toBe(true);
-    expect((await rpc(guest,guestState,'muteStateChanged',{kind:'screen',muted:true,presenting:true}))?.error?.code).toBe(-32004);
+    expect((await rpc(guest,guestState,'muteStateChanged',{kind:'screen',muted:true,presenting:true}))?.result.ok).toBe(true);
     expect((await rpc(host,hostState,'muteStateChanged',{kind:'screen',muted:true,presenting:true}))?.error).toBeUndefined();
     const attendee = roomManager.getRoom(hostState.roomId)!.peers.get(guestState.peerId)!;
     const attendeeRole = attendee.role;
@@ -1237,6 +1237,10 @@ it('separates a guest host credential from the public invitation and preserves h
     await tick();
     expect((await rpc(guest, guestState, 'admitPeer', { targetPeerId: guestState.peerId }))?.error).toBeDefined();
     expect((await rpc(host, hostState, 'admitPeer', { targetPeerId: guestState.peerId }))?.result.admitted).toBe(true);
+    expect((await rpc(host, hostState, 'updateSettings', { settings: { allowScreenShare: false } }))?.result.updated).toBe(true);
+    const screen = { kind: 'video', appData: { source: 'screen' } };
+    expect((await rpc(host, hostState, 'produce', screen))?.result?.producerId).toBe('test-producer');
+    expect((await rpc(guest, guestState, 'produce', screen))?.error?.code).toBe(-32004);
     expect((await join(back, backState, guestHostToken))?.result.role).toBe('host');
     expect(host.close).toHaveBeenCalledWith(4002, expect.any(String));
     expect(roomManager.getRoom(backState.roomId)?.peers.size).toBe(2);
