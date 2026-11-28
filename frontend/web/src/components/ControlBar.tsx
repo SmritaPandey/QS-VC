@@ -37,7 +37,7 @@ interface Props {
     /** short code shown on the language button, e.g. "HI" */
     onToggleAudio: () => void;
     onToggleVideo: () => void;
-    onToggleScreen: () => void;
+    onToggleScreen?: () => void;
     onOpenInvite?: () => void;
     onToggleRecording: () => void;
     onToggleChat: () => void;
@@ -188,8 +188,8 @@ export default function ControlBar({
             </div>
 
             <div className="controls-center">
-                <ToggleControl on={screenSharing} label={screenSharing ? 'Stop sharing' : 'Share'} title={screenSharing ? 'Stop sharing' : 'Open sharing options'}
-                    iconOn="stop_screen_share" iconOff="screen_share" stateClass={screenSharing ? 'active-sharing' : ''} onToggle={onToggleScreen} />
+                {onToggleScreen && <ToggleControl on={screenSharing} label={screenSharing ? 'Stop sharing' : 'Share'} title={screenSharing ? 'Stop sharing' : 'Open sharing options'}
+                    iconOn="stop_screen_share" iconOff="screen_share" stateClass={screenSharing ? 'active-sharing' : ''} onToggle={onToggleScreen} />}
                 {onOpenInvite && (
                     <button
                         type="button"

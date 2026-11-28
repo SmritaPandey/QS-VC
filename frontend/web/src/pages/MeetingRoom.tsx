@@ -1858,25 +1858,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected, cap
 
     const handleScreenShare = useCallback(() => {
         if (roomTransitionBusy.current) { showNotice('Wait for the room change to finish.'); return; }
-        const manager = myRoleRef.current === 'host' || myRoleRef.current === 'co-host';
         if (sharingRef.current) { void stopScreenShare(); return; }
-        const activitiesAvailable = manager && (!requiredE2eeRef.current || !!e2eeRef.current);
-        if (!activitiesAvailable) {
-            if (!canPublishRef.current) {
-                showNotice('Ask the host to invite you on stage before sharing.');
-                return;
-            }
-            if (myRoleRef.current !== 'host' && !roomSettingsRef.current.allowScreenShare) {
-                showNotice('The host can give you permission to share.');
-                return;
-            }
-            if (typeof navigator.mediaDevices?.getDisplayMedia !== 'function') {
-                showNotice(window.isSecureContext
-                    ? 'This browser cannot share your screen. Open the meeting in a desktop browser that supports screen capture.'
-                    : 'Open the meeting using its trusted HTTPS address to share your screen.');
-                return;
-            }
-        }
         setShareScreenModalOpen(true);
     }, [stopScreenShare, showNotice]);
 
@@ -2282,9 +2264,16 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected, cap
     const secureActivities = requiredE2eeRef.current;
     const activityOnStage = activitiesOpen && (!secureActivities || !!e2eeRef.current);
     const sidePanelOpen = chatOpen || participantsOpen || hostToolsOpen || effectsOpen;
-    const screenCaptureAvailable = !screenSharing && canPublishRef.current
-        && (myRole === 'host' || roomSettings.allowScreenShare)
-        && typeof navigator.mediaDevices?.getDisplayMedia === 'function';
+    const browserSupportsCapture = typeof navigator.mediaDevices?.getDisplayMedia === 'function';
+    const captureUnavailableReason = !browserSupportsCapture
+        ? window.isSecureContext
+            ? 'Screen capture is unavailable in this browser. Open this meeting on a computer to present. You can stay here to watch.'
+            : 'Open the meeting using its trusted HTTPS address to share your screen.'
+        : !canPublishRef.current
+            ? 'Ask the host to invite you on stage before sharing.'
+            : myRole !== 'host' && !roomSettings.allowScreenShare
+                ? 'Ask the host to allow screen sharing.'
+                : audioOnly ? 'Open More, then Connection quality, and turn off Audio-only to share your screen.' : undefined;
     const manager = myRole === 'host' || myRole === 'co-host';
     const restoreFormatFocus = () => {
         const opener = formatOpener.current;
@@ -2553,7 +2542,7 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected, cap
                 languageOpen={languageOpen}
                 onToggleLanguage={() => { closePanels(); setLanguageOpen(!languageOpen); }}
                 onToggleAudio={handleToggleAudio} onToggleVideo={handleToggleVideo}
-                onToggleScreen={handleScreenShare} onOpenInvite={() => setInviteModalOpen(true)} onToggleRecording={handleToggleRecording}
+                onToggleScreen={screenSharing || browserSupportsCapture || (manager && (!secureActivities || !!encryptedNotes)) ? handleScreenShare : undefined} onOpenInvite={() => setInviteModalOpen(true)} onToggleRecording={handleToggleRecording}
                 onToggleChat={() => { if (!roomSettings.allowChat && !manager) { showNotice('Chat is disabled by the host.'); return; } setIncomingChatMessage(null); closePanels(); setChatOpen(!chatOpen); }}
                 onToggleParticipants={() => { closePanels(); setParticipantsOpen(!participantsOpen); }}
                 onRaiseHand={handleRaiseHand} onLeave={requestLeave}
@@ -2561,8 +2550,8 @@ function MeetingRoomSession({ reconnecting, carried, onDropped, onConnected, cap
             <MeetingInformation open={informationOpen} meetingCode={meetingCode || ''} joinUrl={`${window.location.origin}${meetingPreviewPath}`} meetingTitle={meetingTitle} onClose={() => setInformationOpen(false)} />
             <ShareScreenModal
                 open={shareScreenModalOpen}
-                captureUnavailableReason={audioOnly && screenCaptureAvailable ? 'Open More, then Connection quality, and turn off Audio-only to share your screen.' : undefined}
-                canCapture={screenCaptureAvailable && !audioOnly}
+                captureUnavailableReason={captureUnavailableReason}
+                canCapture={!screenSharing && !captureUnavailableReason}
                 canShareActivity={manager && (!secureActivities || !!encryptedNotes)}
                 onActivity={tab => { void signaling.request('setSharedActivity', { tab }).catch(() => showNotice('Could not share the activity. Try again.')); }}
                 onClose={() => setShareScreenModalOpen(false)}

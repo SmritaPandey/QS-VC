@@ -16,6 +16,13 @@
   flex-direction: column;
   align-items: center;
 }
+@media (max-width: 767px) {
+  .meeting-room .meeting-room-status .meeting-notices.meeting-notices {
+    position: absolute;
+    top: 8px;
+    right: auto;
+  }
+}
 .meeting-room-status .meeting-notices:not(:empty) { padding-block: 0; }
 .meeting-room .meeting-room-status .meeting-notices.meeting-notices > * {
   pointer-events: auto;

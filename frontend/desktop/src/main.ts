@@ -10,7 +10,7 @@
  * %ProgramData%\QS-VC (Windows installer /SERVERURL=), /Library/Application Support/QS-VC (macOS) or /etc/qsvc (Linux)
  * ({"workspaceUrl":"https://..."}), or QSVC_WEB_URL.
  */
-import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell, session, desktopCapturer, dialog, net, nativeTheme, safeStorage, clipboard } from 'electron';
+import { app, BrowserWindow, Tray, Menu, nativeImage, Notification, ipcMain, shell, session, desktopCapturer, dialog, net, nativeTheme, safeStorage, clipboard, systemPreferences } from 'electron';
 import * as fs from 'fs';
 import { randomBytes } from 'node:crypto';
 import { createSsoLoopback } from './sso-loopback';
@@ -231,15 +231,54 @@ function setupPermissions() {
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => callback(allowed.has(permission) && sameOrigin(webContents.getURL())));
     session.defaultSession.setPermissionCheckHandler((_webContents, permission, origin) => allowed.has(permission) && sameOrigin(origin));
     session.defaultSession.setDisplayMediaRequestHandler(async (request, callback) => {
-        if (!sameOrigin(request.securityOrigin || request.frame?.url || '')) { callback({}); return; }
-        try {
-            const sources = (await desktopCapturer.getSources({ types: ['screen', 'window'] })).slice(0, 8);
-            if (!sources.length || !mainWindow) { callback({}); return; }
-            const { response } = await dialog.showMessageBox(mainWindow, {
-                type: 'question', title: 'Share your screen', message: 'Choose what to share',
-                buttons: [...sources.map(source => source.name.slice(0, 60) || 'Screen'), 'Cancel'], cancelId: sources.length, defaultId: 0, noLink: true,
+        const window = mainWindow;
+        if (!window || request.frame !== window.webContents.mainFrame ||
+            !request.userGesture || !sameOrigin(request.securityOrigin || request.frame?.url || '')) {
+            callback({});
+            return;
+        }
+        const showMacPermission = async () => {
+            if (process.platform !== 'darwin' || window.isDestroyed()) return;
+            await dialog.showMessageBox(window, {
+                type: 'info',
+                title: 'Allow screen sharing',
+                message: 'Allow QS-VC to record your screen in System Settings.',
+                detail: 'Open Privacy & Security → Screen & System Audio Recording, enable QS-VC, then quit and reopen it.',
             });
-            callback(response < sources.length ? { video: sources[response] } : {});
+        };
+        try {
+            if (process.platform === 'darwin' && ['denied', 'restricted'].includes(systemPreferences.getMediaAccessStatus('screen'))) {
+                await showMacPermission();
+                callback({});
+                return;
+            }
+            const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 0, height: 0 } });
+            if (!sources.length || window.isDestroyed()) {
+                if (!sources.length && process.platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted') await showMacPermission();
+                callback({});
+                return;
+            }
+            const screens = sources.filter(source => source.id.startsWith('screen:'));
+            const windows = sources.filter(source => !source.id.startsWith('screen:'));
+            const groups = [
+                { name: 'Entire screen', sources: screens },
+                { name: 'Application window', sources: windows },
+            ].filter(group => group.sources.length);
+            const { response: groupIndex } = await dialog.showMessageBox(window, {
+                type: 'question', title: 'Share your screen', message: 'Choose a display or application window',
+                detail: 'To share a specific browser tab, join the meeting in your desktop browser.',
+                buttons: [...groups.map(group => group.name), 'Cancel'], cancelId: groups.length, defaultId: groups.length, noLink: true,
+            });
+            const group = groups[groupIndex];
+            if (!group || window.isDestroyed()) { callback({}); return; }
+            const { response } = await dialog.showMessageBox(window, {
+                type: 'question', title: group.name, message: 'Choose what people will see',
+                buttons: [...group.sources.map(source => source.name.slice(0, 60) || group.name), 'Cancel'],
+                cancelId: group.sources.length, defaultId: group.sources.length, noLink: true,
+            });
+            const stillInWorkspace = !window.isDestroyed() &&
+                request.frame === window.webContents.mainFrame && sameOrigin(request.frame.url);
+            callback(stillInWorkspace && group.sources[response] ? { video: group.sources[response] } : {});
         } catch { callback({}); }
     });
 }
