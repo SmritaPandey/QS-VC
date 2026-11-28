@@ -2,6 +2,7 @@ import express, { type NextFunction, type Request, type Response } from 'express
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createLocalStorage } from './local-storage.js';
 import { createS3Storage, type RecordingStorage } from './storage.js';
 import { createLiveStreaming } from './live-streaming.js';
 import { FEATURE_MIN_PLAN, RECORDING_STORAGE_GIB, type Plan } from '../../../shared/entitlements.cjs';
@@ -11,6 +12,7 @@ interface Identity { sub: string; tenantId: string; plan?: Plan; role?: string }
 interface Meeting { hostId: string | null; status: string; settings?: { allowRecording?: boolean; recording_allowed?: boolean; e2eeRequired?: boolean } }
 interface Options {
     storage?: RecordingStorage;
+    localStorageDirectory?: string;
     authenticate?: (authorization: string) => Promise<Identity | null>;
     authorizeFeature?: (authorization: string | undefined, feature: string) => Promise<'allow' | 'deny' | 'unauthorized'>;
     meeting?: (code: string, authorization: string | undefined) => Promise<Meeting | null>;
@@ -64,7 +66,9 @@ async function authorizeFeature(authorization: string | undefined, feature: stri
 export function createRecordingApp(options: Options = {}) {
     const app = express();
     const bucket = process.env.RECORDING_BUCKET;
-    const storage = options.storage || (bucket ? createS3Storage(bucket) : undefined);
+    const localDirectory = options.localStorageDirectory || process.env.RECORDING_LOCAL_DIR;
+    const local = !options.storage && !bucket && localDirectory ? createLocalStorage(localDirectory) : undefined;
+    const storage = options.storage || (bucket ? createS3Storage(bucket) : local);
     const verify = options.authenticate || authenticate;
     const authorize = options.authorizeFeature || authorizeFeature;
     const meeting = options.meeting || loadMeeting;
@@ -80,6 +84,22 @@ export function createRecordingApp(options: Options = {}) {
     app.use('/api/live-streams', liveStreaming.router);
     app.use('/api', rateLimit({ windowMs: 60_000, max: 120, standardHeaders: true, legacyHeaders: false }));
     app.use('/api', (_req, res, next) => storage ? next() : res.status(503).json({ code: 'RECORDING_UNAVAILABLE', error: 'Cloud recording storage is not configured.' }));
+
+    if (local) {
+        app.get('/api/recordings/media', (req, res, next) => {
+            const file = typeof req.query.token === 'string' ? local.playbackFile(req.query.token) : null;
+            if (!file) return res.sendStatus(404);
+            res.setHeader('Referrer-Policy', 'no-referrer');
+            res.setHeader('X-Content-Type-Options', 'nosniff');
+            res.sendFile(file, { cacheControl: false, lastModified: false }, error => {
+                if (!error) return;
+                if (res.headersSent) { next(error); return; }
+                const status = (error as Error & { status?: number }).status;
+                if (status === 404 || status === 416) { res.sendStatus(status); return; }
+                next(error);
+            });
+        });
+    }
 
     const route = (handler: (req: Request, res: Response) => Promise<unknown>) => (req: Request, res: Response, next: NextFunction) => { handler(req, res).catch(next); };
     const identity = async (req: Request, res: Response) => {

@@ -1,3 +1,4 @@
+import { DEFAULT_SIGNALING_PARTICIPANT_LIMIT, meetingParticipantLimit } from '../../../shared/meeting-capacity.cjs';
 import type { Plan } from '../../../shared/entitlements.cjs';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from './logger.js';
@@ -192,6 +193,8 @@ export class RoomManager {
             settings: {
                 ...DEFAULT_SETTINGS,
                 ...settings,
+                maxParticipants: Math.min(settings?.maxParticipants ?? DEFAULT_SETTINGS.maxParticipants,
+                    meetingParticipantLimit(DEFAULT_SIGNALING_PARTICIPANT_LIMIT)),
                 meetingKind,
                 webinar: meetingKind === 'town_hall' || meetingKind === 'webinar',
                 waitingRoomEnabled: true,
@@ -494,6 +497,9 @@ export class RoomManager {
         const room = this.rooms.get(roomId);
         if (!room) return;
         if (settings.waitingRoomEnabled === false) throw new Error('Host approval is required for guests.');
+        if (settings.maxParticipants !== undefined && settings.maxParticipants > meetingParticipantLimit(DEFAULT_SIGNALING_PARTICIPANT_LIMIT)) {
+            throw new Error('Participant limit exceeds this deployment’s configured maximum.');
+        }
         Object.assign(room.settings, settings, { waitingRoomEnabled: true });
         if (!room.settings.allowRecording && room.recording) this.updateRecording(roomId, null);
         this.broadcast(roomId, 'settingsUpdated', { settings: { ...room.settings, password: undefined } });

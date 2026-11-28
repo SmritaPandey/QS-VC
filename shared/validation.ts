@@ -3,6 +3,7 @@
  * Import from '../../../shared/validation' or copy as needed.
  */
 import { z } from 'zod';
+import { DEFAULT_MEETING_PARTICIPANT_LIMIT } from './meeting-capacity.cjs';
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // PRIMITIVES
@@ -127,7 +128,7 @@ export const createMeetingSchema = z.object({
     scheduledStart: z.string().datetime().optional(),
     scheduledEnd: z.string().datetime().optional(),
     settings: z.object({
-        maxParticipants: z.number().int().min(2).max(500).optional(),
+        maxParticipants: z.number().int().min(2).max(DEFAULT_MEETING_PARTICIPANT_LIMIT).optional(),
         waitingRoom: z.boolean().optional(),
         e2eeRequired: z.boolean().optional(),
         recordingAllowed: z.boolean().optional(),

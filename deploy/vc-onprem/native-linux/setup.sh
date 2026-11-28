@@ -91,7 +91,7 @@ import os,secrets
 from pathlib import Path
 keys=['AUTH_DATABASE_URL','MEETING_DATABASE_URL','REDIS_URL','REDIS_HOST','REDIS_PORT','POSTGRES_SSL','POSTGRES_CA_FILE','SFU_ANNOUNCED_IP','TURN_SERVERS','TURN_USERNAME','TURN_PASSWORD','RECORDING_BUCKET','AWS_REGION','AWS_ACCESS_KEY_ID','AWS_SECRET_ACCESS_KEY']
 env={k:os.environ[k] for k in keys if os.environ.get(k)}
-env.update(NODE_ENV='production',HOST='127.0.0.1',SFU_CONTROL_HOST='127.0.0.1',CORS_ORIGINS='https://'+os.environ['QSVC_DOMAIN'],WEB_URL='https://'+os.environ['QSVC_DOMAIN'],SFU_INTERNAL_URL='http://127.0.0.1:4000',AUTH_INTERNAL_URL='http://127.0.0.1:4002',MEETING_INTERNAL_URL='http://127.0.0.1:4003')
+env.update(NODE_ENV='production',QSVC_DEPLOYMENT='onprem',HOST='127.0.0.1',SFU_CONTROL_HOST='127.0.0.1',CORS_ORIGINS='https://'+os.environ['QSVC_DOMAIN'],WEB_URL='https://'+os.environ['QSVC_DOMAIN'],SFU_INTERNAL_URL='http://127.0.0.1:4000',AUTH_INTERNAL_URL='http://127.0.0.1:4002',MEETING_INTERNAL_URL='http://127.0.0.1:4003')
 for k in ['JWT_SECRET','SFU_CONTROL_TOKEN','INTERNAL_AUTH_SECRET','MEETING_POLICY_SECRET','INVITATION_SECRET','TURN_ACCESS_SECRET']:env[k]=secrets.token_hex(48)
 # systemd EnvironmentFile uses quoted values, not shell evaluation.
 def quote(v):
@@ -130,6 +130,7 @@ WorkingDirectory=/opt/qsvc-native/current/services/$service
 EnvironmentFile=/etc/qsvc/native/service.env
 Environment=QSVC_TRIAL_DIR=/var/lib/qsvc/onprem-trial
 $( [[ $service == sfu || $service == signaling ]] && echo 'Environment=NODE_OPTIONS=--require=/opt/qsvc-native/current/trial/stop-at-expiry.cjs' )
+$( [[ $service == recording ]] && printf '%s\n' 'StateDirectory=qsvc-native/recordings' 'StateDirectoryMode=0700' 'Environment=RECORDING_LOCAL_DIR=/var/lib/qsvc-native/recordings' )
 ExecStart=$node_bin /opt/qsvc-native/current/services/$service/dist/index.js
 Restart=on-failure
 RestartSec=5
@@ -164,7 +165,7 @@ https://$QSVC_DOMAIN {
  handle @meetings {
   reverse_proxy 127.0.0.1:4003
  }
- @recording path /api/recordings /api/recordings/*
+ @recording path /api/recordings /api/recordings/* /api/live-streams/*
  handle @recording {
   reverse_proxy 127.0.0.1:4004
  }

@@ -1,10 +1,10 @@
-# Private cloud recording
+# Private server recording
 
-Set `RECORDING_BUCKET` to a private AWS S3 bucket and `AWS_REGION` to its region.
+The offline Compose bundle uses a private persistent `recording_data` volume. The native Linux installation uses `/var/lib/qsvc-native/recordings`. Both store objects on customer-controlled infrastructure and serve temporary media URLs through the same HTTPS gateway. Put the Docker data root or the native state directory on encrypted storage and include it in the site backup and restore procedure. Reserve capacity for the expected recording load and keep the service at one replica.
+
+Use `RECORDING_LOCAL_DIR` with an existing private writable directory to configure other local deployments. A configured `RECORDING_BUCKET` takes precedence. Set it to a private AWS S3 bucket and `AWS_REGION` to its region.
 The AWS demo stack supplies scoped instance-role access; no browser credentials
-or public bucket is required. Without a bucket the API returns 503 and health
-reports `recordingEnabled: false`. Health reports configuration, not verified S3
-connectivity.
+or public bucket is required. Without a storage backend the API returns 503 and health reports `recordingEnabled: false`. Health reports configuration. Local storage must be readable and writable at startup. S3 connectivity, disk capacity and backup recovery are site checks.
 
 Every owner operation verifies the current session with the auth service and
 checks persisted meeting host ownership with the meeting service. Guests and
@@ -14,7 +14,7 @@ this service.
 
 - `POST /api/recordings/:meetingCode`: raw WebM/MP4, maximum 80 MiB, up to two
   simultaneous buffered uploads. `X-Recording-Id` is an optional UUID retained by
-  the client across retries. Conditional S3 writes prevent overwriting a saved
+  the client across retries. Conditional storage writes prevent overwriting a saved
   object; successful retry returns existing metadata. The original host can
   finish uploading after the meeting ends. Cancelled/disallowed meetings reject
   uploads.
@@ -29,6 +29,7 @@ this service.
 - `GET /api/recordings/shared/:token`: anyone possessing the intentional share
   link can request playback. Only token hashes are stored. Revocation prevents
   new URLs; already-issued media URLs can remain usable for five minutes.
+  Restarting the local service invalidates outstanding media URLs.
 
 Recordings are retained until the host deletes them. The stack has no automatic
 expiry lifecycle, blocks public access, requires TLS and encrypts S3 objects.

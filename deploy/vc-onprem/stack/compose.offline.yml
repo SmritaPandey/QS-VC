@@ -80,7 +80,13 @@ services:
     profiles: [object-storage]
   recording:
     depends_on: !reset {}
+    user: "node"
+    volumes:
+      - recording_data:/var/lib/qsvc-recording
     environment:
       RECORDING_BUCKET: ""
+      RECORDING_LOCAL_DIR: /var/lib/qsvc-recording
       AUTH_INTERNAL_URL: http://auth:4002
       MEETING_INTERNAL_URL: http://meeting:4003
+volumes:
+  recording_data:

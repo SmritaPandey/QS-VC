@@ -7,6 +7,9 @@ services:
       BRIDGE_API_TOKEN: ${SFU_CONTROL_TOKEN:?Set a shared SFU control token}
       BRIDGE_RTP_ANNOUNCED_IP: ${SFU_ANNOUNCED_IP:?Set the SFU address}
       BRIDGE_SRTP: mandatory
+      # Enable only after qualifying this suite on the site FreeSWITCH gateway.
+      # Applies to the SFU-to-FreeSWITCH media leg.
+      # BRIDGE_SRTP_SUITE: AEAD_AES_256_GCM
       SIGNALING_URL: http://signaling:4001
       FS_ESL_HOST: mcu.example.gov.in
       FS_ESL_PASSWORD: REPLACE_WITH_SITE_ESL_PASSWORD

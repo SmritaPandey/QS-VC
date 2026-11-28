@@ -5,6 +5,16 @@ function req(name: string, fallback?: string): string {
   return v;
 }
 
+const srtp = req("BRIDGE_SRTP", "mandatory");
+if (srtp !== "mandatory" && srtp !== "off") throw new Error("BRIDGE_SRTP must be mandatory or off");
+const srtpSuite = req("BRIDGE_SRTP_SUITE", "AES_CM_128_HMAC_SHA1_80");
+if (srtpSuite !== "AES_CM_128_HMAC_SHA1_80" && srtpSuite !== "AEAD_AES_256_GCM") {
+  throw new Error("Unsupported BRIDGE_SRTP_SUITE");
+}
+if (srtp === "off" && process.env.BRIDGE_SRTP_SUITE !== undefined) {
+  throw new Error("BRIDGE_SRTP_SUITE requires BRIDGE_SRTP=mandatory");
+}
+
 export const config = {
   /** Branch/site id, used for branch-to-branch routing and logs. */
   site: req("BRIDGE_SITE", "hq"),
@@ -27,7 +37,8 @@ export const config = {
     secret: req("DRACHTIO_SECRET", "cymru"),
   },
   /** "mandatory" = SRTP (SDES) on the SFU<->MCU leg, "off" = plain RTP (lab only). */
-  srtp: req("BRIDGE_SRTP", "mandatory") as "mandatory" | "off",
+  srtp,
+  srtpSuite: srtpSuite as "AES_CM_128_HMAC_SHA1_80" | "AEAD_AES_256_GCM",
   /** Video codec on the SFU<->MCU leg. FreeSWITCH transcodes to H.264/H.263 for Poly. */
   legVideoCodec: req("BRIDGE_LEG_VIDEO_CODEC", "VP8") as "VP8" | "H264",
   /** Shared secret QSVC's MCU service uses to call this bridge. */

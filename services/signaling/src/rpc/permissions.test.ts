@@ -1293,3 +1293,22 @@ it('keeps assistant, summaries and minutes unavailable to an admitted host', asy
     expect((await rpc(ws, state, 'getTranscript', {}))?.result).toEqual({ saving: false, entries: [] });
     await handlePeerDisconnect(state);
 });
+
+it('applies the configured ceiling through signed invitation admission and live room settings', async () => {
+    const meetingCode = 'QS-S-FFAABBCCDDEE001122334455';
+    const inviteToken = meetingInvitation.createSessionMeetingInvite(meetingCode, {
+        hostId: 'owner', expiresAt: Date.now() + 60_000, meetingKind: 'team', e2eeRequired: true, maxParticipants: 1500,
+    });
+    const connection: any = { authUser: { sub: 'owner' } };
+    const host = socket();
+    vi.stubEnv('QSVC_MAX_MEETING_PARTICIPANTS', '1500');
+    try {
+        expect((await rpc(host, connection, 'joinRoom', { meetingCode, displayName: 'Host', inviteToken }))?.result.settings.maxParticipants).toBe(1500);
+        const result = await rpc(host, connection, 'updateSettings', { settings: { maxParticipants: 1501 } });
+        expect(result?.error).toBeDefined();
+        expect(roomManager.getRoomByCode(meetingCode)?.settings.maxParticipants).toBe(1500);
+    } finally {
+        await handlePeerDisconnect(connection);
+        vi.unstubAllEnvs();
+    }
+});

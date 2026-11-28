@@ -60,6 +60,7 @@ const ScheduleMeeting: React.FC = () => {
     const [copiedId, setCopiedId] = useState('');
     const [error, setError] = useState('');
     const [notice, setNotice] = useState('');
+    const [participantLimit, setParticipantLimit] = useState(500);
     const session = useSession();
     const userId = session.status === 'authenticated' ? session.profile?.id : undefined;
     const guest = !ON_PREM && session.status === 'anonymous';
@@ -92,6 +93,24 @@ const ScheduleMeeting: React.FC = () => {
         enableE2EE: true,
         maxParticipants: 100,
     });
+
+    useEffect(() => {
+        const controller = new AbortController();
+        void (async () => {
+            try {
+                const response = await fetch(`${MEETINGS_ENDPOINT}/capacity`, {
+                    signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]),
+                });
+                if (!response.ok) return;
+                const capacity = await response.json();
+                const maxParticipants = guest ? capacity.guestMaxParticipants : capacity.maxParticipants;
+                if (controller.signal.aborted || !Number.isSafeInteger(maxParticipants) || maxParticipants < 2) return;
+                setParticipantLimit(maxParticipants);
+                setForm(previous => ({ ...previous, maxParticipants: Math.min(previous.maxParticipants, maxParticipants) }));
+            } catch { /* Older servers use the default scheduling limit. */ }
+        })();
+        return () => controller.abort();
+    }, [guest]);
 
     const updateField = <K extends keyof ScheduleFormData>(key: K, value: ScheduleFormData[K]) => {
         setForm(prev => ({ ...prev, [key]: value }));
@@ -337,7 +356,7 @@ const ScheduleMeeting: React.FC = () => {
                                     id="maxParticipants"
                                     type="number"
                                     min={2}
-                                    max={500}
+                                    max={participantLimit}
                                     value={form.maxParticipants}
                                     onChange={e => updateField('maxParticipants', parseInt(e.target.value) || 100)}
                                     className="form-input"

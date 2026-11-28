@@ -23,7 +23,9 @@ import dotenv from 'dotenv';
 import pino from 'pino';
 import { attachSignalingIfAvailable } from './signaling-bridge.js';
 import { disableDemoPersistence } from './demo-storage-policy.js';
+import { createMeetingSchema } from './meeting-validation.js';
 import { normalizeMeetingSettings } from './meeting-settings.js';
+import { DEFAULT_MEETING_PARTICIPANT_LIMIT, meetingParticipantLimit } from '../../../shared/meeting-capacity.cjs';
 import meetingInvitation from '../../../shared/meeting-invitation.cjs';
 import { transcriptAsSrt, transcriptAsText, transcriptBody } from './transcripts.js';
 import crypto from 'node:crypto';
@@ -46,23 +48,13 @@ const logger = pino({
 // VALIDATION SCHEMAS
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-const createMeetingBody = z.object({
-    title: z.string().trim().min(1).max(255).optional(),
-    type: z.enum(['instant', 'scheduled', 'recurring']).default('instant'),
-    scheduledStart: z.string().datetime().optional(),
-    scheduledEnd: z.string().datetime().optional(),
-    recurrence: z.object({ frequency: z.enum(['daily', 'weekly']), count: z.number().int().min(2).max(12) }).optional(),
-    settings: z.object({
-        maxParticipants: z.number().int().min(2).max(500).default(100),
-        waitingRoom: z.boolean().default(true),
-        webinar: z.boolean().default(false),
-        meetingKind: z.enum(['instant', 'conference', 'team', 'town_hall', 'webinar']).optional(),
-        e2eeRequired: z.boolean().default(true),
-        recordingAllowed: z.boolean().default(true),
-        chatEnabled: z.boolean().default(true),
-        screenShareEnabled: z.boolean().default(false),
-    }).optional(),
-});
+const maxMeetingParticipants = meetingParticipantLimit();
+const defaultMeetingParticipants = Math.min(100, maxMeetingParticipants);
+
+const guestParticipantLimit = Math.min(DEFAULT_MEETING_PARTICIPANT_LIMIT, maxMeetingParticipants);
+const createMeetingBody = createMeetingSchema(maxMeetingParticipants);
+const validateMeetingBody = validateBody(createMeetingBody);
+const validateGuestMeetingBody = validateBody(createMeetingSchema(guestParticipantLimit));
 
 const updateMeetingStatusBody = z.object({
     status: z.enum(['waiting', 'active', 'ended']),
@@ -166,6 +158,10 @@ const authMiddleware = meetingAuth(AUTH_URL, (tenantId, next) => pool.runWithTen
 const scheduleFeature = requireFeature(AUTH_URL, 'meeting_scheduling');
 registerSessionReportRoutes(app, pool, rawPool, authMiddleware);
 registerBrandingRoutes(app, pool, rawPool, authMiddleware);
+app.get('/api/meetings/capacity', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json({ maxParticipants: maxMeetingParticipants, guestMaxParticipants: guestParticipantLimit });
+});
 app.use('/api/meetings/webinars', webinarsRouter(rawPool, authMiddleware, scheduleFeature));
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -200,7 +196,7 @@ function issueSessionMeeting(start: number, user: AuthPayload | undefined, setti
         expiresAt: start + 86_400_000,
         meetingKind: settings?.meetingKind ?? (settings?.webinar ? 'town_hall' : user ? 'conference' : 'instant'),
         e2eeRequired: settings?.e2eeRequired ?? true,
-        maxParticipants: settings?.maxParticipants ?? 100,
+        maxParticipants: settings?.maxParticipants ?? defaultMeetingParticipants,
     });
     return { meetingCode, inviteToken, guestHostToken: user ? undefined : meetingInvitation.createGuestHostToken(meetingCode) };
 }
@@ -210,7 +206,7 @@ function allowedGuestKind(settings: z.infer<typeof createMeetingBody>['settings'
 }
 
 // Quick meeting creation (no auth required — for demo/guest access)
-app.post('/api/meetings/create', guestHostingEnabled ? validateBody(createMeetingBody) : (_req, _res, next) => next(), async (req, res) => {
+app.post('/api/meetings/create', guestHostingEnabled ? validateGuestMeetingBody : (_req, _res, next) => next(), async (req, res) => {
     try {
         if (guestHostingEnabled) {
             const { settings } = req.body as z.infer<typeof createMeetingBody>;
@@ -251,7 +247,7 @@ app.post('/api/meetings/create', guestHostingEnabled ? validateBody(createMeetin
 });
 
 // Create instant meeting
-app.post('/api/meetings', authMiddleware, validateBody(createMeetingBody), async (req, res) => {
+app.post('/api/meetings', authMiddleware, validateMeetingBody, async (req, res) => {
     try {
         const user = (req as any).user as AuthPayload;
         const { title, settings } = req.body;
@@ -284,7 +280,7 @@ app.post('/api/meetings', authMiddleware, validateBody(createMeetingBody), async
 app.post('/api/meetings/schedule', (req, res, next) => {
     if (guestHostingEnabled && !req.headers.authorization) return next();
     return authMiddleware(req, res, next);
-}, validateBody(createMeetingBody), async (req, res) => {
+}, (req, res, next) => (req.headers.authorization ? validateMeetingBody : validateGuestMeetingBody)(req, res, next), async (req, res) => {
     const user = (req as any).user as AuthPayload | undefined;
     const { scheduledStart, scheduledEnd, settings, recurrence }: z.infer<typeof createMeetingBody> = req.body;
     if (!user && !allowedGuestKind(settings)) {

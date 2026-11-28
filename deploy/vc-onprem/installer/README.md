@@ -34,7 +34,15 @@ secrets generated on the server → 14-day record and installation ID → images
 restricted accounts → services and first administrator → firewall and start-on-boot → finish
 (server URL, installation ID, root CA for branch PCs).
 
-Manage afterwards: `qsvc status | start | stop | restart | logs [service] | ca | support-bundle`.
+Manage afterwards with `qsvc status`, `qsvc doctor`, `qsvc start`, `qsvc stop`,
+`qsvc restart`, `qsvc logs [service]`, `qsvc ca`, or `qsvc support-bundle`.
+After installation or an update, run `sudo qsvc doctor` to verify the local
+HTTPS certificate and the auth, meeting, signaling, SFU, and recording
+endpoints. The recording check also confirms that server storage is enabled.
+For a site-issued certificate whose issuer is absent from the
+server trust store, run `sudo qsvc doctor /path/to/organisation-ca.pem`.
+The command exits nonzero if a probe fails. Run browser, media, recording
+playback and failover checks separately from an actual branch client.
 For an existing installation, setup creates a root-only database backup
 under `/var/lib/qsvc/pre-upgrade` and checks that PostgreSQL can read its
 table of contents. It runs the signed migration runner before starting
@@ -84,6 +92,20 @@ This file survives reinstall and upgrade. Setup installs a separate
 `compose.organisation.example.yml` as a starting point. Keep the active
 file root-only (0600). Apply changes with `sudo qsvc restart`.
 
+For a controlled capacity qualification only, set
+`QSVC_MAX_MEETING_PARTICIPANTS=1500` in `/etc/qsvc/qsvc.env` and restart
+both the meeting and signaling services. This raises the admission ceiling
+for explicit meeting limits. It does not increase SFU capacity or qualify
+1,500 interactive participants. Keep the default until the target host,
+media topology and client mix have passed load testing.
+
+For government SSO, configure the organisation's approved Keycloak broker
+and upstream OIDC or SAML identity provider using the
+[Enterprise SSO guide](../../../docs/ENTERPRISE_SSO.md). Put the auth service
+environment overrides in the root-only organisation Compose file. Keep verified
+HTTPS and an explicit IdP host allowlist. Test sign-in, tenant assignment,
+revocation and denied access from the actual branch network before rollout.
+
 The SFU image ships the existing Bharat VC bridge module. The example
 enables it for an organisation-operated FreeSWITCH and drachtio on the
 private network. Provision them using the [gateway guide](../../poly-bridge/README.md).
@@ -119,8 +141,10 @@ The installed recording service can relay an allowed host broadcast through
 the existing FFmpeg and RTMPS path. Set `LIVE_YOUTUBE_RTMPS_URL` and/or
 `LIVE_FACEBOOK_RTMPS_URL` as recording service environment values in the
 root-only organisation override when outbound broadcasting is approved.
-Leave them unset for isolated networks. Server recording storage requires
-a separate qualified storage configuration.
+Leave them unset for isolated networks. The offline installation stores
+host-captured uploads in a persistent local recording volume by default.
+Place the volume on encrypted storage and validate backup, restore, playback
+and capacity before rollout.
 
 ## Offline updates for room-system administrators
 

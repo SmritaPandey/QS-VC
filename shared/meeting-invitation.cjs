@@ -1,5 +1,6 @@
 const { createHmac, timingSafeEqual } = require('node:crypto');
 
+const { MAX_CONFIGURED_MEETING_PARTICIPANTS } = require('./meeting-capacity.cjs');
 const { serviceSecret } = require('./service-secrets.cjs');
 
 function invitationSecret(secret) { return secret || serviceSecret('INVITATION_SECRET'); }
@@ -44,7 +45,7 @@ function verifySessionMeetingInvite(meetingCode, token, now = Date.now(), secret
         const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
         if (typeof claims.hostId !== 'string' || !claims.hostId || !Number.isSafeInteger(claims.expiresAt) || claims.expiresAt <= now ||
             !['instant', 'conference', 'team', 'town_hall', 'webinar'].includes(claims.meetingKind) || typeof claims.e2eeRequired !== 'boolean' ||
-            !Number.isInteger(claims.maxParticipants) || claims.maxParticipants < 2 || claims.maxParticipants > 500) return null;
+            !Number.isInteger(claims.maxParticipants) || claims.maxParticipants < 2 || claims.maxParticipants > MAX_CONFIGURED_MEETING_PARTICIPANTS) return null;
         return claims;
     } catch {
         return null;

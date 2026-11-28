@@ -1,7 +1,7 @@
 import type { types as ms } from "mediasoup";
 import { randomInt, randomUUID } from "crypto";
 import { config } from "./config";
-import { buildOffer, parseAnswer, MLineSpec } from "./sdp";
+import { buildOffer, parseAnswer, validateAnswer, MLineSpec } from "./sdp";
 
 // drachtio-srf ships without types
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -23,13 +23,18 @@ export function sipStack(): Promise<any> {
 }
 
 async function plainTransport(router: ms.Router): Promise<ms.PlainTransport> {
-  return router.createPlainTransport({
+  const transport = await router.createPlainTransport({
     listenInfo: { protocol: "udp", ip: config.rtp.listenIp, announcedAddress: config.rtp.announcedIp },
     rtcpMux: false,
     comedia: false,
     enableSrtp: config.srtp === "mandatory",
-    srtpCryptoSuite: "AES_CM_128_HMAC_SHA1_80",
+    srtpCryptoSuite: config.srtpSuite,
   });
+  if (config.srtp === "mandatory" && transport.srtpParameters?.cryptoSuite !== config.srtpSuite) {
+    transport.close();
+    throw new Error("mediasoup did not enable the configured SRTP suite");
+  }
+  return transport;
 }
 
 function pickCodec(router: ms.Router, kind: "audio" | "video"): ms.RtpCodecCapability {
@@ -127,6 +132,7 @@ export class UplinkLeg extends Leg {
         "X-Qsvc-Peer": this.peerId,
       })
     );
+    validateAnswer(lines, answer);
     await this.connect(answer);
   }
 
@@ -134,8 +140,6 @@ export class UplinkLeg extends Leg {
     for (let i = 0; i < this.transports.length; i++) {
       const a = answer[i];
       const t = this.transports[i];
-      if (!a || a.rejected) throw new Error(`MCU rejected ${this.consumers[i]?.kind} m-line`);
-      if (config.srtp === "mandatory" && !a.srtp) throw new Error("MCU answered without SRTP while SRTP is mandatory");
       await t.connect({ ip: a.ip, port: a.port, rtcpPort: a.rtcpPort, srtpParameters: a.srtp });
       await this.consumers[i].resume();
       if (this.consumers[i].kind === "video") {
@@ -184,12 +188,11 @@ export class DownlinkLeg extends Leg {
       })
     );
 
+    validateAnswer(lines, answer);
     for (let i = 0; i < this.transports.length; i++) {
       const a = answer[i];
       const t = this.transports[i];
       const kind = lines[i].kind;
-      if (!a || a.rejected) throw new Error(`MCU rejected downlink ${kind}`);
-      if (config.srtp === "mandatory" && !a.srtp) throw new Error("MCU answered without SRTP while SRTP is mandatory");
       await t.connect({ ip: a.ip, port: a.port, rtcpPort: a.rtcpPort, srtpParameters: a.srtp });
       const c = pickCodec(this.router, kind);
       const producer = await t.produce({

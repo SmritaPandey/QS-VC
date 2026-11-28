@@ -20,6 +20,7 @@ import { logger } from '../logger.js';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { can, getPrivateConversationLimitMs } from '../../../../shared/entitlements.cjs';
+import { MAX_CONFIGURED_MEETING_PARTICIPANTS } from '../../../../shared/meeting-capacity.cjs';
 import meetingInvitation from '../../../../shared/meeting-invitation.cjs';
 import { publishCaption, publishInterim, subscribeCaptions, translationCapabilities, translateCaption, clearEmptyRoomCaptions, forgetPeerCaptions, setTranscriptSaving, transcriptEntries, transcriptSaving } from '../captions.js';
 import { asrParticipants, asrCapabilities, pushAsrAudio, startAsr, stopAsr, stopAsrForPeer } from '../asr-relay.js';
@@ -255,7 +256,7 @@ async function finishPrivateConversationsForPeer(roomId: string, peerId: string,
 
 // RPC param validation schemas
 const roomSettingsSchema = z.object({
-    maxParticipants: z.number().int().min(1).max(1000).optional(),
+    maxParticipants: z.number().int().min(1).max(MAX_CONFIGURED_MEETING_PARTICIPANTS).optional(),
     waitingRoomEnabled: z.boolean().optional(), locked: z.boolean().optional(),
     password: z.string().max(50).nullable().optional(), muteOnEntry: z.boolean().optional(),
     allowScreenShare: z.boolean().optional(), allowFileShare: z.boolean().optional(), allowChat: z.boolean().optional(),

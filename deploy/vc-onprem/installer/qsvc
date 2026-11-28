@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# qsvc — manage an installed QS-VC server.  Usage: qsvc status|start|stop|restart|logs [service]|ca|support-bundle|check-update INSTALLER.run|version
+# qsvc — manage an installed QS-VC server.
 set -euo pipefail
 PREFIX=/opt/qsvc; ETC=/etc/qsvc
 [[ $(id -u) == 0 ]] || { echo 'Run as root (sudo qsvc ...)' >&2; exit 1; }
@@ -22,12 +22,60 @@ compose() {
   /usr/local/libexec/qsvc-compose -p qsvc --project-directory "$PREFIX/current" --env-file "$ETC/qsvc.env" "${files[@]}" "$@"
 }
 SERVICES=(postgres redis coturn trial-gateway sfu signaling auth meeting recording web caddy)
+doctor() {
+  local domain ca=${1:-} code failed=0
+  local gateway_probe=(curl --silent --show-error --max-time 8 --noproxy '*')
+  domain=$(sed -n 's/^DOMAIN=//p' "$ETC/qsvc.env")
+  if [[ ! $domain =~ ^[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$ ]]; then
+    echo 'Cannot determine the installed meeting hostname.' >&2
+    return 1
+  fi
+  if [[ -z $ca && -s $PREFIX/downloads/QS-VC-Root-CA.crt ]]; then
+    ca=$PREFIX/downloads/QS-VC-Root-CA.crt
+  fi
+  if [[ -n $ca ]]; then
+    [[ -r $ca ]] || { echo 'Cannot read the CA bundle.' >&2; return 1; }
+    gateway_probe+=(--cacert "$ca")
+  fi
+  code=$("${gateway_probe[@]}" \
+    --resolve "$domain:443:127.0.0.1" --output /dev/null --write-out '%{http_code}' \
+    "https://$domain/health") || code=failed
+  if [[ $code == 200 ]]; then
+    echo 'PASS gateway HTTPS and certificate'
+  else
+    echo "FAIL gateway HTTPS ($code)" >&2
+    failed=1
+  fi
+  local service endpoint
+  while read -r service endpoint; do
+    if compose exec -T "$service" node -e \
+      'fetch(process.argv[1], {signal: AbortSignal.timeout(5000)}).then(async response => {
+        if (!response.ok || (process.argv[2] === "recording" && !(await response.json()).recordingEnabled)) {
+          process.exitCode = 1;
+        }
+      }).catch(() => { process.exitCode = 1; });' "$endpoint" "$service" >/dev/null; then
+      echo "PASS $service"
+    else
+      echo "FAIL $service" >&2
+      failed=1
+    fi
+  done <<'ENDPOINTS'
+auth http://127.0.0.1:4002/ready
+meeting http://127.0.0.1:4003/ready
+signaling http://127.0.0.1:4001/health
+sfu http://127.0.0.1:4000/health
+recording http://127.0.0.1:4004/health
+ENDPOINTS
+  return "$failed"
+}
 case "${1:-status}" in
   start)   compose up -d --no-build --pull never --no-deps "${SERVICES[@]}" ;;
   stop)    compose stop ;;
   restart) compose stop; compose up -d --no-build --pull never --no-deps "${SERVICES[@]}" ;;
   status)  echo "QS-VC $VERSION ($RUNTIME) · installation $(cat /var/lib/qsvc/onprem-trial/installation-id 2>/dev/null)"
            compose ps --format 'table {{.Service}}\t{{.Status}}' ;;
+  doctor)  [[ $# -le 2 ]] || { echo 'Usage: sudo qsvc doctor [CA_BUNDLE]' >&2; exit 2; }
+           doctor "${2:-}" ;;
   logs)    if [[ -n ${2:-} ]]; then compose logs --tail 200 -f "$2"; else compose logs --tail 100; fi ;;
   ca)      compose exec -T caddy cat /data/caddy/pki/authorities/local/root.crt >"$PREFIX/downloads/QS-VC-Root-CA.crt"
            chmod 644 "$PREFIX/downloads/QS-VC-Root-CA.crt"; echo "Saved $PREFIX/downloads/QS-VC-Root-CA.crt" ;;
@@ -40,5 +88,5 @@ case "${1:-status}" in
            cp /var/log/qsvc-setup.log "$tmp/" 2>/dev/null || true
            tar -C "$tmp" -czf "$out" . && rm -rf "$tmp" && chmod 600 "$out" && echo "Support bundle (secrets removed): $out" ;;
   version) echo "QS-VC $VERSION" ;;
-  *) echo 'Usage: qsvc status|start|stop|restart|logs [service]|ca|support-bundle|check-update INSTALLER.run|version' >&2; exit 2 ;;
+  *) echo 'Usage: qsvc status|doctor [CA_BUNDLE]|start|stop|restart|logs [service]|ca|support-bundle|check-update INSTALLER.run|version' >&2; exit 2 ;;
 esac

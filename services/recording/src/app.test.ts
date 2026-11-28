@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
 import type { Server } from 'node:http';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Plan } from '../../../shared/entitlements.cjs';
 import { createRecordingApp } from './app.js';
 import type { RecordingStorage, StoredObject } from './storage.js';
@@ -25,6 +28,53 @@ async function listen(app: ReturnType<typeof createRecordingApp>) {
     return { server, base: `http://127.0.0.1:${address.port}` };
 }
 async function close(server: Server) { if (server?.listening) await new Promise<void>(resolve => server.close(() => resolve())); }
+
+it('persists private on-prem recordings and serves signed, range-capable media', async () => {
+    const localStorageDirectory = await mkdtemp(join(tmpdir(), 'qsvc-test-recording-'));
+    const localApp = () => createRecordingApp({
+        localStorageDirectory,
+        authenticate: async authorization => ({ sub: 'host', tenantId: authorization === 'Bearer other' ? 'other-site' : 'site', plan: 'basic' }),
+        authorizeFeature: async () => 'allow',
+        meeting: async () => ({ hostId: 'host', status: 'active' }),
+    });
+    const first = await listen(localApp());
+    let second: Awaited<ReturnType<typeof listen>> | undefined;
+    const auth = { Authorization: 'Bearer host' };
+    try {
+        const created = await fetch(first.base + '/api/recordings/SITE', {
+            method: 'POST', headers: { ...auth, 'Content-Type': 'video/webm' }, body: video,
+        });
+        expect(created.status).toBe(201);
+        const { id } = await created.json() as { id: string };
+        const path = '/api/recordings/SITE/' + id;
+        const old = await (await fetch(first.base + path + '/playback', { headers: auth })).json() as { url: string };
+        expect((await fetch(first.base + old.url)).status).toBe(200);
+        await close(first.server);
+
+        second = await listen(localApp());
+        const { base } = second;
+        expect((await fetch(base + old.url)).status).toBe(404);
+        expect((await fetch(base + path + '/playback', { headers: { Authorization: 'Bearer other' } })).status).toBe(404);
+        const listed = await (await fetch(base + '/api/recordings/mine', { headers: auth })).json() as { recordings: unknown[] };
+        expect(listed.recordings).toEqual([expect.objectContaining({ id, meetingCode: 'SITE', size: video.length })]);
+        const { url } = await (await fetch(base + path + '/playback', { headers: auth })).json() as { url: string };
+        const mediaUrl = new URL(url, base);
+        const token = mediaUrl.searchParams.get('token')!;
+        mediaUrl.searchParams.set('token', (token.startsWith('A') ? 'B' : 'A') + token.slice(1));
+        expect((await fetch(mediaUrl)).status).toBe(404);
+        const result = await fetch(base + url, { headers: { Range: 'bytes=0-3' } });
+        expect(result.status).toBe(206);
+        expect(result.headers.get('content-type')).toBe('video/webm');
+        expect(result.headers.get('cache-control')).toBe('no-store');
+        expect(Buffer.from(await result.arrayBuffer())).toEqual(video.subarray(0, 4));
+        expect((await fetch(base + path, { headers: auth, method: 'DELETE' })).status).toBe(204);
+        expect((await fetch(base + url)).status).toBe(404);
+    } finally {
+        await close(first.server);
+        if (second) await close(second.server);
+        await rm(localStorageDirectory, { recursive: true, force: true });
+    }
+});
 
 describe('private cloud recordings', () => {
     let server: Server, base: string;

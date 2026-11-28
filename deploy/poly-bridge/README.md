@@ -84,7 +84,7 @@ Requirements on the QSVC router: `mediaCodecs` must contain `audio/opus` and
 
 ### Phase 1 — First media (AT-01, AT-02, AT-03) (1 week)
 1. Implement `SfuAdapter` in QSVC; mount `bridge.http`; delete/redirect the status-only gateway route.
-2. Start with `BRIDGE_SRTP=off` (bridge then sends `X-Qsvc-Plain: true`) only if SRTP blocks first light; switch back to `mandatory` immediately after.
+2. Keep `BRIDGE_SRTP=mandatory` (default). Set `BRIDGE_SRTP_SUITE=AEAD_AES_256_GCM` to require AES-256-GCM SDES-SRTP on the internal mediasoup-to-FreeSWITCH leg. The default `AES_CM_128_HMAC_SHA1_80` preserves compatibility. The bridge rejects SDP answers that downgrade the profile or suite. Qualify the chosen suite on the installed FreeSWITCH build. Keep this SIP signaling on the protected internal network because SDES carries keys in SDP. Verify the endpoint-facing SIP/TLS and SRTP negotiation separately. Use `BRIDGE_SRTP=off` only in an isolated lab and leave `BRIDGE_SRTP_SUITE` unset in that mode.
 3. Dial in from both Poly endpoints, admit both from QSVC, join from browser.
 4. Run `scripts/verify-at01.sh`; record in the tracker. Gate: all 6 audio + 6 video directions.
 

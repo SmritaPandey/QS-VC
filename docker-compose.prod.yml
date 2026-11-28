@@ -157,6 +157,7 @@ services:
       dockerfile: services/signaling/Dockerfile
     container_name: qsvc-signaling
     environment:
+      - QSVC_MAX_MEETING_PARTICIPANTS=${QSVC_MAX_MEETING_PARTICIPANTS:-}
       - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-}
       - MEETING_POLICY_SECRET=${MEETING_POLICY_SECRET:-}
       - INVITATION_SECRET=${INVITATION_SECRET:-}
@@ -318,6 +319,7 @@ services:
       dockerfile: services/meeting/Dockerfile
     container_name: qsvc-meeting
     environment:
+      - QSVC_MAX_MEETING_PARTICIPANTS=${QSVC_MAX_MEETING_PARTICIPANTS:-}
       - INTERNAL_AUTH_SECRET=${INTERNAL_AUTH_SECRET:-}
       - MEETING_POLICY_SECRET=${MEETING_POLICY_SECRET:-}
       - INVITATION_SECRET=${INVITATION_SECRET:-}

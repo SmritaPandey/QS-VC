@@ -33,7 +33,7 @@ Migration-owner credentials are omitted from the generated service environment. 
 
 ## Network and optional dependencies
 
-Supply private DNS resolving the configured domain to the reachable server; distribute the organization CA trust; keep clocks synchronized. Bind service control APIs to loopback and permit external HTTPS443 plus configured SFU UDP40000–40100. Review firewall policy before exposure. Existing TURN must be reachable for restricted networks; set its URL/credentials. Recording currently uses the app's AWS S3 implementation and credentials; arbitrary S3-compatible endpoints are not supported by this installer. Leaving recording unconfigured does not make storage operational. No native TURN/S3 server is automatically installed.
+Supply private DNS resolving the configured domain to the reachable server; distribute the organization CA trust; keep clocks synchronized. Bind service control APIs to loopback and permit external HTTPS443 plus configured SFU UDP40000–40100. Review firewall policy before exposure. Existing TURN must be reachable for restricted networks; set its URL/credentials. Recordings default to /var/lib/qsvc-native/recordings on the customer host. Place /var/lib/qsvc-native on encrypted storage and include recordings in the site backup and restore procedure. A configured AWS S3 bucket takes precedence for installations that already use it.
 
 ## Operations, rollback and remaining checks
 

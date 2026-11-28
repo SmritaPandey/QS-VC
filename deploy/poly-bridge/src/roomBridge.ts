@@ -66,7 +66,12 @@ export class RoomBridge {
     const leg = new UplinkLeg(router, this.room, peerId, e.name);
     leg.onClose = () => this.uplinks.get(peerId) === leg && this.uplinks.delete(peerId);
     this.uplinks.set(peerId, leg);
-    await leg.start({ audio: e.audio, video: e.video });
+    try {
+      await leg.start({ audio: e.audio, video: e.video });
+    } catch (error) {
+      await leg.close();
+      throw error;
+    }
   }
 
   // ---------- MCU events ----------

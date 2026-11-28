@@ -4,24 +4,13 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
 
-// Re-define schemas locally (matching meeting/src/index.ts)
-const createMeetingBody = z.object({
-    title: z.string().trim().min(1).max(255).optional(),
-    type: z.enum(['instant', 'scheduled', 'recurring']).default('instant'),
-    scheduledStart: z.string().datetime().optional(),
-    scheduledEnd: z.string().datetime().optional(),
-    settings: z.object({
-        maxParticipants: z.number().int().min(2).max(500).default(100),
-        waitingRoom: z.boolean().default(true),
-        webinar: z.boolean().default(false),
-        meetingKind: z.enum(['conference', 'team', 'town_hall']).optional(),
-        e2eeRequired: z.boolean().default(false),
-        recordingAllowed: z.boolean().default(true),
-        chatEnabled: z.boolean().default(true),
-        screenShareEnabled: z.boolean().default(false),
-    }).optional(),
-});
+import { createMeetingSchema } from './meeting-validation.js';
+import { DEFAULT_MEETING_PARTICIPANT_LIMIT, meetingParticipantLimit } from '../../../shared/meeting-capacity.cjs';
+import meetingInvitation from '../../../shared/meeting-invitation.cjs';
 
+const createMeetingBody = createMeetingSchema(DEFAULT_MEETING_PARTICIPANT_LIMIT);
+
+// Re-define the remaining schemas locally (matching meeting/src/index.ts).
 const updateMeetingStatusBody = z.object({
     status: z.enum(['waiting', 'active', 'ended']),
 });
@@ -317,5 +306,32 @@ describe('validateAccessBody', () => {
         expect(validateAccessBody.safeParse({ guestToken: 'abc' }).success).toBe(true);
         expect(validateAccessBody.safeParse({ inviteToken: 'xyz' }).success).toBe(true);
         expect(validateAccessBody.safeParse({}).success).toBe(true);
+    });
+});
+
+describe('Configured meeting participant limit', () => {
+    it('allows 1500 only with an explicit ceiling and preserves the limit in the signed schedule', () => {
+        expect(meetingParticipantLimit(undefined, {})).toBe(500);
+        expect(meetingParticipantLimit(undefined, { QSVC_MAX_MEETING_PARTICIPANTS: '' })).toBe(500);
+        const configured = meetingParticipantLimit(undefined, { QSVC_MAX_MEETING_PARTICIPANTS: '1500' });
+        const schema = createMeetingSchema(configured);
+        const settings = schema.parse({ settings: { maxParticipants: 1500 } }).settings!;
+        expect(settings.maxParticipants).toBe(1500);
+        expect(schema.safeParse({ settings: { maxParticipants: 1501 } }).success).toBe(false);
+
+        const code = 'QS-S-ABCDEF0123456789ABCDEF01';
+        const secret = 'local-capacity-regression-test';
+        const claims = { hostId: 'owner', expiresAt: 10_000, meetingKind: 'team' as const, e2eeRequired: true, maxParticipants: settings.maxParticipants };
+        const invite = meetingInvitation.createSessionMeetingInvite(code, claims, secret);
+        expect(meetingInvitation.verifySessionMeetingInvite(code, invite, 1, secret)).toEqual(claims);
+        const excessive = meetingInvitation.createSessionMeetingInvite(code, { ...claims, maxParticipants: 1501 }, secret);
+        expect(meetingInvitation.verifySessionMeetingInvite(code, excessive, 1, secret)).toBeNull();
+    });
+
+    it('rejects invalid deployment values and uses a default within a lowered ceiling', () => {
+        for (const value of ['1', '1501', 'unlimited', '500.5']) {
+            expect(() => meetingParticipantLimit(undefined, { QSVC_MAX_MEETING_PARTICIPANTS: value })).toThrow();
+        }
+        expect(createMeetingSchema(50).parse({ settings: {} }).settings?.maxParticipants).toBe(50);
     });
 });

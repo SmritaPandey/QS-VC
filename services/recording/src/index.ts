@@ -16,7 +16,7 @@ const logger = pino({
 const app = createRecordingApp();
 const PORT = parseInt(process.env.RECORDING_PORT || '4004', 10);
 const server = app.listen(PORT, process.env.HOST || '0.0.0.0', () => {
-    logger.info(`QS-VC Recording Service running on port ${PORT}; cloud storage ${process.env.RECORDING_BUCKET ? 'configured' : 'not configured'}`);
+    logger.info(`QS-VC Recording Service running on port ${PORT}; server storage ${process.env.RECORDING_BUCKET || process.env.RECORDING_LOCAL_DIR ? 'configured' : 'not configured'}`);
 });
 
 app.locals.liveStreaming.attach(server);
